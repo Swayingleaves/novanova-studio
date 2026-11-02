@@ -101,7 +101,7 @@
   "adminCreditUsageBarChart": "Admin credit usage bar chart",
   "creditRecordsFor": "Credit records for {value0}",
   "creditRecordsForAllUsers": "Credit records for all users",
-  "includingUsageRefundsTopUpsAndCheckIns": ", including usage, refunds, top-ups and check-ins",
+  "includingUsageRefundsTopUpsAndCheckIns": ", including usage, refunds, top-ups and check-ins; the detail filters are independent of the statistics above",
   "records": "records",
   "noTransactionsInThisPeriod": "No transactions in this period",
   "noUsageDataInThisPeriod": "No usage data in this period",

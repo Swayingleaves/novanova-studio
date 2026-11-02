@@ -12,6 +12,7 @@ const OAUTH2_ERROR_MESSAGES: Record<string, string> = {
     get accountUnavailable() { return translate("auth.thisAccountCannotSignInRightNow"); },
     get emailUnavailable() { return translate("auth.noUsableEmailFromProviderSignInUnavailable"); },
     get emailUnverified() { return translate("auth.thirdPartyEmailIsUnverifiedSignInUnavailable"); },
+    get emailSuffixNotAllowed() { return translate("auth.emailSuffixNotAllowed"); },
     get providerIdentityUnavailable() { return translate("auth.cannotReadThirdPartyIdentity"); },
     get providerProfileInvalid() { return translate("auth.thirdPartyProfileExceedsFieldLimits"); },
     get providerUnavailable() { return translate("auth.thisSignInProviderIsDisabled"); },

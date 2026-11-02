@@ -10,6 +10,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.novanovastudio.entity.User;
+import com.novanovastudio.config.NovanovaProperties;
+import com.novanovastudio.security.oauth2.OAuth2LoginException;
 import com.novanovastudio.entity.UserIdentityBinding;
 import com.novanovastudio.repository.OAuth2IdentityRepository;
 import com.novanovastudio.repository.UserRepository;
@@ -38,6 +40,7 @@ class ThirdPartyAuthenticationServiceTest {
     @DisplayName("已有第三方绑定时使用绑定用户并刷新资料快照")
     void shouldUseExistingBinding() {
         TestContext context = testContext();
+        context.properties.getEmail().setAllowedSuffixes("qq.com");
         UserIdentityBinding binding = new UserIdentityBinding();
         binding.setId(6L);
         binding.setUserId(8L);
@@ -98,10 +101,10 @@ class ThirdPartyAuthenticationServiceTest {
     @DisplayName("已有本地账号首次绑定第三方身份时不发邀请奖励")
     void shouldNotGrantInvitationRewardForExistingEmail() {
         TestContext context = testContext();
+        context.properties.getEmail().setAllowedSuffixes("qq.com");
         User user = normalUser(8L);
         when(context.identityRepository.findBinding("linuxDo", "12345")).thenReturn(Mono.empty());
-        when(context.identityRepository.resolveUserByTrustedEmail(eq(context.identity), anyString(), eq(5L)))
-                .thenReturn(Mono.just(new OAuth2IdentityRepository.ResolvedOAuthUser(user, false)));
+        when(context.userRepository.findByEmail(context.identity.email())).thenReturn(Mono.just(user));
         when(context.identityRepository.upsertBinding(8L, context.identity)).thenReturn(Mono.just(8L));
         when(context.transactionalOperator.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -109,6 +112,33 @@ class ThirdPartyAuthenticationServiceTest {
 
         verify(context.creditService, never()).initializeAccount(8L);
         verify(context.creditService, never()).grantInvitationReward(5L, 8L);
+        verify(context.identityRepository, never()).resolveUserByTrustedEmail(any(), anyString(), any());
+    }
+
+    /**
+     * Google 与 linux.do 首次注册均必须在创建用户与发放积分前检查白名单。
+     * @param providerId String 第三方认证渠道
+     */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"google", "linuxDo"})
+    void shouldRejectNewUserOutsideEmailWhitelist(String providerId) {
+        TestContext context = testContext();
+        context.properties.getEmail().setAllowedSuffixes("qq.com,gmail.com");
+        ThirdPartyOAuth2Provider provider = mock(ThirdPartyOAuth2Provider.class);
+        ThirdPartyUserIdentity identity = new ThirdPartyUserIdentity(providerId, "12345", "a56fv43@vn-v55.com", "新用户", "");
+        when(context.registry.requireEnabled(providerId)).thenReturn(provider);
+        when(provider.resolveIdentity(context.oidcUser)).thenReturn(identity);
+        when(context.identityRepository.findBinding(providerId, "12345")).thenReturn(Mono.empty());
+        when(context.userRepository.findByEmail(identity.email())).thenReturn(Mono.empty());
+
+        StepVerifier.create(context.service.authenticate(providerId, context.oidcUser, 5L))
+                .expectErrorMatches(error -> error instanceof OAuth2LoginException exception
+                        && "emailSuffixNotAllowed".equals(exception.getErrorCode()))
+                .verify();
+
+        verify(context.identityRepository, never()).resolveUserByTrustedEmail(any(), anyString(), any());
+        verify(context.identityRepository, never()).upsertBinding(any(), any());
+        org.mockito.Mockito.verifyNoInteractions(context.creditService);
     }
 
     /**
@@ -126,11 +156,15 @@ class ThirdPartyAuthenticationServiceTest {
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
         OidcUser oidcUser = mock(OidcUser.class);
         ThirdPartyUserIdentity identity = new ThirdPartyUserIdentity("linuxDo", "12345", "user@example.com", "tester", "");
+        NovanovaProperties properties = new NovanovaProperties();
+        properties.getEmail().setAllowedSuffixes("@example.com");
         when(registry.requireEnabled("linuxDo")).thenReturn(provider);
         when(provider.resolveIdentity(oidcUser)).thenReturn(identity);
         when(invitationService.generateInvitationCode()).thenReturn("INVITATIONCODE01");
-        ThirdPartyAuthenticationService service = new ThirdPartyAuthenticationService(registry, identityRepository, userRepository, creditService, invitationService, transactionalOperator);
-        return new TestContext(service, identityRepository, userRepository, creditService, transactionalOperator, oidcUser, identity);
+        when(userRepository.findByEmail(identity.email())).thenReturn(Mono.empty());
+        when(transactionalOperator.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        ThirdPartyAuthenticationService service = new ThirdPartyAuthenticationService(registry, identityRepository, userRepository, new EmailRegistrationPolicy(properties), creditService, invitationService, transactionalOperator);
+        return new TestContext(service, identityRepository, userRepository, creditService, transactionalOperator, oidcUser, identity, properties, registry);
     }
 
     /**
@@ -162,6 +196,8 @@ class ThirdPartyAuthenticationServiceTest {
                                CreditService creditService,
                                TransactionalOperator transactionalOperator,
                                OidcUser oidcUser,
-                               ThirdPartyUserIdentity identity) {
+                               ThirdPartyUserIdentity identity,
+                               NovanovaProperties properties,
+                               ThirdPartyOAuth2ProviderRegistry registry) {
     }
 }

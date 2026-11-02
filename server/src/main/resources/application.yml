@@ -216,6 +216,8 @@ novanova:
   email:
     # 发件人显示地址
     from: ${EMAIL_SMTP_FROM:}
+    # 注册邮箱域名白名单，邮箱验证码与第三方首次注册共用；空值或独立星号表示不限制。
+    allowed-suffixes: ${EMAIL_ALLOWED_SUFFIXES:qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,foxmail.com,icloud.com,sina.com,aliyun.com,yeah.net,139.com,189.cn,sina.cn,vip.qq.com,vip.163.com,yahoo.com,live.com,msn.com,proton.me,protonmail.com}
   email-campaign:
     # 群发使用独立队列，所有服务实例共同遵守发送间隔与滚动窗口额度
     minimum-interval-seconds: ${EMAIL_CAMPAIGN_MINIMUM_INTERVAL_SECONDS:3}

@@ -516,17 +516,18 @@ public class CreditService {
      * @param userId Long 用户ID，可为空表示全部用户
      * @param startDate LocalDate 筛选起始日期
      * @param endDate LocalDate 筛选结束日期
-     * @param generationType String 生成类型筛选：image/video 表示只看对应生成任务的流水，可为空表示全部来源
+     * @param direction String 变动方向：all 全部 / add 增加 / spend 消耗，可为空默认全部
+     * @param source String 来源筛选：image/video/task_refund/card_redeem/admin_adjustment/initial_grant/invitation_reward/daily_check_in/credit_expired/storage_purchase/storage_charge/credit_purchase，可为空
      * @param page int 页码
      * @param pageSize int 每页数量
      * @return Mono<AdminCreditTransactionListResponse> 积分明细
      */
-    public Mono<CreditDtos.AdminCreditTransactionListResponse> listAdminCreditTransactions(Long userId, LocalDate startDate, LocalDate endDate, String generationType, int page, int pageSize) {
+    public Mono<CreditDtos.AdminCreditTransactionListResponse> listAdminCreditTransactions(Long userId, LocalDate startDate, LocalDate endDate, String direction, String source, int page, int pageSize) {
         if (page < 1 || pageSize < 1 || pageSize > 100) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidPaginationParameters")));
         }
         return Mono.defer(() -> {
-            CreditRepository.UserCreditQuery query = createUserCreditQuery(userId, startDate, endDate, null, generationType);
+            CreditRepository.UserCreditQuery query = createUserCreditQuery(userId, startDate, endDate, direction, source);
             return Mono.zip(
                             creditRepository.listAdminCreditTransactions(query, page, pageSize).collectList(),
                             creditRepository.countAdminTransactions(query))

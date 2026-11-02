@@ -501,6 +501,26 @@ public class NovanovaProperties {
         /** 邮件发件人 */
         private String from = "";
 
+        /** 允许注册的邮箱域名，逗号分隔；为空或包含独立星号表示不限制。 */
+        private String allowedSuffixes = "qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,foxmail.com,icloud.com,sina.com,aliyun.com,"
+                + "yeah.net,139.com,189.cn,sina.cn,vip.qq.com,vip.163.com,yahoo.com,live.com,msn.com,proton.me,protonmail.com";
+
+        /**
+         * 获取邮箱注册白名单。
+         * @return String 逗号分隔的邮箱域名
+         */
+        public String getAllowedSuffixes() {
+            return allowedSuffixes;
+        }
+
+        /**
+         * 设置邮箱注册白名单。
+         * @param allowedSuffixes String 逗号分隔的邮箱域名，支持带或不带前导 @
+         */
+        public void setAllowedSuffixes(String allowedSuffixes) {
+            this.allowedSuffixes = allowedSuffixes;
+        }
+
         /**
          * 获取发件人邮箱
          *
