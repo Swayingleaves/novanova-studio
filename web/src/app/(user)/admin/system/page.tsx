@@ -55,6 +55,8 @@ import {
     listAdminCreditTransactions,
     type HomepageShowcase,
     type ServerAdminCreditTransaction,
+    type ServerCreditDirection,
+    type ServerCreditSource,
     type ServerPrompt,
     type ServerGenerationStyle,
     type ServerSkill,
@@ -78,7 +80,7 @@ import { EpisodeBodiesPricingManagement } from "./components/episode-bodies-pric
 import { ScriptAiActionPricingManagement } from "./components/script-ai-action-pricing-management";
 import { GenerationStyleCover } from "@/features/generation/components/generation-style-picker";
 import { uploadImage } from "@/features/storage/services/image-storage";
-import { CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactionIcon, creditTransactionTypeLabel, formatCreditChange, formatCredits, formatCreditTime, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
+import { createCreditDirectionOptions, createCreditSourceOptions, CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactionIcon, creditTransactionTypeLabel, formatCreditChange, formatCredits, formatCreditTime, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
 import { TaskRecordPanel } from "@/app/(user)/credits/components/task-record-panel";
 
 const PAGE_SIZE = 20;
@@ -217,6 +219,9 @@ function CreditConsumptionManagement() {
     const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")]);
     const [generationType, setGenerationType] = useState<GenerationTypeFilter>("all");
     const [trendUnit, setTrendUnit] = useState<TrendUnit>("day");
+    const [detailDateRange, setDetailDateRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")]);
+    const [detailDirection, setDetailDirection] = useState<"all" | ServerCreditDirection>("all");
+    const [detailSource, setDetailSource] = useState<"all" | ServerCreditSource>("all");
     const [selectedUser, setSelectedUser] = useState<ServerUserProfile | null>(null);
     const [userKeyword, setUserKeyword] = useState("");
     const [page, setPage] = useState(1);
@@ -240,13 +245,25 @@ function CreditConsumptionManagement() {
         [dateRange, generationType, selectedUser?.id, filterTeamId, translate.locale],
     );
     const filterKey = adminCreditFilterKey(filters);
+    // 明细筛选独立于上方统计范围，与个人中心积分明细保持一致；空间与用户仍沿用上方选择
+    const detailFilters = useMemo(
+        () => ({
+            filterTeamId,
+            userId: selectedUser?.id,
+            startDate: detailDateRange[0].format("YYYY-MM-DD"),
+            endDate: detailDateRange[1].format("YYYY-MM-DD"),
+            direction: detailDirection === "all" ? undefined : detailDirection,
+            source: detailSource === "all" ? undefined : detailSource,
+        }),
+        [detailDateRange, detailDirection, detailSource, selectedUser?.id, filterTeamId, translate.locale],
+    );
     const overviewQuery = useQuery({
         queryKey: ["admin-credit-overview", filterTeamId, ...filterKey, trendUnit],
         queryFn: () => getAdminCreditOverview({ ...filters, trendUnit }),
     });
     const transactionsQuery = useQuery({
-        queryKey: ["admin-credit-transactions", filterTeamId, ...filterKey, page],
-        queryFn: () => listAdminCreditTransactions({ ...filters, page, pageSize: CREDIT_TRANSACTION_PAGE_SIZE }),
+        queryKey: ["admin-credit-transactions", filterTeamId, detailFilters.userId ?? null, detailFilters.startDate, detailFilters.endDate, detailFilters.direction ?? null, detailFilters.source ?? null, page],
+        queryFn: () => listAdminCreditTransactions({ ...detailFilters, page, pageSize: CREDIT_TRANSACTION_PAGE_SIZE }),
     });
 
     const overview = overviewQuery.data;
@@ -385,6 +402,35 @@ function CreditConsumptionManagement() {
                                             <p className="mt-1 text-sm text-[var(--studio-muted)]">{selectedUser ? translate("administration.creditRecordsFor", { value0: adminCreditUserLabel(selectedUser) }) : translate("administration.creditRecordsForAllUsers")}{translate("administration.includingUsageRefundsTopUpsAndCheckIns")}</p>
                                         </div>
                                         <span className="text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} {translate("administration.records")}</span>
+                                    </div>
+                                    <div className="mb-4 flex flex-wrap items-center gap-3">
+                                        <DatePicker.RangePicker
+                                            value={detailDateRange}
+                                            allowClear={false}
+                                            disabledDate={(date) => date.isAfter(dayjs(), "day")}
+                                            onChange={(nextDateRange) => {
+                                                if (!nextDateRange?.[0] || !nextDateRange[1]) return;
+                                                setDetailDateRange([nextDateRange[0], nextDateRange[1]]);
+                                                resetPage();
+                                            }}
+                                        />
+                                        <Segmented
+                                            value={detailDirection}
+                                            options={createCreditDirectionOptions(translate)}
+                                            onChange={(value) => {
+                                                setDetailDirection(value as "all" | ServerCreditDirection);
+                                                resetPage();
+                                            }}
+                                        />
+                                        <Select
+                                            value={detailSource}
+                                            options={createCreditSourceOptions(translate)}
+                                            className="w-40"
+                                            onChange={(value) => {
+                                                setDetailSource(value as "all" | ServerCreditSource);
+                                                resetPage();
+                                            }}
+                                        />
                                     </div>
                                     <Table<ServerAdminCreditTransaction>
                                         rowKey="id"

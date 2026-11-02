@@ -101,7 +101,7 @@
   "adminCreditUsageBarChart": "管理员积分消耗趋势柱状图",
   "creditRecordsFor": "{value0}的积分记录",
   "creditRecordsForAllUsers": "所有用户的积分记录",
-  "includingUsageRefundsTopUpsAndCheckIns": "，包含消耗、退款、充值、签到等全部积分变动",
+  "includingUsageRefundsTopUpsAndCheckIns": "，包含消耗、退款、充值、签到等全部积分变动；明细筛选独立于上方统计",
   "records": "条记录",
   "noTransactionsInThisPeriod": "所选范围没有积分记录",
   "noUsageDataInThisPeriod": "所选范围暂无消耗数据",

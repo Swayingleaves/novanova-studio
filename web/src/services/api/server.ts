@@ -1395,7 +1395,7 @@ export function getAdminCreditOverview(params: { filterTeamId?: number; userId?:
     return serverGet<ServerCreditOverview>(`/admin/credit/getCreditOverview?${query}`);
 }
 
-export function listAdminCreditTransactions(params: { filterTeamId?: number; userId?: number; startDate: string; endDate: string; generationType?: "image" | "video"; page: number; pageSize: number }) {
+export function listAdminCreditTransactions(params: { filterTeamId?: number; userId?: number; startDate: string; endDate: string; direction?: ServerCreditDirection; source?: ServerCreditSource; page: number; pageSize: number }) {
     const query = new URLSearchParams({
         startDate: params.startDate,
         endDate: params.endDate,
@@ -1404,7 +1404,8 @@ export function listAdminCreditTransactions(params: { filterTeamId?: number; use
     });
     if (params.filterTeamId !== undefined) query.set("filterTeamId", String(params.filterTeamId));
     if (params.userId !== undefined) query.set("userId", String(params.userId));
-    if (params.generationType) query.set("generationType", params.generationType);
+    if (params.direction) query.set("direction", params.direction);
+    if (params.source) query.set("source", params.source);
     return serverGet<ServerAdminCreditTransactionList>(`/admin/credit/listCreditTransactions?${query}`);
 }
 
