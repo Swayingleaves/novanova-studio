@@ -12,8 +12,8 @@ export type DocPage = {
     title: string;
     description: string;
     content: string;
-    /** 企业版专属文档，在侧边栏与总览里展示 PRO 角标。 */
-    pro?: boolean;
+    /** 近期新增文档，在侧边栏与总览里展示 NEW 角标。 */
+    isNew?: boolean;
 };
 
 export type SearchEntry = Pick<DocPage, "locale" | "slug" | "title" | "description"> & { text: string };
@@ -82,7 +82,7 @@ function readDocPage(locale: Locale, filePath: string): DocPage {
     const { data, content } = parseFrontmatter(source);
     const relative = path.relative(path.join(docsRoot, locale), filePath).replace(/\\/g, "/").replace(/\.(mdx|md)$/, "");
     const slug = relative === "index" ? [] : relative.split("/");
-    return { locale, slug, title: String(data.title || slug.at(-1) || "Novanova Studio"), description: String(data.description || ""), content, pro: data.pro === true || data.pro === "true" };
+    return { locale, slug, title: String(data.title || slug.at(-1) || "Novanova Studio"), description: String(data.description || ""), content, isNew: data.new === true || data.new === "true" };
 }
 
 function parseFrontmatter(source: string): { data: Record<string, unknown>; content: string } {
