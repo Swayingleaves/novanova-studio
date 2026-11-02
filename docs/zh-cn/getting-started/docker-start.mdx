@@ -23,11 +23,11 @@ Docker Compose 会把 PostgreSQL、Redis、服务端、前端和 Nginx 一起拉
 | 方式 | Compose 文件 | 访问入口 | 适合场景 |
 | --- | --- | --- | --- |
 | 默认启动 | `docker-compose.yml` | `http://127.0.0.1:5554` | 使用仓库自带的 Nginx 配置运行整套服务 |
-| 现有企业线上部署 | `docker-compose.yml` + `docker-compose-production.yml` | 你自己的域名 | 沿用线上容器名称、镜像、端口与 Nginx 配置 |
+| 现有生产部署 | `docker-compose.yml`（`production` 配置档） | 你自己的域名 | 通过 `.env` 复用现有容器、端口和宿主机 Nginx |
 
 主配置使用桥接网络，Nginx 在容器网络里反代 `server:8080` 与 `web:5550`。整套服务通过 `NGINX_PORT`（默认 `5554`）访问；`WEB_PORT`（默认 `5550`）只用于直接访问 Next.js 前端。
 
-从原本的本地配置切换时，保留原有 `.env` 和 `volume/` 数据目录，将 `FRONTEND_BASE_URL` 更新为实际的 Nginx 访问地址。现有企业线上部署继续沿用服务器的 `.env` 和生产覆盖文件。
+从原本的本地配置切换时，保留原有 `.env` 和 `volume/` 数据目录，将 `FRONTEND_BASE_URL` 更新为实际的 Nginx 访问地址。现有企业线上部署继续沿用服务器 `.env`；发布脚本会在主 Compose 文件中选择 `production` 配置档。
 
 ## 3. 配置 `.env`
 
@@ -61,13 +61,13 @@ FRONTEND_BASE_URL=http://127.0.0.1:5554
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | 含 `localhost:3000` 与 `www.novanovastudio.cn` | 改成你的实际来源，多个用英文逗号分隔 |
 | `TRUSTED_PROXY_ADDRESSES` | 空 | Nginx 反代场景建议填 Docker bridge 网关（通常 `172.18.0.1`，或直接写网段 `172.18.0.0/16`）；不配置时“接口记录”和登录限流只能看到网关地址。不要把 `127.0.0.1` 填在这里——容器内看到的对端地址是网关，不是它 |
 | `TZ` | `Asia/Shanghai` | 容器与 Java 日志使用的时区 |
-| `FLYWAY_MIGRATION_LOCATION` | `.env.example` 为 `classpath:db/migration-community` | 新建开源库和原开源库使用开源迁移目录；已有企业库使用 `classpath:db/migration`。Compose 文件名不会自动选择迁移历史 |
+| `FLYWAY_MIGRATION_LOCATION` | `.env.example` 为 `classpath:db/migration-community` | 新建开源库使用社区迁移目录；继承企业版线上数据库必须显式保留 `classpath:db/migration`，已有数据库不能切换迁移历史 |
 
 ### 可以不动的部分
 
 - `POSTGRES_HOST` / `REDIS_HOST`：Compose 已固定为 `postgres` / `redis`，`.env` 里的这两个值只在本地源码启动时生效。
 - `POSTGRES_PORT` / `REDIS_PORT` / `SERVER_PORT` / `WEB_PORT`：填的是**宿主机映射端口**，容器内端口固定（5432 / 6379 / 8080 / 5550），宿主机端口冲突时才需要改。
-- 主配置与生产覆盖配置中的 PostgreSQL、Redis 端口均只发布到宿主机 `127.0.0.1`；容器内通过服务名连接，远程运维请使用 SSH 隧道。
+- 主 Compose 文件中的 PostgreSQL、Redis 端口均只发布到宿主机 `127.0.0.1`；容器内通过服务名连接，远程运维请使用 SSH 隧道。
 - `NGINX_PORT`：主配置的整套服务入口端口，默认 `5554`；修改后同步更新 `FRONTEND_BASE_URL`。
 - `TOKEN_EXPIRE_HOURS`、`LOG_LEVEL`、`TENCENT_COS_*`、`AI_*`（轮询间隔、各类超时、提示词文件路径）：默认值即可用。
 - 邮件（`EMAIL_SMTP_*`）与 linux.do / Google 登录（`OAUTH2_*`）：可选能力，不配置就是关闭状态。
@@ -97,13 +97,13 @@ docker compose build server # 只重建服务端
 # 默认启动：访问 http://127.0.0.1:5554
 docker compose up -d --build
 
-# 现有企业线上部署：在服务器上沿用原有 .env 和 Nginx 站点配置
-docker compose -f docker-compose.yml -f docker-compose-production.yml up -d --build
 ```
 
-启动顺序由依赖关系保证：PostgreSQL 与 Redis 健康检查通过后才启动 `server`，`server` 起来后再启动 `web` 和 `nginx`。**数据库迁移由服务端启动时按 `FLYWAY_MIGRATION_LOCATION` 用 Flyway 自动执行**，不需要手工建表。修改 `.env` 后重新执行对应启动命令即可让新变量生效（Compose 会重建相关容器）。
+此 Compose 启动方式用于新环境或本机试用。已有生产数据库请使用仓库根目录的 `./deploy.sh <唯一版本标签>`，脚本会沿用原 `.env` 和站点配置，并在切换前验证备份与迁移历史。不要直接对既有生产库执行 `docker compose up`。
 
-更新已有部署时，执行上述对应的启动命令，已有 `volume/` 数据保持不变；仅执行 `docker compose restart` 不会应用新的环境变量和端口绑定。
+启动顺序由依赖关系保证：PostgreSQL 与 Redis 健康检查通过后才启动 `server`，`server` 起来后再启动 `web` 和对应配置档的 Nginx。**数据库迁移由服务端启动时按 `FLYWAY_MIGRATION_LOCATION` 用 Flyway 自动执行**，不需要手工建表。新建开源数据库默认使用 `classpath:db/migration-community`；继承企业版历史的现有生产库必须显式使用 `classpath:db/migration`，并保留原有迁移历史。修改 `.env` 后重新执行对应启动命令即可让新变量生效（Compose 会重建相关容器）。
+
+更新已有生产部署时使用 `./deploy.sh <唯一版本标签>`；本机试用环境可用 `docker compose up -d --build` 更新。仅执行 `docker compose restart` 不会应用新的环境变量和端口绑定。
 
 ### Nginx 配置与挂载
 
@@ -150,7 +150,7 @@ server {
 | `NGINX_STATIC_DIRECTORY` | `./volume/nginx_static` | 静态资源目录，只读挂载 |
 | `NGINX_SSL_DIRECTORY` | `./volume/nginx_ssl` | 证书目录，只读挂载 |
 
-生产覆盖文件中的 Nginx 使用 `network_mode: host`，静态资源与证书目录分别默认挂载 `/usr/share/nginx/html`、`/etc/nginx/ssl`。线上 `.env` 的 `NGINX_CONFIG_DIRECTORY` 必须指向已有站点配置目录，上游使用 `127.0.0.1` 和实际的 `SERVER_PORT`、`WEB_PORT`，不能直接使用仓库中的容器服务名配置。
+生产 `production` 配置档中的 Nginx 使用 `network_mode: host`，静态资源与证书目录分别默认挂载 `/usr/share/nginx/html`、`/etc/nginx/ssl`。线上 `.env` 的 `NGINX_CONFIG_DIRECTORY` 必须指向已有站点配置目录，上游使用 `127.0.0.1` 和实际的 `SERVER_PORT`、`WEB_PORT`，不能直接使用仓库中的容器服务名配置。
 
 ## 6. 验证
 
@@ -171,9 +171,10 @@ docker compose logs -f server            # 跟踪服务端日志
 
 ## 8. 常用命令
 
-以下命令适用于主配置；现有企业线上部署的管理命令都需在 `docker compose` 后添加 `-f docker-compose.yml -f docker-compose-production.yml`。
+以下命令适用于本地 `local` 配置档。线上只使用 `docker-compose.yml`，管理时显式指定 `--env-file .env --profile production`。
 
 ```bash
+# 以下命令仅用于新环境或本机试用，线上现有数据库请使用 ./deploy.sh <唯一版本标签>
 docker compose stop             # 停止服务，保留容器
 docker compose restart          # 重启服务
 docker compose logs -f server   # 跟踪某个服务的日志

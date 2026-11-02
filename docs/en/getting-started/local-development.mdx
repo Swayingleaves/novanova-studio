@@ -36,7 +36,7 @@ The server loads the root `.env` automatically (it tries both the current and th
 | `SERVER_PORT` | `8080` | **Set it explicitly**: the fallback default in the config is 9080, while the web app expects 8080 |
 | `POSTGRES_*` / `REDIS_*` | Defaults (`127.0.0.1`, `postgres` / `123456`, database `novanova_studio`) | Match your local instance |
 | `REDIS_PASSWORD` | Empty by default | The default Compose Redis does not enable authentication; enter the password when connecting to a Redis instance with authentication configured separately |
-| `FLYWAY_MIGRATION_LOCATION` | `classpath:db/migration-community` | Use this for new community databases and existing community databases. Existing enterprise databases use `classpath:db/migration`; keep the original migration history |
+| `FLYWAY_MIGRATION_LOCATION` | `classpath:db/migration-community` | New community databases use the community history. Existing enterprise databases must explicitly retain `classpath:db/migration` |
 | `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | `admin@admin.com` / `novanovastudio@pwss` | The administrator is created on first boot and never overwritten |
 
 After configuring the root `.env`, start PostgreSQL and Redis from the main Compose file if you prefer to keep those dependencies in containers and run the server and web app on the host:
@@ -68,7 +68,7 @@ $env:JAVA_HOME="$env:USERPROFILE\.jabba\jdk\openjdk@21.0.2"
 mvn -f server/pom.xml spring-boot:run
 ```
 
-Flyway runs the migrations selected by `FLYWAY_MIGRATION_LOCATION` during startup. The `.env.example` default is the community directory, `classpath:db/migration-community`, so there is no manual schema step. For breakpoint debugging, run `NovanovaStudioServerApplication` from your IDE with the repository root as the working directory.
+Flyway runs the migrations selected by `FLYWAY_MIGRATION_LOCATION` during startup. The `.env.example` default is `classpath:db/migration-community`; existing enterprise databases must explicitly retain `classpath:db/migration`. For breakpoint debugging, run `NovanovaStudioServerApplication` from your IDE with the repository root as the working directory.
 
 ## 4. Start the web app
 

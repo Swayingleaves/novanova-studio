@@ -40,5 +40,5 @@ volume/
 /videos/project-introduction/
 AGENTS.md
 CLAUDE.md
-deploy.sh
 docker-compose-production.yml
+__pycache__/
