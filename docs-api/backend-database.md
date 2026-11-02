@@ -6,14 +6,14 @@
 
 | 数据库来源 | `FLYWAY_MIGRATION_LOCATION` | 迁移历史 |
 | --- | --- | --- |
-| 企业版已有数据库或新数据库 | `classpath:db/migration`（默认） | 保留企业版 V1–V76 |
-| 开源版已有数据库 | `classpath:db/migration-community` | 保留原开源版 V1–V38，新增 V39–V77 补齐企业版结构 |
+| 企业版已有数据库 | `classpath:db/migration`（生产显式指定） | 保留企业版 V1–V76 |
+| 新建开源库或开源版已有数据库 | `classpath:db/migration-community`（默认） | 保留原开源版 V1–V38，新增 V39–V77 补齐企业版结构 |
 
-两套历史从 V32 起内容不同，必须根据数据库来源显式选择，不能同时加载或在已有数据库上切换。目录不存在或校验失败时直接停止启动，不自动探测、`repair`、改写历史表或重放迁移。后续结构变更应在对应历史下新增更高版本，禁止修改任何已执行文件。本文件以下版本号使用默认企业版历史。
+两套历史从 V32 起内容不同，必须根据数据库来源显式选择，不能同时加载或在已有数据库上切换。目录不存在或校验失败时直接停止启动，不自动探测、`repair`、改写历史表或重放迁移。后续结构变更应在对应历史下新增更高版本，禁止修改任何已执行文件。本文件以下版本号使用企业版历史。
 
 开源版升级中，原企业版 V32–V54 顺延为 V39–V61，V56–V61 顺延为 V62–V67，V65–V74 顺延为 V68–V77；已存在的任务双语消息、图片尺寸与定价、社群配置和模型开关不重复执行。开源版 V44 复用 V32 的 `video_composition_tasks.task_type`，增加 `project_id` 和 `input_snapshot` 并保留导演台索引。
 
-生产部署组合 `docker-compose.yml` 与 `docker-compose-production.yml`，保留当前 `novanova-studio` Compose 项目标识、`novanovastudio-pro-*` 容器及企业版端口。本地默认组合使用独立的 `novanovastudio-*` 容器；发布脚本不上传本地 `.env`，避免把本地开源版迁移配置带到线上。
+部署只使用 `docker-compose.yml`，容器、镜像名称及端口由 `.env` 配置。已有数据库必须显式保留原迁移目录，部署配置不能切换或同时加载两套迁移历史。
 
 ## 剧本 AI 助手动作独立定价（V74）
 

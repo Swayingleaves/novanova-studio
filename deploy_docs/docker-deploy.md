@@ -2,7 +2,7 @@
 
 本文档介绍如何使用 Docker Compose 一键部署 Novanova Studio 的全部服务（PostgreSQL、Redis、后端、前端、Nginx）。
 
-> **注意**：此方式适用于 Linux 服务器环境。Nginx 使用 `network_mode: host` 并挂载宿主机 `/etc`、日志和证书目录，因此不适用于 Windows / macOS 本地开发。本地开发请参考[本地源码启动与调试指南](local-source-development.md)。
+默认 `local` 配置档使用仓库内 Nginx 配置和桥接网络。`production` 配置档使用 Linux 宿主机的 HTTPS 配置及证书。两种配置均只使用 `docker-compose.yml`。
 
 ## 1. 准备环境
 
@@ -11,7 +11,7 @@
 | 操作系统 | Linux（推荐 Ubuntu 22.04+） |
 | Docker Engine | 24+ |
 | Docker Compose | v2 |
-| Nginx | 已安装并配置完成（Compose 中的 Nginx 容器使用 `network_mode: host` 共享宿主机网络） |
+| Nginx | 生产配置档需提供宿主机站点配置与证书；本地配置档由容器提供代理 |
 
 ## 2. 获取源码与配置环境变量
 
@@ -52,7 +52,7 @@ openssl rand -base64 48
 | `ALIPAY_GATEWAY_URL` | 支付宝网关地址；沙箱联调使用支付宝开放平台提供的沙箱网关。 |
 | `ALIPAY_NOTIFY_URL` | 必填，形如 `https://域名/api/v1/payment/alipay/notify`，必须能被支付宝服务器公网访问。 |
 | `ALIPAY_RETURN_URL` | 必填，形如 `https://域名/api/v1/payment/alipay/return`，用于同步回到前端购买页。 |
-| `AI_TASK_POLLING_INTERVAL_SECONDS` | 所有 AI 异步任务状态轮询间隔（服务端渠道、内部等待、视频合成恢复和前端状态查询），单位为秒，必须大于 0，默认 `3`。 |
+| `AI_TASK_POLLING_INTERVAL_SECONDS` | 所有 AI 异步任务状态轮询间隔（服务端渠道、内部等待、视频合成恢复和前端状态查询），单位为秒，必须大于 0，默认 `5`。 |
 
 ### Nginx 路径配置
 
@@ -60,16 +60,20 @@ Compose 中的 Nginx 容器会挂载以下宿主机目录，确保这些目录�
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
-| `NGINX_CONFIG_DIRECTORY` | `/etc/nginx/conf.d` | Nginx 配置文件目录。 |
-| `NGINX_STATIC_DIRECTORY` | `/usr/share/nginx/html` | 静态资源目录。 |
-| `NGINX_LOG_DIRECTORY` | `/var/log/nginx` | 日志目录。 |
-| `NGINX_SSL_DIRECTORY` | `/etc/nginx/ssl` | SSL 证书目录。 |
+| `NGINX_CONFIG_DIRECTORY` | `./nginx` | 生产配置档可设置为 `/etc/nginx/conf.d`。 |
+| `NGINX_STATIC_DIRECTORY` | `./volume/nginx_static`（样例） | 生产配置档可设置为 `/usr/share/nginx/html`。 |
+| `NGINX_LOG_DIRECTORY` | `./logs/nginx` | Nginx 日志目录。 |
+| `NGINX_SSL_DIRECTORY` | `./volume/nginx_ssl`（样例） | 生产配置档可设置为 `/etc/nginx/ssl`。 |
 
 ## 3. 构建并启动
 
+新环境执行以下命令，默认入口为 `http://127.0.0.1:5554`：
+
 ```bash
-docker compose up --build -d
+docker compose up -d --build
 ```
+
+已有生产环境更新前，先备份并验证 PostgreSQL 和 Redis 数据，核对 `.env`、站点配置与 Flyway 迁移历史，再在维护窗口内更新应用。数据库备份必须实际恢复验证；不要删除数据目录、自动修复迁移历史或跳过数据一致性检查。
 
 首次运行会构建 `web` 和 `server` 镜像，耗时取决于网络和机器性能。
 
@@ -81,15 +85,17 @@ docker compose ps
 
 所有服务状态为 `Up` 且 `healthy`（PostgreSQL、Redis）即表示启动成功。
 
-PostgreSQL 和 Redis 在主配置、生产覆盖配置中均仅发布到宿主机 `127.0.0.1`，远程运维请使用 SSH 隧道。更新已有部署时，执行对应的 `docker compose up -d` 命令重建相关容器；已有数据目录保持不变，单独执行 `restart` 不会应用新的环境变量和端口绑定。
+PostgreSQL 和 Redis 在 Compose 中均仅发布到宿主机 `127.0.0.1`，远程运维请使用 SSH 隧道。已有生产数据库的更新必须先完成备份、恢复验证与迁移历史校验。
 
 ## 4. 验证
 
 ```bash
-curl http://127.0.0.1:8080/api/v1/health
+curl http://127.0.0.1:8080/actuator/health
+curl https://你的域名/api/v1/health
 ```
 
-返回 `{"code":200,"data":"OK"}` 表示后端正常。
+第一条应返回包含 `"status":"UP"` 的 Actuator 响应，第二条应返回业务响应
+`{"code":0,"data":"ok","msg":"success"}`。实际端口以服务器 `.env` 为准。
 
 ## 5. 完成首次配置
 
@@ -118,8 +124,8 @@ docker compose logs -f
 # 仅查看某个服务的日志
 docker compose logs -f server
 
-# 重新构建并启动（代码更新后）
-docker compose up --build -d
+# 更新应用（已有数据须先完成备份验证）
+docker compose up -d --build server web
 
 # 停止并删除容器（数据卷不受影响）
 docker compose down
@@ -131,3 +137,7 @@ docker compose down
 - 浏览器可见的 `NEXT_PUBLIC_*` 环境变量不应用于保存任何密钥。
 - 数据持久化在项目根目录的 `volume/` 下（PostgreSQL 和 Redis），`docker compose down` 不会删除数据卷。
 - Agent 提示词文件挂载自 `server/config/prompts/`，修改后重启 `server` 容器即可生效。
+- 继承企业版线上数据库时，`FLYWAY_MIGRATION_LOCATION` 必须保持
+  `classpath:db/migration`，不能切换到 `db/migration-community`；已执行迁移文件的名称和
+  内容也不能修改。
+- 生产更新完成后保留源码、配置及数据库备份，确认新版本稳定后再按备份保留策略清理。

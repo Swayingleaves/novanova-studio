@@ -36,7 +36,7 @@ cp .env.example .env
 | `SERVER_PORT` | `8080` | **务必显式写成 8080**：配置里的兜底默认值是 9080，而前端默认请求 8080 |
 | `POSTGRES_*` / `REDIS_*` | 保持默认（`127.0.0.1`、`postgres` / `123456`、库名 `novanova_studio`） | 与本机实际账号保持一致 |
 | `REDIS_PASSWORD` | 默认留空 | 默认 Compose Redis 不启用认证；连接自行启用认证的 Redis 时，填写其密码 |
-| `FLYWAY_MIGRATION_LOCATION` | `classpath:db/migration-community` | 新建开源库和原开源库使用此目录；已有企业库使用 `classpath:db/migration`，必须与原迁移历史一致 |
+| `FLYWAY_MIGRATION_LOCATION` | `classpath:db/migration-community` | 新建开源库默认使用社区历史；继承企业版的已有数据库必须显式使用 `classpath:db/migration` |
 | `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | 默认 `admin@admin.com` / `novanovastudio@pwss` | 首次启动自动创建管理员；同邮箱账号已存在时不会覆盖 |
 
 配置好根目录的 `.env` 后，不想在本机安装 PostgreSQL 和 Redis 时，可以用主 Compose 只启动依赖，服务端和前端仍然在本地跑：
@@ -68,7 +68,7 @@ $env:JAVA_HOME="$env:USERPROFILE\.jabba\jdk\openjdk@21.0.2"
 mvn -f server/pom.xml spring-boot:run
 ```
 
-启动过程中 Flyway 会自动执行 `FLYWAY_MIGRATION_LOCATION` 指定目录下的迁移脚本，`.env.example` 默认使用开源迁移目录 `classpath:db/migration-community`，不需要手工建库建表。需要断点调试时，可以在 IDE 中直接运行 `NovanovaStudioServerApplication`，把工作目录设为项目根目录。
+启动过程中 Flyway 会自动执行 `FLYWAY_MIGRATION_LOCATION` 指定目录下的迁移脚本。当前 `.env.example` 默认使用 `classpath:db/migration-community`；继承企业版的已有数据库必须显式保留 `classpath:db/migration`。需要断点调试时，可以在 IDE 中直接运行 `NovanovaStudioServerApplication`，把工作目录设为项目根目录。
 
 ## 4. 启动前端
 

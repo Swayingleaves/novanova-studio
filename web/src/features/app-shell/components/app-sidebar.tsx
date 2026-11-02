@@ -64,7 +64,7 @@ export function AppSidebar() {
                     <Icon className="size-5" />
                 </span>
                 <span className="sidebar-rail-label">{translate(tool.labelKey)}</span>
-                {tool.pro ? <span className="pro-badge right-0.5 top-0.5" title={translate("common.enterpriseFeature")}>PRO</span> : null}
+                {tool.isNew ? <span className="new-badge right-0.5 top-0.5" title={translate("common.newFeature")}>NEW</span> : null}
             </Link>
         );
     };

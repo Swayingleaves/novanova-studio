@@ -50,7 +50,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                                         >
                                             <Icon className="size-5" />
                                             <span className="text-sm">{translate(tool.labelKey)}</span>
-                                            {tool.pro ? <span className="pro-badge right-2 top-2" title={translate("common.enterpriseFeature")}>PRO</span> : null}
+                                            {tool.isNew ? <span className="new-badge right-2 top-2" title={translate("common.newFeature")}>NEW</span> : null}
                                         </Link>
                                     );
                                 })}

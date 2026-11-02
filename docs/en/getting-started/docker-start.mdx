@@ -23,11 +23,11 @@ Docker Compose brings up PostgreSQL, Redis, the server, the web app, and Nginx t
 | Path | Compose file | Entry point | Good for |
 | --- | --- | --- | --- |
 | Default | `docker-compose.yml` | `http://127.0.0.1:5554` | Running all services with the Nginx config shipped in the repository |
-| Existing enterprise deployment | `docker-compose.yml` + `docker-compose-production.yml` | Your own domain | Keeping the existing container names, images, ports, and Nginx configuration |
+| Existing production deployment | `docker-compose.yml` (`production` profile) | Your own domain | Reusing existing containers, ports, and host Nginx through `.env` |
 
 The main configuration uses a bridge network. Nginx proxies to `server:8080` and `web:5550` inside the Compose network. Access the full application through `NGINX_PORT` (default `5554`); `WEB_PORT` (default `5550`) provides direct access to Next.js only.
 
-When switching from the previous local configuration, keep the existing `.env` and `volume/` data directory, and update `FRONTEND_BASE_URL` to the actual Nginx URL. Existing enterprise deployments must keep their server-side `.env` and production override.
+When switching from the previous local configuration, keep the existing `.env` and `volume/` data directory, and update `FRONTEND_BASE_URL` to the actual Nginx URL. Existing deployments keep their server-side `.env`; the release script selects the `production` profile in the main Compose file.
 
 ## 3. Configure `.env`
 
@@ -61,13 +61,13 @@ FRONTEND_BASE_URL=http://127.0.0.1:5554
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | Includes `localhost:3000` and `www.novanovastudio.cn` | Replace with your real origins, comma-separated |
 | `TRUSTED_PROXY_ADDRESSES` | Empty | Behind Nginx, set the Docker bridge gateway (usually `172.18.0.1`, or the whole subnet `172.18.0.0/16`). Without it, API logs and login rate limiting only see the gateway address. Do not put `127.0.0.1` here — the peer address inside the container is the gateway, not loopback |
 | `TZ` | `Asia/Shanghai` | Time zone used by the containers and Java logs |
-| `FLYWAY_MIGRATION_LOCATION` | `.env.example` uses `classpath:db/migration-community` | Use community migrations for new community databases and existing community databases; existing enterprise databases use `classpath:db/migration`. The Compose filename does not select the migration history |
+| `FLYWAY_MIGRATION_LOCATION` | `.env.example` uses `classpath:db/migration-community` | New community databases use this default. Existing enterprise databases must explicitly retain `classpath:db/migration`; never switch an existing database history |
 
 ### Leave alone
 
 - `POSTGRES_HOST` / `REDIS_HOST`: Compose pins them to `postgres` / `redis`; the `.env` values only matter when you run the server from source.
 - `POSTGRES_PORT` / `REDIS_PORT` / `SERVER_PORT` / `WEB_PORT`: these are the **host-side** published ports. Container ports are fixed (5432 / 6379 / 8080 / 5550), so only change these on a port conflict.
-- Both the main configuration and the production override publish PostgreSQL and Redis only on host `127.0.0.1`. Containers connect by service name; use an SSH tunnel for remote administration.
+- The main Compose file publishes PostgreSQL and Redis only on host `127.0.0.1`. Containers connect by service name; use an SSH tunnel for remote administration.
 - `NGINX_PORT`: entry port for the full application in the main configuration, default `5554`. Update `FRONTEND_BASE_URL` whenever this changes.
 - `TOKEN_EXPIRE_HOURS`, `LOG_LEVEL`, `TENCENT_COS_*`, and `AI_*` (polling interval, timeouts, prompt file paths): defaults are fine.
 - Email (`EMAIL_SMTP_*`) and linux.do / Google sign-in (`OAUTH2_*`): optional features, off unless configured.
@@ -97,13 +97,13 @@ docker compose build server # 只重建服务端
 # 默认启动：访问 http://127.0.0.1:5554
 docker compose up -d --build
 
-# 现有企业线上部署：在服务器上沿用原有 .env 和 Nginx 站点配置
-docker compose -f docker-compose.yml -f docker-compose-production.yml up -d --build
 ```
 
-Dependency order is enforced: `server` starts only after PostgreSQL and Redis are healthy, and `web` plus `nginx` start after `server`. **Flyway runs the migrations selected by `FLYWAY_MIGRATION_LOCATION` when the server boots**, so there is no manual schema step. After editing `.env`, run the corresponding startup command again so the affected containers are recreated with the new values.
+Use this startup command for new environments. Before updating an existing production database, back up the data, verify an actual restore, preserve the existing `.env` and Nginx configuration, and validate migration history before scheduling a maintenance window.
 
-To update an existing deployment, run the applicable startup command above; existing data under `volume/` is kept. Running only `docker compose restart` does not apply new environment variables or port bindings.
+Dependency order is enforced: `server` starts only after PostgreSQL and Redis are healthy, and `web` plus the selected Nginx profile start after `server`. **Flyway runs the migrations selected by `FLYWAY_MIGRATION_LOCATION` when the server boots**, so there is no manual schema step. The sample defaults to `classpath:db/migration-community`; existing enterprise databases must explicitly retain `classpath:db/migration`. After editing `.env`, run the corresponding startup command again so the affected containers are recreated with the new values.
+
+After backup verification and migration validation, use `docker compose up -d --build` to update the deployment. Running only `docker compose restart` does not apply new environment variables or port bindings.
 
 ### Nginx configuration and mounts
 
@@ -150,7 +150,7 @@ The repository's `nginx/default.conf` already contains these proxy rules. Every 
 | `NGINX_STATIC_DIRECTORY` | `./volume/nginx_static` | Static asset directory, mounted read-only |
 | `NGINX_SSL_DIRECTORY` | `./volume/nginx_ssl` | Certificate directory, mounted read-only |
 
-In the production override, Nginx uses `network_mode: host`, with `/usr/share/nginx/html` and `/etc/nginx/ssl` as the default static asset and certificate directories. The server-side `.env` must point `NGINX_CONFIG_DIRECTORY` at the existing site configuration. Its upstreams must use `127.0.0.1` with the actual `SERVER_PORT` and `WEB_PORT`, rather than the service-name configuration shipped in the repository.
+The `production` profile in the main Compose file runs Nginx with `network_mode: host`, using `/usr/share/nginx/html` and `/etc/nginx/ssl` as the default static asset and certificate directories. The server-side `.env` must point `NGINX_CONFIG_DIRECTORY` at the existing site configuration. Its upstreams must use `127.0.0.1` with the actual `SERVER_PORT` and `WEB_PORT`, rather than the service-name configuration shipped in the repository.
 
 ## 6. Verify
 
@@ -171,7 +171,7 @@ Logs are written per service under the repository root: `logs/server/`, `logs/we
 
 ## 8. Common commands
 
-These commands use the main configuration. For existing enterprise deployments, add `-f docker-compose.yml -f docker-compose-production.yml` after `docker compose` in every management command.
+These commands use the local `local` profile. Production uses only `docker-compose.yml`; specify `--env-file .env --profile production` for management commands.
 
 ```bash
 docker compose stop             # stop services, keep containers
