@@ -11,7 +11,10 @@
 </p>
 
 <p align="center">
-  <a href="https://www.novanovastudio.cn/">>>>>如果觉得部署麻烦、找便宜渠道麻烦->点我在线体验 seedance2.0系列4折官转API<<<<<</a>
+  <a href="https://www.novanovastudio.cn/">>>>>如果觉得部署麻烦、找便宜渠道麻烦->点我在线体验 <<<<<</a> <br>
+  <a href="https://www.novanovastudio.cn/">🚀seedance2.0系列最低4折官转API🚀</a><br>
+  <a href="https://www.novanovastudio.cn/">🚀minmax-h3 高清 最低6分钱一秒🚀</a><br>
+  <a href="https://www.novanovastudio.cn/">🚀gpt-image-2.5 最低一毛五一张🚀</a>
 </p>
 
 <p align="center">
