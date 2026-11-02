@@ -13,7 +13,7 @@
 
 开源版升级中，原企业版 V32–V54 顺延为 V39–V61，V56–V61 顺延为 V62–V67，V65–V74 顺延为 V68–V77；已存在的任务双语消息、图片尺寸与定价、社群配置和模型开关不重复执行。开源版 V44 复用 V32 的 `video_composition_tasks.task_type`，增加 `project_id` 和 `input_snapshot` 并保留导演台索引。
 
-生产部署只使用 `docker-compose.yml`，由服务器 `.env` 的 `production` 配置档保留当前 `novanova-studio` Compose 项目标识及企业版端口。Web 容器及镜像统一改为 `novanovastudio-web`，数据库、Redis、服务端、Nginx 保留当前 `novanovastudio-pro-*` 名称。本地 `local` 配置档使用独立的 `novanovastudio-*` 容器；发布脚本不上传本地 `.env`，避免把本地开源版迁移配置带到线上。
+部署只使用 `docker-compose.yml`，容器、镜像名称及端口由 `.env` 配置。已有数据库必须显式保留原迁移目录，部署配置不能切换或同时加载两套迁移历史。
 
 ## 剧本 AI 助手动作独立定价（V74）
 

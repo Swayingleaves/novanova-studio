@@ -27,7 +27,7 @@ Docker Compose 会把 PostgreSQL、Redis、服务端、前端和 Nginx 一起拉
 
 主配置使用桥接网络，Nginx 在容器网络里反代 `server:8080` 与 `web:5550`。整套服务通过 `NGINX_PORT`（默认 `5554`）访问；`WEB_PORT`（默认 `5550`）只用于直接访问 Next.js 前端。
 
-从原本的本地配置切换时，保留原有 `.env` 和 `volume/` 数据目录，将 `FRONTEND_BASE_URL` 更新为实际的 Nginx 访问地址。现有企业线上部署继续沿用服务器 `.env`；发布脚本会在主 Compose 文件中选择 `production` 配置档。
+从原本的本地配置切换时，保留原有 `.env` 和 `volume/` 数据目录，将 `FRONTEND_BASE_URL` 更新为实际的 Nginx 访问地址。使用宿主机 HTTPS 配置时，通过服务器 `.env` 显式选择 `production` 配置档。
 
 ## 3. 配置 `.env`
 
@@ -99,11 +99,11 @@ docker compose up -d --build
 
 ```
 
-此 Compose 启动方式用于新环境或本机试用。已有生产数据库请使用仓库根目录的 `./deploy.sh <唯一版本标签>`，脚本会沿用原 `.env` 和站点配置，并在切换前验证备份与迁移历史。不要直接对既有生产库执行 `docker compose up`。
+此 Compose 启动方式可用于新环境。已有生产数据库更新前，必须备份并实际恢复验证数据，保留原 `.env` 和站点配置，并校验迁移历史后再安排维护窗口更新。
 
 启动顺序由依赖关系保证：PostgreSQL 与 Redis 健康检查通过后才启动 `server`，`server` 起来后再启动 `web` 和对应配置档的 Nginx。**数据库迁移由服务端启动时按 `FLYWAY_MIGRATION_LOCATION` 用 Flyway 自动执行**，不需要手工建表。新建开源数据库默认使用 `classpath:db/migration-community`；继承企业版历史的现有生产库必须显式使用 `classpath:db/migration`，并保留原有迁移历史。修改 `.env` 后重新执行对应启动命令即可让新变量生效（Compose 会重建相关容器）。
 
-更新已有生产部署时使用 `./deploy.sh <唯一版本标签>`；本机试用环境可用 `docker compose up -d --build` 更新。仅执行 `docker compose restart` 不会应用新的环境变量和端口绑定。
+完成备份验证与迁移校验后，可用 `docker compose up -d --build` 更新部署。仅执行 `docker compose restart` 不会应用新的环境变量和端口绑定。
 
 ### Nginx 配置与挂载
 
@@ -174,7 +174,7 @@ docker compose logs -f server            # 跟踪服务端日志
 以下命令适用于本地 `local` 配置档。线上只使用 `docker-compose.yml`，管理时显式指定 `--env-file .env --profile production`。
 
 ```bash
-# 以下命令仅用于新环境或本机试用，线上现有数据库请使用 ./deploy.sh <唯一版本标签>
+# 已有生产数据库更新前须先完成备份恢复验证与迁移校验
 docker compose stop             # 停止服务，保留容器
 docker compose restart          # 重启服务
 docker compose logs -f server   # 跟踪某个服务的日志

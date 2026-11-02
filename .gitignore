@@ -43,3 +43,6 @@ CLAUDE.md
 docker-compose-production.yml
 __pycache__/
 deploy.sh
+/scripts/deploy-production.sh
+/scripts/deployment-check.py
+/deploy_docs/production-private.md

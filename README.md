@@ -264,7 +264,7 @@ Agent 不只是一次性调用模型，而是贯穿需求理解、工具选择�
 
 Docker 部署会由 Flyway 自动执行数据库迁移。新建开源库默认使用 `classpath:db/migration-community`；继承企业版的现有数据库必须在 `.env` 中设置 `FLYWAY_MIGRATION_LOCATION=classpath:db/migration`，保留线上 V1–V76。原开源版数据库沿用社区历史，从 V38 升级至 V77。已有数据库不能切换或同时加载这两套历史，详见 [数据库迁移说明](docs-api/backend-database.md#合并后的数据库迁移历史)。
 
-生产环境还应配置 `APP_SECRET_KEY`、`FRONTEND_BASE_URL`、可信代理地址 `TRUSTED_PROXY_ADDRESSES`，并按需调整统一 AI 任务轮询间隔 `AI_TASK_POLLING_INTERVAL_SECONDS`。线上部署只使用 `docker-compose.yml`，由服务器 `.env` 选择 `production` 配置档并保留现有容器名称及端口；生产更新使用 `./deploy.sh <唯一版本标签>`，具体说明见 [Docker 部署指南](deploy_docs/docker-deploy.md)。
+生产环境还应配置 `APP_SECRET_KEY`、`FRONTEND_BASE_URL`、可信代理地址 `TRUSTED_PROXY_ADDRESSES`，并按需调整统一 AI 任务轮询间隔 `AI_TASK_POLLING_INTERVAL_SECONDS`。部署只使用 `docker-compose.yml`，按需通过 `.env` 选择 `production` 配置档并设置容器名称及端口；已有数据库更新前须先完成备份与迁移校验，具体说明见 [Docker 部署指南](deploy_docs/docker-deploy.md)。
 
 ## 📚 相关文档
 

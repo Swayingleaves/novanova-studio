@@ -99,11 +99,11 @@ docker compose up -d --build
 
 ```
 
-Use this startup command for new environments and local trials. For an existing production database, run `./deploy.sh <unique-image-tag>`; it keeps the server `.env` and Nginx site configuration and validates the database backup and migration history before switching. Do not run `docker compose up` directly against that database.
+Use this startup command for new environments. Before updating an existing production database, back up the data, verify an actual restore, preserve the existing `.env` and Nginx configuration, and validate migration history before scheduling a maintenance window.
 
 Dependency order is enforced: `server` starts only after PostgreSQL and Redis are healthy, and `web` plus the selected Nginx profile start after `server`. **Flyway runs the migrations selected by `FLYWAY_MIGRATION_LOCATION` when the server boots**, so there is no manual schema step. The sample defaults to `classpath:db/migration-community`; existing enterprise databases must explicitly retain `classpath:db/migration`. After editing `.env`, run the corresponding startup command again so the affected containers are recreated with the new values.
 
-For the existing production deployment, use `./deploy.sh <unique-image-tag>`; local trials may use `docker compose up -d --build`. Running only `docker compose restart` does not apply new environment variables or port bindings.
+After backup verification and migration validation, use `docker compose up -d --build` to update the deployment. Running only `docker compose restart` does not apply new environment variables or port bindings.
 
 ### Nginx configuration and mounts
 
