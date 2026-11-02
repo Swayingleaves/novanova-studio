@@ -42,6 +42,38 @@ public final class CreditDtos {
     }
 
     /**
+     * 首充赠送设置响应。
+     *
+     * @param percent BigDecimal 赠送比例，单位百分数
+     */
+    public record FirstPurchaseBonusSettingsResponse(@jakarta.validation.constraints.Digits(integer = 3, fraction = 2) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal percent) {
+    }
+
+    /**
+     * 修改首充赠送设置请求。
+     *
+     * @param percent BigDecimal 赠送比例，单位百分数
+     */
+    public record UpdateFirstPurchaseBonusSettingsRequest(@NotNull(message = "business.firstPurchaseBonusPercentIsRequired")
+                                                          @jakarta.validation.constraints.DecimalMin(value = "0", message = "business.firstPurchaseBonusPercentMustNotBeNegative")
+                                                          @jakarta.validation.constraints.DecimalMax(value = "100", message = "business.firstPurchaseBonusPercentMustNotExceed100")
+                                                          @jakarta.validation.constraints.Digits(integer = 3, fraction = 2)
+                                                          @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal percent) {
+    }
+
+    /**
+     * 首充赠送状态响应。
+     *
+     * @param percent BigDecimal 赠送比例，单位百分数
+     * @param enabled boolean 是否开启赠送
+     * @param eligible boolean 当前账号是否仍享有赠送资格
+     * @param noticeSeen boolean 弹窗是否已展示过
+     */
+    public record FirstPurchaseBonusStatusResponse(@jakarta.validation.constraints.Digits(integer = 3, fraction = 2) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal percent,
+                                                   boolean enabled, boolean eligible, boolean noticeSeen) {
+    }
+
+    /**
      * 管理员调整用户积分请求。
      *
      * @param userId Long 用户ID

@@ -5,15 +5,18 @@ import com.novanovastudio.common.CreditAmounts;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
+import com.novanovastudio.dto.CreditDtos;
 import com.novanovastudio.dto.PaymentDtos;
 import com.novanovastudio.payment.PaymentProvider;
 import com.novanovastudio.payment.PaymentProviderRegistry;
 import com.novanovastudio.repository.CreditPurchaseRepository;
 import com.novanovastudio.repository.CreditRepository;
+import com.novanovastudio.repository.UserRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.TeamScope;
 import com.novanovastudio.task.AiTaskEventPublisher;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.URI;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -54,11 +57,15 @@ public class CreditPurchaseService {
     private static final Duration QUERY_THROTTLE_WINDOW = Duration.ofSeconds(5);
     /** 订单列表单次最多返回条数。 */
     private static final int MAX_ORDER_PAGE_SIZE = 100;
+    /** 平台积分兑换口径：1 元等于 10 积分。 */
+    private static final BigDecimal CREDITS_PER_YUAN = BigDecimal.TEN;
 
     /** 商品订单仓储。 */
     private final CreditPurchaseRepository purchaseRepository;
     /** 积分仓储。 */
     private final CreditRepository creditRepository;
+    /** 用户仓储。 */
+    private final UserRepository userRepository;
     /** 当前用户提供器。 */
     private final CurrentUserProvider currentUserProvider;
     /** 支付提供方注册表。 */
@@ -71,6 +78,33 @@ public class CreditPurchaseService {
     private final NovanovaProperties properties;
     /** Redis模板。 */
     private final ReactiveStringRedisTemplate redisTemplate;
+
+    /**
+     * 查询当前用户的首充赠送状态。
+     *
+     * @return Mono<FirstPurchaseBonusStatusResponse> 比例、是否开启、是否仍可享和弹窗是否已展示
+     */
+    public Mono<CreditDtos.FirstPurchaseBonusStatusResponse> getFirstPurchaseBonusStatus() {
+        return requirePlatform().then(Mono.defer(() -> currentUserProvider.currentUserId()
+                .flatMap(userId -> Mono.zip(creditRepository.getFirstPurchaseBonusPercent().defaultIfEmpty(BigDecimal.ZERO),
+                                purchaseRepository.hasPaidPurchaseOrder(userId),
+                                userRepository.hasSeenFirstPurchaseBonusNotice(userId))
+                        .map(tuple -> {
+                            BigDecimal percent = tuple.getT1();
+                            boolean enabled = percent.signum() > 0;
+                            return new CreditDtos.FirstPurchaseBonusStatusResponse(percent, enabled, enabled && !Boolean.TRUE.equals(tuple.getT2()), Boolean.TRUE.equals(tuple.getT3()));
+                        }))));
+    }
+
+    /**
+     * 标记首充赠送弹窗已展示，仅影响弹窗，不消耗赠送资格。
+     *
+     * @return Mono<Void> 操作完成信号
+     */
+    public Mono<Void> acknowledgeFirstPurchaseBonus() {
+        return requirePlatform().then(Mono.defer(() -> currentUserProvider.currentUserId()
+                .flatMap(userId -> userRepository.markFirstPurchaseBonusNoticeSeen(userId))));
+    }
 
     /**
      * 查询当前启用的积分商品。
@@ -149,7 +183,7 @@ public class CreditPurchaseService {
                     if (!product.enabled()) throw new BusinessException(ErrorCode.BUSINESS_ERROR, "积分商品已停用");
                     String orderNo = createOrderNo();
                     OffsetDateTime expiresAt = OffsetDateTime.now().plusMinutes(ORDER_EXPIRATION_MINUTES);
-                    return purchaseRepository.createOrder(orderNo, userId, product.id(), product.totalCredits(), product.priceAmount(), paymentMethod, expiresAt)
+                    return purchaseRepository.createOrder(orderNo, userId, product.id(), product.credits(), product.totalCredits(), product.priceAmount(), paymentMethod, expiresAt)
                             .flatMap(order -> provider.createPayment(new PaymentProvider.PaymentOrder(order.orderNo(),
                                             orderSubject(order.credits()), order.priceAmount(), order.expiresAt()))
                                     .map(paymentUrl -> orderResponse(order, paymentUrl)));
@@ -408,17 +442,65 @@ public class CreditPurchaseService {
                     return transactionalOperator.transactional(
                                     purchaseRepository.claimOrderForSettlement(order.orderNo(), notification.providerTradeNo())
                                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "支付订单正在处理中或已关闭")))
-                                            .flatMap(claimed -> creditRepository.changeBalance(claimed.userId(), claimed.credits())
-                                                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "平台积分账户不存在")))
-                                                    .flatMap(balance -> creditRepository.createCreditPurchaseTransaction(claimed.userId(), claimed.orderNo(), claimed.credits(), balance,
-                                                                    "购买积分订单：" + claimed.orderNo())
-                                                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分购买流水已存在")))
-                                                            .then(purchaseRepository.markOrderPaid(claimed.orderNo(), notification.paidAt()))
-                                                            .thenReturn(new SettlementResult(claimed, true, balance)))))
+                                            // 必须先锁平台钱包：同一用户的多笔订单串行结算，否则两笔同时到达时会各发一次首充赠送。
+                                            .flatMap(claimed -> creditRepository.lockWallet(claimed.userId())
+                                                    .flatMap(exists -> Boolean.TRUE.equals(exists) ? Mono.just(claimed)
+                                                            : Mono.<CreditPurchaseRepository.Order>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "平台积分账户不存在")))
+                                                    .flatMap(claimedOrder -> creditRepository.changeBalance(claimedOrder.userId(), claimedOrder.credits())
+                                                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "平台积分账户不存在")))
+                                                            .flatMap(balance -> creditRepository.createCreditPurchaseTransaction(claimedOrder.userId(), claimedOrder.orderNo(), claimedOrder.credits(), balance,
+                                                                            "购买积分订单：" + claimedOrder.orderNo())
+                                                                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分购买流水已存在")))
+                                                                    .then(grantFirstPurchaseBonus(claimedOrder, balance)))
+                                                            .flatMap(balance -> purchaseRepository.markOrderPaid(claimedOrder.orderNo(), notification.paidAt())
+                                                                    .thenReturn(new SettlementResult(claimedOrder, true, balance))))))
                             .flatMap(result -> result.newlyPaid()
                                     ? eventPublisher.publish(result.order().userId(), new AiTaskDtos.AiTaskEvent("credit-balance", null, null, result.balanceAfter())).thenReturn(result)
                                     : Mono.just(result));
                 });
+    }
+
+    /**
+     * 在结算事务内发放首充赠送积分。
+     * <p>
+     * 赠送与主入账同事务：任一步失败整体回滚，订单回到待结算状态，由支付宝重试或订单查单补偿。
+     *
+     * @param order 已抢占的订单
+     * @param balanceAfterPurchase 主入账后的余额
+     * @return Mono<BigDecimal> 含赠送后的最终余额
+     */
+    private Mono<BigDecimal> grantFirstPurchaseBonus(CreditPurchaseRepository.Order order, BigDecimal balanceAfterPurchase) {
+        return creditRepository.getFirstPurchaseBonusPercent()
+                .defaultIfEmpty(BigDecimal.ZERO)
+                .flatMap(percent -> {
+                    BigDecimal firstBonus = firstPurchaseBonusCredits(order.priceAmount(), percent);
+                    // 商品自带赠送与首充赠送取较大额度，首充只补差额，避免同一笔订单重复发放。
+                    BigDecimal baseCredits = order.baseCredits() == null ? BigDecimal.ZERO : order.baseCredits();
+                    BigDecimal productBonus = order.credits().subtract(baseCredits).max(BigDecimal.ZERO);
+                    BigDecimal bonus = firstBonus.subtract(productBonus).max(BigDecimal.ZERO);
+                    if (bonus.signum() <= 0) return Mono.just(balanceAfterPurchase);
+                    return purchaseRepository.claimFirstPurchaseBonus(order.userId(), order.orderNo(), bonus)
+                            .flatMap(granted -> creditRepository.changeBalance(order.userId(), granted)
+                                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "平台积分账户不存在")))
+                                    .flatMap(balance -> creditRepository.createFirstPurchaseBonusTransaction(order.userId(), order.orderNo(), granted, balance,
+                                                    "首充赠送（" + percent.stripTrailingZeros().toPlainString() + "%）：" + order.orderNo())
+                                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "首充赠送流水已存在")))
+                                            .thenReturn(balance)))
+                            .defaultIfEmpty(balanceAfterPurchase);
+                });
+    }
+
+    /**
+     * 计算首充赠送积分，按平台口径 1 元等于 10 积分折算后乘以比例。
+     *
+     * @param priceAmount 订单支付金额
+     * @param percent 赠送比例，单位百分数
+     * @return BigDecimal 赠送积分，六位小数向下取整
+     */
+    private BigDecimal firstPurchaseBonusCredits(BigDecimal priceAmount, BigDecimal percent) {
+        if (priceAmount == null || percent == null || percent.signum() <= 0) return BigDecimal.ZERO.setScale(CreditAmounts.SCALE, RoundingMode.DOWN);
+        return priceAmount.multiply(CREDITS_PER_YUAN).multiply(percent)
+                .divide(BigDecimal.valueOf(100)).setScale(CreditAmounts.SCALE, RoundingMode.DOWN);
     }
 
     /**
@@ -499,7 +581,8 @@ public class CreditPurchaseService {
      * @return CreditOrderStatusResponse 订单状态响应
      */
     private PaymentDtos.CreditOrderStatusResponse orderStatus(CreditPurchaseRepository.Order order) {
-        return new PaymentDtos.CreditOrderStatusResponse(order.orderNo(), order.credits(), order.priceAmount().setScale(2).toPlainString(), order.paymentMethod(), order.status(), order.paidAt() == null ? null : order.paidAt().toString());
+        BigDecimal bonusCredits = order.firstPurchaseBonusCredits() == null ? BigDecimal.ZERO : order.firstPurchaseBonusCredits();
+        return new PaymentDtos.CreditOrderStatusResponse(order.orderNo(), order.credits(), bonusCredits, order.priceAmount().setScale(2).toPlainString(), order.paymentMethod(), order.status(), order.paidAt() == null ? null : order.paidAt().toString());
     }
 
     /**

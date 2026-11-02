@@ -152,6 +152,7 @@ public final class PaymentDtos {
      *
      * @param orderNo String 平台订单号
      * @param credits BigDecimal 到账积分数量
+     * @param bonusCredits BigDecimal 首充赠送积分数量，未获得时为 0
      * @param priceAmount String 订单金额文本
      * @param paymentMethod String 支付方式
      * @param status String 订单状态
@@ -159,6 +160,7 @@ public final class PaymentDtos {
      */
     public record CreditOrderStatusResponse(String orderNo,
                                             @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits,
+                                            @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal bonusCredits,
                                             String priceAmount,
                                             String paymentMethod,
                                             String status,

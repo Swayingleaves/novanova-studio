@@ -28,7 +28,7 @@ class DatabaseMigrationHistoryIntegrationTest {
             .withDatabaseName("novanova_migration_test").withUsername("postgres").withPassword("postgres");
 
     /**
-     * 企业版 V76 与线上只读快照逐项一致，重新启动时无待执行迁移且保留业务数据。
+     * 企业版 V76 与线上只读快照逐项一致，重新启动时无待执行迁移且保留业务数据，后续迁移只能追加。
      *
      * @throws Exception 读取快照或访问测试数据库失败时抛出
      */
@@ -47,17 +47,23 @@ class DatabaseMigrationHistoryIntegrationTest {
             Assertions.assertEquals(expected, actual, "已发布迁移必须与线上 V76 的描述及校验和一致");
         }
 
-        Flyway restarted = migration("classpath:db/migration", "latest");
+        Flyway restarted = migration("classpath:db/migration", "76");
         restarted.validate();
         Assertions.assertEquals(0, restarted.info().pending().length);
         Assertions.assertEquals(0, restarted.migrate().migrationsExecuted);
+        Assertions.assertEquals(history, readHistory(76));
+        assertUserPreserved();
+
+        // V76 之后的新迁移只能追加执行，已发布历史不得改写
+        Flyway upgraded = migration("classpath:db/migration", "latest");
+        Assertions.assertEquals(2, upgraded.migrate().migrationsExecuted);
         Assertions.assertEquals(history, readHistory(76));
         assertUserPreserved();
         Assertions.assertThrows(FlywayException.class, () -> migration("classpath:db/migration-community", "latest").validate());
     }
 
     /**
-     * 开源版从 V38 升至 V77，仅追加迁移并保留原历史与用户，禁止切换企业版目录。
+     * 开源版从 V38 升至 V80，仅追加迁移并保留原历史与用户，禁止切换企业版目录。
      *
      * @throws Exception 访问测试数据库失败时抛出
      */
@@ -68,8 +74,8 @@ class DatabaseMigrationHistoryIntegrationTest {
         List<String> history = readHistory(38);
 
         Flyway upgraded = migration("classpath:db/migration-community", "latest");
-        Assertions.assertEquals(39, upgraded.migrate().migrationsExecuted);
-        Assertions.assertEquals(77, upgraded.info().applied().length);
+        Assertions.assertEquals(41, upgraded.migrate().migrationsExecuted);
+        Assertions.assertEquals(79, upgraded.info().applied().length);
         Assertions.assertEquals(history, readHistory(38));
         assertUserPreserved();
 

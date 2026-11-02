@@ -1,6 +1,7 @@
 package com.novanovastudio.controller;
 
 import com.novanovastudio.common.ApiResponse;
+import com.novanovastudio.dto.CreditDtos;
 import com.novanovastudio.dto.PaymentDtos;
 import com.novanovastudio.service.CreditPurchaseService;
 import jakarta.validation.Valid;
@@ -35,6 +36,26 @@ public class CreditPaymentController {
     @GetMapping("/listProducts")
     public Mono<ApiResponse<PaymentDtos.CreditProductListResponse>> listProducts() {
         return purchaseService.listProducts().map(ApiResponse::ok);
+    }
+
+    /**
+     * 查询当前用户的首充赠送状态。
+     *
+     * @return Mono<ApiResponse<FirstPurchaseBonusStatusResponse>> 首充赠送状态
+     */
+    @GetMapping("/getFirstPurchaseBonusStatus")
+    public Mono<ApiResponse<CreditDtos.FirstPurchaseBonusStatusResponse>> getFirstPurchaseBonusStatus() {
+        return purchaseService.getFirstPurchaseBonusStatus().map(ApiResponse::ok);
+    }
+
+    /**
+     * 标记首充赠送弹窗已展示。
+     *
+     * @return Mono<ApiResponse<Void>> 操作完成信号
+     */
+    @PostMapping("/acknowledgeFirstPurchaseBonus")
+    public Mono<ApiResponse<Void>> acknowledgeFirstPurchaseBonus() {
+        return purchaseService.acknowledgeFirstPurchaseBonus().thenReturn(ApiResponse.ok(null));
     }
 
     /**

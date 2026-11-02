@@ -62,6 +62,17 @@ public class CreditRepository {
     }
 
     /**
+     * 查询账号首笔已支付订单的赠送比例。
+     *
+     * @return Mono<BigDecimal> 赠送比例，单位百分数
+     */
+    public Mono<BigDecimal> getFirstPurchaseBonusPercent() {
+        return databaseClient.sql("SELECT first_purchase_bonus_percent FROM platform_credit_settings WHERE id = 1")
+                .map((row, metadata) -> row.get("first_purchase_bonus_percent", BigDecimal.class))
+                .one();
+    }
+
+    /**
      * 查询邀请注册奖励积分。
      *
      * @return 邀请奖励积分
@@ -269,6 +280,20 @@ public class CreditRepository {
     }
 
     /**
+     * 更新账号首笔已支付订单的赠送比例。
+     *
+     * @param percent BigDecimal 赠送比例，单位百分数
+     * @return Mono<Void> 操作完成信号
+     */
+    public Mono<Void> updateFirstPurchaseBonusPercent(BigDecimal percent) {
+        return databaseClient.sql("UPDATE platform_credit_settings SET first_purchase_bonus_percent = :percent, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
+                .bind("percent", percent)
+                .fetch()
+                .rowsUpdated()
+                .then();
+    }
+
+    /**
      * 创建用户积分账户。
      *
      * @param userId Long 用户ID
@@ -377,6 +402,34 @@ public class CreditRepository {
                 .bind("balanceAfter", balanceAfter)
                 .bind("reason", reason)
                 .bind("orderNo", orderNo)
+                .map((row, metadata) -> row.get("id", Long.class))
+                .one();
+    }
+
+    /**
+     * 写入首充赠送流水，使用订单号加后缀抢占幂等键。
+     *
+     * @param userId Long 获得赠送的用户标识
+     * @param orderNo String 触发赠送的平台订单号
+     * @param changeAmount BigDecimal 赠送积分
+     * @param balanceAfter BigDecimal 入账后的平台钱包余额
+     * @param reason String 流水原因
+     * @return Mono<Long> 新流水标识，赠送流水已存在时为空
+     */
+    public Mono<Long> createFirstPurchaseBonusTransaction(Long userId, String orderNo, BigDecimal changeAmount,
+                                                          BigDecimal balanceAfter, String reason) {
+        return databaseClient.sql("""
+                INSERT INTO user_credit_transactions(team_id, wallet_team_id, beneficiary_team_id, user_id,
+                    transaction_type, change_amount, balance_after, reason, billing_reference)
+                VALUES (0, 0, 0, :userId, 'first_purchase_bonus', :changeAmount, :balanceAfter, :reason, :billingReference)
+                ON CONFLICT (billing_reference) WHERE billing_reference IS NOT NULL DO NOTHING
+                RETURNING id
+                """)
+                .bind("userId", userId)
+                .bind("changeAmount", changeAmount)
+                .bind("balanceAfter", balanceAfter)
+                .bind("reason", reason)
+                .bind("billingReference", orderNo + ":first-bonus")
                 .map((row, metadata) -> row.get("id", Long.class))
                 .one();
     }
