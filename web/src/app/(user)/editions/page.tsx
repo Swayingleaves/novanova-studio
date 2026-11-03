@@ -7,6 +7,14 @@ import { ContactMe } from "./components/contact-me";
 
 export default function EditionsPage() {
     const translate = useTranslation();
+    const clusterFeatures = [
+        { title: translate("editions.modularArchitecture"), description: translate("editions.modularArchitectureDescription") },
+        { title: translate("editions.gatewayAccess"), description: translate("editions.gatewayAccessDescription") },
+        { title: translate("editions.distributedMicroservices"), description: translate("editions.distributedMicroservicesDescription") },
+        { title: translate("editions.clusterDeployment"), description: translate("editions.clusterDeploymentDescription") },
+        { title: translate("editions.highConcurrency"), description: translate("editions.highConcurrencyDescription") },
+        { title: translate("editions.containerDeployment"), description: translate("editions.containerDeploymentDescription") },
+    ];
     return (
         <main className="studio-page h-full overflow-y-auto px-4 pb-12 pt-20 sm:px-6 lg:px-8">
             <div className="mx-auto w-full max-w-6xl">
@@ -27,7 +35,14 @@ export default function EditionsPage() {
                             </span>
                             <h3 className="text-base font-semibold text-[var(--studio-ink)]">{translate("editions.enterpriseCluster")}</h3>
                         </div>
-                        <p className="mt-4 max-w-3xl text-sm leading-6 text-[var(--studio-text)]">{translate("editions.clusterEditionDescription")}</p>
+                        <ul className="mt-4 max-w-3xl list-disc space-y-2 pl-5 text-sm leading-6 text-[var(--studio-text)]">
+                            {clusterFeatures.map((feature) => (
+                                <li key={feature.title}>
+                                    <strong className="font-medium text-[var(--studio-ink)]">{feature.title}</strong>{" "}
+                                    {feature.description}
+                                </li>
+                            ))}
+                        </ul>
                     </article>
                 </section>
 

@@ -9,5 +9,16 @@
     "chooseYourEdition": "选择适合你的版本",
     "editionsOverview": "版本概览",
     "enterpriseCluster": "集群企业版",
-    "clusterEditionDescription": "在开源版的基础上做了架构拆分，每个模块独立，支持网关接入和分布式微服务。同时，支持大规模部署和集群部署，支持更高的并发，性能更优越，并支持 K8S 容器部署"
+    "modularArchitecture": "模块化架构：",
+    "modularArchitectureDescription": "在开源版基础上拆分架构，各模块保持独立。",
+    "gatewayAccess": "网关接入：",
+    "gatewayAccessDescription": "支持通过网关接入系统服务。",
+    "distributedMicroservices": "分布式微服务：",
+    "distributedMicroservicesDescription": "支持分布式微服务架构，适用于多服务协同场景。",
+    "clusterDeployment": "大规模集群部署：",
+    "clusterDeploymentDescription": "支持大规模部署和集群部署，适用于更大规模的业务场景。",
+    "highConcurrency": "高并发与性能：",
+    "highConcurrencyDescription": "支持更高并发，提供更优的性能表现。",
+    "containerDeployment": "容器化部署：",
+    "containerDeploymentDescription": "支持 Kubernetes（K8s）容器部署。"
 }

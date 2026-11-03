@@ -9,5 +9,16 @@
     "chooseYourEdition": "Choose your edition",
     "editionsOverview": "Editions overview",
     "enterpriseCluster": "Enterprise cluster",
-    "clusterEditionDescription": "Built on the open-source edition with a split architecture where every module stays independent, supporting gateway access and distributed microservices. It also supports large-scale and cluster deployment, higher concurrency with better performance, and runs on Kubernetes (K8s)."
+    "modularArchitecture": "Modular architecture:",
+    "modularArchitectureDescription": "Splits the open-source architecture into independent modules.",
+    "gatewayAccess": "Gateway access:",
+    "gatewayAccessDescription": "Supports access to system services through a gateway.",
+    "distributedMicroservices": "Distributed microservices:",
+    "distributedMicroservicesDescription": "Supports a distributed microservices architecture for services working together.",
+    "clusterDeployment": "Large-scale cluster deployment:",
+    "clusterDeploymentDescription": "Supports large-scale and cluster deployments for larger business workloads.",
+    "highConcurrency": "High concurrency and performance:",
+    "highConcurrencyDescription": "Supports higher concurrency and delivers better performance.",
+    "containerDeployment": "Container deployment:",
+    "containerDeploymentDescription": "Supports container deployment with Kubernetes (K8s)."
 }
