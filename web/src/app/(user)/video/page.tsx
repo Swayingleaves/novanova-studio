@@ -37,7 +37,7 @@ import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceVideo } from "@/features/generation/types/media";
 import { PromptSelectDialog } from "@/features/prompts/components/prompt-select-dialog";
 import { ModelPicker } from "@/features/settings/components/model-picker";
-import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
+import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig, type VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 import { deleteStoredMedia, resolveMediaStorageInfo, resolveMediaUrl, uploadMediaFile } from "@/features/storage/services/file-storage";
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
@@ -376,14 +376,18 @@ export default function VideoPage() {
     };
 
     // 文生视频模式下上传参考素材时，按素材类型自动切换生成模式：仅图片 → 图生视频；含视频 → 全能参考。
-    const autoSwitchModeForReferences = (addedImages: number, addedVideos: number) => {
-        if (readVideoModelConfiguration(effectiveConfig)?.isCustomModel) return;
-        if (config.videoGenerationMode !== "text-to-video") return;
-        if (videoReferences.length + addedVideos > 0) {
-            handleVideoSettingsChange("videoGenerationMode", "reference-to-video");
-        } else if (references.length + addedImages > 0) {
-            handleVideoSettingsChange("videoGenerationMode", "image-to-video");
-        }
+    // 返回本次应使用的模式交给调用方继续做上限校验、报价和提交，避免沿用切换前的旧模式把刚选的素材判为"模式不对"。
+    const resolveModeForReferences = (addedImages: number, addedVideos: number): VideoGenerationMode => {
+        if (config.videoGenerationMode !== "text-to-video") return config.videoGenerationMode;
+        if (videoReferences.length + addedVideos > 0) return "reference-to-video";
+        if (references.length + addedImages > 0) return "image-to-video";
+        return config.videoGenerationMode;
+    };
+
+    /** 素材通过校验后落地模式切换，页面配置、「更多设置」面板与上次使用设置同步更新。 */
+    const applyModeForReferences = (mode: VideoGenerationMode) => {
+        if (mode === config.videoGenerationMode) return;
+        handleVideoSettingsChange("videoGenerationMode", mode);
     };
 
     // Agent chat state
@@ -809,9 +813,9 @@ export default function VideoPage() {
         };
     }, [conversations, refreshConversations]);
 
-    const canAddReferences = (images: number, videos: number) => {
+    const canAddReferences = (images: number, videos: number, mode: VideoGenerationMode = config.videoGenerationMode) => {
         const custom = readVideoModelConfiguration(effectiveConfig, model)?.isCustomModel;
-        const issue = custom ? readVideoGenerationConstraintIssue({ config: effectiveConfig, model, mode: config.videoGenerationMode,
+        const issue = custom ? readVideoGenerationConstraintIssue({ config: effectiveConfig, model, mode,
             imageCount: references.length + images, videoCount: videoReferences.length + videos, addingReferences: true })
             : references.length + images > SEEDANCE_REFERENCE_LIMITS.images ? translate("video.addUpToReferenceImages", { value0: SEEDANCE_REFERENCE_LIMITS.images })
             : videoReferences.length + videos > SEEDANCE_REFERENCE_LIMITS.videos ? translate("generation.atMostSeedanceReferenceVideos", { value0: SEEDANCE_REFERENCE_LIMITS.videos }) : "";
@@ -819,7 +823,8 @@ export default function VideoPage() {
         return !issue;
     };
 
-    const addReferences = async (files?: FileList | File[] | null): Promise<{ images: ReferenceImage[]; videos: ReferenceVideo[] }> => {
+    const addReferences = async (files?: FileList | File[] | null): Promise<{ images: ReferenceImage[]; videos: ReferenceVideo[]; mode: VideoGenerationMode }> => {
+        let mode: VideoGenerationMode = config.videoGenerationMode;
         try {
             const selectedFiles = Array.from(files || []);
             const unsupportedFiles = selectedFiles.filter((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/"));
@@ -829,7 +834,10 @@ export default function VideoPage() {
 
             const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes);
             const videoFiles = selectedFiles.filter((file) => file.type.startsWith("video/") && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes);
-            if (!canAddReferences(imageFiles.length, videoFiles.length)) return { images: [], videos: [] };
+            // 先按素材类型算出目标模式再校验：文生视频下携带素材必然不通过"图片 0 张"的上限检查。
+            mode = resolveModeForReferences(imageFiles.length, videoFiles.length);
+            if (!canAddReferences(imageFiles.length, videoFiles.length, mode)) return { images: [], videos: [], mode };
+            applyModeForReferences(mode);
             if (selectedFiles.some((file) => file.type.startsWith("image/") && file.size > SEEDANCE_REFERENCE_LIMITS.imageMaxBytes)) {
                 message.warning(translate("video.referenceImagesOver30MBIgnored"));
             }
@@ -851,11 +859,10 @@ export default function VideoPage() {
             }));
             const placeholders = [...imagePlaceholders, ...videoPlaceholders];
             if (!placeholders.length) {
-                return { images: [], videos: [] };
+                return { images: [], videos: [], mode };
             }
             setReferences((current) => [...current, ...imagePlaceholders]);
             setVideoReferences((current) => [...current, ...videoPlaceholders]);
-            autoSwitchModeForReferences(imageFiles.length, videoFiles.length);
             setUploadingReferenceIds((current) => [...current, ...placeholders.map((placeholder) => placeholder.id)]);
 
             const uploadedImages: ReferenceImage[] = [];
@@ -910,10 +917,10 @@ export default function VideoPage() {
                     }
                 }),
             ]);
-            return { images: uploadedImages, videos: uploadedVideos };
+            return { images: uploadedImages, videos: uploadedVideos, mode };
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("video.failedToUploadReference_893885"));
-            return { images: [], videos: [] };
+            return { images: [], videos: [], mode };
         }
     };
 
@@ -1127,7 +1134,7 @@ export default function VideoPage() {
     const handleUploadFromChoice = async (files?: FileList | null) => {
         if (!files?.length) return;
         if (!ensureModelConfiguration("video", model) || !ensureModelConfiguration("text")) return;
-        const { images, videos } = await addReferences(files);
+        const { images, videos, mode } = await addReferences(files);
         const attachments = [...imageReferenceAttachments(images), ...videoReferenceAttachments(videos)];
         if (!attachments.length || isStreaming || isQueued) return;
         const videoModel = effectiveConfig.videoModel || effectiveConfig.model || model;
@@ -1139,7 +1146,8 @@ export default function VideoPage() {
         const selectedVideoQuote = quoteVideoGeneration({
             config: effectiveConfig,
             model: videoModel,
-            mode: config.videoGenerationMode,
+            // 上传时可能刚从文生视频自动切到图生视频，这里必须用切换后的模式报价
+            mode,
             resolution: quality,
             seconds,
             size,
@@ -1166,7 +1174,7 @@ export default function VideoPage() {
             quality: quality.includes("1080") ? "high" : quality.includes("480") ? "low" : "medium",
             seconds,
             watermark: String(watermark).toLowerCase() === "true",
-            videoGenerationMode: config.videoGenerationMode,
+            videoGenerationMode: mode,
             ...(selectedStyles.length ? { generationStyleIds: selectedStyles.map((style) => style.id) } : {}),
         });
     };
@@ -1377,7 +1385,9 @@ export default function VideoPage() {
     };
 
     const insertPickedAsset = (payload: InsertAssetPayload) => {
-        if (payload.kind === "image" && !canAddReferences(1, 0) || payload.kind === "video" && !canAddReferences(0, 1)) return;
+        // 文生视频下插入素材同样先切模式，再按目标模式校验上限，否则会被"文生视频不能携带素材"挡掉。
+        const mode = resolveModeForReferences(payload.kind === "image" ? 1 : 0, payload.kind === "video" ? 1 : 0);
+        if (payload.kind === "image" && !canAddReferences(1, 0, mode) || payload.kind === "video" && !canAddReferences(0, 1, mode)) return;
         if (payload.kind === "text") {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
@@ -1397,7 +1407,7 @@ export default function VideoPage() {
                         },
                     ],
                 );
-                autoSwitchModeForReferences(1, 0);
+                applyModeForReferences(mode);
             }
         } else if (payload.kind === "video") {
             if (!hasPlayableVideoUrl(payload.url)) {
@@ -1419,7 +1429,7 @@ export default function VideoPage() {
                     },
                 ],
             );
-            autoSwitchModeForReferences(0, 1);
+            applyModeForReferences(mode);
         }
         setAssetPickerOpen(false);
     };
@@ -1501,21 +1511,22 @@ export default function VideoPage() {
     ];
     // 「最近上传」按素材类型回填到对应的参考列表，视频回填时带上时长，保持 2-15 秒校验有效。
     const addRecentReference = (asset: RecentReferenceAsset) => {
+        const mode = resolveModeForReferences(asset.kind === "image" ? 1 : 0, asset.kind === "video" ? 1 : 0);
         if (asset.kind === "video") {
-            if (videoReferences.some((reference) => reference.url === asset.url) || !canAddReferences(0, 1)) return;
+            if (videoReferences.some((reference) => reference.url === asset.url) || !canAddReferences(0, 1, mode)) return;
             setVideoReferences((current) => {
                 if (current.some((reference) => reference.url === asset.url)) return current;
                 return [...current, { id: nanoid(), name: asset.name || translate("generation.referenceVideo_6ae00d"), type: "video/*", url: asset.url, durationMs: asset.durationMs }];
             });
-            autoSwitchModeForReferences(0, 1);
+            applyModeForReferences(mode);
             return;
         }
-        if (references.some((reference) => reference.dataUrl === asset.url) || !canAddReferences(1, 0)) return;
+        if (references.some((reference) => reference.dataUrl === asset.url) || !canAddReferences(1, 0, mode)) return;
         setReferences((current) => {
             if (current.some((reference) => reference.dataUrl === asset.url)) return current;
             return [...current, { id: nanoid(), name: asset.name || translate("video.recentReferenceImages"), type: "image/*", dataUrl: asset.url }];
         });
-        autoSwitchModeForReferences(1, 0);
+        applyModeForReferences(mode);
     };
     const composerActions: CreationComposerAction[] = [
         {
