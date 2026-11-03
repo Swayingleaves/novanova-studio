@@ -115,7 +115,8 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
         payload.put("model", context.model());
         payload.put("prompt", context.request().prompt());
         payload.put("n", AiTaskParameterReader.intParameter(context.request().parameters(), "count", 1, 1, 10));
-        payload.put("response_format", "url");
+        //response_format已弃用
+//        payload.put("response_format", "url");
         payload.put("output_format", "png");
         AiTaskParameterReader.putNonAuto(payload, context.request().parameters(), "quality");
         // 手写size优先，不为已覆盖的参数查询尺寸映射。
