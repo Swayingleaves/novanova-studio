@@ -332,6 +332,40 @@ public class UserRepository {
     }
 
     /**
+     * 标记首充赠送弹窗已展示。
+     * <p>
+     * 使用未读条件保证重复请求不会改写首次展示时间；该标记只影响弹窗，不消耗赠送资格。
+     *
+     * @param userId Long 用户ID
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> markFirstPurchaseBonusNoticeSeen(Long userId) {
+        return databaseClient.sql("""
+                UPDATE users
+                SET first_purchase_bonus_notice_seen_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id AND first_purchase_bonus_notice_seen_at IS NULL
+                """)
+                .bind("id", userId)
+                .fetch()
+                .rowsUpdated()
+                .then();
+    }
+
+    /**
+     * 查询首充赠送弹窗是否已展示。
+     *
+     * @param userId Long 用户ID
+     * @return Mono<Boolean> 已展示过时为 true
+     */
+    public Mono<Boolean> hasSeenFirstPurchaseBonusNotice(Long userId) {
+        return databaseClient.sql("SELECT first_purchase_bonus_notice_seen_at IS NOT NULL AS seen FROM users WHERE id = :id")
+                .bind("id", userId)
+                .map((row, metadata) -> Boolean.TRUE.equals(row.get("seen", Boolean.class)))
+                .one()
+                .defaultIfEmpty(false);
+    }
+
+    /**
      * 标记用户已完成指定版本的产品引导。
      * <p>
      * 使用 GREATEST 保证重复或乱序请求不会回退版本。

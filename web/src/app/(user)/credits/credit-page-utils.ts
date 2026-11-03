@@ -3,7 +3,7 @@ import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { translateMessage as translate } from "@/features/locale/translate";
-import { CalendarCheck, Coins, Gift, Image as ImageIcon, RotateCcw, ShoppingCart, TimerOff, UserCog, UserPlus, Video } from "lucide-react";
+import { CalendarCheck, Coins, Gift, Image as ImageIcon, RotateCcw, ShoppingCart, Sparkles, TimerOff, UserCog, UserPlus, Video } from "lucide-react";
 
 import type { ServerCreditDirection, ServerCreditDistributionItem, ServerCreditSource, ServerCreditTransactionType, ServerGenerationSource, ServerUserCreditTransaction } from "@/services/api/server";
 
@@ -115,6 +115,12 @@ export const createCreditSourceOptions = (translator: typeof translate = transla
         },
         value: "credit_purchase",
     },
+    {
+        get label() {
+            return translator("credits.firstPurchaseBonusTitle");
+        },
+        value: "first_purchase_bonus",
+    },
 ];
 
 export const CREDIT_SOURCE_OPTIONS = createCreditSourceOptions();
@@ -149,6 +155,7 @@ export function creditTransactionIcon(transaction: Pick<ServerUserCreditTransact
     if (transaction.transactionType === "daily_check_in") return CalendarCheck;
     if (transaction.transactionType === "credit_expired") return TimerOff;
     if (transaction.transactionType === "credit_purchase") return ShoppingCart;
+    if (transaction.transactionType === "first_purchase_bonus") return Sparkles;
     return Gift;
 }
 
@@ -170,6 +177,7 @@ export function creditTransactionTypeLabel(transactionType: ServerCreditTransact
     if (transactionType === "daily_check_in") return translate("credits.dailyCheckIn");
     if (transactionType === "credit_expired") return translate("credits.creditExpiration");
     if (transactionType === "credit_purchase") return translate("credits.creditPurchase");
+    if (transactionType === "first_purchase_bonus") return translate("credits.firstPurchaseBonusTitle");
     return translate("credits.unknownType");
 }
 

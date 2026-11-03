@@ -57,14 +57,29 @@
 | 表 | 作用 | 关键字段、约束与索引 |
 | --- | --- | --- |
 | `credit_products` | 平台可售积分商品配置 | `credits` 为基础积分数量，`bonus_credits` 为购买时额外赠送的积分数量，`price_amount` 为人民币金额；`enabled` 控制启停，`sort_order` 控制展示顺序；启用状态、排序和标识联合索引；仅平台作用域可读写 |
-| `credit_purchase_orders` | 用户购买积分的订单和渠道快照 | `order_no` 唯一；保存商品、最终到账积分和金额快照，客户端不能覆盖金额；`payment_method` 当前为 `alipay`，预留 `wechat`；状态为 `pending`、`processing`、`paid`、`closed` 或 `cancelled`；`wallet_team_id` 固定为 `0`；用户+创建时间、待支付过期时间、钱包+状态索引；渠道交易号按支付方式唯一 |
-| `user_credit_transactions` | 积分余额变更流水 | 新增 `credit_purchase` 类型；`billing_reference` 使用平台订单号并建立唯一约束，支付宝重复通知不会重复入账 |
+| `credit_purchase_orders` | 用户购买积分的订单和渠道快照 | `order_no` 唯一；保存商品、最终到账积分和金额快照，客户端不能覆盖金额；`payment_method` 当前为 `alipay`，预留 `wechat`；状态为 `pending`、`processing`、`paid`、`closed` 或 `cancelled`；`wallet_team_id` 固定为 `0`；用户+创建时间、待支付过期时间、钱包+状态索引；渠道交易号按支付方式唯一；`first_purchase_bonus_credits` 记录该单实发的首充赠送积分，大于 `0` 时由部分唯一索引保证每个用户最多一条 |
+| `user_credit_transactions` | 积分余额变更流水 | 新增 `credit_purchase` 类型；`billing_reference` 使用平台订单号并建立唯一约束，支付宝重复通知不会重复入账；V77 追加 `first_purchase_bonus` 类型，`billing_reference` 为订单号加 `:first-bonus` 后缀 |
 
 首次迁移创建 `10/20/50/100` 积分商品，默认价格分别为 `1/2/5/10` 元。管理员可在系统管理的“积分商品”配置中新增、编辑、排序和停用商品；已创建订单继续使用订单快照，不受商品后续修改影响。
 
 订单创建接口为 `GET /api/v1/payment/credit/listProducts`、`POST /api/v1/payment/credit/createOrder` 和 `GET /api/v1/payment/credit/getOrderStatus`。支付宝回调接口为 `POST /api/v1/payment/alipay/notify` 和 `GET /api/v1/payment/alipay/return`。同步回跳只重定向到前端购买页，到账必须以验签后的异步通知或支付宝交易查询为准；服务端核对 `app_id`、商户订单号、金额和 `TRADE_SUCCESS`/`TRADE_FINISHED` 状态后，在事务内更新订单、余额和 `credit_purchase` 流水，并发布积分余额事件。
 
 商品管理接口位于 `/api/v1/config/creditProduct/`，仅平台管理员可用。支付宝密钥和网关配置只通过部署环境注入，异步通知地址必须可以被支付宝公网访问。
+
+## 首充赠送（V77、V79）
+
+账号首笔已支付订单可按配置比例额外赠送积分，赠送基数为支付金额折算积分（1 元 = 10 积分），结果保留六位小数向下取整。例：支付 20 元的商品，比例 50%，则到账 200 积分并入 100 积分赠送，共 300 积分。
+
+商品自带的 `bonus_credits` 与首充赠送**取较大额度，不叠加**：基础 100 积分、商品赠送 50 积分、首充额度 50 积分的商品，到账为 150 积分；若首充额度为 100 积分，则到账 200 积分（首充补差额 50）。展示与到账使用同一口径。
+
+| 变更 | 说明 |
+| --- | --- |
+| `platform_credit_settings.first_purchase_bonus_percent` | `NUMERIC(5,2)`，单位百分数，取值 `0`–`100`，默认 `0` 表示关闭。仅结算时读取一次，后台修改不影响已支付订单。 |
+| `credit_purchase_orders.first_purchase_bonus_credits` | 该订单实际发放的赠送积分，未获得时为 `0`；`first_purchase_bonus_credits > 0` 上建部分唯一索引，保证每名用户最多一条。 |
+| `credit_purchase_orders.base_credits` | V79 新增，下单时的商品基础积分快照；与 `credits` 的差额即商品自带赠送，用于计算首充应补差额。 |
+| `users.first_purchase_bonus_notice_seen_at` | 首充弹窗关闭时间，由 `POST /api/v1/payment/credit/acknowledgeFirstPurchaseBonus` 写入；仅记录是否展示过，不消耗赠送资格。 |
+
+结算在原有事务内按固定顺序执行：先用 `SELECT ... FOR UPDATE` 锁定用户平台钱包，使同一用户的多笔订单串行化；再 `NOT EXISTS` 判定是否存在其他已支付订单；命中则按「首充额度 − 商品自带赠送」补差额，落 `first_purchase_bonus_credits`，并在主入账后追加 `first_purchase_bonus` 流水。赠送与主入账同事务，任一步失败整体回滚，由支付宝重试与订单查单补偿。配置读写接口为 `GET/POST /api/v1/config/credit/getFirstPurchaseBonusSettings`、`updateFirstPurchaseBonusSettings`（管理员），用户侧查询与确认接口为 `GET /api/v1/payment/credit/getFirstPurchaseBonusStatus`、`POST /api/v1/payment/credit/acknowledgeFirstPurchaseBonus`。
 
 ## 邮件群发（V65、V66、V67）
 
@@ -143,12 +158,14 @@ V53 新增 `episode_bodies_pricing`（`model_config_id` 主键、`credits`、`re
 | --- | --- | --- |
 | `invitation_code` | `VARCHAR(16)` | 用户唯一邀请码，创建用户时由服务端安全随机生成，长期有效并建立唯一约束。 |
 | `invited_by_user_id` | `BIGINT` | 邀请人用户 ID，关联 `users.id`；无邀请注册时为空。 |
+| `first_purchase_bonus_notice_seen_at` | `TIMESTAMPTZ` | 首充赠送弹窗关闭时间；为空表示从未展示，关闭弹窗不消耗赠送资格。 |
 
 ### `platform_credit_settings`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `invitation_reward_credits` | `INTEGER` | 每名受邀请新用户注册后发给邀请人的积分，默认 `0` 且不得小于 `0`。 |
+| `first_purchase_bonus_percent` | `NUMERIC(5,2)` | 账号首笔已支付订单的赠送比例，单位百分数，默认 `0` 表示关闭，取值 `0`–`100`。 |
 
 ### `user_credit_transactions`
 

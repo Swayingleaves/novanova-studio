@@ -75,6 +75,30 @@ public class PersistenceController {
     }
 
     /**
+     * 查询首充赠送比例设置。
+     *
+     * @return Mono<ApiResponse<FirstPurchaseBonusSettingsResponse>> 首充赠送比例
+     */
+    @GetMapping("/config/credit/getFirstPurchaseBonusSettings")
+    @RequireRole("admin")
+    public Mono<ApiResponse<CreditDtos.FirstPurchaseBonusSettingsResponse>> getFirstPurchaseBonusSettings() {
+        return creditService.getFirstPurchaseBonusSettings().map(ApiResponse::ok);
+    }
+
+    /**
+     * 更新首充赠送比例设置。
+     *
+     * @param request UpdateFirstPurchaseBonusSettingsRequest 首充赠送比例请求
+     * @return Mono<ApiResponse<FirstPurchaseBonusSettingsResponse>> 保存后的首充赠送比例
+     */
+    @PostMapping("/config/credit/updateFirstPurchaseBonusSettings")
+    @RequireRole("admin")
+    public Mono<ApiResponse<CreditDtos.FirstPurchaseBonusSettingsResponse>> updateFirstPurchaseBonusSettings(
+            @Valid @RequestBody CreditDtos.UpdateFirstPurchaseBonusSettingsRequest request) {
+        return creditService.updateFirstPurchaseBonusSettings(request).map(ApiResponse::ok);
+    }
+
+    /**
      * 查询邀请奖励设置。
      *
      * @return 邀请奖励设置

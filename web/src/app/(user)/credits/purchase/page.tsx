@@ -9,10 +9,14 @@ import { ArrowLeft, CheckCircle2, Clock, ExternalLink, Gift, LoaderCircle, QrCod
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { cancelCreditOrder, createCreditPurchaseOrder, getCreditPurchaseOrderStatus, getCreditPurchasePayment, getCurrentUserInfo, listCreditProducts } from "@/services/api/server";
+import { acknowledgeFirstPurchaseBonus, cancelCreditOrder, createCreditPurchaseOrder, getCreditPurchaseOrderStatus, getCreditPurchasePayment, getCurrentUserInfo, getFirstPurchaseBonusStatus, listCreditProducts } from "@/services/api/server";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
+import { firstPurchaseBonusCredits, firstPurchaseBonusYuan, firstPurchaseEffectiveBonus, firstPurchaseTotalCredits, isExactBonusYuan } from "@/features/credits/first-purchase-bonus";
+import { useSpaceBrand } from "@/features/team/use-space-brand";
 import Link, { useSearchParams } from "@/shared/lib/team-navigation";
 import { cn } from "@/shared/lib/utils";
+
+import { FirstPurchaseBonusModal } from "./first-purchase-bonus-modal";
 
 const creditStoreUrl = process.env.NEXT_PUBLIC_CREDIT_STORE_URL?.trim();
 
@@ -37,7 +41,9 @@ export default function CreditPurchasePage() {
     const translate = useTranslation();
     const { message, modal } = App.useApp();
     const searchParams = useSearchParams();
+    const brand = useSpaceBrand();
     const setUser = useUserStore((state) => state.setUser);
+    const user = useUserStore((state) => state.user);
     const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
     const [paymentMethod, setPaymentMethod] = useState<"alipay" | "wechat">("alipay");
     const [submitting, setSubmitting] = useState(false);
@@ -48,6 +54,19 @@ export default function CreditPurchasePage() {
     const [expiresAt, setExpiresAt] = useState("");
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [remainingSeconds, setRemainingSeconds] = useState(0);
+    const [bonusDismissed, setBonusDismissed] = useState(false);
+    const [bonusManuallyOpened, setBonusManuallyOpened] = useState(false);
+
+    // 首充赠送只在平台空间生效；团队空间直接跳过请求，避免无意义的 403。
+    const bonusQuery = useQuery({
+        queryKey: ["first-purchase-bonus"],
+        queryFn: getFirstPurchaseBonusStatus,
+        enabled: Boolean(user) && !brand.isTeam,
+        staleTime: 30_000,
+    });
+    const bonusStatus = bonusQuery.data;
+    // 无资格或未开启时按 0 比例参与计算，商品卡自然不显示赠送信息。
+    const bonusPercent = bonusStatus?.eligible ? bonusStatus.percent : "0";
 
     const productsQuery = useQuery({
         queryKey: ["credit-products"],
@@ -56,6 +75,8 @@ export default function CreditPurchasePage() {
     });
     const products = productsQuery.data?.products || [];
     const selectedProduct = useMemo(() => products.find((product) => product.id === selectedProductId) || null, [products, selectedProductId]);
+    // 商品自带赠送与首充赠送取较大者，摘要与商品卡使用同一口径。
+    const selectedEffectiveBonus = selectedProduct ? firstPurchaseEffectiveBonus(selectedProduct.bonusCredits, selectedProduct.priceAmount, bonusPercent) : creditAmount(0);
 
     // 支付宝交易是在二维码页面被加载的那一刻才创建的，二维码没展示过就查单只会反复拿到“交易不存在”。
     const paymentShownRef = useRef(false);
@@ -70,6 +91,8 @@ export default function CreditPurchasePage() {
         },
     });
     const orderStatus = orderStatusQuery.data;
+    // 到账总额包含首充赠送，bonusCredits 为 0 时与订单积分一致。
+    const paidTotalCredits = creditAmount(orderStatus?.credits || 0).add(creditAmount(orderStatus?.bonusCredits || 0));
 
     useEffect(() => {
         if (selectedProductId === null && products.length) setSelectedProductId(products[0].id);
@@ -218,6 +241,11 @@ export default function CreditPurchasePage() {
                         <Link href="/credits/redeem">
                             <Button icon={<Ticket className="size-4" />}>{translate("credits.redeemCredits")}</Button>
                         </Link>
+                        {bonusStatus?.eligible ? (
+                            <Button icon={<Gift className="size-4" />} onClick={() => setBonusManuallyOpened(true)}>
+                                {translate("credits.firstPurchaseBonusEntry")}
+                            </Button>
+                        ) : null}
                         {creditStoreUrl ? (
                             <a href={creditStoreUrl} target="_blank" rel="noreferrer">
                                 <Button icon={<ExternalLink className="size-4" />}>{translate("credits.purchaseInNewWindow")}</Button>
@@ -260,7 +288,12 @@ export default function CreditPurchasePage() {
                         <div className="grid gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
                             {products.map((product) => {
                                 const selected = product.id === selectedProductId;
-                                const hasBonus = !creditAmount(product.bonusCredits).isZero();
+                                const productBonus = creditAmount(product.bonusCredits);
+                                const firstBonusCredits = firstPurchaseBonusCredits(product.priceAmount, bonusPercent);
+                                // 商品自带赠送与首充赠送取较大者，不叠加，与后端结算口径一致。
+                                const effectiveBonus = firstPurchaseEffectiveBonus(product.bonusCredits, product.priceAmount, bonusPercent);
+                                const totalCredits = firstPurchaseTotalCredits(product.credits, product.bonusCredits, product.priceAmount, bonusPercent);
+                                const firstBonusWins = firstBonusCredits.gt(productBonus);
                                 return (
                                     <button
                                         key={product.id}
@@ -274,22 +307,26 @@ export default function CreditPurchasePage() {
                                                 : "border-[var(--studio-line-strong)] bg-[var(--studio-surface)] hover:border-[var(--studio-action)] hover:shadow-[0_0_22px_color-mix(in_srgb,var(--studio-action)_24%,transparent)]",
                                         )}
                                     >
-                                        {hasBonus ? (
+                                        {effectiveBonus.gt(0) ? (
                                             <span className="absolute -top-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full border border-[var(--studio-action)] bg-[var(--studio-action)] px-4 py-2 text-sm font-semibold text-[var(--studio-action-foreground)] shadow-[0_0_20px_color-mix(in_srgb,var(--studio-action)_55%,transparent)]">
                                                 <Gift className="size-3.5" aria-hidden />
-                                                {translate("credits.bonusCreditsLabel", { value0: creditText(product.bonusCredits) })}
+                                                {firstBonusWins
+                                                    ? translate(isExactBonusYuan(firstPurchaseBonusYuan(firstBonusCredits), firstBonusCredits) ? "credits.firstPurchaseBonusCardExtra" : "credits.firstPurchaseBonusCardExtraApprox", {
+                                                          value0: creditText(firstPurchaseBonusYuan(firstBonusCredits)),
+                                                      })
+                                                    : translate("credits.bonusCreditsLabel", { value0: creditText(productBonus) })}
                                             </span>
                                         ) : null}
                                         <div className="flex items-start justify-between gap-3">
                                             <div>
                                                 <div className="flex items-center gap-2 text-4xl font-bold leading-none tracking-tight tabular-nums">
-                                                    {hasBonus ? (
+                                                    {effectiveBonus.gt(0) ? (
                                                         <>
                                                             <span className="text-[var(--studio-muted)] line-through decoration-[var(--studio-muted)]">{creditText(product.credits)}</span>
                                                             <span className="text-2xl text-[var(--studio-action)]" aria-hidden>
                                                                 →
                                                             </span>
-                                                            <span className="text-[var(--studio-ink)]">{creditText(product.totalCredits)}</span>
+                                                            <span className="text-[var(--studio-ink)]">{creditText(totalCredits)}</span>
                                                         </>
                                                     ) : (
                                                         <span className="text-[var(--studio-ink)]">{creditText(product.credits)}</span>
@@ -302,9 +339,9 @@ export default function CreditPurchasePage() {
                                         <div className="mt-4 flex items-center gap-2 text-base">
                                             <span className="text-xl font-bold tabular-nums text-[var(--studio-action)]">¥ {product.priceAmount}</span>
                                         </div>
-                                        <div className="mt-auto pt-5">
+                                        <div className="mt-auto flex flex-wrap items-center gap-2 pt-5">
                                             <span className="inline-flex rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-3 py-1.5 text-sm font-semibold text-[var(--studio-action)]">
-                                                {translate("credits.totalCreditsLabel", { value0: creditText(product.totalCredits) })}
+                                                {translate("credits.totalCreditsLabel", { value0: creditText(totalCredits) })}
                                             </span>
                                         </div>
                                     </button>
@@ -356,8 +393,8 @@ export default function CreditPurchasePage() {
                             {selectedProduct
                                 ? translate("credits.selectedProductSummary", {
                                       value0: creditText(selectedProduct.credits),
-                                      value1: creditAmount(selectedProduct.bonusCredits).isZero() ? "" : ` + ${creditText(selectedProduct.bonusCredits)} ${translate("credits.creditsUnit")}`,
-                                      value2: creditText(selectedProduct.totalCredits),
+                                      value1: selectedEffectiveBonus.isZero() ? "" : ` + ${creditText(selectedEffectiveBonus)} ${translate("credits.creditsUnit")}`,
+                                      value2: creditText(creditAmount(selectedProduct.credits).add(selectedEffectiveBonus)),
                                       value3: selectedProduct.priceAmount,
                                   })
                                 : translate("credits.selectProductFirst")}
@@ -399,7 +436,7 @@ export default function CreditPurchasePage() {
                                 </Button>
                             ) : null}
                         </div>
-                        {orderStatus?.status === "paid" ? <p className="mt-3 text-sm text-[var(--studio-action)]">{translate("credits.paymentSuccessDescription", { value0: creditText(orderStatus.credits) })}</p> : null}
+                        {orderStatus?.status === "paid" ? <p className="mt-3 text-sm text-[var(--studio-action)]">{translate("credits.paymentSuccessDescription", { value0: creditText(paidTotalCredits) })}</p> : null}
                         {orderStatusQuery.isError ? (
                             <Alert
                                 className="mt-3"
@@ -423,7 +460,7 @@ export default function CreditPurchasePage() {
                             <div className="py-6">
                                 <CheckCircle2 className="mx-auto size-14 text-emerald-500" />
                                 <h3 className="mt-3 text-xl font-bold text-[var(--studio-ink)]">{translate("credits.paymentSuccess")}</h3>
-                                <p className="mt-2 text-sm text-[var(--studio-muted)]">{translate("credits.paymentSuccessDescription", { value0: creditText(orderStatus.credits) })}</p>
+                                <p className="mt-2 text-sm text-[var(--studio-muted)]">{translate("credits.paymentSuccessDescription", { value0: creditText(paidTotalCredits) })}</p>
                                 <Button type="primary" className="mt-6 w-full!" onClick={closePaymentModal}>
                                     {translate("credits.closeModal")}
                                 </Button>
@@ -478,6 +515,18 @@ export default function CreditPurchasePage() {
                         )}
                     </div>
                 </Modal>
+
+                {/* 首充赠送引导：自动弹一次，之后可从头部的「首充资格」再次打开 */}
+                {!brand.isTeam && bonusStatus?.eligible && (bonusManuallyOpened || (!bonusStatus.noticeSeen && !bonusDismissed)) ? (
+                    <FirstPurchaseBonusModal
+                        percent={bonusStatus.percent}
+                        onClose={() => {
+                            setBonusManuallyOpened(false);
+                            setBonusDismissed(true);
+                            void acknowledgeFirstPurchaseBonus().catch(() => undefined);
+                        }}
+                    />
+                ) : null}
             </div>
         </main>
     );

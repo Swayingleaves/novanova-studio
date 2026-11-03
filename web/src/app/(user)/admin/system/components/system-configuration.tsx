@@ -49,6 +49,7 @@ import {
     deleteObjectStorage as deleteServerObjectStorage,
     getCreditSettings,
     getCheckInRewardSettings,
+    getFirstPurchaseBonusSettings,
     getInvitationRewardSettings,
     refreshChannelModels as refreshServerChannelModels,
     setDefaultModel,
@@ -56,6 +57,7 @@ import {
     updateChannel as updateServerChannel,
     updateCheckInRewardSettings,
     updateCreditSettings,
+    updateFirstPurchaseBonusSettings,
     updateInvitationRewardSettings,
     updateModelConfig,
     updateObjectStorage as updateServerObjectStorage,
@@ -79,7 +81,7 @@ import { communityDraftIssue, communityDraftSignature, createCommunityDrafts, ty
 import { saveCommunityConfigs } from "@/services/api/community";
 import { useCommunityStore } from "@/features/community/stores/use-community-store";
 
-type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "objectStorage" | "community";
+type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "firstPurchaseBonus" | "objectStorage" | "community";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -313,6 +315,8 @@ export function SystemConfiguration() {
     const [draftInvitationRewardCredits, setDraftInvitationRewardCredits] = useState<CreditAmount>(0);
     const [checkInBaseline, setCheckInBaseline] = useState<CreditAmount>(0);
     const [draftCheckInCredits, setDraftCheckInCredits] = useState<CreditAmount>(0);
+    const [firstPurchaseBonusBaseline, setFirstPurchaseBonusBaseline] = useState<CreditAmount>(0);
+    const [draftFirstPurchaseBonusPercent, setDraftFirstPurchaseBonusPercent] = useState<CreditAmount>(0);
     const [communityBaseline, setCommunityBaseline] = useState<CommunityConfigDraft[]>([]);
     const [draftCommunityConfigs, setDraftCommunityConfigs] = useState<CommunityConfigDraft[]>([]);
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
@@ -372,9 +376,10 @@ export function SystemConfiguration() {
             useTeamStore.getState().team ? Promise.resolve({ initialCredits: "0" }) : getCreditSettings(),
             useTeamStore.getState().team ? Promise.resolve({ invitationRewardCredits: "0" }) : getInvitationRewardSettings(),
             useTeamStore.getState().team ? Promise.resolve({ checkInCredits: "0" }) : getCheckInRewardSettings(),
+            useTeamStore.getState().team ? Promise.resolve({ percent: "0" }) : getFirstPurchaseBonusSettings(),
             useTeamStore.getState().team ? Promise.resolve() : useCommunityStore.getState().refresh(),
         ])
-            .then(([, , creditSettings, invitationRewardSettings, checkInSettings]) => {
+            .then(([, , creditSettings, invitationRewardSettings, checkInSettings, firstPurchaseBonusSettings]) => {
                 if (!active) return;
                 resetAllDrafts();
                 setCreditBaseline(creditSettings.initialCredits);
@@ -383,6 +388,8 @@ export function SystemConfiguration() {
                 setDraftInvitationRewardCredits(invitationRewardSettings.invitationRewardCredits);
                 setCheckInBaseline(checkInSettings.checkInCredits);
                 setDraftCheckInCredits(checkInSettings.checkInCredits);
+                setFirstPurchaseBonusBaseline(firstPurchaseBonusSettings.percent);
+                setDraftFirstPurchaseBonusPercent(firstPurchaseBonusSettings.percent);
                 setDraftsReady(true);
             })
             .catch((error) => {
@@ -413,10 +420,11 @@ export function SystemConfiguration() {
     const creditsDirty = draftInitialCredits !== creditBaseline;
     const invitationRewardDirty = draftInvitationRewardCredits !== invitationRewardBaseline;
     const checkInDirty = draftCheckInCredits !== checkInBaseline;
+    const firstPurchaseBonusDirty = draftFirstPurchaseBonusPercent !== firstPurchaseBonusBaseline;
     const communityDirty = communityDraftSignature(draftCommunityConfigs) !== communityDraftSignature(communityBaseline);
     const editingModelBaseline = editingModelConfig && draftModelConfigs.find((item) => item.id === editingModelConfig.id);
     const modelEditorDirty = Boolean(editingModelConfig && (!sameValue(editingModelConfig, editingModelBaseline) || editingCustomBodyParameters !== JSON.stringify(editingModelBaseline?.customBodyParameters || {}, null, 2)));
-    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || communityDirty || modelEditorDirty;
+    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || firstPurchaseBonusDirty || communityDirty || modelEditorDirty;
     const isSaving = Boolean(savingTab);
     useConfigurationLeaveGuard(draftsReady && hasUnsavedChanges);
 
@@ -794,6 +802,20 @@ export function SystemConfiguration() {
             message.success(translate("appShell.checkInSettingsSaved"));
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("appShell.failedToSaveCheckInSettings"));
+        } finally {
+            setSavingTab("");
+        }
+    };
+
+    const saveFirstPurchaseBonusSettings = async () => {
+        setSavingTab("firstPurchaseBonus");
+        try {
+            const settings = await updateFirstPurchaseBonusSettings(draftFirstPurchaseBonusPercent);
+            setFirstPurchaseBonusBaseline(settings.percent);
+            setDraftFirstPurchaseBonusPercent(settings.percent);
+            message.success(translate("appShell.firstPurchaseBonusSaved"));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("appShell.failedToSaveFirstPurchaseBonus"));
         } finally {
             setSavingTab("");
         }
@@ -1289,6 +1311,37 @@ export function SystemConfiguration() {
                             ),
                         },
                         {
+                            key: "firstPurchaseBonus",
+                            label: translate("appShell.firstPurchaseBonus"),
+                            children: (
+                                <Form layout="vertical" requiredMark={false} className="max-w-xl">
+                                    <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                        <div className="text-sm font-semibold">{translate("appShell.firstPurchaseBonus")}</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.firstPurchaseBonusDescription")}</div>
+                                        <div className="mt-5 flex flex-wrap items-end gap-3">
+                                            <Form.Item label={translate("appShell.firstPurchaseBonusPercent")} className="mb-0">
+                                                <InputNumber<string>
+                                                    stringMode
+                                                    min="0"
+                                                    max="100"
+                                                    precision={2}
+                                                    suffix="%"
+                                                    value={String(draftFirstPurchaseBonusPercent)}
+                                                    disabled={isSaving}
+                                                    className="w-40"
+                                                    onChange={(value) => setDraftFirstPurchaseBonusPercent(creditText(value || "0"))}
+                                                />
+                                            </Form.Item>
+                                            <Button type="primary" disabled={!firstPurchaseBonusDirty || isSaving} loading={savingTab === "firstPurchaseBonus"} onClick={() => void saveFirstPurchaseBonusSettings()}>
+                                                {translate("appShell.save")}
+                                            </Button>
+                                        </div>
+                                        <div className="mt-3 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.firstPurchaseBonusRateHint")}</div>
+                                    </div>
+                                </Form>
+                            ),
+                        },
+                        {
                             key: "objectStorage",
                             label: translate("appShell.objectStorage_2caed1"),
                             children: (
@@ -1441,7 +1494,7 @@ export function SystemConfiguration() {
                                 />
                             ),
                         },
-                    ].filter((item) => !team || !["credits", "creditProducts", "invitationReward", "checkIn", "community"].includes(item.key))}
+                    ].filter((item) => !team || !["credits", "creditProducts", "invitationReward", "checkIn", "firstPurchaseBonus", "community"].includes(item.key))}
                 />
             )}
             {modelPicker && modelPickerGroup ? (

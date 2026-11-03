@@ -119,6 +119,26 @@ public class CreditService {
     }
 
     /**
+     * 查询首充赠送比例设置。
+     *
+     * @return Mono<FirstPurchaseBonusSettingsResponse> 首充赠送比例
+     */
+    public Mono<CreditDtos.FirstPurchaseBonusSettingsResponse> getFirstPurchaseBonusSettings() {
+        return creditRepository.getFirstPurchaseBonusPercent().defaultIfEmpty(BigDecimal.ZERO).map(CreditDtos.FirstPurchaseBonusSettingsResponse::new);
+    }
+
+    /**
+     * 更新首充赠送比例设置。
+     *
+     * @param request UpdateFirstPurchaseBonusSettingsRequest 首充赠送比例请求
+     * @return Mono<FirstPurchaseBonusSettingsResponse> 保存后的首充赠送比例
+     */
+    public Mono<CreditDtos.FirstPurchaseBonusSettingsResponse> updateFirstPurchaseBonusSettings(CreditDtos.UpdateFirstPurchaseBonusSettingsRequest request) {
+        return creditRepository.updateFirstPurchaseBonusPercent(request.percent())
+                .thenReturn(new CreditDtos.FirstPurchaseBonusSettingsResponse(request.percent()));
+    }
+
+    /**
      * 查询邀请奖励设置。
      *
      * @return 邀请奖励设置
@@ -596,7 +616,7 @@ public class CreditService {
         if (direction != null && !List.of("all", "add", "spend").contains(direction)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.creditDirectionMustBeAllAddOrSpend"));
         }
-        if (source != null && !List.of("image", "video", "task_refund", "card_redeem", "admin_adjustment", "initial_grant", "invitation_reward", TRANSACTION_DAILY_CHECK_IN, TRANSACTION_CREDIT_EXPIRED, "storage_purchase", "storage_charge", "credit_purchase").contains(source)) {
+        if (source != null && !List.of("image", "video", "task_refund", "card_redeem", "admin_adjustment", "initial_grant", "invitation_reward", TRANSACTION_DAILY_CHECK_IN, TRANSACTION_CREDIT_EXPIRED, "storage_purchase", "storage_charge", "credit_purchase", "first_purchase_bonus").contains(source)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidCreditSourceFilter"));
         }
         OffsetDateTime startAt = startDate.atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime();

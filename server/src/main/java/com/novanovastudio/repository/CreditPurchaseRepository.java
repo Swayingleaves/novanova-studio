@@ -152,22 +152,23 @@ public class CreditPurchaseRepository {
      * @param orderNo String 平台订单号
      * @param userId Long 用户标识
      * @param productId Long 商品标识
+     * @param baseCredits BigDecimal 商品基础积分快照
      * @param credits BigDecimal 积分数量快照
      * @param priceAmount BigDecimal 金额快照
      * @param paymentMethod String 支付方式
      * @param expiresAt OffsetDateTime 过期时间
      * @return Mono<Order> 创建后的订单
      */
-    public Mono<Order> createOrder(String orderNo, Long userId, Long productId, BigDecimal credits,
+    public Mono<Order> createOrder(String orderNo, Long userId, Long productId, BigDecimal baseCredits, BigDecimal credits,
                                    BigDecimal priceAmount, String paymentMethod, OffsetDateTime expiresAt) {
         return databaseClient.sql("""
-                INSERT INTO credit_purchase_orders(order_no, user_id, product_id, credits, price_amount,
+                INSERT INTO credit_purchase_orders(order_no, user_id, product_id, base_credits, credits, price_amount,
                     wallet_team_id, payment_method, status, expires_at)
-                VALUES (:orderNo, :userId, :productId, :credits, :priceAmount, 0, :paymentMethod, 'pending', :expiresAt)
+                VALUES (:orderNo, :userId, :productId, :baseCredits, :credits, :priceAmount, 0, :paymentMethod, 'pending', :expiresAt)
                 RETURNING id, order_no, user_id, product_id, credits, price_amount, wallet_team_id, payment_method, status,
-                    provider_trade_no, expires_at, paid_at, created_at
+                    provider_trade_no, expires_at, paid_at, created_at, first_purchase_bonus_credits, base_credits
                 """)
-                .bind("orderNo", orderNo).bind("userId", userId).bind("productId", productId)
+                .bind("orderNo", orderNo).bind("userId", userId).bind("productId", productId).bind("baseCredits", baseCredits)
                 .bind("credits", credits).bind("priceAmount", priceAmount).bind("paymentMethod", paymentMethod).bind("expiresAt", expiresAt)
                 .map((row, metadata) -> order(row)).one();
     }
@@ -182,7 +183,7 @@ public class CreditPurchaseRepository {
     public Mono<Order> findOrder(String orderNo, Long userId) {
         return databaseClient.sql("""
                 SELECT id, order_no, user_id, product_id, credits, price_amount, wallet_team_id, payment_method, status,
-                    provider_trade_no, expires_at, paid_at, created_at
+                    provider_trade_no, expires_at, paid_at, created_at, first_purchase_bonus_credits, base_credits
                 FROM credit_purchase_orders
                 WHERE order_no = :orderNo AND user_id = :userId
                 """)
@@ -199,7 +200,7 @@ public class CreditPurchaseRepository {
     public Mono<Order> findOrder(String orderNo) {
         return databaseClient.sql("""
                 SELECT id, order_no, user_id, product_id, credits, price_amount, wallet_team_id, payment_method, status,
-                    provider_trade_no, expires_at, paid_at, created_at
+                    provider_trade_no, expires_at, paid_at, created_at, first_purchase_bonus_credits, base_credits
                 FROM credit_purchase_orders
                 WHERE order_no = :orderNo
                 """)
@@ -217,7 +218,7 @@ public class CreditPurchaseRepository {
     public Mono<List<Order>> listOrders(Long userId, int limit) {
         return databaseClient.sql("""
                 SELECT id, order_no, user_id, product_id, credits, price_amount, wallet_team_id, payment_method, status,
-                    provider_trade_no, expires_at, paid_at, created_at
+                    provider_trade_no, expires_at, paid_at, created_at, first_purchase_bonus_credits, base_credits
                 FROM credit_purchase_orders
                 WHERE user_id = :userId AND wallet_team_id = 0
                 ORDER BY created_at DESC, id DESC
@@ -243,7 +244,7 @@ public class CreditPurchaseRepository {
                 SET status = 'processing', provider_trade_no = :providerTradeNo, updated_at = CURRENT_TIMESTAMP
                 WHERE order_no = :orderNo AND status IN ('pending', 'closed', 'cancelled')
                 RETURNING id, order_no, user_id, product_id, credits, price_amount, wallet_team_id, payment_method, status,
-                    provider_trade_no, expires_at, paid_at, created_at
+                    provider_trade_no, expires_at, paid_at, created_at, first_purchase_bonus_credits, base_credits
                 """)
                 .bind("orderNo", orderNo).bind("providerTradeNo", providerTradeNo)
                 .map((row, metadata) -> order(row)).one();
@@ -267,6 +268,48 @@ public class CreditPurchaseRepository {
     }
 
     /**
+     * 判定并记录首充赠送：仅当该用户没有其他已支付订单时写入赠送积分。
+     *
+     * @param userId Long 下单用户标识
+     * @param orderNo String 当前结算的订单号
+     * @param bonusCredits BigDecimal 计算出的赠送积分，为 0 时不发放
+     * @return Mono<BigDecimal> 实际写入的赠送积分，未获得时为空
+     */
+    public Mono<BigDecimal> claimFirstPurchaseBonus(Long userId, String orderNo, BigDecimal bonusCredits) {
+        return databaseClient.sql("""
+                UPDATE credit_purchase_orders
+                SET first_purchase_bonus_credits = :bonus, updated_at = CURRENT_TIMESTAMP
+                WHERE order_no = :orderNo
+                  AND :bonus > 0
+                  AND NOT EXISTS (
+                      SELECT 1 FROM credit_purchase_orders prior
+                      WHERE prior.user_id = :userId AND prior.status = 'paid' AND prior.order_no <> :orderNo)
+                RETURNING first_purchase_bonus_credits
+                """)
+                .bind("bonus", bonusCredits)
+                .bind("orderNo", orderNo)
+                .bind("userId", userId)
+                .map((row, metadata) -> row.get("first_purchase_bonus_credits", BigDecimal.class))
+                .one();
+    }
+
+    /**
+     * 判断用户是否已有已支付订单。
+     *
+     * @param userId Long 用户标识
+     * @return Mono<Boolean> 是否存在已支付订单
+     */
+    public Mono<Boolean> hasPaidPurchaseOrder(Long userId) {
+        return databaseClient.sql("""
+                SELECT EXISTS(SELECT 1 FROM credit_purchase_orders
+                    WHERE user_id = :userId AND wallet_team_id = 0 AND status = 'paid') AS purchased
+                """)
+                .bind("userId", userId)
+                .map((row, metadata) -> Boolean.TRUE.equals(row.get("purchased", Boolean.class)))
+                .one();
+    }
+
+    /**
      * 将用户主动取消的待支付订单标记为已取消。
      *
      * @param orderNo String 平台订单号
@@ -279,7 +322,7 @@ public class CreditPurchaseRepository {
                 SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
                 WHERE order_no = :orderNo AND user_id = :userId AND status = 'pending'
                 RETURNING id, order_no, user_id, product_id, credits, price_amount, wallet_team_id, payment_method, status,
-                    provider_trade_no, expires_at, paid_at, created_at
+                    provider_trade_no, expires_at, paid_at, created_at, first_purchase_bonus_credits, base_credits
                 """)
                 .bind("orderNo", orderNo).bind("userId", userId)
                 .map((row, metadata) -> order(row)).one();
@@ -340,7 +383,8 @@ public class CreditPurchaseRepository {
         return new Order(row.get("id", Long.class), row.get("order_no", String.class), row.get("user_id", Long.class),
                 row.get("product_id", Long.class), row.get("credits", BigDecimal.class), row.get("price_amount", BigDecimal.class),
                 row.get("wallet_team_id", Long.class), row.get("payment_method", String.class), row.get("status", String.class), row.get("provider_trade_no", String.class),
-                row.get("expires_at", OffsetDateTime.class), row.get("paid_at", OffsetDateTime.class), row.get("created_at", OffsetDateTime.class));
+                row.get("expires_at", OffsetDateTime.class), row.get("paid_at", OffsetDateTime.class), row.get("created_at", OffsetDateTime.class),
+                row.get("first_purchase_bonus_credits", BigDecimal.class), row.get("base_credits", BigDecimal.class));
     }
 
     /** 积分商品。 */
@@ -358,6 +402,6 @@ public class CreditPurchaseRepository {
     /** 积分购买订单。 */
     public record Order(Long id, String orderNo, Long userId, Long productId, BigDecimal credits, BigDecimal priceAmount,
                         Long walletTeamId, String paymentMethod, String status, String providerTradeNo, OffsetDateTime expiresAt,
-                        OffsetDateTime paidAt, OffsetDateTime createdAt) {
+                        OffsetDateTime paidAt, OffsetDateTime createdAt, BigDecimal firstPurchaseBonusCredits, BigDecimal baseCredits) {
     }
 }

@@ -20,6 +20,7 @@ import com.novanovastudio.payment.PaymentProvider;
 import com.novanovastudio.payment.PaymentProviderRegistry;
 import com.novanovastudio.repository.CreditPurchaseRepository;
 import com.novanovastudio.repository.CreditRepository;
+import com.novanovastudio.repository.UserRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.TeamScope;
 import com.novanovastudio.task.AiTaskEventPublisher;
@@ -46,6 +47,8 @@ class CreditPurchaseServiceTest {
     private CreditPurchaseRepository purchaseRepository;
     /** 积分仓储。 */
     private CreditRepository creditRepository;
+    /** 用户仓储。 */
+    private UserRepository userRepository;
     /** 当前用户提供器。 */
     private CurrentUserProvider currentUserProvider;
     /** 支付提供方注册表。 */
@@ -68,6 +71,7 @@ class CreditPurchaseServiceTest {
     void setUp() {
         purchaseRepository = mock(CreditPurchaseRepository.class);
         creditRepository = mock(CreditRepository.class);
+        userRepository = mock(UserRepository.class);
         currentUserProvider = mock(CurrentUserProvider.class);
         providerRegistry = mock(PaymentProviderRegistry.class);
         provider = mock(PaymentProvider.class);
@@ -81,7 +85,10 @@ class CreditPurchaseServiceTest {
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(eventPublisher.publish(anyLong(), any())).thenReturn(Mono.empty());
-        purchaseService = new CreditPurchaseService(purchaseRepository, creditRepository, currentUserProvider,
+        when(creditRepository.lockWallet(anyLong())).thenReturn(Mono.just(true));
+        when(creditRepository.getFirstPurchaseBonusPercent()).thenReturn(Mono.just(BigDecimal.ZERO));
+        when(purchaseRepository.claimFirstPurchaseBonus(anyLong(), anyString(), any(BigDecimal.class))).thenReturn(Mono.empty());
+        purchaseService = new CreditPurchaseService(purchaseRepository, creditRepository, userRepository, currentUserProvider,
                 providerRegistry, transactionalOperator, eventPublisher, properties, redisTemplate);
     }
 
@@ -102,7 +109,7 @@ class CreditPurchaseServiceTest {
         CreditPurchaseRepository.Product product = product(7L, "20", "5", "2.00", true);
         CreditPurchaseRepository.Order order = order("order-1", "pending", "25", "2.00", null);
         when(purchaseRepository.findProduct(7L)).thenReturn(Mono.just(product));
-        when(purchaseRepository.createOrder(anyString(), eq(42L), eq(7L), eq(product.totalCredits()), eq(product.priceAmount()),
+        when(purchaseRepository.createOrder(anyString(), eq(42L), eq(7L), eq(product.credits()), eq(product.totalCredits()), eq(product.priceAmount()),
                 eq("alipay"), any(OffsetDateTime.class))).thenReturn(Mono.just(order));
         when(provider.createPayment(any())).thenReturn(Mono.just("https://openapi.alipay.com/gateway.do?sign=1"));
 
@@ -120,7 +127,7 @@ class CreditPurchaseServiceTest {
         assertEquals("购买25积分", paymentOrder.getValue().subject());
         assertEquals(new BigDecimal("2.00"), paymentOrder.getValue().amount());
         assertEquals(order.expiresAt(), paymentOrder.getValue().expiresAt());
-        verify(purchaseRepository).createOrder(anyString(), eq(42L), eq(7L), eq(new BigDecimal("25")),
+        verify(purchaseRepository).createOrder(anyString(), eq(42L), eq(7L), eq(new BigDecimal("20")), eq(new BigDecimal("25")),
                 eq(new BigDecimal("2.00")), eq("alipay"), any(OffsetDateTime.class));
     }
 
@@ -169,10 +176,123 @@ class CreditPurchaseServiceTest {
         }
     }
 
+    /** 首笔已支付订单按支付金额折算积分后乘以比例发放首充赠送。 */
+    @Test
+    void shouldGrantFirstPurchaseBonusOnFirstPaidOrder() {
+        CreditPurchaseRepository.Order pending = order("order-1", "pending", "200", "20.00", null);
+        CreditPurchaseRepository.Order processing = order("order-1", "processing", "200", "20.00", "trade-1");
+        when(provider.verifyNotification(any())).thenReturn(Mono.just(notification("app-id", "order-1", "20.00", "trade-1", "TRADE_SUCCESS")));
+        when(purchaseRepository.findOrder("order-1")).thenReturn(Mono.just(pending));
+        when(purchaseRepository.claimOrderForSettlement("order-1", "trade-1")).thenReturn(Mono.just(processing));
+        when(creditRepository.getFirstPurchaseBonusPercent()).thenReturn(Mono.just(new BigDecimal("50")));
+        when(purchaseRepository.claimFirstPurchaseBonus(42L, "order-1", new BigDecimal("100.000000"))).thenReturn(Mono.just(new BigDecimal("100.000000")));
+        when(creditRepository.changeBalance(42L, new BigDecimal("200"))).thenReturn(Mono.just(new BigDecimal("400")));
+        when(creditRepository.changeBalance(42L, new BigDecimal("100.000000"))).thenReturn(Mono.just(new BigDecimal("500")));
+        when(creditRepository.createCreditPurchaseTransaction(42L, "order-1", new BigDecimal("200"), new BigDecimal("400"), "购买积分订单：order-1"))
+                .thenReturn(Mono.just(99L));
+        when(creditRepository.createFirstPurchaseBonusTransaction(42L, "order-1", new BigDecimal("100.000000"), new BigDecimal("500"), "首充赠送（50%）：order-1"))
+                .thenReturn(Mono.just(100L));
+        when(purchaseRepository.markOrderPaid(eq("order-1"), any(OffsetDateTime.class))).thenReturn(Mono.empty());
+
+        StepVerifier.create(purchaseService.handleAlipayNotification(Map.of("out_trade_no", "order-1")))
+                .verifyComplete();
+
+        verify(creditRepository).changeBalance(42L, new BigDecimal("200"));
+        verify(creditRepository).changeBalance(42L, new BigDecimal("100.000000"));
+        verify(creditRepository).createFirstPurchaseBonusTransaction(42L, "order-1", new BigDecimal("100.000000"), new BigDecimal("500"), "首充赠送（50%）：order-1");
+        verify(eventPublisher).publish(eq(42L), any(AiTaskDtos.AiTaskEvent.class));
+    }
+
+    /** 首充赠送只发一次：已被领取时主入账照常、赠送分文不发。 */
+    @Test
+    void shouldSkipFirstPurchaseBonusWhenAlreadyClaimed() {
+        CreditPurchaseRepository.Order pending = order("order-1", "pending", "200", "20.00", null);
+        CreditPurchaseRepository.Order processing = order("order-1", "processing", "200", "20.00", "trade-1");
+        when(provider.verifyNotification(any())).thenReturn(Mono.just(notification("app-id", "order-1", "20.00", "trade-1", "TRADE_SUCCESS")));
+        when(purchaseRepository.findOrder("order-1")).thenReturn(Mono.just(pending));
+        when(purchaseRepository.claimOrderForSettlement("order-1", "trade-1")).thenReturn(Mono.just(processing));
+        when(creditRepository.getFirstPurchaseBonusPercent()).thenReturn(Mono.just(new BigDecimal("50")));
+        when(creditRepository.changeBalance(42L, new BigDecimal("200"))).thenReturn(Mono.just(new BigDecimal("400")));
+        when(creditRepository.createCreditPurchaseTransaction(42L, "order-1", new BigDecimal("200"), new BigDecimal("400"), "购买积分订单：order-1"))
+                .thenReturn(Mono.just(99L));
+        when(purchaseRepository.markOrderPaid(eq("order-1"), any(OffsetDateTime.class))).thenReturn(Mono.empty());
+
+        StepVerifier.create(purchaseService.handleAlipayNotification(Map.of("out_trade_no", "order-1")))
+                .verifyComplete();
+
+        verify(creditRepository).changeBalance(42L, new BigDecimal("200"));
+        verify(creditRepository, never()).changeBalance(42L, new BigDecimal("100.000000"));
+        verify(creditRepository, never()).createFirstPurchaseBonusTransaction(anyLong(), anyString(), any(BigDecimal.class), any(BigDecimal.class), anyString());
+    }
+
+    /** 商品自带赠送小于首充额度时只补差额，不叠加。 */
+    @Test
+    void shouldGrantOnlyTheDifferenceWhenProductBonusIsSmaller() {
+        CreditPurchaseRepository.Order pending = order("order-1", "pending", "250", "20.00", null, "0", "200");
+        CreditPurchaseRepository.Order processing = order("order-1", "processing", "250", "20.00", "trade-1", "0", "200");
+        when(provider.verifyNotification(any())).thenReturn(Mono.just(notification("app-id", "order-1", "20.00", "trade-1", "TRADE_SUCCESS")));
+        when(purchaseRepository.findOrder("order-1")).thenReturn(Mono.just(pending));
+        when(purchaseRepository.claimOrderForSettlement("order-1", "trade-1")).thenReturn(Mono.just(processing));
+        when(creditRepository.getFirstPurchaseBonusPercent()).thenReturn(Mono.just(new BigDecimal("50")));
+        when(purchaseRepository.claimFirstPurchaseBonus(42L, "order-1", new BigDecimal("50.000000"))).thenReturn(Mono.just(new BigDecimal("50.000000")));
+        when(creditRepository.changeBalance(42L, new BigDecimal("250"))).thenReturn(Mono.just(new BigDecimal("450")));
+        when(creditRepository.changeBalance(42L, new BigDecimal("50.000000"))).thenReturn(Mono.just(new BigDecimal("500")));
+        when(creditRepository.createCreditPurchaseTransaction(42L, "order-1", new BigDecimal("250"), new BigDecimal("450"), "购买积分订单：order-1"))
+                .thenReturn(Mono.just(99L));
+        when(creditRepository.createFirstPurchaseBonusTransaction(42L, "order-1", new BigDecimal("50.000000"), new BigDecimal("500"), "首充赠送（50%）：order-1"))
+                .thenReturn(Mono.just(100L));
+        when(purchaseRepository.markOrderPaid(eq("order-1"), any(OffsetDateTime.class))).thenReturn(Mono.empty());
+
+        StepVerifier.create(purchaseService.handleAlipayNotification(Map.of("out_trade_no", "order-1")))
+                .verifyComplete();
+
+        verify(purchaseRepository).claimFirstPurchaseBonus(42L, "order-1", new BigDecimal("50.000000"));
+        verify(creditRepository).changeBalance(42L, new BigDecimal("50.000000"));
+    }
+
+    /** 商品自带赠送已经大于首充额度时以商品赠送为准，首充不再补发。 */
+    @Test
+    void shouldNotGrantFirstPurchaseBonusWhenProductBonusIsLarger() {
+        CreditPurchaseRepository.Order pending = order("order-1", "pending", "350", "20.00", null, "0", "200");
+        CreditPurchaseRepository.Order processing = order("order-1", "processing", "350", "20.00", "trade-1", "0", "200");
+        when(provider.verifyNotification(any())).thenReturn(Mono.just(notification("app-id", "order-1", "20.00", "trade-1", "TRADE_SUCCESS")));
+        when(purchaseRepository.findOrder("order-1")).thenReturn(Mono.just(pending));
+        when(purchaseRepository.claimOrderForSettlement("order-1", "trade-1")).thenReturn(Mono.just(processing));
+        when(creditRepository.getFirstPurchaseBonusPercent()).thenReturn(Mono.just(new BigDecimal("50")));
+        when(creditRepository.changeBalance(42L, new BigDecimal("350"))).thenReturn(Mono.just(new BigDecimal("550")));
+        when(creditRepository.createCreditPurchaseTransaction(42L, "order-1", new BigDecimal("350"), new BigDecimal("550"), "购买积分订单：order-1"))
+                .thenReturn(Mono.just(99L));
+        when(purchaseRepository.markOrderPaid(eq("order-1"), any(OffsetDateTime.class))).thenReturn(Mono.empty());
+
+        StepVerifier.create(purchaseService.handleAlipayNotification(Map.of("out_trade_no", "order-1")))
+                .verifyComplete();
+
+        verify(purchaseRepository, never()).claimFirstPurchaseBonus(anyLong(), anyString(), any(BigDecimal.class));
+        verify(creditRepository, never()).createFirstPurchaseBonusTransaction(anyLong(), anyString(), any(BigDecimal.class), any(BigDecimal.class), anyString());
+    }
+
+    /** 比例为 0 时不判定也不发放首充赠送。 */
+    @Test
+    void shouldNotClaimFirstPurchaseBonusWhenDisabled() {
+        CreditPurchaseRepository.Order pending = order("order-1", "pending", "200", "20.00", null);
+        CreditPurchaseRepository.Order processing = order("order-1", "processing", "200", "20.00", "trade-1");
+        when(provider.verifyNotification(any())).thenReturn(Mono.just(notification("app-id", "order-1", "20.00", "trade-1", "TRADE_SUCCESS")));
+        when(purchaseRepository.findOrder("order-1")).thenReturn(Mono.just(pending));
+        when(purchaseRepository.claimOrderForSettlement("order-1", "trade-1")).thenReturn(Mono.just(processing));
+        when(creditRepository.changeBalance(42L, new BigDecimal("200"))).thenReturn(Mono.just(new BigDecimal("400")));
+        when(creditRepository.createCreditPurchaseTransaction(42L, "order-1", new BigDecimal("200"), new BigDecimal("400"), "购买积分订单：order-1"))
+                .thenReturn(Mono.just(99L));
+        when(purchaseRepository.markOrderPaid(eq("order-1"), any(OffsetDateTime.class))).thenReturn(Mono.empty());
+
+        StepVerifier.create(purchaseService.handleAlipayNotification(Map.of("out_trade_no", "order-1")))
+                .verifyComplete();
+
+        verify(purchaseRepository, never()).claimFirstPurchaseBonus(anyLong(), anyString(), any(BigDecimal.class));
+    }
+
     /** 已支付订单收到重复通知时不得再次改余额或写流水。 */
     @Test
-    void shouldIgnoreDuplicatePaidNotification() {
-        CreditPurchaseRepository.Order paid = order("order-1", "paid", "20", "2.00", "trade-1");
+    void shouldIgnoreDuplicatePaidNotification() {        CreditPurchaseRepository.Order paid = order("order-1", "paid", "20", "2.00", "trade-1");
         when(provider.verifyNotification(any())).thenReturn(Mono.just(notification("app-id", "order-1", "2.00", "trade-1", "TRADE_SUCCESS")));
         when(purchaseRepository.findOrder("order-1")).thenReturn(Mono.just(paid));
 
@@ -248,11 +368,24 @@ class CreditPurchaseServiceTest {
         return new CreditPurchaseRepository.Product(id, new BigDecimal(credits), new BigDecimal(bonusCredits), new BigDecimal(priceAmount), 10, enabled);
     }
 
-    /** 构造测试订单。 */
+    /** 构造测试订单，默认商品没有自带赠送。 */
     private CreditPurchaseRepository.Order order(String orderNo, String status, String credits, String priceAmount, String providerTradeNo) {
+        return order(orderNo, status, credits, priceAmount, providerTradeNo, "0", credits);
+    }
+
+    /** 构造带首充赠送积分的测试订单。 */
+    private CreditPurchaseRepository.Order order(String orderNo, String status, String credits, String priceAmount, String providerTradeNo,
+                                                 String firstPurchaseBonusCredits) {
+        return order(orderNo, status, credits, priceAmount, providerTradeNo, firstPurchaseBonusCredits, credits);
+    }
+
+    /** 构造带商品基础积分快照的测试订单。 */
+    private CreditPurchaseRepository.Order order(String orderNo, String status, String credits, String priceAmount, String providerTradeNo,
+                                                 String firstPurchaseBonusCredits, String baseCredits) {
         return new CreditPurchaseRepository.Order(1L, orderNo, 42L, 7L, new BigDecimal(credits), new BigDecimal(priceAmount),
                 0L, "alipay", status, providerTradeNo, OffsetDateTime.now().plusMinutes(10),
-                "paid".equals(status) ? OffsetDateTime.now() : null, OffsetDateTime.now());
+                "paid".equals(status) ? OffsetDateTime.now() : null, OffsetDateTime.now(), new BigDecimal(firstPurchaseBonusCredits),
+                new BigDecimal(baseCredits));
     }
 
     /** 构造已验签的支付宝通知。 */

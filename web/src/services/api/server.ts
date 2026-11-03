@@ -347,6 +347,21 @@ export type CreditSettings = {
     initialCredits: CreditAmount;
 };
 
+export type FirstPurchaseBonusSettings = {
+    percent: CreditAmount;
+};
+
+export type FirstPurchaseBonusStatus = {
+    /** 首充赠送比例，单位为百分数。 */
+    percent: CreditAmount;
+    /** 是否开启赠送（比例大于 0）。 */
+    enabled: boolean;
+    /** 当前账号是否仍享有赠送资格（首次付费前为 true）。 */
+    eligible: boolean;
+    /** 购买页弹窗是否已展示过。 */
+    noticeSeen: boolean;
+};
+
 export type CreditBalance = {
     userId: number;
     creditBalance: CreditAmount;
@@ -368,11 +383,11 @@ export type ServerCreditOverview = {
     trend: ServerCreditTrendItem[];
 };
 
-export type ServerCreditTransactionType = "task_charge" | "task_refund" | "admin_adjustment" | "card_redeem" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired" | "storage_purchase" | "storage_charge" | "credit_purchase";
+export type ServerCreditTransactionType = "task_charge" | "task_refund" | "admin_adjustment" | "card_redeem" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired" | "storage_purchase" | "storage_charge" | "credit_purchase" | "first_purchase_bonus";
 
 export type ServerCreditDirection = "add" | "spend";
 
-export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redeem" | "admin_adjustment" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired" | "storage_purchase" | "storage_charge" | "credit_purchase";
+export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redeem" | "admin_adjustment" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired" | "storage_purchase" | "storage_charge" | "credit_purchase" | "first_purchase_bonus";
 
 export type ServerCreditProduct = {
     id: number;
@@ -400,6 +415,8 @@ export type ServerCreateCreditOrderResponse = {
 export type ServerCreditOrderStatus = {
     orderNo: string;
     credits: CreditAmount;
+    /** 该订单实发的首充赠送积分，未获得时为 0。 */
+    bonusCredits: CreditAmount;
     priceAmount: string;
     paymentMethod: string;
     status: "pending" | "processing" | "paid" | "closed" | string;
@@ -1262,6 +1279,22 @@ export function getCreditSettings() {
 
 export function updateCreditSettings(initialCredits: CreditAmount) {
     return serverPost<CreditSettings>("/config/credit/updateCreditSettings", { initialCredits });
+}
+
+export function getFirstPurchaseBonusSettings() {
+    return serverGet<FirstPurchaseBonusSettings>("/config/credit/getFirstPurchaseBonusSettings");
+}
+
+export function updateFirstPurchaseBonusSettings(percent: CreditAmount) {
+    return serverPost<FirstPurchaseBonusSettings>("/config/credit/updateFirstPurchaseBonusSettings", { percent });
+}
+
+export function getFirstPurchaseBonusStatus() {
+    return serverGet<FirstPurchaseBonusStatus>("/payment/credit/getFirstPurchaseBonusStatus", { scope: "platform" });
+}
+
+export function acknowledgeFirstPurchaseBonus() {
+    return serverPost<null>("/payment/credit/acknowledgeFirstPurchaseBonus", {}, { scope: "platform" });
 }
 
 export function listCreditProducts() {
