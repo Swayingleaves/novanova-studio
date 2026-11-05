@@ -70,6 +70,8 @@ import { getGenerationConversationStatus, hasRunningGeneration, type GenerationL
 import { selectGenerationAttachments } from "@/features/generation/lib/generation-retry";
 import { imageReferenceAttachments, referenceMediaType, referenceMediaUrl, videoReferenceAttachments } from "@/features/generation/lib/reference-attachments";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
+import { useCreationMode } from "@/features/generation/hooks/use-creation-mode";
+import type { CreationMode } from "@/features/generation/lib/creation-mode-preference";
 import { useRecentReferenceAssets } from "@/features/generation/hooks/use-recent-reference-assets";
 import type { RecentReferenceAsset } from "@/features/generation/lib/recent-reference-assets";
 import { reconcileImageMentions, type PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
@@ -247,6 +249,15 @@ export default function VideoPage() {
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
+    const { mode: creationMode, changeMode: changeCreationMode } = useCreationMode("video");
+    // Chat 模式不走 Agent 规划，风格与技能都不参与生成，切换时清空避免残留
+    const handleCreationModeChange = (nextMode: CreationMode) => {
+        if (nextMode === "chat") {
+            setSelectedStyles([]);
+            setSelectedSkill(null);
+        }
+        changeCreationMode(nextMode);
+    };
     const imageReferences = useMemo<PromptImageReference[]>(() => references.map((reference, index) => ({
         id: reference.id,
         name: reference.name,
@@ -495,6 +506,7 @@ export default function VideoPage() {
         entrySource: "videoPage",
         skillId: selectedSkill ? String(selectedSkill.id) : undefined,
         creationSettings: agentCreationSettings,
+        mode: creationMode,
         onTextDelta: (msgId, delta) => {
             setStreamingText((prev) => {
                 const next = prev?.messageId === msgId ? { ...prev, text: prev.text + delta } : { messageId: msgId, text: delta };
@@ -931,7 +943,9 @@ export default function VideoPage() {
             message.error(translate("video.enterVideoPrompt"));
             return;
         }
-        if (!ensureModelConfiguration("video", model) || !ensureModelConfiguration("text")) return;
+        if (!ensureModelConfiguration("video", model)) return;
+        // Chat 模式不经过主 Agent，不需要文本模型
+        if (creationMode !== "chat" && !ensureModelConfiguration("text")) return;
 
         resetThinkings();
 
@@ -1817,6 +1831,8 @@ export default function VideoPage() {
                     skillLoading,
                     skillError,
                     actions: composerActions,
+                    creationMode,
+                    onCreationModeChange: handleCreationModeChange,
                     running: isStreaming || activeConversationPending,
                     queued: isQueued,
                     canSubmit: canGenerate,

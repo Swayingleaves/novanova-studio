@@ -39,6 +39,8 @@ import { selectGenerationAttachments } from "@/features/generation/lib/generatio
 import { imageReferenceAttachments, referenceMediaType, referenceMediaUrl } from "@/features/generation/lib/reference-attachments";
 import { reconcileImageMentions, type PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
+import { useCreationMode } from "@/features/generation/hooks/use-creation-mode";
+import type { CreationMode } from "@/features/generation/lib/creation-mode-preference";
 import { useRecentReferenceAssets } from "@/features/generation/hooks/use-recent-reference-assets";
 import type { RecentReferenceAsset } from "@/features/generation/lib/recent-reference-assets";
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
@@ -147,6 +149,15 @@ export default function ImagePage() {
     const [skillError, setSkillError] = useState<string | null>(null);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
+    const { mode: creationMode, changeMode: changeCreationMode } = useCreationMode("image");
+    // Chat 模式不走 Agent 规划，风格与技能都不参与生成，切换时清空避免残留
+    const handleCreationModeChange = (nextMode: CreationMode) => {
+        if (nextMode === "chat") {
+            setSelectedStyles([]);
+            setSelectedSkill(null);
+        }
+        changeCreationMode(nextMode);
+    };
     const promptReferences = useMemo<PromptImageReference[]>(() => references.map((reference, index) => ({
         id: reference.id,
         name: reference.name,
@@ -273,6 +284,7 @@ export default function ImagePage() {
         entrySource: "imagePage",
         creationSettings: agentCreationSettings,
         skillId: selectedSkill ? String(selectedSkill.id) : undefined,
+        mode: creationMode,
         onTextDelta: (msgId, delta) => {
             setStreamingText((prev) => {
                 const next = prev?.messageId === msgId ? { ...prev, text: prev.text + delta } : { messageId: msgId, text: delta };
@@ -555,7 +567,9 @@ export default function ImagePage() {
             message.error(translate("image.enterImagePrompt"));
             return;
         }
-        if (!ensureModelConfiguration("image", model) || !ensureModelConfiguration("text")) return;
+        if (!ensureModelConfiguration("image", model)) return;
+        // Chat 模式不经过主 Agent，不需要文本模型
+        if (creationMode !== "chat" && !ensureModelConfiguration("text")) return;
         if (balanceInsufficient) { showInsufficientCredits(); return; }
 
         resetThinkings();
@@ -1133,6 +1147,8 @@ export default function ImagePage() {
                     skillLoading,
                     skillError,
                     actions: composerActions,
+                    creationMode,
+                    onCreationModeChange: handleCreationModeChange,
                     running: isStreaming || activeConversationPending,
                     queued: isQueued,
                     canSubmit: canGenerate,

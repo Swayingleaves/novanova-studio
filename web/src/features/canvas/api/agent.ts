@@ -65,6 +65,8 @@ export interface AgentChatParams {
     sessionId?: string;
     entrySource: "imagePage" | "videoPage" | "canvas";
     message: string;
+    /** 对话模式：agent 由主 Agent 规划优化，chat 跳过规划直接生成。 */
+    mode?: "agent" | "chat";
     canvasSnapshot?: Record<string, unknown>;
     references?: { title: string; text: string }[];
     attachments?: AgentAttachment[];

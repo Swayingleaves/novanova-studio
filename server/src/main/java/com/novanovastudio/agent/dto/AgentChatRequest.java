@@ -23,6 +23,7 @@ import java.util.Map;
  * @param skillId String 选中技能ID（图片/视频页或画布设定图，可为空）
  * @param settingGraphNodeId String 画布设定图目标节点ID
  * @param settingGraphSkillSnapshot Map 画布设定图技能快照
+ * @param mode String 对话模式：agent（默认，主Agent规划）| chat（跳过规划直接生成）
  */
 public record AgentChatRequest(
     String sessionId,
@@ -35,14 +36,20 @@ public record AgentChatRequest(
     CreationSettings creationSettings,
     String skillId,
     String settingGraphNodeId,
-    Map<String, Object> settingGraphSkillSnapshot
+    Map<String, Object> settingGraphSkillSnapshot,
+    String mode
 ) {
 
     /** 保留既有九参数构造方式。 */
     public AgentChatRequest(String sessionId, String entrySource, String message, Map<String, Object> canvasSnapshot,
                             List<Reference> references, List<Attachment> attachments, List<HistoryMessage> history,
                             CreationSettings creationSettings, String skillId) {
-        this(sessionId, entrySource, message, canvasSnapshot, references, attachments, history, creationSettings, skillId, null, null);
+        this(sessionId, entrySource, message, canvasSnapshot, references, attachments, history, creationSettings, skillId, null, null, null);
+    }
+
+    /** 判断是否 Chat 模式：跳过主Agent规划与提示词优化，直接执行生成工具。 */
+    public boolean chatMode() {
+        return "chat".equals(mode);
     }
 
     /**

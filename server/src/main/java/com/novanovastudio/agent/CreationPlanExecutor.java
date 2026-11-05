@@ -12,6 +12,7 @@ import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.ai.VideoGenerationConstraintSupport;
 import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentEvent;
+import com.novanovastudio.agent.dto.AgentToolResult;
 import com.novanovastudio.agent.dto.CreationPlan;
 import com.novanovastudio.agent.dto.CreationRecoveryPlan;
 import com.novanovastudio.agent.dto.CreationSettings;
@@ -49,6 +50,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -155,6 +157,78 @@ public class CreationPlanExecutor {
                 .flatMap(summary -> isImageStagePlan(plan)
                         ? completeImageStage(userId, sessionId, plan, request, summary)
                         : completeFinalStage(userId, sessionId, plan, request, summary));
+    }
+
+    /**
+     * Chat 模式直接执行生成工具，跳过主Agent规划、计划校验、子Agent决策和提示词优化。
+     * <p>
+     * 复用生成 Profile 的异步任务链路，因此任务落库、扣费、生成记录、进度事件和取消语义与 Agent 模式一致。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param request AgentChatRequest 对话请求
+     * @return Mono<ToolResult> 工具执行结果
+     */
+    public Mono<AgentToolResult.ToolResult> executeDirectGeneration(Long userId, String sessionId, AgentChatRequest request) {
+        String entrySource = request == null || request.entrySource() == null ? "" : request.entrySource();
+        boolean video = AiTaskSources.VIDEO_PAGE.equals(entrySource);
+        if (!video && !AiTaskSources.IMAGE_PAGE.equals(entrySource)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.chatModeOnlySupportsCreationPages")));
+        }
+        if (request.creationSettings() == null) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.generationSettingsRequired")));
+        }
+        String taskType = video ? "video" : "image";
+        String toolName = video ? "generate_video" : "generate_image";
+        String callId = UUID.randomUUID().toString();
+        Map<String, Object> arguments = directGenerationArguments(request.creationSettings(), entrySource, video);
+        arguments.put("prompt", request.message());
+        emit(userId, AgentEvent.toolExecute(sessionId, callId, toolName, arguments));
+        List<AgentChatRequest.Attachment> attachments = request.attachments() == null ? List.of() : request.attachments();
+        return resolveProfile(taskType)
+                .executeTool(userId, toolName, arguments, request.message(), attachments, eventEmitter, sessionId, callId)
+                .map(result -> {
+                    Map<String, Object> data = result.data() == null ? Map.of() : new LinkedHashMap<>(result.data());
+                    emit(userId, AgentEvent.toolResult(sessionId, callId, result.ok(), result.message(), data));
+                    return new AgentToolResult.ToolResult(result.ok(), result.message(), data, result.error());
+                })
+                .onErrorResume(exception -> {
+                    AiErrorDetails error = AiErrorSupport.fromThrowable(exception, "task", "execution");
+                    Map<String, Object> data = AiErrorSupport.errorData(error);
+                    emit(userId, AgentEvent.toolResult(sessionId, callId, false, error.message(), data));
+                    return Mono.just(new AgentToolResult.ToolResult(false, error.message(), data, error));
+                });
+    }
+
+    /**
+     * 组装 Chat 模式的生成工具参数，页面设置作为不可改写约束直接下发给生成 Profile。
+     *
+     * @param settings CreationSettings 页面生成设置
+     * @param entrySource String 入口来源
+     * @param video boolean 是否视频任务
+     * @return Map<String, Object> 工具参数
+     */
+    private Map<String, Object> directGenerationArguments(CreationSettings settings, String entrySource, boolean video) {
+        Map<String, Object> arguments = new LinkedHashMap<>();
+        if (video) {
+            String model = StringUtils.hasText(settings.videoModel()) ? settings.videoModel() : settings.model();
+            if (StringUtils.hasText(model)) arguments.put("model", model);
+            if (StringUtils.hasText(settings.size())) arguments.put("size", settings.size());
+            if (StringUtils.hasText(settings.resolution())) arguments.put("resolution", settings.resolution());
+            if (StringUtils.hasText(settings.quality())) arguments.put("quality", settings.quality());
+            if (StringUtils.hasText(settings.seconds())) arguments.put("seconds", settings.seconds());
+            if (settings.watermark() != null) arguments.put("watermark", settings.watermark());
+            if (StringUtils.hasText(settings.videoGenerationMode())) arguments.put("videoGenerationMode", settings.videoGenerationMode());
+            arguments.put("count", 1);
+        } else {
+            if (StringUtils.hasText(settings.model())) arguments.put("model", settings.model());
+            if (StringUtils.hasText(settings.size())) arguments.put("size", settings.size());
+            if (StringUtils.hasText(settings.resolution())) arguments.put("resolution", settings.resolution());
+            if (StringUtils.hasText(settings.quality())) arguments.put("quality", settings.quality());
+            if (settings.count() != null) arguments.put("count", settings.count());
+        }
+        arguments.put("entrySource", entrySource);
+        return arguments;
     }
 
     /**
