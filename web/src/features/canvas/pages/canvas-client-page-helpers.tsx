@@ -154,6 +154,7 @@ export function CanvasLoadingShell() {
 export function ConnectionCreateMenu({
     pending,
     sourceNode,
+    sourceNodes,
     onPositionChange,
     onCreate,
     onCreateSettingGraph,
@@ -161,6 +162,7 @@ export function ConnectionCreateMenu({
 }: {
     pending: PendingConnectionCreate;
     sourceNode: CanvasNode | null;
+    sourceNodes?: CanvasNode[];
     onPositionChange: (position: CanvasPoint) => void;
     onCreate: (type: PendingConnectionCreateNodeType) => void;
     onCreateSettingGraph: (skill: SkillOption) => void;
@@ -171,6 +173,10 @@ export function ConnectionCreateMenu({
     const menuRef = useRef<HTMLDivElement>(null);
     const dragRef = useRef<{ pointerId: number; startX: number; startY: number; position: CanvasPoint } | null>(null);
     const menuPosition = pending.menuPosition ?? pending.position;
+    const allSourceNodes = sourceNodes?.length ? sourceNodes : sourceNode ? [sourceNode] : [];
+    const allSourcesAreImages = allSourceNodes.length > 0 && allSourceNodes.every(isImageNode);
+    const allSourcesAreVideos = allSourceNodes.length > 0 && allSourceNodes.every(isVideoNode);
+    const allSourcesAreTexts = allSourceNodes.length > 0 && allSourceNodes.every(isTextNode);
 
     /** 将菜单限制在画布可见区域，保留标题栏可操作。 */
     const moveMenu = (x: number, y: number) => {
@@ -243,8 +249,10 @@ export function ConnectionCreateMenu({
                     }}
                 >
                     <GripVertical className="size-4 shrink-0" aria-hidden="true" />
-                    {pending.sourceNodeIds && pending.sourceNodeIds.length > 1
-                        ? translate("canvas.referenceSelectedImageNodes", { value0: pending.sourceNodeIds.length })
+                    {allSourceNodes.length > 1
+                        ? allSourcesAreImages
+                            ? translate("canvas.referenceSelectedImageNodes", { value0: allSourceNodes.length })
+                            : translate("canvas.referenceSelectedNodes", { value0: allSourceNodes.length })
                         : translate("canvas.generateFromThisNode")}</button>
                 <button type="button" className="grid size-7 place-items-center rounded-lg text-base opacity-55 transition hover:bg-black/5 hover:opacity-100" onClick={onClose} aria-label={translate("canvas.close")}>
                     ×
@@ -254,17 +262,17 @@ export function ConnectionCreateMenu({
                 <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title={translate("canvas.textGeneration")} description={translate("canvas.scriptsAdCopyBrandCopy")} onClick={() => onCreate("text")} />
                 <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title={translate("canvas.imageGeneration")} onClick={() => onCreate("image")} />
                 <ConnectionCreateOption theme={theme} icon={<Video className="size-5" />} title={translate("canvas.videoGeneration")} onClick={() => onCreate("video")} />
-                <ConnectionCreateSettingGraphOption theme={theme} sourceNode={sourceNode} onSelect={onCreateSettingGraph} />
+                <ConnectionCreateSettingGraphOption theme={theme} sourceNode={sourceNode} sourceNodes={allSourceNodes} onSelect={onCreateSettingGraph} />
                 <ConnectionCreateOption
                     theme={theme}
                     icon={<Clapperboard className="size-5" />}
                     title={translate("canvas.composeVideo")}
-                    description={sourceNode && isVideoNode(sourceNode) ? translate("canvas.joinVideosInDragOrder") : translate("canvas.videoNodesOnly")}
-                    disabled={!sourceNode || !isVideoNode(sourceNode)}
+                    description={allSourcesAreVideos ? translate("canvas.joinVideosInDragOrder") : translate("canvas.videoNodesOnly")}
+                    disabled={!allSourcesAreVideos}
                     disabledReason={translate("canvas.videoNodesOnly")}
                     onClick={() => onCreate("videoComposition")}
                 />
-                {sourceNode && isTextNode(sourceNode) ? <ConnectionCreateOption theme={theme} icon={<Clapperboard className="size-5" />} title={translate("canvas.storyboardScript")} description={translate("canvas.generateShotsAndAssetsFromAScript")} onClick={() => onCreate("storyboard")} /> : null}
+                {allSourcesAreTexts ? <ConnectionCreateOption theme={theme} icon={<Clapperboard className="size-5" />} title={translate("canvas.storyboardScript")} description={translate("canvas.generateShotsAndAssetsFromAScript")} onClick={() => onCreate("storyboard")} /> : null}
             </div>
         </div>
     );
@@ -273,10 +281,12 @@ export function ConnectionCreateMenu({
 function ConnectionCreateSettingGraphOption({
     theme,
     sourceNode,
+    sourceNodes,
     onSelect,
 }: {
     theme: CanvasTheme;
     sourceNode: CanvasNode | null;
+    sourceNodes?: CanvasNode[];
     onSelect: (skill: SkillOption) => void;
 }) {
     const translate = useTranslation();
@@ -284,7 +294,8 @@ function ConnectionCreateSettingGraphOption({
     const [loading, setLoading] = useState(false);
     const [skills, setSkills] = useState<SkillOption[]>([]);
     const [error, setError] = useState<string | null>(null);
-    const available = Boolean(sourceNode && (isTextNode(sourceNode) || isImageNode(sourceNode)));
+    const availableSources = sourceNodes?.length ? sourceNodes : sourceNode ? [sourceNode] : [];
+    const available = availableSources.length > 0 && availableSources.every((node) => isTextNode(node) || isImageNode(node));
     const disabledReason = sourceNode ? settingGraphDisabledReason(sourceNode) : translate("canvas.referenceSheetsSupportTextAndImageNodes");
     const menuButtonRef = useRef<HTMLButtonElement>(null);
     const skillButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);

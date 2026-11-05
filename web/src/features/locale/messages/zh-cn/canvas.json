@@ -795,9 +795,10 @@
     "items_9479b5": "{value0} 个",
     "notUploaded": "尚未上传",
     "confirmBatchVideoGenerationDetails": "将使用所选模型、{value0}比例和{value1}清晰度，为 {value2} 个镜头分别创建视频任务，预计消耗 {value3} 积分。是否继续？",
-    "connectSelectedImagesToVideo": "把选中的图片节点批量连接到视频节点",
+    "connectSelectedNodesToVideo": "把选中的节点批量连接到视频节点",
+    "referenceSelectedNodes": "引用选中的 {value0} 个节点",
     "referenceSelectedImageNodes": "引用选中的 {value0} 个图片节点",
-    "batchConnectImagesSuccess": "已连接 {value0} 个图片节点",
-    "batchConnectImagesSkipped": "已连接 {value0} 个图片节点，{value1} 个已存在连线",
-    "batchConnectImagesAlreadyConnected": "所选图片节点都已连接到该视频节点"
+    "batchConnectImagesSuccess": "已连接 {value0} 个节点",
+    "batchConnectImagesSkipped": "已连接 {value0} 个节点，{value1} 个已存在连线",
+    "batchConnectImagesAlreadyConnected": "所选节点都已连接到该视频节点"
 }

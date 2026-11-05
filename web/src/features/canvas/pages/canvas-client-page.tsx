@@ -86,7 +86,7 @@ import {
     updateCanvasNodeSelection,
 } from "../domain/canvas-page-node";
 import { canComposeVideo, readVideoCompositionConnectionError, synchronizeVideoCompositionInputs } from "../domain/video-composition";
-import { canvasNodeContainsPoint, planBatchImageToVideoConnections, readCanvasNodesBounds } from "../domain/canvas-batch-connection";
+import { canvasNodeContainsPoint, planBatchNodesToVideoConnections, readCanvasNodesBounds } from "../domain/canvas-batch-connection";
 import { ActiveConnectionPath, ConnectionPath } from "../components/canvas-connections";
 import { CanvasChatPanel } from "../components/canvas-chat-panel";
 import type { CanvasImageCropRect } from "../components/canvas-node-crop-dialog";
@@ -4640,13 +4640,13 @@ function CanvasWorkspacePage() {
 
     // Phase 2-3: 转换为 React Flow 格式
     const hiddenBatchNodeIds = useMemo(() => new Set(nodes.filter((node) => isHiddenBatchChild(node, nodes, collapsingBatchIds)).map((node) => node.id)), [collapsingBatchIds, nodes, translate.locale]);
-    const selectedImageNodes = useMemo(
-        () => nodes.filter((node) => selectedNodeIds.has(node.id) && isImageNode(node) && !hiddenBatchNodeIds.has(node.id)),
+    const selectedSourceNodes = useMemo(
+        () => nodes.filter((node) => selectedNodeIds.has(node.id) && (isImageNode(node) || isVideoNode(node)) && !hiddenBatchNodeIds.has(node.id)),
         [hiddenBatchNodeIds, nodes, selectedNodeIds],
     );
-    const selectedImageBounds = useMemo(() => {
-        if (selectedImageNodes.length < 2) return null;
-        const bounds = readCanvasNodesBounds(selectedImageNodes);
+    const selectedSourceBounds = useMemo(() => {
+        if (selectedSourceNodes.length < 2) return null;
+        const bounds = readCanvasNodesBounds(selectedSourceNodes);
         if (!bounds) return null;
         return {
             left: viewport.x + bounds.left * viewport.k,
@@ -4654,20 +4654,20 @@ function CanvasWorkspacePage() {
             width: bounds.width * viewport.k,
             height: bounds.height * viewport.k,
         };
-    }, [selectedImageNodes, viewport.k, viewport.x, viewport.y]);
+    }, [selectedSourceNodes, viewport.k, viewport.x, viewport.y]);
 
-    // 多选图片进入批量连线状态时收起节点提示面板，避免面板挡住选区左右两侧的圆点。
+    // 多选图片/视频进入批量连线状态时收起节点提示面板，避免面板挡住选区左右两侧的圆点。
     useEffect(() => {
-        if (selectedImageNodes.length >= 2) setDialogNodeId(null);
-    }, [selectedImageNodes.length]);
+        if (selectedSourceNodes.length >= 2) setDialogNodeId(null);
+    }, [selectedSourceNodes.length]);
 
     const findVideoNodeAtClientPoint = useCallback((clientX: number, clientY: number) => {
         const world = screenToCanvas(clientX, clientY);
         return nodesRef.current.find((node) => isVideoNode(node) && !hiddenBatchNodeIds.has(node.id) && canvasNodeContainsPoint(node, world)) || null;
     }, [hiddenBatchNodeIds, screenToCanvas]);
 
-    const connectSelectedImagesToVideo = useCallback((sourceNodeIds: readonly string[], targetNodeId: string) => {
-        const plan = planBatchImageToVideoConnections({
+    const connectSelectedNodesToVideo = useCallback((sourceNodeIds: readonly string[], targetNodeId: string) => {
+        const plan = planBatchNodesToVideoConnections({
             sourceNodeIds,
             targetNodeId,
             nodes: nodesRef.current,
@@ -4695,16 +4695,16 @@ function CanvasWorkspacePage() {
     }, [hiddenBatchNodeIds, message, readVideoReferenceAdditionIssue, translate.locale]);
 
     const startGroupConnect = useCallback((event: ReactPointerEvent<HTMLButtonElement>, side: "left" | "right") => {
-        if (selectedImageNodes.length < 2) return;
+        if (selectedSourceNodes.length < 2) return;
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
         event.preventDefault();
         event.stopPropagation();
         event.currentTarget.setPointerCapture(event.pointerId);
-        const bounds = selectedImageBounds;
+        const bounds = selectedSourceBounds;
         setGroupConnectDrag({
             side,
-            sourceNodeIds: selectedImageNodes.map((node) => node.id),
+            sourceNodeIds: selectedSourceNodes.map((node) => node.id),
             startX: bounds ? (side === "left" ? bounds.left : bounds.left + bounds.width) : event.clientX - rect.left,
             startY: bounds ? bounds.top + bounds.height / 2 : event.clientY - rect.top,
             currentX: event.clientX - rect.left,
@@ -4714,7 +4714,7 @@ function CanvasWorkspacePage() {
         setDialogNodeId(null);
         setContextMenu(null);
         setEdgeDeletePopover(null);
-    }, [selectedImageBounds, selectedImageNodes]);
+    }, [selectedSourceBounds, selectedSourceNodes]);
 
     const moveGroupConnect = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
         if (!groupConnectDragRef.current) return;
@@ -4737,7 +4737,7 @@ function CanvasWorkspacePage() {
         setGroupConnectDrag(null);
         const target = findVideoNodeAtClientPoint(event.clientX, event.clientY);
         if (target) {
-            connectSelectedImagesToVideo(drag.sourceNodeIds, target.id);
+            connectSelectedNodesToVideo(drag.sourceNodeIds, target.id);
             return;
         }
         const rect = containerRef.current?.getBoundingClientRect();
@@ -4752,7 +4752,7 @@ function CanvasWorkspacePage() {
         setSelectedConnectionId(null);
         setContextMenu(null);
         setEdgeDeletePopover(null);
-    }, [connectSelectedImagesToVideo, findVideoNodeAtClientPoint, screenToCanvas]);
+    }, [connectSelectedNodesToVideo, findVideoNodeAtClientPoint, screenToCanvas]);
 
     const cancelGroupConnect = useCallback(() => setGroupConnectDrag(null), []);
 
@@ -5117,7 +5117,7 @@ function CanvasWorkspacePage() {
                     />
                 </NodeActionProvider>
 
-                {selectedImageBounds ? (
+                {selectedSourceBounds ? (
                     <div
                         className="pointer-events-none absolute inset-0 z-[115]"
                         style={{ opacity: groupConnectDrag ? 0 : 1, pointerEvents: groupConnectDrag ? "none" : undefined }}
@@ -5127,12 +5127,12 @@ function CanvasWorkspacePage() {
                             <button
                                 key={side}
                                 type="button"
-                                aria-label={translate("canvas.connectSelectedImagesToVideo")}
-                                title={translate("canvas.connectSelectedImagesToVideo")}
+                                aria-label={translate("canvas.connectSelectedNodesToVideo")}
+                                title={translate("canvas.connectSelectedNodesToVideo")}
                                 className="pointer-events-auto absolute grid size-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 shadow-md transition hover:scale-110 focus-visible:outline-2 focus-visible:outline-offset-2"
                                 style={{
-                                    left: side === "left" ? selectedImageBounds.left : selectedImageBounds.left + selectedImageBounds.width,
-                                    top: selectedImageBounds.top + selectedImageBounds.height / 2,
+                                    left: side === "left" ? selectedSourceBounds.left : selectedSourceBounds.left + selectedSourceBounds.width,
+                                    top: selectedSourceBounds.top + selectedSourceBounds.height / 2,
                                     background: theme.node.panel,
                                     borderColor: theme.node.activeStroke,
                                     color: theme.node.activeStroke,
@@ -5212,6 +5212,7 @@ function CanvasWorkspacePage() {
                         <ConnectionCreateMenu
                             pending={pendingConnectionCreate}
                             sourceNode={nodeById.get(pendingConnectionCreate.connection.nodeId) || null}
+                            sourceNodes={pendingConnectionCreate.sourceNodeIds?.map((nodeId) => nodeById.get(nodeId)).filter((node): node is CanvasDomainNode => Boolean(node))}
                             onPositionChange={(menuPosition) => setPendingConnectionCreate((current) => (current ? { ...current, menuPosition } : null))}
                             onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)}
                             onCreateSettingGraph={(skill) => createConnectedNode("image", pendingConnectionCreate, skill)}
@@ -5262,7 +5263,7 @@ function CanvasWorkspacePage() {
                 ) : null}
 
                 <CanvasNodeHoverToolbar
-                    node={isNodeDragging || nodeImageSettingsOpen ? null : toolbarNode}
+                    node={isNodeDragging || nodeImageSettingsOpen || selectedSourceNodes.length >= 2 ? null : toolbarNode}
                     viewport={viewport}
                     onKeep={keepNodeToolbar}
                     onLeave={hideNodeToolbar}
