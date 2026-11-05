@@ -9,7 +9,7 @@ import type { TextAreaRef } from "antd/es/input/TextArea";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { ArrowUp, BookOpenText, Bot, LoaderCircle, Square, X } from "lucide-react";
 
-import type { CreationComposerProps } from "@/features/generation/components/creation-workspace-types";
+import type { CreationComposerProps, CreationStyleOption } from "@/features/generation/components/creation-workspace-types";
 import type { CreationMode } from "@/features/generation/lib/creation-mode-preference";
 import { CreditCostDisplay } from "@/features/generation/constants/credits";
 import { GenerationStyleCover, GenerationStyleMenu } from "@/features/generation/components/generation-style-picker";

@@ -3,13 +3,19 @@ import test from "node:test";
 
 const { normalizeCreationMode, readCreationMode, writeCreationMode } = await import(new URL("./creation-mode-preference.ts", import.meta.url).href);
 
+type StorageLike = {
+    getItem: (key: string) => string | null;
+    setItem: (key: string, value: string) => void;
+    removeItem: (key: string) => void;
+};
+
 /**
  * 用内存 storage 替换 window.localStorage，返回恢复函数。
  *
  * @param storage 假 storage
  * @return 恢复原 window 的函数
  */
-function useWindow(storage) {
+function useWindow(storage: StorageLike) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, "window");
     Object.defineProperty(globalThis, "window", { configurable: true, value: { localStorage: storage } });
     return () => {
@@ -19,14 +25,14 @@ function useWindow(storage) {
 }
 
 /** 创建内存 localStorage。 */
-function memoryStorage() {
-    const values = new Map();
+function memoryStorage(): StorageLike {
+    const values = new Map<string, string>();
     return {
-        getItem: (key) => values.get(key) ?? null,
-        setItem: (key, value) => {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => {
             values.set(key, value);
         },
-        removeItem: (key) => {
+        removeItem: (key: string) => {
             values.delete(key);
         },
     };
@@ -67,6 +73,9 @@ test("存储不可用时读取回落 Agent 且写入不抛错", () => {
             throw new Error("blocked");
         },
         setItem: () => {
+            throw new Error("blocked");
+        },
+        removeItem: () => {
             throw new Error("blocked");
         },
     });
