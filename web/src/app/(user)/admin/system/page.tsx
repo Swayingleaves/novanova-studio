@@ -431,6 +431,9 @@ function CreditConsumptionManagement() {
                                                 resetPage();
                                             }}
                                         />
+                                        <Button icon={<Search className="size-4" />} loading={transactionsQuery.isFetching} onClick={() => void transactionsQuery.refetch()}>
+                                            {translate("administration.query")}
+                                        </Button>
                                     </div>
                                     <Table<ServerAdminCreditTransaction>
                                         rowKey="id"

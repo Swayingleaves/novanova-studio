@@ -51,9 +51,13 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
         ...(admin ? [{
             title: translate("administration.user"),
             dataIndex: "username",
-            width: 160,
-            ellipsis: true,
-            render: (_: string | null | undefined, record: TaskRecordView) => <span className="block truncate text-[var(--studio-text)]" title={record.email || undefined}>{taskRecordUserLabel(record)}</span>,
+            width: 200,
+            render: (_: string | null | undefined, record: TaskRecordView) => (
+                <div className="min-w-0">
+                    <span className="block truncate text-[var(--studio-text)]" title={taskRecordUserLabel(record)}>{taskRecordUserLabel(record)}</span>
+                    {record.email ? <span className="mt-0.5 block truncate text-xs text-[var(--studio-muted)]" title={record.email}>{record.email}</span> : null}
+                </div>
+            ),
         }] : []),
         {
             title: translate("credits.time"),
@@ -157,7 +161,7 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
                     dataSource={records}
                     loading={recordsQuery.isLoading}
                     pagination={false}
-                    scroll={{ x: admin ? 1_044 : 884 }}
+                    scroll={{ x: admin ? 1_084 : 884 }}
                     locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("credits.noTaskRecordsInThisPeriod")} /> }}
                 />
             </div>
@@ -176,7 +180,7 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
                                 <Tag color={taskRecordStatusTone(record.status)} className="mr-0">{taskRecordStatusLabel(record.status)}</Tag>
                                 <span className="tabular-nums">{formatCreditTime(record.createdAt)}</span>
                             </div>
-                            {admin ? <p className="mt-1 truncate text-xs text-[var(--studio-muted)]">{translate("administration.user")} · {taskRecordUserLabel(record)}</p> : null}
+                            {admin ? <p className="mt-1 truncate text-xs text-[var(--studio-muted)]">{translate("administration.user")} · {taskRecordUserLabel(record)}{record.email ? ` · ${record.email}` : ""}</p> : null}
                             <p className="mt-1 truncate text-xs text-[var(--studio-muted)]" title={record.model}>{record.model || "—"}</p>
                             <p className="mt-1 line-clamp-2 text-xs text-[var(--studio-muted)]">{record.prompt || translate("credits.noPrompt")}</p>
                             <div className="mt-2">

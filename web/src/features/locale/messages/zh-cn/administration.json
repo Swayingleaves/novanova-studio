@@ -16,6 +16,7 @@
   "keywordIPEndpointUserID": "关键字：IP / 接口地址 / 用户 ID",
   "allResults": "全部结果",
   "refresh": "刷新",
+  "query": "查询",
   "aPIAccessDetails": "接口访问详情",
   "method": "方法",
   "endpointURL": "接口地址",
