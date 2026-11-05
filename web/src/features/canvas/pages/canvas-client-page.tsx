@@ -15,7 +15,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useParams, useRouter } from "@/shared/lib/team-navigation";
 import dynamic from "next/dynamic";
-import { Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/features/generation/api/image";
@@ -86,6 +86,7 @@ import {
     updateCanvasNodeSelection,
 } from "../domain/canvas-page-node";
 import { canComposeVideo, readVideoCompositionConnectionError, synchronizeVideoCompositionInputs } from "../domain/video-composition";
+import { canvasNodeContainsPoint, planBatchImageToVideoConnections, readCanvasNodesBounds } from "../domain/canvas-batch-connection";
 import { ActiveConnectionPath, ConnectionPath } from "../components/canvas-connections";
 import { CanvasChatPanel } from "../components/canvas-chat-panel";
 import type { CanvasImageCropRect } from "../components/canvas-node-crop-dialog";
@@ -207,6 +208,17 @@ type CanvasMediaUploadScope = {
     controller: AbortController;
     messageKeys: Set<string>;
     replacingNodeIds: Set<string>;
+};
+
+/** 从选区左右圆点拖出的批量连线状态。 */
+type GroupConnectDrag = {
+    side: "left" | "right";
+    sourceNodeIds: string[];
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+    targetVideoId: string | null;
 };
 const CONNECTION_NODE_HIT_PADDING = 32;
 const PROMPT_PANEL_WIDTH = 580;
@@ -409,6 +421,7 @@ function CanvasWorkspacePage() {
     const [connectingParams, setConnectingParams] = useState<ConnectionHandle | null>(null);
     const [connectionTargetNodeId, setConnectionTargetNodeId] = useState<string | null>(null);
     const [pendingConnectionCreate, setPendingConnectionCreate] = useState<PendingConnectionCreate | null>(null);
+    const [groupConnectDrag, setGroupConnectDrag] = useState<GroupConnectDrag | null>(null);
     const [mouseWorld, setMouseWorld] = useState<CanvasPoint>({ x: 0, y: 0 });
     const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -486,6 +499,7 @@ function CanvasWorkspacePage() {
     const selectionBoxRef = useRef(selectionBox);
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const reactFlowConnectionStartRef = useRef<ConnectionHandle | null>(null);
+    const groupConnectDragRef = useRef<GroupConnectDrag | null>(null);
     const pendingFocusNodeIdsRef = useRef<string[]>([]);
     const activeAgentAssistantMessageIdRef = useRef<string | null>(null);
     const activeAgentSessionIdRef = useRef<string | null>(null);
@@ -839,6 +853,7 @@ function CanvasWorkspacePage() {
     connectingParamsRef.current = connectingParams;
     connectionTargetNodeIdRef.current = connectionTargetNodeId;
     pendingConnectionCreateRef.current = pendingConnectionCreate;
+    groupConnectDragRef.current = groupConnectDrag;
     selectionBoxRef.current = selectionBox;
 
     const focusCanvasNodes = useCallback(
@@ -1020,12 +1035,17 @@ function CanvasWorkspacePage() {
 
     const createConnectedNode = useCallback(
         (type: PendingConnectionCreateNodeType, pending: PendingConnectionCreate, settingGraphSkill?: SkillOption) => {
-            const sourceNode = nodesRef.current.find((node) => node.id === pending.connection.nodeId);
-            if (type === "storyboard" && (!sourceNode || !isTextNode(sourceNode))) {
+            const sourceNodeIds = pending.sourceNodeIds?.length ? pending.sourceNodeIds : [pending.connection.nodeId];
+            const sourceNodes = sourceNodeIds.flatMap((nodeId) => {
+                const node = nodesRef.current.find((item) => item.id === nodeId);
+                return node ? [node] : [];
+            });
+            if (!sourceNodes.length) return;
+            if (type === "storyboard" && !sourceNodes.every(isTextNode)) {
                 message.warning(translate("canvas.createStoryboardFromAScriptTextNode"));
                 return;
             }
-            if (type === "videoComposition" && (!sourceNode || !isVideoNode(sourceNode))) {
+            if (type === "videoComposition" && !sourceNodes.every(isVideoNode)) {
                 message.warning(translate("canvas.compositionNodesRequireVideoNodeReferences"));
                 return;
             }
@@ -1047,30 +1067,44 @@ function CanvasWorkspacePage() {
                 }),
                 ...(settingGraphSkill ? { title: translate("canvas.referenceSheet_39d23c", { value0: settingGraphSkill.name }) } : {}),
             };
-            // 连接菜单的释放点通常紧贴源节点手柄，不能直接作为新节点位置；统一按源节点边缘外侧间距布局。
-            const preferredPosition = sourceNode
+            // 连接菜单的释放点通常紧贴源节点手柄，不能直接作为新节点位置；统一按来源节点整体外接边缘布局。
+            const sourceBounds = readCanvasNodesBounds(sourceNodes);
+            const preferredPosition = sourceBounds
                 ? {
-                      x: pending.connection.handleType === "target" ? sourceNode.frame.position.x - CONNECTED_NODE_GAP - initialNode.frame.width : sourceNode.frame.position.x + sourceNode.frame.width + CONNECTED_NODE_GAP,
-                      y: sourceNode.frame.position.y + sourceNode.frame.height / 2 - initialNode.frame.height / 2,
+                      x: pending.connection.handleType === "target" ? sourceBounds.left - CONNECTED_NODE_GAP - initialNode.frame.width : sourceBounds.left + sourceBounds.width + CONNECTED_NODE_GAP,
+                      y: sourceBounds.top + sourceBounds.height / 2 - initialNode.frame.height / 2,
                   }
                 : initialNode.frame.position;
             const newNode = updateCanvasNodeFrame(initialNode, {
                 position: findNonOverlappingCanvasNodePosition(nodesRef.current, preferredPosition, initialNode.frame.width, initialNode.frame.height, CONNECTED_NODE_GAP),
             });
-            const connection = normalizeCanvasConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode]);
-            if (!connection) {
+            const nodesWithNewNode = [...nodesRef.current, newNode];
+            const createdConnections = sourceNodes.flatMap((sourceNode) => {
+                const connection = normalizeCanvasConnection(sourceNode.id, newNode.id, nodesWithNewNode);
+                return connection ? [connectionHandlesForCreatedNode(nanoid(), pending.connection, connection)] : [];
+            });
+            if (!createdConnections.length) {
                 message.warning(translate("canvas.configurationNodesCannotConnect"));
                 return;
             }
-            const errorMessage = readVideoCompositionConnectionError(connection.source.nodeId, connection.target.nodeId, [...nodesRef.current, newNode], connectionsRef.current)
-                || readVideoReferenceAdditionIssue([...nodesRef.current, newNode], [...connectionsRef.current, { id: "pending", ...connection }]);
-            if (errorMessage) {
-                message.warning(errorMessage);
+            for (let index = 0; index < createdConnections.length; index += 1) {
+                const connection = createdConnections[index];
+                const errorMessage = readVideoCompositionConnectionError(connection.source.nodeId, connection.target.nodeId, nodesWithNewNode, [...connectionsRef.current, ...createdConnections.slice(0, index)]);
+                if (errorMessage) {
+                    message.warning(errorMessage);
+                    return;
+                }
+            }
+            const nextConnections = [...connectionsRef.current, ...createdConnections];
+            const referenceIssue = readVideoReferenceAdditionIssue(nodesWithNewNode, nextConnections);
+            if (referenceIssue) {
+                message.warning(referenceIssue);
                 return;
             }
+            connectionsRef.current = nextConnections;
             setNodes((prev) => [...prev, newNode]);
             requestFocusNodes([newNode.id]);
-            setConnections((prev) => [...prev, connectionHandlesForCreatedNode(nanoid(), pending.connection, connection)]);
+            setConnections((prev) => [...prev, ...createdConnections]);
             setSelectedNodeIds(new Set([newNode.id]));
             setSelectedConnectionId(null);
             setDialogNodeId(newNode.id);
@@ -2217,6 +2251,7 @@ function CanvasWorkspacePage() {
                 else if (selectedConnectionId) confirmDeleteConnection(selectedConnectionId);
             },
             cancel: () => {
+                setGroupConnectDrag(null);
                 deselectCanvas();
                 setConnecting(null);
                 setEditingNodeId(null);
@@ -4605,6 +4640,140 @@ function CanvasWorkspacePage() {
 
     // Phase 2-3: 转换为 React Flow 格式
     const hiddenBatchNodeIds = useMemo(() => new Set(nodes.filter((node) => isHiddenBatchChild(node, nodes, collapsingBatchIds)).map((node) => node.id)), [collapsingBatchIds, nodes, translate.locale]);
+    const selectedImageNodes = useMemo(
+        () => nodes.filter((node) => selectedNodeIds.has(node.id) && isImageNode(node) && !hiddenBatchNodeIds.has(node.id)),
+        [hiddenBatchNodeIds, nodes, selectedNodeIds],
+    );
+    const selectedImageBounds = useMemo(() => {
+        if (selectedImageNodes.length < 2) return null;
+        const bounds = readCanvasNodesBounds(selectedImageNodes);
+        if (!bounds) return null;
+        return {
+            left: viewport.x + bounds.left * viewport.k,
+            top: viewport.y + bounds.top * viewport.k,
+            width: bounds.width * viewport.k,
+            height: bounds.height * viewport.k,
+        };
+    }, [selectedImageNodes, viewport.k, viewport.x, viewport.y]);
+
+    // 多选图片进入批量连线状态时收起节点提示面板，避免面板挡住选区左右两侧的圆点。
+    useEffect(() => {
+        if (selectedImageNodes.length >= 2) setDialogNodeId(null);
+    }, [selectedImageNodes.length]);
+
+    const findVideoNodeAtClientPoint = useCallback((clientX: number, clientY: number) => {
+        const world = screenToCanvas(clientX, clientY);
+        return nodesRef.current.find((node) => isVideoNode(node) && !hiddenBatchNodeIds.has(node.id) && canvasNodeContainsPoint(node, world)) || null;
+    }, [hiddenBatchNodeIds, screenToCanvas]);
+
+    const connectSelectedImagesToVideo = useCallback((sourceNodeIds: readonly string[], targetNodeId: string) => {
+        const plan = planBatchImageToVideoConnections({
+            sourceNodeIds,
+            targetNodeId,
+            nodes: nodesRef.current,
+            connections: connectionsRef.current,
+            hiddenNodeIds: hiddenBatchNodeIds,
+            createConnectionId: nanoid,
+        });
+        if (!plan) return;
+        if (!plan.connections.length) {
+            message.info(translate("canvas.batchConnectImagesAlreadyConnected"));
+            return;
+        }
+        const issue = readVideoReferenceAdditionIssue(nodesRef.current, [...connectionsRef.current, ...plan.connections]);
+        if (issue) {
+            message.warning(issue);
+            return;
+        }
+        connectionsRef.current = [...connectionsRef.current, ...plan.connections];
+        setConnections((prev) => [...prev, ...plan.connections]);
+        if (plan.skippedExistingCount > 0) {
+            message.info(translate("canvas.batchConnectImagesSkipped", { value0: plan.connections.length, value1: plan.skippedExistingCount }));
+        } else {
+            message.success(translate("canvas.batchConnectImagesSuccess", { value0: plan.connections.length }));
+        }
+    }, [hiddenBatchNodeIds, message, readVideoReferenceAdditionIssue, translate.locale]);
+
+    const startGroupConnect = useCallback((event: ReactPointerEvent<HTMLButtonElement>, side: "left" | "right") => {
+        if (selectedImageNodes.length < 2) return;
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const bounds = selectedImageBounds;
+        setGroupConnectDrag({
+            side,
+            sourceNodeIds: selectedImageNodes.map((node) => node.id),
+            startX: bounds ? (side === "left" ? bounds.left : bounds.left + bounds.width) : event.clientX - rect.left,
+            startY: bounds ? bounds.top + bounds.height / 2 : event.clientY - rect.top,
+            currentX: event.clientX - rect.left,
+            currentY: event.clientY - rect.top,
+            targetVideoId: null,
+        });
+        setDialogNodeId(null);
+        setContextMenu(null);
+        setEdgeDeletePopover(null);
+    }, [selectedImageBounds, selectedImageNodes]);
+
+    const moveGroupConnect = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+        if (!groupConnectDragRef.current) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const currentX = event.clientX - rect.left;
+        const currentY = event.clientY - rect.top;
+        const target = findVideoNodeAtClientPoint(event.clientX, event.clientY);
+        setGroupConnectDrag((current) => (current ? { ...current, currentX, currentY, targetVideoId: target?.id ?? null } : current));
+    }, [findVideoNodeAtClientPoint]);
+
+    const finishGroupConnect = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+        const drag = groupConnectDragRef.current;
+        if (!drag) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+        setGroupConnectDrag(null);
+        const target = findVideoNodeAtClientPoint(event.clientX, event.clientY);
+        if (target) {
+            connectSelectedImagesToVideo(drag.sourceNodeIds, target.id);
+            return;
+        }
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        setPendingConnectionCreate({
+            connection: { nodeId: drag.sourceNodeIds[0], handleType: drag.side === "right" ? "source" : "target" },
+            position: screenToCanvas(event.clientX, event.clientY),
+            menuPosition: { x: event.clientX - rect.left, y: event.clientY - rect.top },
+            sourceNodeIds: drag.sourceNodeIds,
+            startScreenPoint: { x: drag.startX, y: drag.startY },
+        });
+        setSelectedConnectionId(null);
+        setContextMenu(null);
+        setEdgeDeletePopover(null);
+    }, [connectSelectedImagesToVideo, findVideoNodeAtClientPoint, screenToCanvas]);
+
+    const cancelGroupConnect = useCallback(() => setGroupConnectDrag(null), []);
+
+    const groupConnectPath = useMemo(() => {
+        const drag = groupConnectDrag;
+        if (!drag) return "";
+        let endX = drag.currentX;
+        let endY = drag.currentY;
+        const targetNode = drag.targetVideoId ? nodes.find((node) => node.id === drag.targetVideoId) : undefined;
+        if (targetNode) {
+            const left = viewport.x + targetNode.frame.position.x * viewport.k;
+            const right = viewport.x + (targetNode.frame.position.x + targetNode.frame.width) * viewport.k;
+            const top = viewport.y + targetNode.frame.position.y * viewport.k;
+            const height = targetNode.frame.height * viewport.k;
+            endX = drag.startX <= left + (right - left) / 2 ? left : right;
+            endY = top + height / 2;
+        }
+        const direction = endX >= drag.startX ? 1 : -1;
+        const curvature = Math.max(Math.abs(endX - drag.startX) * 0.45, 56);
+        return `M ${drag.startX} ${drag.startY} C ${drag.startX + curvature * direction} ${drag.startY}, ${endX - curvature * direction} ${endY}, ${endX} ${endY}`;
+    }, [groupConnectDrag, nodes, viewport.k, viewport.x, viewport.y]);
     const navigationNodes = useMemo(() => nodes.filter((node) => !hiddenBatchNodeIds.has(node.id)), [hiddenBatchNodeIds, nodes, translate.locale]);
     const navigationAssets = useMemo<CanvasNavigationAsset[]>(
         () => [
@@ -4947,6 +5116,43 @@ function CanvasWorkspacePage() {
                         onPaneContextMenu={handlePaneContextMenu}
                     />
                 </NodeActionProvider>
+
+                {selectedImageBounds ? (
+                    <div
+                        className="pointer-events-none absolute inset-0 z-[115]"
+                        style={{ opacity: groupConnectDrag ? 0 : 1, pointerEvents: groupConnectDrag ? "none" : undefined }}
+                        aria-hidden={Boolean(groupConnectDrag)}
+                    >
+                        {(["left", "right"] as const).map((side) => (
+                            <button
+                                key={side}
+                                type="button"
+                                aria-label={translate("canvas.connectSelectedImagesToVideo")}
+                                title={translate("canvas.connectSelectedImagesToVideo")}
+                                className="pointer-events-auto absolute grid size-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 shadow-md transition hover:scale-110 focus-visible:outline-2 focus-visible:outline-offset-2"
+                                style={{
+                                    left: side === "left" ? selectedImageBounds.left : selectedImageBounds.left + selectedImageBounds.width,
+                                    top: selectedImageBounds.top + selectedImageBounds.height / 2,
+                                    background: theme.node.panel,
+                                    borderColor: theme.node.activeStroke,
+                                    color: theme.node.activeStroke,
+                                }}
+                                onPointerDown={(event) => startGroupConnect(event, side)}
+                                onPointerMove={moveGroupConnect}
+                                onPointerUp={finishGroupConnect}
+                                onPointerCancel={cancelGroupConnect}
+                                onLostPointerCapture={cancelGroupConnect}
+                            >
+                                <Plus className="size-3" />
+                            </button>
+                        ))}
+                    </div>
+                ) : null}
+                {groupConnectDrag ? (
+                    <svg className="pointer-events-none absolute inset-0 z-[116] h-full w-full overflow-visible" aria-hidden="true">
+                        <path d={groupConnectPath} stroke={theme.node.activeStroke} strokeWidth="2.5" strokeDasharray="6 5" strokeLinecap="round" fill="none" />
+                    </svg>
+                ) : null}
 
                 {navigationPanelState !== "hidden" ? (
                     <CanvasNavigationPanel

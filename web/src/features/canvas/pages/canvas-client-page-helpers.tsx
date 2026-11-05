@@ -34,6 +34,10 @@ export type PendingConnectionCreate = {
     connection: ConnectionHandle;
     position: CanvasPoint;
     menuPosition?: CanvasPoint;
+    /** 多选批量创建时的全部来源节点。 */
+    sourceNodeIds?: string[];
+    /** 从选区圆点开始拖动的位置，使用画布容器的屏幕坐标。 */
+    startScreenPoint?: CanvasPoint;
 };
 
 export type PendingConnectionCreateNodeType = CanvasNodeKind;
@@ -179,6 +183,14 @@ export function ConnectionCreateMenu({
         });
     };
 
+    // 首次渲染后把菜单拉回可见区域，避免在画布边缘释放时菜单被裁掉。
+    const positionedRef = useRef(false);
+    useEffect(() => {
+        if (positionedRef.current) return;
+        positionedRef.current = true;
+        moveMenu(menuPosition.x, menuPosition.y);
+    });
+
     return (
         <div
             ref={menuRef}
@@ -231,7 +243,9 @@ export function ConnectionCreateMenu({
                     }}
                 >
                     <GripVertical className="size-4 shrink-0" aria-hidden="true" />
-                    {translate("canvas.generateFromThisNode")}</button>
+                    {pending.sourceNodeIds && pending.sourceNodeIds.length > 1
+                        ? translate("canvas.referenceSelectedImageNodes", { value0: pending.sourceNodeIds.length })
+                        : translate("canvas.generateFromThisNode")}</button>
                 <button type="button" className="grid size-7 place-items-center rounded-lg text-base opacity-55 transition hover:bg-black/5 hover:opacity-100" onClick={onClose} aria-label={translate("canvas.close")}>
                     ×
                 </button>
@@ -452,12 +466,14 @@ export function PendingConnectionLine({
 }) {
     const theme = useCanvasTheme();
     const sourceNode = nodes.find((node) => node.id === pending.connection.nodeId);
-    if (!sourceNode) return null;
+    if (!sourceNode && !pending.startScreenPoint) return null;
 
-    const sourceWorldX = pending.connection.handleType === "source" ? sourceNode.frame.position.x + sourceNode.frame.width : sourceNode.frame.position.x;
-    const sourceWorldY = sourceNode.frame.position.y + sourceNode.frame.height / 2;
-    const startX = viewport.x + sourceWorldX * viewport.k;
-    const startY = viewport.y + sourceWorldY * viewport.k;
+    const sourceWorldX = sourceNode
+        ? (pending.connection.handleType === "source" ? sourceNode.frame.position.x + sourceNode.frame.width : sourceNode.frame.position.x)
+        : 0;
+    const sourceWorldY = sourceNode ? sourceNode.frame.position.y + sourceNode.frame.height / 2 : 0;
+    const startX = pending.startScreenPoint?.x ?? viewport.x + sourceWorldX * viewport.k;
+    const startY = pending.startScreenPoint?.y ?? viewport.y + sourceWorldY * viewport.k;
     const menuLeft = pending.menuPosition?.x ?? pending.position.x;
     const menuTop = pending.menuPosition?.y ?? pending.position.y;
     const menuRight = menuLeft + CONNECTION_CREATE_MENU_WIDTH;
