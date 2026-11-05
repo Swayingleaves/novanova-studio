@@ -44,12 +44,15 @@ public class AiTaskEventPublisher {
     /** 本地用户事件流 */
     private final Map<String, UserEventSink> userSinks = new ConcurrentHashMap<>();
 
+    /** 本地任务事件流 */
+    private final Map<String, UserEventSink> taskSinks = new ConcurrentHashMap<>();
+
     /**
      * 初始化Redis事件订阅
      */
     @PostConstruct
     public void subscribeRedisEvents() {
-        // 订阅所有用户AI任务事件，并转发到本实例内存事件流。
+        // 订阅所有用户AI任务事件，并转发到本实例的用户事件流和按任务等待的事件流。
         listenerContainer.receive(new PatternTopic(EVENT_CHANNEL_PREFIX + "*"))
                 .flatMap(message -> {
                     String channel = message.getChannel();
@@ -63,6 +66,13 @@ public class AiTaskEventPublisher {
                         UserEventSink sink = userSinks.get(userId);
                         if (sink != null) {
                             sink.sink().tryEmitNext(event);
+                        }
+                        String taskId = event.task() == null ? null : event.task().id();
+                        if (taskId != null) {
+                            UserEventSink taskSink = taskSinks.get(taskId);
+                            if (taskSink != null) {
+                                taskSink.sink().tryEmitNext(event);
+                            }
                         }
                     } catch (Exception exception) {
                         log.error("解析AI任务Redis事件失败: channel={}", channel, exception);
@@ -117,13 +127,40 @@ public class AiTaskEventPublisher {
      * @return Mono<Void> 发布结果
      */
     public Mono<Void> publish(Long userId, AiTaskDtos.AiTaskEvent event) {
-        // 只发布到Redis Pub/Sub，再由统一订阅链路转发到本地事件流，避免同实例重复推送。
+        // 只发布到Redis Pub/Sub，再由统一订阅链路转发到本地用户事件流和按任务等待的事件流，避免同实例重复推送。
         log.debug("发布AI任务事件: userId={}, event={}", userId, JSON.toJSONString(event));
         String payload = JSON.toJSONString(event);
         return Mono.deferContextual(context -> redisTemplate.convertAndSend(EVENT_CHANNEL_PREFIX + TeamScope.from(context).teamId() + ":" + userId, payload))
                 .doOnError(exception -> log.error("发布AI任务Redis事件失败: userId={}", userId, exception))
                 .onErrorResume(exception -> Mono.empty())
                 .then();
+    }
+
+    /**
+     * 订阅指定任务的事件流，供服务端等待链路在任务状态变化时立即响应。
+     *
+     * @param taskId String 任务ID
+     * @return Flux<AiTaskEvent> 任务事件流
+     */
+    public Flux<AiTaskDtos.AiTaskEvent> watchTask(String taskId) {
+        if (taskId == null || taskId.isBlank()) {
+            return Flux.empty();
+        }
+        return Flux.defer(() -> {
+            UserEventSink sink = taskSinks.computeIfAbsent(taskId,
+                    ignored -> new UserEventSink(Sinks.many().multicast().directBestEffort(), new AtomicInteger()));
+            return Flux.concat(
+                            Mono.just(new AiTaskDtos.AiTaskEvent("ping", null)),
+                            sink.sink().asFlux())
+                    .doOnSubscribe(subscription -> sink.subscriberCount().incrementAndGet())
+                    .doFinally(signal -> {
+                        int subscribers = sink.subscriberCount().decrementAndGet();
+                        if (subscribers <= 0) {
+                            taskSinks.computeIfPresent(taskId, (ignored, currentSink) -> currentSink == sink ? null : currentSink);
+                        }
+                        log.debug("结束订阅AI任务事件: taskId={}, signal={}", taskId, signal);
+                    });
+        });
     }
 
     /**

@@ -620,6 +620,18 @@ public class AiTaskService {
     }
 
     /**
+     * 订阅指定任务的状态事件，供服务端等待链路在任务状态变化时立即响应。
+     *
+     * @param taskId String 任务ID
+     * @return Flux<AiGenerationTaskResponse> 任务状态事件流
+     */
+    public Flux<AiTaskDtos.AiGenerationTaskResponse> watchTask(String taskId) {
+        return eventPublisher.watchTask(taskId)
+                .filter(event -> EVENT_TASK.equals(event.type()) && event.task() != null)
+                .map(AiTaskDtos.AiTaskEvent::task);
+    }
+
+    /**
      * 取消AI生成任务
      *
      * @param taskId String 任务ID
