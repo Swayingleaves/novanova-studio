@@ -225,11 +225,19 @@ services:
       ALIPAY_GATEWAY_URL: ${ALIPAY_GATEWAY_URL:-https://openapi.alipay.com/gateway.do}
       ALIPAY_NOTIFY_URL: ${ALIPAY_NOTIFY_URL:-}
       ALIPAY_RETURN_URL: ${ALIPAY_RETURN_URL:-}
+      WECHAT_ENABLED: ${WECHAT_ENABLED:-false}
+      WECHAT_APP_ID: ${WECHAT_APP_ID:-}
+      WECHAT_MERCHANT_ID: ${WECHAT_MERCHANT_ID:-}
+      WECHAT_MERCHANT_SERIAL_NUMBER: ${WECHAT_MERCHANT_SERIAL_NUMBER:-}
+      WECHAT_API_V3_KEY: ${WECHAT_API_V3_KEY:-}
+      WECHAT_PRIVATE_KEY_PATH: ${WECHAT_PRIVATE_KEY_PATH:-/app/config/wechatpay/apiclient_key.pem}
+      WECHAT_NOTIFY_URL: ${WECHAT_NOTIFY_URL:-}
     ports:
       - "127.0.0.1:${SERVER_PORT:-8080}:8080"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./server/config/prompts:/app/config/prompts:ro
+      - ${WECHAT_CERTIFICATE_DIRECTORY:-./server/config/wechatpay}:/app/config/wechatpay:ro
       - ./logs/server:/app/logs
     depends_on:
       postgres:

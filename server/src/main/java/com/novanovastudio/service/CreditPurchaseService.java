@@ -20,7 +20,6 @@ import java.math.RoundingMode;
 import java.net.URI;
 import java.time.Duration;
 import java.time.OffsetDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -43,15 +42,13 @@ import reactor.core.publisher.Mono;
 @Slf4j
 public class CreditPurchaseService {
 
-    /** 允许的支付宝成功状态。 */
-    private static final List<String> SUCCESS_STATUSES = List.of("TRADE_SUCCESS", "TRADE_FINISHED");
-    /** 支付宝关闭交易状态。 */
-    private static final String CLOSED_STATUS = "TRADE_CLOSED";
-    /** 订单号时间格式。 */
-    private static final DateTimeFormatter ORDER_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    /** 支付宝和微信的成功交易状态。 */
+    private static final List<String> SUCCESS_STATUSES = List.of("TRADE_SUCCESS", "TRADE_FINISHED", "SUCCESS");
+    /** 支付渠道明确关闭的交易状态。 */
+    private static final List<String> CLOSED_STATUSES = List.of("TRADE_CLOSED", "CLOSED");
     /** 购买订单有效期。 */
     private static final long ORDER_EXPIRATION_MINUTES = 15;
-    /** 支付宝查单节流键前缀。 */
+    /** 支付渠道查单节流键前缀。 */
     private static final String QUERY_THROTTLE_KEY_PREFIX = "credit:order-query:";
     /** 同一订单最短查单间隔。 */
     private static final Duration QUERY_THROTTLE_WINDOW = Duration.ofSeconds(5);
@@ -192,7 +189,7 @@ public class CreditPurchaseService {
     }
 
     /**
-     * 查询当前用户订单状态，并对待支付订单执行支付宝补偿查询。
+     * 查询当前用户订单状态，并对待支付订单执行渠道补偿查询。
      *
      * @param orderNo String 平台订单号
      * @return Mono<CreditOrderStatusResponse> 订单状态
@@ -251,13 +248,21 @@ public class CreditPurchaseService {
         }
         // 已关闭或已取消的订单直接返回当前状态，取消操作保持幂等。
         if (!"pending".equals(order.status())) return Mono.just(orderStatus(order));
-        // 先关掉渠道交易让二维码失效，关单失败也继续本地取消，避免用户卡在无法取消的状态。
-        return providerRegistry.require(order.paymentMethod()).closePayment(order.orderNo())
-                .then(purchaseRepository.cancelOrder(order.orderNo(), userId))
-                .map(this::orderStatus)
-                .switchIfEmpty(Mono.defer(() -> purchaseRepository.findOrder(order.orderNo(), userId)
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "订单状态已变化，请刷新后重试")))
-                        .map(this::orderStatus)));
+        // 微信关单前主动查单，先补齐已收款结果；关单不明时保留本地待支付状态。
+        Mono<PaymentDtos.CreditOrderStatusResponse> checked = "wechat".equals(order.paymentMethod())
+                ? queryAndSettle(order) : Mono.just(orderStatus(order));
+        return checked.flatMap(status -> {
+            if ("paid".equals(status.status()) || "processing".equals(status.status())) {
+                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "订单已支付或正在确认支付，无法取消"));
+            }
+            if (!"pending".equals(status.status())) return Mono.just(status);
+            return providerRegistry.require(order.paymentMethod()).closePayment(order.orderNo())
+                    .then(Mono.defer(() -> purchaseRepository.cancelOrder(order.orderNo(), userId)))
+                    .map(this::orderStatus)
+                    .switchIfEmpty(Mono.defer(() -> purchaseRepository.findOrder(order.orderNo(), userId)
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "订单状态已变化，请刷新后重试")))
+                            .map(this::orderStatus)));
+        });
     }
 
     /**
@@ -282,15 +287,54 @@ public class CreditPurchaseService {
      * @return Mono<Void> 通知处理完成
      */
     public Mono<Void> handleAlipayNotification(Map<String, String> parameters) {
-        PaymentProvider provider = providerRegistry.require("alipay");
+        return handleNotification("alipay", parameters);
+    }
+
+    /**
+     * 处理微信原始支付通知，业务成功持久化后才确认接收。
+     * @param parameters 微信签名头与原始回调正文
+     * @return 通知处理完成信号
+     */
+    public Mono<Void> handleWechatNotification(Map<String, String> parameters) {
+        return handleNotification("wechat", parameters).contextWrite(TeamScope.PLATFORM::apply);
+    }
+
+    /**
+     * 通过渠道验签后进入统一的幂等结算流程。
+     * @param paymentMethod 接收通知的渠道
+     * @param parameters 渠道通知参数
+     * @return 通知处理完成信号
+     */
+    private Mono<Void> handleNotification(String paymentMethod, Map<String, String> parameters) {
+        PaymentProvider provider = providerRegistry.require(paymentMethod);
         return provider.verifyNotification(parameters)
                 .flatMap(notification -> {
+                    if (!paymentMethod.equals(notification.paymentMethod())) {
+                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "支付通知来源不匹配"));
+                    }
                     if (SUCCESS_STATUSES.contains(notification.tradeStatus())) return settleNotification(notification).then();
-                    if (CLOSED_STATUS.equals(notification.tradeStatus())) return closeNotification(notification);
-                    log.info("忽略未完成的支付宝交易通知: orderNo={}, tradeStatus={}", notification.orderNo(), notification.tradeStatus());
+                    if (CLOSED_STATUSES.contains(notification.tradeStatus())) return closeNotification(notification);
+                    log.info("忽略未完成的支付通知: paymentMethod={}, orderNo={}, tradeStatus={}", paymentMethod, notification.orderNo(), notification.tradeStatus());
                     return Mono.empty();
                 })
                 .then();
+    }
+
+    /**
+     * 分页扫描本轮开始前的微信待支付订单，覆盖页面关闭或回调丢失的场景。
+     * @return 本轮查单、入账和超时关单完成信号
+     */
+    public Mono<Void> reconcileWechatOrders() {
+        OffsetDateTime scanBefore = OffsetDateTime.now();
+        return purchaseRepository.listPendingWechatOrders(0L, scanBefore, MAX_ORDER_PAGE_SIZE)
+                .expand(orders -> orders.size() < MAX_ORDER_PAGE_SIZE ? Mono.empty()
+                        : purchaseRepository.listPendingWechatOrders(orders.getLast().id(), scanBefore, MAX_ORDER_PAGE_SIZE))
+                .flatMapIterable(orders -> orders)
+                .concatMap(order -> refreshOrderStatus(order).onErrorResume(error -> {
+                    log.error("后台核对微信支付订单失败，保留订单供下轮核对: orderNo={}", order.orderNo(), error);
+                    return Mono.empty();
+                }))
+                .then().contextWrite(TeamScope.PLATFORM::apply);
     }
 
     /**
@@ -342,16 +386,19 @@ public class CreditPurchaseService {
         if ("pending".equals(order.status()) && !order.expiresAt().isAfter(OffsetDateTime.now())) {
             // 过期前一刻可能刚好付完款，先向渠道确认一次，确认未支付才关单，避免钱付了单却关了。
             return providerRegistry.require(order.paymentMethod()).queryOrder(order.orderNo())
-                    .onErrorResume(error -> Mono.empty())
-                    .flatMap(notification -> SUCCESS_STATUSES.contains(notification.tradeStatus())
-                            ? settleNotification(notification).map(result -> orderStatus(result.order()))
-                            : Mono.<PaymentDtos.CreditOrderStatusResponse>empty())
-                    .switchIfEmpty(purchaseRepository.closeExpiredOrder(order.orderNo())
+                    .flatMap(notification -> {
+                        validateNotification(order, notification);
+                        return SUCCESS_STATUSES.contains(notification.tradeStatus())
+                                ? settleNotification(notification).map(result -> orderStatus(result.order()))
+                                : Mono.<PaymentDtos.CreditOrderStatusResponse>empty();
+                    })
+                    .switchIfEmpty(Mono.defer(() -> providerRegistry.require(order.paymentMethod()).closePayment(order.orderNo())
+                            .then(Mono.defer(() -> purchaseRepository.closeExpiredOrder(order.orderNo())))
                             .then(purchaseRepository.findOrder(order.orderNo(), order.userId()))
-                            .map(this::orderStatus));
+                            .map(this::orderStatus)));
         }
         if (!"pending".equals(order.status())) return Mono.just(orderStatus(order));
-        // 前端轮询远快于支付宝查单的合理频率，按订单节流，避免每次轮询都打一次渠道接口。
+        // 页面轮询与后台扫描共用按订单节流，避免同时反复调用渠道查单。
         return claimQuerySlot(order.orderNo())
                 .flatMap(claimed -> Boolean.TRUE.equals(claimed) ? queryAndSettle(order) : Mono.just(orderStatus(order)));
     }
@@ -367,8 +414,10 @@ public class CreditPurchaseService {
             return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "订单已支付、已关闭或已取消，无法重新支付"));
         }
         if (!order.expiresAt().isAfter(OffsetDateTime.now())) {
-            return purchaseRepository.closeExpiredOrder(order.orderNo())
-                    .then(Mono.<PaymentDtos.CreateCreditOrderResponse>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "订单已超时关闭，请重新下单")));
+            return refreshOrderStatus(order)
+                    .flatMap(status -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
+                            "paid".equals(status.status()) || "processing".equals(status.status())
+                                    ? "订单已支付，请刷新查看到账结果" : "订单已超时关闭，请重新下单")));
         }
         return providerRegistry.require(order.paymentMethod())
                 .createPayment(new PaymentProvider.PaymentOrder(order.orderNo(), orderSubject(order.credits()), order.priceAmount(), order.expiresAt()))
@@ -376,7 +425,7 @@ public class CreditPurchaseService {
     }
 
     /**
-     * 占用一次支付宝查单机会。
+     * 占用一次渠道查单机会。
      *
      * @param orderNo String 平台订单号
      * @return Mono<Boolean> 是否允许本次查单，Redis 不可用时放行
@@ -386,13 +435,13 @@ public class CreditPurchaseService {
                 .setIfAbsent(QUERY_THROTTLE_KEY_PREFIX + orderNo, "1", QUERY_THROTTLE_WINDOW)
                 .defaultIfEmpty(false)
                 .onErrorResume(error -> {
-                    log.warn("支付宝查单节流键写入失败，本次直接查单: orderNo={}", orderNo, error);
+                    log.warn("支付渠道查单节流键写入失败，本次直接查单: orderNo={}", orderNo, error);
                     return Mono.just(true);
                 });
     }
 
     /**
-     * 主动查询支付宝订单并结算。
+     * 主动查询渠道订单并结算。
      *
      * @param order Order 当前订单
      * @return Mono<CreditOrderStatusResponse> 订单状态
@@ -400,16 +449,19 @@ public class CreditPurchaseService {
     private Mono<PaymentDtos.CreditOrderStatusResponse> queryAndSettle(CreditPurchaseRepository.Order order) {
         PaymentProvider provider = providerRegistry.require(order.paymentMethod());
         return provider.queryOrder(order.orderNo())
-                .flatMap(notification -> SUCCESS_STATUSES.contains(notification.tradeStatus())
+                .flatMap(notification -> {
+                    validateNotification(order, notification);
+                    return SUCCESS_STATUSES.contains(notification.tradeStatus())
                         ? settleNotification(notification).map(result -> orderStatus(result.order()))
-                        : CLOSED_STATUS.equals(notification.tradeStatus())
+                        : CLOSED_STATUSES.contains(notification.tradeStatus())
                                 ? closeNotification(notification).then(purchaseRepository.findOrder(order.orderNo(), order.userId()).map(this::orderStatus))
-                                : Mono.just(orderStatus(order)))
+                                : Mono.just(orderStatus(order));
+                })
                 .defaultIfEmpty(orderStatus(order));
     }
 
     /**
-     * 处理支付宝明确关闭的交易。
+     * 处理支付渠道明确关闭的交易。
      *
      * @param notification PaymentNotification 已验签的关闭通知
      * @return Mono<Void> 关闭处理完成信号
@@ -432,7 +484,7 @@ public class CreditPurchaseService {
      */
     private Mono<SettlementResult> settleNotification(PaymentProvider.PaymentNotification notification) {
         if (!SUCCESS_STATUSES.contains(notification.tradeStatus())) {
-            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "支付宝订单尚未支付成功"));
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "支付渠道订单尚未支付成功"));
         }
         return purchaseRepository.findOrder(notification.orderNo())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "支付订单不存在")))
@@ -463,7 +515,7 @@ public class CreditPurchaseService {
     /**
      * 在结算事务内发放首充赠送积分。
      * <p>
-     * 赠送与主入账同事务：任一步失败整体回滚，订单回到待结算状态，由支付宝重试或订单查单补偿。
+     * 赠送与主入账同事务：任一步失败整体回滚，由渠道重试或订单查单补偿。
      *
      * @param order 已抢占的订单
      * @param balanceAfterPurchase 主入账后的余额
@@ -510,13 +562,16 @@ public class CreditPurchaseService {
      * @param notification PaymentNotification 支付通知
      */
     private void validateNotification(CreditPurchaseRepository.Order order, PaymentProvider.PaymentNotification notification) {
-        if (!"alipay".equals(order.paymentMethod())) throw new BusinessException(ErrorCode.BUSINESS_ERROR, "订单支付方式不匹配");
+        if (!order.paymentMethod().equals(notification.paymentMethod())) throw new BusinessException(ErrorCode.BUSINESS_ERROR, "订单支付方式不匹配");
         if (order.walletTeamId() == null || order.walletTeamId() != 0L) throw new BusinessException(ErrorCode.BUSINESS_ERROR, "订单钱包作用域无效");
-        if (!properties.getAlipay().getAppId().equals(notification.appId())) throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "支付宝应用标识不匹配");
-        if (!order.orderNo().equals(notification.orderNo())) throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "支付宝订单号不匹配");
-        if (order.priceAmount().compareTo(notification.amount()) != 0) throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "支付宝支付金额不匹配");
+        if (!providerRegistry.require(order.paymentMethod()).applicationId().equals(notification.appId())) throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "支付应用标识不匹配");
+        if (!order.orderNo().equals(notification.orderNo())) throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "支付订单号不匹配");
+        if ((SUCCESS_STATUSES.contains(notification.tradeStatus()) && notification.amount() == null)
+                || (notification.amount() != null && order.priceAmount().compareTo(notification.amount()) != 0)) {
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "支付金额不匹配");
+        }
         if ("paid".equals(order.status()) && order.providerTradeNo() != null && !order.providerTradeNo().equals(notification.providerTradeNo())) {
-            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "支付宝交易号不匹配");
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "支付渠道交易号不匹配");
         }
     }
 
@@ -624,7 +679,8 @@ public class CreditPurchaseService {
      * @return String 平台订单号
      */
     private String createOrderNo() {
-        return "CREDIT" + OffsetDateTime.now().format(ORDER_TIME_FORMAT) + UUID.randomUUID().toString().replace("-", "");
+        // 微信商户订单号最多 32 位，支付宝同样接受此格式。
+        return UUID.randomUUID().toString().replace("-", "");
     }
 
     /**

@@ -74,6 +74,15 @@ public class AlipayPaymentProvider implements PaymentProvider {
     }
 
     /**
+     * 获取支付宝应用标识。
+     * @return 已配置的支付宝应用标识
+     */
+    @Override
+    public String applicationId() {
+        return properties.getAlipay().getAppId();
+    }
+
+    /**
      * 创建支付宝扫码支付页面地址。
      *
      * @param order PaymentOrder 平台订单快照
@@ -269,7 +278,7 @@ public class AlipayPaymentProvider implements PaymentProvider {
         } catch (NumberFormatException exception) {
             throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "支付宝通知金额无效");
         }
-        return new PaymentNotification(appId, orderNo, parsedAmount, tradeNo, tradeStatus, parseTime(paidAt));
+        return new PaymentNotification(METHOD, appId, orderNo, parsedAmount, tradeNo, tradeStatus, parseTime(paidAt));
     }
 
     /**

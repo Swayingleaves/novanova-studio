@@ -29,6 +29,7 @@ skills-lock.json
 volume/
 .agnes/
 /server/logs/
+/server/config/wechatpay/
 .agnes/
 /server/logs/
 .test-out*.txt

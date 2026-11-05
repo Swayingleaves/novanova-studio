@@ -59,6 +59,7 @@ public class TokenAuthenticationWebFilter implements WebFilter {
             PathPatternParser.defaultInstance.parse("/api/v1/community/listCommunityConfigs"),
             PathPatternParser.defaultInstance.parse("/api/v1/team/getPublicTeam"),
             PathPatternParser.defaultInstance.parse("/api/v1/payment/alipay/notify"),
+            PathPatternParser.defaultInstance.parse("/api/v1/payment/wechat/notify"),
             PathPatternParser.defaultInstance.parse("/api/v1/payment/alipay/return")
     );
 

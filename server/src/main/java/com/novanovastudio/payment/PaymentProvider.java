@@ -21,10 +21,16 @@ public interface PaymentProvider {
     String method();
 
     /**
-     * 创建支付渠道扫码支付页面地址。
+     * 获取当前支付渠道配置的应用标识。
+     * @return 应用标识，用于核对订单来源
+     */
+    String applicationId();
+
+    /**
+     * 创建支付页面地址或供前端生成二维码的渠道链接。
      *
      * @param order PaymentOrder 平台订单快照
-     * @return Mono<String> 可直接加载的支付页面地址
+     * @return Mono<String> 支付页面地址或二维码链接
      */
     Mono<String> createPayment(PaymentOrder order);
 
@@ -47,7 +53,7 @@ public interface PaymentProvider {
     /**
      * 关闭渠道上尚未支付的交易，使用户取消后二维码立即失效。
      *
-     * <p>实现必须容忍交易不存在、已支付等无法关闭的情形：本地取消不依赖渠道关单成功。</p>
+     * <p>渠道关单结果不明确时应返回错误，避免将仍可支付的交易标为已取消。</p>
      *
      * @param orderNo String 平台订单号
      * @return Mono<Void> 关闭完成信号
@@ -68,6 +74,7 @@ public interface PaymentProvider {
     /**
      * 已验签的支付渠道订单结果。
      *
+     * @param paymentMethod String 完成验签的支付渠道标识
      * @param appId String 支付应用标识
      * @param orderNo String 平台订单号
      * @param amount BigDecimal 渠道返回金额
@@ -75,7 +82,7 @@ public interface PaymentProvider {
      * @param tradeStatus String 渠道交易状态
      * @param paidAt OffsetDateTime 渠道支付时间
      */
-    record PaymentNotification(String appId, String orderNo, BigDecimal amount, String providerTradeNo,
+    record PaymentNotification(String paymentMethod, String appId, String orderNo, BigDecimal amount, String providerTradeNo,
                                String tradeStatus, OffsetDateTime paidAt) {
     }
 }
