@@ -23,4 +23,5 @@ logs
 .trae
 .maven-repository
 server/target
+server/config/wechatpay/
 **/node_modules
