@@ -10,7 +10,7 @@ test("平台积分支付请求不携带团队请求头", async () => {
     useTeamStore.setState({ ...previousTeam, team: { id: 101, teamSlug: "team1", name: "测试团队", logoUrl: "", enabled: true }, ready: true });
     globalThis.fetch = async (input, options) => {
         const headers = new Headers(options?.headers);
-        requests.push({ path: new URL(String(input)).pathname, teamId: headers.get("X-Team-Id") });
+        requests.push({ path: new URL(String(input)).pathname, teamId: headers.get("X-Team-Id"), body: options?.body ? JSON.parse(options.body) : null });
         const path = new URL(String(input)).pathname;
         const data = path.endsWith("listProducts")
             ? { products: [] }
@@ -22,11 +22,13 @@ test("平台积分支付请求不携带团队请求头", async () => {
     try {
         await listCreditProducts();
         await createCreditPurchaseOrder({ productId: 1, paymentMethod: "alipay" });
+        await createCreditPurchaseOrder({ productId: 1, paymentMethod: "wechat" });
         await getCreditPurchaseOrderStatus("order-1");
         assert.deepEqual(
             requests.map((request) => request.teamId),
-            [null, null, null],
+            [null, null, null, null],
         );
+        assert.deepEqual(requests[2].body, { productId: 1, paymentMethod: "wechat" });
     } finally {
         globalThis.fetch = previousFetch;
         useTeamStore.setState(previousTeam);

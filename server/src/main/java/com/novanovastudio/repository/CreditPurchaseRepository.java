@@ -209,6 +209,27 @@ public class CreditPurchaseRepository {
     }
 
     /**
+     * 按主键游标分页读取微信待支付订单，避免失败订单阻塞后续订单。
+     * @param afterId 上一批最后一个订单标识，首批为零
+     * @param scanBefore 本轮扫描开始时间，排除扫描中新增的订单
+     * @param limit 每批订单数量
+     * @return 本批待核对订单
+     */
+    public Mono<List<Order>> listPendingWechatOrders(long afterId, OffsetDateTime scanBefore, int limit) {
+        return databaseClient.sql("""
+                SELECT id, order_no, user_id, product_id, credits, price_amount, wallet_team_id, payment_method, status,
+                    provider_trade_no, expires_at, paid_at, created_at, first_purchase_bonus_credits, base_credits
+                FROM credit_purchase_orders
+                WHERE status = 'pending' AND payment_method = 'wechat' AND wallet_team_id = 0
+                    AND id > :afterId AND created_at <= :scanBefore
+                ORDER BY id ASC
+                LIMIT :limit
+                """)
+                .bind("afterId", afterId).bind("scanBefore", scanBefore).bind("limit", limit)
+                .map((row, metadata) -> order(row)).all().collectList();
+    }
+
+    /**
      * 查询用户最近的积分购买订单。
      *
      * @param userId Long 用户标识

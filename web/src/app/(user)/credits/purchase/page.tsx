@@ -4,7 +4,8 @@ import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 
 import { useTranslation } from "@/features/locale/use-translation";
 
-import { Alert, App, Button, Empty, Modal, Skeleton, Tag } from "antd";
+import { Alert, App, Button, Empty, Modal, QRCode, Skeleton, Tag } from "antd";
+import { WechatOutlined } from "@ant-design/icons";
 import { ArrowLeft, CheckCircle2, Clock, ExternalLink, Gift, LoaderCircle, QrCode, ScanLine, ShoppingCart, Ticket, WalletCards, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -46,6 +47,8 @@ export default function CreditPurchasePage() {
     const user = useUserStore((state) => state.user);
     const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
     const [paymentMethod, setPaymentMethod] = useState<"alipay" | "wechat">("alipay");
+    const [orderPaymentMethod, setOrderPaymentMethod] = useState("alipay");
+    const submittingRef = useRef(false);
     const [submitting, setSubmitting] = useState(false);
     const [openingPayment, setOpeningPayment] = useState(false);
     const [orderNo, setOrderNo] = useState(() => searchParams.get("orderNo") || "");
@@ -91,6 +94,9 @@ export default function CreditPurchasePage() {
         },
     });
     const orderStatus = orderStatusQuery.data;
+    // 已有订单的渠道与当前准备购买时选择的渠道分别保存，避免切换选项后显示错二维码。
+    const isWechatPayment = (orderStatus?.paymentMethod || orderPaymentMethod) === "wechat";
+    const scanPayTitle = translate(isWechatPayment ? "credits.wechatScanPay" : "credits.alipayScanPay");
     // 到账总额包含首充赠送，bonusCredits 为 0 时与订单积分一致。
     const paidTotalCredits = creditAmount(orderStatus?.credits || 0).add(creditAmount(orderStatus?.bonusCredits || 0));
 
@@ -126,7 +132,8 @@ export default function CreditPurchasePage() {
     const seconds = remainingSeconds % 60;
     const timeLeftText = `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 
-    const applyPayment = (response: { paymentUrl: string; priceAmount: string; expiresAt: string }, fallbackPriceAmount = "") => {
+    const applyPayment = (response: { paymentMethod: string; paymentUrl: string; priceAmount: string; expiresAt: string }, fallbackPriceAmount = "") => {
+        setOrderPaymentMethod(response.paymentMethod);
         setPaymentUrl(response.paymentUrl || "");
         paymentShownRef.current = Boolean(response.paymentUrl);
         setPaymentPriceAmount(response.priceAmount || fallbackPriceAmount);
@@ -142,7 +149,8 @@ export default function CreditPurchasePage() {
     }, [paymentUrl, orderNo]);
 
     const submitOrder = async () => {
-        if (!selectedProduct || paymentMethod !== "alipay") return;
+        if (!selectedProduct || submittingRef.current) return;
+        submittingRef.current = true;
         setSubmitting(true);
         try {
             const response = await createCreditPurchaseOrder({ productId: selectedProduct.id, paymentMethod });
@@ -151,6 +159,7 @@ export default function CreditPurchasePage() {
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("credits.paymentFailed"));
         } finally {
+            submittingRef.current = false;
             setSubmitting(false);
         }
     };
@@ -379,13 +388,21 @@ export default function CreditPurchasePage() {
                             </span>
                             {paymentMethod === "alipay" ? <CheckCircle2 className="size-5 text-[var(--studio-action)]" /> : null}
                         </button>
-                        <button type="button" disabled aria-disabled="true" className="flex min-h-16 items-center gap-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] px-4 text-left opacity-60">
-                            <WalletCards className="size-8 text-[var(--studio-muted)]" aria-hidden />
+                        <button
+                            type="button"
+                            aria-pressed={paymentMethod === "wechat"}
+                            onClick={() => setPaymentMethod("wechat")}
+                            className={cn(
+                                "flex min-h-16 items-center gap-3 rounded-lg border px-4 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]",
+                                paymentMethod === "wechat" ? "border-[var(--studio-action)] bg-[var(--studio-surface-soft)]" : "border-[var(--studio-line)] bg-[var(--studio-surface)] hover:border-[var(--studio-action)]",
+                            )}
+                        >
+                            <WechatOutlined className="text-3xl text-[var(--studio-action)]" aria-hidden />
                             <span className="min-w-0 flex-1">
                                 <span className="block font-medium text-[var(--studio-ink)]">{translate("credits.wechat")}</span>
-                                <span className="mt-1 block text-xs text-[var(--studio-muted)]">{translate("credits.comingSoon")}</span>
+                                <span className="mt-1 block text-xs text-[var(--studio-muted)]">{translate("credits.wechatAvailable")}</span>
                             </span>
-                            <Tag>{translate("credits.comingSoon")}</Tag>
+                            {paymentMethod === "wechat" ? <CheckCircle2 className="size-5 text-[var(--studio-action)]" /> : null}
                         </button>
                     </div>
                     <div className="mt-5 flex flex-col gap-3 border-t border-[var(--studio-line)] pt-5 sm:flex-row sm:items-center sm:justify-between">
@@ -399,14 +416,7 @@ export default function CreditPurchasePage() {
                                   })
                                 : translate("credits.selectProductFirst")}
                         </div>
-                        <Button
-                            type="primary"
-                            size="large"
-                            disabled={!selectedProduct || paymentMethod !== "alipay" || submitting}
-                            loading={submitting}
-                            icon={submitting ? <LoaderCircle className="size-4" /> : <ShoppingCart className="size-4" />}
-                            onClick={() => void submitOrder()}
-                        >
+                        <Button type="primary" size="large" disabled={!selectedProduct || submitting} loading={submitting} icon={submitting ? <LoaderCircle className="size-4" /> : <ShoppingCart className="size-4" />} onClick={() => void submitOrder()}>
                             {translate("credits.goToPay")}
                         </Button>
                     </div>
@@ -432,7 +442,7 @@ export default function CreditPurchasePage() {
                             </div>
                             {orderStatus?.status === "pending" ? (
                                 <Button icon={<QrCode className="size-4" />} loading={openingPayment} onClick={() => void openPayment()}>
-                                    {translate("credits.alipayScanPay")}
+                                    {scanPayTitle}
                                 </Button>
                             ) : null}
                         </div>
@@ -453,7 +463,7 @@ export default function CreditPurchasePage() {
                     </section>
                 ) : null}
 
-                {/* 支付宝扫码支付弹窗 */}
+                {/* 按订单渠道展示支付宝支付页面或微信 Native 二维码。 */}
                 <Modal open={isModalOpen} onCancel={closePaymentModal} footer={null} width={380} centered mask={{ closable: true }}>
                     <div className="pt-2 text-center">
                         {orderStatus?.status === "paid" ? (
@@ -468,8 +478,8 @@ export default function CreditPurchasePage() {
                         ) : (
                             <div>
                                 <div className="flex items-center justify-center gap-2">
-                                    <img src="/payment/alipay.png" alt="支付宝" className="size-6 rounded object-contain" />
-                                    <span className="text-base font-semibold text-[var(--studio-ink)]">{translate("credits.alipayScanPay")}</span>
+                                    {isWechatPayment ? <WechatOutlined className="text-2xl text-[var(--studio-action)]" aria-hidden /> : <img src="/payment/alipay.png" alt="支付宝" className="size-6 rounded object-contain" />}
+                                    <span className="text-base font-semibold text-[var(--studio-ink)]">{scanPayTitle}</span>
                                 </div>
 
                                 <div className="mt-3">
@@ -488,7 +498,15 @@ export default function CreditPurchasePage() {
                                 {/* 支付宝前置模式页面把二维码画在视口左上角，尺寸正好等于 qrcode_width（后端 AlipayPaymentProvider.QRCODE_WIDTH=200），
                                     iframe 必须与二维码等大，多出来的空间会全落到右下角、看起来不居中。 */}
                                 <div className="relative mx-auto mt-4 flex size-[240px] items-center justify-center rounded-xl border border-[var(--studio-line)] bg-white p-4 shadow-xs">
-                                    {paymentUrl ? <iframe src={paymentUrl} title={translate("credits.alipayScanPay")} className="size-[200px] border-0" scrolling="no" /> : <LoaderCircle className="size-8 animate-spin text-[var(--studio-muted)]" />}
+                                    {paymentUrl ? (
+                                        isWechatPayment ? (
+                                            <QRCode value={paymentUrl} size={200} marginSize={4} bordered={false} color="#000000" bgColor="#ffffff" />
+                                        ) : (
+                                            <iframe src={paymentUrl} title={scanPayTitle} className="size-[200px] border-0" scrolling="no" />
+                                        )
+                                    ) : (
+                                        <LoaderCircle className="size-8 animate-spin text-[var(--studio-muted)]" />
+                                    )}
                                     {remainingSeconds <= 0 ? (
                                         <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-white/95 p-4 text-center backdrop-blur-xs">
                                             <XCircle className="mb-2 size-8 text-rose-500" />
@@ -497,7 +515,7 @@ export default function CreditPurchasePage() {
                                     ) : null}
                                 </div>
 
-                                {paymentUrl ? (
+                                {paymentUrl && !isWechatPayment ? (
                                     <a href={paymentUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-[var(--studio-action)] hover:underline">
                                         <ExternalLink className="size-3" />
                                         {translate("credits.openQrInNewTab")}
@@ -507,7 +525,7 @@ export default function CreditPurchasePage() {
                                 <div className="mt-4 flex flex-col items-center gap-1">
                                     <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--studio-ink)]">
                                         <ScanLine className="size-3.5 text-[var(--studio-primary)]" />
-                                        <span>{translate("credits.scanWithAlipay")}</span>
+                                        <span>{translate(isWechatPayment ? "credits.scanWithWechat" : "credits.scanWithAlipay")}</span>
                                     </div>
                                     <span className="text-[11px] text-[var(--studio-muted)]">{translate("credits.autoCloseAfterPaid")}</span>
                                 </div>

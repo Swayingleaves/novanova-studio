@@ -502,7 +502,38 @@ public class CreationAgentOrchestrator {
                                 .then(isRequestCancellationRequested(active))
                                 .flatMap(canceledAfterAppend -> Boolean.TRUE.equals(canceledAfterAppend)
                                         ? Mono.empty()
+                                        : request.chatMode()
+                                        ? executeChatGeneration(userId, session, request, active)
                                         : createAndExecutePlan(userId, session, request, active)));
+    }
+
+    /**
+     * Chat 模式执行：跳过主Agent规划、计划校验、子Agent决策和提示词优化，直接创建生成任务。
+     * <p>
+     * 复用生成 Profile 的工具执行链路，因此任务落库、扣费、生成记录、进度事件和取消语义与 Agent 模式一致。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 会话
+     * @param request AgentChatRequest 对话请求
+     * @param active ActiveRequestExecution 当前请求执行上下文
+     * @return Mono<Void> 执行完成信号
+     */
+    private Mono<Void> executeChatGeneration(Long userId, AgentSession session, AgentChatRequest request,
+                                             ActiveRequestExecution active) {
+        return isRequestCancellationRequested(active)
+                .flatMap(canceled -> Boolean.TRUE.equals(canceled)
+                        ? Mono.empty()
+                        : planExecutor.executeDirectGeneration(userId, session.id(), request))
+                .flatMap(result -> {
+                    boolean canceled = result.data() != null && Boolean.TRUE.equals(result.data().get("canceled"));
+                    String status = canceled ? "canceled" : result.ok() ? "success" : "failed";
+                    SystemMessage summary = "success".equals(status)
+                            ? SystemMessage.of("system.chatGenerationCompleted")
+                            : canceled ? SystemMessage.of("system.generationStopped")
+                            : SystemMessage.of("system.externalFailure", result.message());
+                    active.setCompletion(status, summary);
+                    return completeWithMessage(userId, session.id(), summary, null);
+                });
     }
 
     /**
@@ -1264,7 +1295,7 @@ public class CreationAgentOrchestrator {
      * @return Mono<AgentChatRequest> 合并历史风格后的请求
      */
     private Mono<AgentChatRequest> resolveRetryRequest(Long userId, AgentSession session, AgentChatRequest request) {
-        if (!isRetryMessage(request.message()) || hasGenerationStyles(request.creationSettings())) {
+        if (request.chatMode() || !isRetryMessage(request.message()) || hasGenerationStyles(request.creationSettings())) {
             return Mono.just(request);
         }
         return planRepository.findLatestCreationSettings(userId, session.id())
@@ -1765,6 +1796,13 @@ public class CreationAgentOrchestrator {
                 && !"imagePage".equals(request.entrySource()) && !"videoPage".equals(request.entrySource()) && !"canvas".equals(request.entrySource())) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidSkillEntry"));
         }
+        if (StringUtils.hasText(request.mode()) && !"agent".equals(request.mode()) && !"chat".equals(request.mode())) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidAgentChatMode"));
+        }
+        if ("chat".equals(request.mode())
+                && !"imagePage".equals(request.entrySource()) && !"videoPage".equals(request.entrySource())) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.chatModeOnlySupportsCreationPages"));
+        }
     }
 
     /**
@@ -2090,7 +2128,7 @@ public class CreationAgentOrchestrator {
     private AgentChatRequest requestWithSessionId(AgentChatRequest request, String sessionId) {
         return new AgentChatRequest(sessionId, request.entrySource(), request.message(), request.canvasSnapshot(),
                 request.references(), request.attachments(), request.history(), request.creationSettings(),
-                request.skillId(), request.settingGraphNodeId(), request.settingGraphSkillSnapshot());
+                request.skillId(), request.settingGraphNodeId(), request.settingGraphSkillSnapshot(), request.mode());
     }
 
     /**

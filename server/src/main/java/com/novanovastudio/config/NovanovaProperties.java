@@ -40,6 +40,49 @@ public class NovanovaProperties {
     /** 支付宝电脑网站支付配置 */
     private Alipay alipay = new Alipay();
 
+    /** 微信 Native 扫码支付配置。 */
+    private Wechat wechat = new Wechat();
+
+    /**
+     * 获取微信支付配置。
+     * @return 微信支付配置
+     */
+    public Wechat getWechat() {
+        return wechat;
+    }
+
+    /**
+     * 设置微信支付配置。
+     * @param wechat 微信支付配置
+     */
+    public void setWechat(Wechat wechat) {
+        this.wechat = wechat;
+    }
+
+    /**
+     * 普通商户 APIv3 支付配置，使用自动更新的平台证书验签。
+     * @author zhenglin.cn.cq@gmail.com
+     * @date 2026-11-05 14:00
+     */
+    @lombok.Data
+    public static class Wechat {
+        /** 是否启用微信支付。 */
+        private boolean enabled;
+        /** 已与商户号绑定的公众账号标识。 */
+        private String appId = "";
+        /** 直接收款的普通商户号。 */
+        private String merchantId = "";
+        /** 商户 API 私钥文件路径，仅供服务端读取。 */
+        private String privateKeyPath = "";
+        /** 商户 API 证书序列号。 */
+        private String merchantSerialNumber = "";
+        /** 用于解密回调和平台证书的 APIv3 密钥。 */
+        @lombok.ToString.Exclude
+        private String apiV3Key = "";
+        /** 微信可访问且不含查询参数的 HTTPS 支付通知地址。 */
+        private String notifyUrl = "";
+    }
+
     /**
      * 获取应用配置
      *

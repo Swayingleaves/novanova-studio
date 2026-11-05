@@ -27,6 +27,7 @@ import com.novanovastudio.task.AiTaskEventPublisher;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.Map;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -81,6 +82,8 @@ class CreditPurchaseServiceTest {
         properties.getAlipay().setAppId("app-id");
         redisTemplate = mock(ReactiveStringRedisTemplate.class);
         when(providerRegistry.require("alipay")).thenReturn(provider);
+        when(providerRegistry.require("wechat")).thenReturn(provider);
+        when(provider.applicationId()).thenReturn("app-id");
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(42L));
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -129,6 +132,9 @@ class CreditPurchaseServiceTest {
         assertEquals(order.expiresAt(), paymentOrder.getValue().expiresAt());
         verify(purchaseRepository).createOrder(anyString(), eq(42L), eq(7L), eq(new BigDecimal("20")), eq(new BigDecimal("25")),
                 eq(new BigDecimal("2.00")), eq("alipay"), any(OffsetDateTime.class));
+        ArgumentCaptor<String> generatedOrderNo = ArgumentCaptor.forClass(String.class);
+        verify(purchaseRepository).createOrder(generatedOrderNo.capture(), eq(42L), eq(7L), any(), any(), any(), eq("alipay"), any());
+        assertEquals(32, generatedOrderNo.getValue().length());
     }
 
     /** 已支付或已关闭的订单不得重新签发支付地址。 */
@@ -333,6 +339,149 @@ class CreditPurchaseServiceTest {
         verify(creditRepository, never()).changeBalance(anyLong(), any(BigDecimal.class));
     }
 
+    /** 微信重复成功通知只入账一次，首充赠送仍在原结算流程内发放。 */
+    @Test
+    void shouldSettleWechatNotificationOnlyOnceWithFirstPurchaseBonus() {
+        CreditPurchaseRepository.Order pending = wechatOrder("order-1", "pending", false);
+        CreditPurchaseRepository.Order paid = wechatOrder("order-1", "paid", false);
+        when(provider.verifyNotification(any())).thenReturn(Mono.just(wechatNotification("order-1", "2.00", "SUCCESS")));
+        when(purchaseRepository.findOrder("order-1")).thenReturn(Mono.just(pending), Mono.just(paid));
+        prepareWechatSettlement();
+        when(creditRepository.getFirstPurchaseBonusPercent()).thenReturn(Mono.just(new BigDecimal("50")));
+        when(purchaseRepository.claimFirstPurchaseBonus(42L, "order-1", new BigDecimal("10.000000"))).thenReturn(Mono.just(new BigDecimal("10.000000")));
+        when(creditRepository.changeBalance(42L, new BigDecimal("10.000000"))).thenReturn(Mono.just(new BigDecimal("130")));
+        when(creditRepository.createFirstPurchaseBonusTransaction(eq(42L), eq("order-1"), eq(new BigDecimal("10.000000")), any(), anyString()))
+                .thenReturn(Mono.just(100L));
+
+        StepVerifier.create(purchaseService.handleWechatNotification(Map.of()).then(purchaseService.handleWechatNotification(Map.of())))
+                .verifyComplete();
+
+        verify(creditRepository).changeBalance(42L, new BigDecimal("20"));
+        verify(creditRepository).changeBalance(42L, new BigDecimal("10.000000"));
+        verify(purchaseRepository).claimOrderForSettlement("order-1", "trade-1");
+        verify(eventPublisher).publish(eq(42L), any());
+    }
+
+    /** 微信通知不得为支付宝订单结算，金额不符也不能进入事务。 */
+    @Test
+    void shouldRejectCrossChannelAndIncorrectWechatAmount() {
+        when(provider.verifyNotification(any())).thenReturn(Mono.just(wechatNotification("order-1", "2.00", "SUCCESS")));
+        when(purchaseRepository.findOrder("order-1")).thenReturn(Mono.just(order("order-1", "pending", "20", "2.00", null)));
+        StepVerifier.create(purchaseService.handleWechatNotification(Map.of())).expectError(BusinessException.class).verify();
+
+        when(purchaseRepository.findOrder("order-1")).thenReturn(Mono.just(wechatOrder("order-1", "pending", false)));
+        when(provider.verifyNotification(any())).thenReturn(Mono.just(wechatNotification("order-1", "3.00", "SUCCESS")));
+        StepVerifier.create(purchaseService.handleWechatNotification(Map.of())).expectError(BusinessException.class).verify();
+        verify(purchaseRepository, never()).claimOrderForSettlement(anyString(), anyString());
+    }
+
+    /** 过期时查到微信支付成功必须补发积分，不能关闭已经付款的订单。 */
+    @Test
+    void shouldSettleExpiredWechatOrderFoundPaid() {
+        CreditPurchaseRepository.Order expired = wechatOrder("order-1", "pending", true);
+        when(purchaseRepository.findOrder("order-1", 42L)).thenReturn(Mono.just(expired));
+        when(purchaseRepository.findOrder("order-1")).thenReturn(Mono.just(expired));
+        when(provider.queryOrder("order-1")).thenReturn(Mono.just(wechatNotification("order-1", "2.00", "SUCCESS")));
+        prepareWechatSettlement();
+
+        StepVerifier.create(purchaseService.getOrderStatus("order-1")).expectNextCount(1).verifyComplete();
+        verify(creditRepository).changeBalance(42L, new BigDecimal("20"));
+        verify(provider, never()).closePayment(anyString());
+        verify(purchaseRepository, never()).closeExpiredOrder(anyString());
+    }
+
+    /** 取消微信订单时，查单或关单失败均不得修改本地状态。 */
+    @Test
+    void shouldKeepWechatOrderPendingWhenCancellationIsUncertain() {
+        when(purchaseRepository.findOrder("order-1", 42L)).thenReturn(Mono.just(wechatOrder("order-1", "pending", false)));
+        when(provider.queryOrder("order-1")).thenReturn(Mono.error(new IllegalStateException("模拟网络超时")));
+        StepVerifier.create(purchaseService.cancelOrder("order-1")).expectError().verify();
+        verify(provider, never()).closePayment(anyString());
+
+        when(provider.queryOrder("order-1")).thenReturn(Mono.just(wechatNotification("order-1", "2.00", "NOTPAY")));
+        when(provider.closePayment("order-1")).thenReturn(Mono.error(new IllegalStateException("模拟关单结果不明")));
+        StepVerifier.create(purchaseService.cancelOrder("order-1")).expectError().verify();
+        verify(purchaseRepository, never()).cancelOrder(anyString(), anyLong());
+    }
+
+    /** 微信已收款但回调未达时，取消动作必须补单，不能执行关单。 */
+    @Test
+    void shouldSettleBeforeRejectingCancellationOfPaidWechatOrder() {
+        CreditPurchaseRepository.Order pending = wechatOrder("order-1", "pending", false);
+        when(purchaseRepository.findOrder("order-1", 42L)).thenReturn(Mono.just(pending));
+        when(purchaseRepository.findOrder("order-1")).thenReturn(Mono.just(pending));
+        when(provider.queryOrder("order-1")).thenReturn(Mono.just(wechatNotification("order-1", "2.00", "SUCCESS")));
+        prepareWechatSettlement();
+
+        StepVerifier.create(purchaseService.cancelOrder("order-1")).expectError(BusinessException.class).verify();
+        verify(creditRepository).changeBalance(42L, new BigDecimal("20"));
+        verify(provider, never()).closePayment(anyString());
+        verify(purchaseRepository, never()).cancelOrder(anyString(), anyLong());
+    }
+
+    /** 重新打开已过期微信订单时，查单失败不能直接关闭本地订单。 */
+    @Test
+    void shouldKeepExpiredWechatOrderWhenReissuingPaymentFailsToQuery() {
+        when(purchaseRepository.findOrder("order-1", 42L)).thenReturn(Mono.just(wechatOrder("order-1", "pending", true)));
+        when(provider.queryOrder("order-1")).thenReturn(Mono.error(new IllegalStateException("模拟查单失败")));
+        StepVerifier.create(purchaseService.getOrderPayment("order-1")).expectError().verify();
+        verify(purchaseRepository, never()).closeExpiredOrder(anyString());
+        verify(provider, never()).createPayment(any());
+    }
+
+    /** 微信关单成功后才允许关闭本地过期订单。 */
+    @Test
+    void shouldCloseExpiredWechatOrderAfterRemoteClosure() {
+        when(purchaseRepository.findOrder("order-1", 42L)).thenReturn(Mono.just(wechatOrder("order-1", "pending", true)), Mono.just(wechatOrder("order-1", "closed", true)));
+        when(provider.queryOrder("order-1")).thenReturn(Mono.just(wechatNotification("order-1", "2.00", "NOTPAY")));
+        when(provider.closePayment("order-1")).thenReturn(Mono.error(new IllegalStateException("模拟关单失败")));
+        StepVerifier.create(purchaseService.getOrderStatus("order-1")).expectError().verify();
+        verify(purchaseRepository, never()).closeExpiredOrder(anyString());
+
+        when(purchaseRepository.findOrder("order-1", 42L)).thenReturn(Mono.just(wechatOrder("order-1", "pending", true)), Mono.just(wechatOrder("order-1", "closed", true)));
+        when(provider.closePayment("order-1")).thenReturn(Mono.empty());
+        when(purchaseRepository.closeExpiredOrder("order-1")).thenReturn(Mono.empty());
+        StepVerifier.create(purchaseService.getOrderStatus("order-1")).assertNext(status -> assertEquals("closed", status.status())).verifyComplete();
+        verify(purchaseRepository).closeExpiredOrder("order-1");
+    }
+
+    /** 后台扫描不依赖当前登录用户，单笔查单失败也继续处理后续订单。 */
+    @Test
+    void shouldReconcileNextWechatOrderAfterOneFailure() {
+        when(purchaseRepository.listPendingWechatOrders(eq(0L), any(), eq(100))).thenReturn(Mono.just(List.of(
+                wechatOrder("order-1", "pending", true), wechatOrder("order-2", "pending", true))));
+        when(provider.queryOrder("order-1")).thenReturn(Mono.error(new IllegalStateException("模拟第一笔查单失败")));
+        when(provider.queryOrder("order-2")).thenReturn(Mono.empty());
+        when(provider.closePayment("order-2")).thenReturn(Mono.empty());
+        when(purchaseRepository.closeExpiredOrder("order-2")).thenReturn(Mono.empty());
+        when(purchaseRepository.findOrder("order-2", 42L)).thenReturn(Mono.just(wechatOrder("order-2", "closed", true)));
+
+        StepVerifier.create(purchaseService.reconcileWechatOrders().contextWrite(context -> new TeamScope(9L, "member").apply(context))).verifyComplete();
+        verify(purchaseRepository).closeExpiredOrder("order-2");
+        verify(purchaseRepository, never()).closeExpiredOrder("order-1");
+        verify(currentUserProvider, never()).currentUserId();
+    }
+
+    /** 准备微信主入账及零首充赠送的成功事务。 */
+    private void prepareWechatSettlement() {
+        when(purchaseRepository.claimOrderForSettlement("order-1", "trade-1")).thenReturn(Mono.just(wechatOrder("order-1", "processing", false)));
+        when(creditRepository.changeBalance(42L, new BigDecimal("20"))).thenReturn(Mono.just(new BigDecimal("120")));
+        when(creditRepository.createCreditPurchaseTransaction(eq(42L), eq("order-1"), eq(new BigDecimal("20")), any(), anyString())).thenReturn(Mono.just(99L));
+        when(purchaseRepository.markOrderPaid(eq("order-1"), any())).thenReturn(Mono.empty());
+    }
+
+    /** 构造属于平台钱包的微信订单。 */
+    private CreditPurchaseRepository.Order wechatOrder(String orderNo, String status, boolean expired) {
+        return new CreditPurchaseRepository.Order(1L, orderNo, 42L, 7L, new BigDecimal("20"), new BigDecimal("2.00"),
+                0L, "wechat", status, "pending".equals(status) ? null : "trade-1", OffsetDateTime.now().plusMinutes(expired ? -1 : 10),
+                "paid".equals(status) ? OffsetDateTime.now() : null, OffsetDateTime.now(), BigDecimal.ZERO, new BigDecimal("20"));
+    }
+
+    /** 构造已经由渠道验签的微信交易状态。 */
+    private PaymentProvider.PaymentNotification wechatNotification(String orderNo, String amount, String status) {
+        return new PaymentProvider.PaymentNotification("wechat", "app-id", orderNo, new BigDecimal(amount), "trade-1", status, OffsetDateTime.now());
+    }
+
     /** 未配置前端公开地址时不得构造未经确认的同步回跳地址。 */
     @Test
     void shouldRejectMissingFrontendReturnUrl() {
@@ -391,7 +540,7 @@ class CreditPurchaseServiceTest {
     /** 构造已验签的支付宝通知。 */
     private PaymentProvider.PaymentNotification notification(String appId, String orderNo, String amount,
                                                              String tradeNo, String tradeStatus) {
-        return new PaymentProvider.PaymentNotification(appId, orderNo, new BigDecimal(amount), tradeNo, tradeStatus, OffsetDateTime.now());
+        return new PaymentProvider.PaymentNotification("alipay", appId, orderNo, new BigDecimal(amount), tradeNo, tradeStatus, OffsetDateTime.now());
     }
 
     /** 断言通知被服务端拒绝。 */

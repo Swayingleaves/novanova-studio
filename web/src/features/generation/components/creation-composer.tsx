@@ -4,12 +4,13 @@ import { currentLanguageTag } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { App, Button, Input, Popover, Tooltip } from "antd";
+import { App, Button, Input, Popover, Segmented, Tooltip } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { ArrowUp, BookOpenText, Bot, LoaderCircle, Square, X } from "lucide-react";
 
-import type { CreationComposerProps } from "@/features/generation/components/creation-workspace-types";
+import type { CreationComposerProps, CreationStyleOption } from "@/features/generation/components/creation-workspace-types";
+import type { CreationMode } from "@/features/generation/lib/creation-mode-preference";
 import { CreditCostDisplay } from "@/features/generation/constants/credits";
 import { GenerationStyleCover, GenerationStyleMenu } from "@/features/generation/components/generation-style-picker";
 import { filterGenerationStyles, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
@@ -33,6 +34,8 @@ export function CreationComposer({
     skillLoading,
     skillError,
     actions,
+    creationMode,
+    onCreationModeChange,
     running,
     queued = false,
     canSubmit,
@@ -64,8 +67,10 @@ export function CreationComposer({
     const toolbarActions = actions.filter((action) => action.placement !== "submit");
     const submitActions = actions.filter((action) => action.placement === "submit");
     const requestActive = running || queued;
+    const chatMode = creationMode === "chat";
     const availableStyles = styleOptions ?? [];
-    const activeStyles = selectedStyles ?? [];
+    const activeStyles: CreationStyleOption[] = chatMode ? [] : selectedStyles ?? [];
+    const activeSkill = chatMode ? null : selectedSkill;
     const availableSkills = skillOptions ?? [];
     const filteredStyles = useMemo(() => {
         return filterGenerationStyles(availableStyles, styleQuery);
@@ -92,9 +97,17 @@ export function CreationComposer({
         setHighlightedStyleIndex((current) => Math.min(current, Math.max(0, filteredStyles.length - 1)));
     }, [filteredStyles.length]);
 
+    useEffect(() => {
+        if (!chatMode) return;
+        setStyleMenuOpenState(false);
+        setStyleCommand(null);
+        setStyleQuery("");
+        setSkillMenuOpen(false);
+    }, [chatMode]);
+
     const updatePrompt = (nextValue: string, cursor: number) => {
         onChange(nextValue);
-        const command = getStyleCommandRange(nextValue, cursor);
+        const command = chatMode ? null : getStyleCommandRange(nextValue, cursor);
         if (!command) {
             setStyleCommand(null);
             closeStyleMenu();
@@ -136,7 +149,7 @@ export function CreationComposer({
     };
 
     const pasteStyleMessage = (pastedText: string) => {
-        if (!onStyleSelect) return false;
+        if (chatMode || !onStyleSelect) return false;
         const parsed = parseGenerationStyleMessage(pastedText, availableStyles);
         if (!parsed) return false;
         const textarea = inputRef.current?.resizableTextArea?.textArea;
@@ -246,13 +259,13 @@ export function CreationComposer({
                     </div>
                     {notice}
 
-                    {references.length || activeStyles.length || selectedSkill ? (
+                    {references.length || activeStyles.length || activeSkill ? (
                         <div className={`flex flex-wrap gap-2 overflow-hidden transition-all duration-200 ${compact ? "invisible mb-0 max-h-0 opacity-0" : "mb-3 max-h-56 opacity-100"}`}>
-                            {selectedSkill ? (
+                            {activeSkill ? (
                                 <div className="creation-composer-chip">
-                                    <GenerationStyleCover style={selectedSkill} className="size-5 shrink-0 overflow-hidden rounded-sm" />
-                                    <span className="min-w-0 max-w-32 truncate text-xs font-medium text-[var(--studio-muted)]">{selectedSkill.name}</span>
-                                    <button type="button" className="creation-composer-chip-remove" onClick={onSkillRemove} aria-label={translate("generation.removeSkill", { value0: selectedSkill.name })}>
+                                    <GenerationStyleCover style={activeSkill} className="size-5 shrink-0 overflow-hidden rounded-sm" />
+                                    <span className="min-w-0 max-w-32 truncate text-xs font-medium text-[var(--studio-muted)]">{activeSkill.name}</span>
+                                    <button type="button" className="creation-composer-chip-remove" onClick={onSkillRemove} aria-label={translate("generation.removeSkill", { value0: activeSkill.name })}>
                                         <X className="size-3.5" />
                                     </button>
                                 </div>
@@ -307,6 +320,7 @@ export function CreationComposer({
                             loading={styleLoading}
                             error={styleError}
                             open={styleMenuOpen}
+                            disabled={chatMode}
                             query={styleQuery}
                             highlightedIndex={highlightedStyleIndex}
                             placement="topLeft"
@@ -321,16 +335,31 @@ export function CreationComposer({
                         />
                         <SkillMenu
                             skills={availableSkills}
-                            selectedSkill={selectedSkill}
+                            selectedSkill={activeSkill}
                             loading={skillLoading}
                             error={skillError}
                             open={skillMenuOpen}
+                            disabled={chatMode}
                             onOpenChange={setSkillMenuOpen}
                             onSelect={onSkillSelect}
                         />
                         {toolbarActions.map(renderAction)}
                         <div className="flex-1" />
                         <div className="flex shrink-0 items-center gap-2">
+                            <Tooltip title={requestActive ? translate("generation.modeSwitchLocked") : chatMode ? translate("generation.switchToAgentMode") : translate("generation.switchToChatMode")}>
+                                <span className="inline-flex h-9 items-center" data-tour="composer-mode">
+                                    <Segmented
+                                        className="creation-composer-mode"
+                                        value={chatMode ? "chat" : "agent"}
+                                        options={[
+                                            { label: translate("generation.agentModeShort"), value: "agent" },
+                                            { label: translate("generation.chatModeShort"), value: "chat" },
+                                        ]}
+                                        disabled={requestActive}
+                                        onChange={(value) => onCreationModeChange?.(value as CreationMode)}
+                                    />
+                                </span>
+                            </Tooltip>
                             {submitActions.map(renderAction)}
                             {requestActive && onStop ? (
                                 <Tooltip title={queued ? translate("generation.leaveQueue") : translate("generation.stopGeneration")}>
@@ -379,6 +408,7 @@ function SkillMenu({
     loading,
     error,
     open,
+    disabled,
     onOpenChange,
     onSelect,
 }: {
@@ -387,6 +417,7 @@ function SkillMenu({
     loading?: boolean;
     error?: string | null;
     open: boolean;
+    disabled?: boolean;
     onOpenChange: (open: boolean) => void;
     onSelect?: (skill: SkillOption) => void;
 }) {
@@ -452,15 +483,18 @@ function SkillMenu({
             getPopupContainer={() => document.body}
             destroyOnHidden
             content={content}
-            onOpenChange={onOpenChange}
+            onOpenChange={(nextOpen) => {
+                if (disabled && nextOpen) return;
+                onOpenChange(nextOpen);
+            }}
             styles={{
                 root: { filter: "none" },
                 container: { padding: 8, background: "var(--studio-surface)", border: "1px solid var(--studio-line)", borderRadius: 8, boxShadow: "var(--studio-shadow)" },
             }}
         >
             <span className="inline-flex">
-                <Tooltip title={selectedSkill ? translate("generation.selectedSkill", { value0: selectedSkill.name }) : translate("generation.selectSkill")}>
-                    <Button size="small" className="creation-composer-action" icon={<BookOpenText className="size-3.5" />} aria-expanded={open} aria-haspopup="dialog">
+                <Tooltip title={disabled ? translate("generation.unavailableInChatMode") : selectedSkill ? translate("generation.selectedSkill", { value0: selectedSkill.name }) : translate("generation.selectSkill")}>
+                    <Button size="small" className="creation-composer-action" icon={<BookOpenText className="size-3.5" />} disabled={disabled} aria-expanded={open} aria-haspopup="dialog">
                         {translate("generation.skill_99aea2")}</Button>
                 </Tooltip>
             </span>

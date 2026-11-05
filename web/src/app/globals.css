@@ -1714,6 +1714,45 @@ html[data-theme="purple"] {
     flex: 1 1 auto;
 }
 
+.creation-composer-mode.ant-segmented {
+    background: var(--studio-surface-raised);
+    border-radius: 8px;
+    padding: 2px;
+}
+
+.creation-composer-mode.ant-segmented .ant-segmented-item {
+    min-width: 54px;
+    border-radius: 6px;
+    color: var(--studio-muted);
+}
+
+.creation-composer-mode.ant-segmented .ant-segmented-item-label {
+    min-height: 28px;
+    line-height: 28px;
+    padding-inline: 10px;
+    font-size: 12px;
+}
+
+.creation-composer-mode.ant-segmented .ant-segmented-item-selected,
+.creation-composer-mode.ant-segmented .ant-segmented-thumb {
+    background: var(--studio-action);
+    border-radius: 6px;
+    box-shadow: none;
+}
+
+.creation-composer-mode.ant-segmented .ant-segmented-item-selected {
+    color: var(--studio-action-foreground);
+    font-weight: 500;
+}
+
+.creation-composer-mode.ant-segmented .ant-segmented-item:not(.ant-segmented-item-selected):hover {
+    color: var(--studio-action);
+}
+
+.creation-composer-mode.ant-segmented .ant-segmented-item:not(.ant-segmented-item-selected):hover::after {
+    background: var(--studio-primary-soft);
+}
+
 .creation-composer-submit.ant-btn,
 .creation-composer-submit-trigger {
     align-items: center;

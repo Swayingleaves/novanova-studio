@@ -88,7 +88,7 @@ export default function CreditOrdersPage() {
             title: translate("credits.paymentMethod"),
             dataIndex: "paymentMethod",
             width: 120,
-            render: (paymentMethod: string) => <span className="text-[var(--studio-muted)]">{paymentMethod === "alipay" ? translate("credits.alipay") : paymentMethod}</span>,
+            render: (paymentMethod: string) => <span className="text-[var(--studio-muted)]">{paymentMethod === "alipay" ? translate("credits.alipay") : paymentMethod === "wechat" ? translate("credits.wechat") : paymentMethod}</span>,
         },
         {
             title: translate("credits.status"),

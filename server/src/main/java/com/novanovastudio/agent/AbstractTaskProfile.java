@@ -512,9 +512,17 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
             Duration timeout = AiTaskTypes.VIDEO.equals(taskType())
                     ? Duration.ofSeconds(properties.getAi().getTask().getVideoWaitTimeoutSeconds())
                     : Duration.ofSeconds(properties.getAi().getTask().getWaitTimeoutSeconds());
-            return Flux.interval(Duration.ZERO, pollingInterval)
-            .take(timeout)
-            .concatMap(i -> aiTaskService.getTaskForUser(userId, taskId))
+            Flux<AiTaskDtos.AiGenerationTaskResponse> polled = Flux.interval(Duration.ZERO, pollingInterval)
+                    .take(timeout)
+                    .concatMap(i -> aiTaskService.getTaskForUser(userId, taskId));
+            // 任务事件优先返回、轮询兜底：状态变化立即唤醒等待链路，避免受轮询间隔影响
+            Flux<AiTaskDtos.AiGenerationTaskResponse> pushed = aiTaskService.watchTask(taskId)
+                    .take(timeout)
+                    .onErrorResume(exception -> {
+                        log.warn("订阅AI任务事件失败，回退轮询: taskId={}, 原因={}", taskId, exception.getMessage());
+                        return Flux.empty();
+                    });
+            return Flux.merge(polled, pushed)
             .concatMap(task -> {
                 // 先更新后端活动快照，再保存轮次，确保数据库中的执行过程与当前进度一致。
                 emitter.emit(userId, AgentEvent.progress(sessionId, callId, taskId,

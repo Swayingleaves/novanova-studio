@@ -19,6 +19,8 @@ type UseAgentChatSSEProps = {
   entrySource: "imagePage" | "videoPage" | "canvas";
   creationSettings?: CreationSettings;
   skillId?: string;
+  /** 对话模式：agent 由主 Agent 规划优化，chat 跳过规划直接生成。 */
+  mode?: "agent" | "chat";
   onTextDelta?: (messageId: string, delta: string) => void;
   onThoughtDelta?: (thoughtId: string, delta: string) => void;
   onThoughtComplete?: (thoughtId: string, durationMs: number) => void;
@@ -56,7 +58,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
     const translate = useTranslation();
   const locale = useLocale();
   const subscribedLocale = useRef(locale);
-  const { entrySource, creationSettings, skillId } = props;
+  const { entrySource, creationSettings, skillId, mode } = props;
 
   const sessionIdRef = useRef<string | undefined>(undefined);
   const requestIdRef = useRef<string | undefined>(undefined);
@@ -345,6 +347,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
           sessionId: previousSessionId,
           entrySource,
           message,
+          mode,
           attachments,
           creationSettings: settingsOverride || creationSettings,
           skillId: skillIdOverride ?? skillId,
@@ -389,7 +392,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
         sendingRef.current = false;
       }
     },
-    [entrySource, creationSettings, skillId, cancelSession, completePendingCancellation, flushPendingEvents, markRequestTerminal]
+    [entrySource, creationSettings, skillId, mode, cancelSession, completePendingCancellation, flushPendingEvents, markRequestTerminal]
   );
 
   const canChangeSession = useCallback(() => !sendingRef.current && !activeRequestRef.current, []);

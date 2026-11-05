@@ -5,6 +5,7 @@ import type { AgentAction } from "@/features/canvas/api/agent";
 import type { AgentActivityState, ThinkingBlockState } from "@/features/chat/types";
 import type { GenerationStyleOption, SkillOption } from "@/services/api/server";
 import type { PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
+import type { CreationMode } from "@/features/generation/lib/creation-mode-preference";
 
 export type CreationConversationStatus = "running" | "unreadSuccess" | "unreadFailed" | "none";
 
@@ -115,6 +116,9 @@ export type CreationComposerProps = {
     skillLoading?: boolean;
     skillError?: string | null;
     actions: CreationComposerAction[];
+    /** 当前对话模式：agent 由主 Agent 规划优化，chat 直接提交生成。 */
+    creationMode?: CreationMode;
+    onCreationModeChange?: (mode: CreationMode) => void;
     running: boolean;
     queued?: boolean;
     canSubmit: boolean;

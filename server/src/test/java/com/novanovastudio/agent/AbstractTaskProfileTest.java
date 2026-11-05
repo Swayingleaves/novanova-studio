@@ -34,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
@@ -89,6 +90,8 @@ class AbstractTaskProfileTest {
         profile = new TestTaskProfile(aiTaskService, persistenceService, executionRegistry, properties);
         org.mockito.Mockito.lenient().when(executionRegistry.registerTaskAndPersist(anyString(), any(AgentExecutionRegistry.AgentTaskRegistration.class)))
                 .thenReturn(Mono.just(false));
+        // 默认没有外部任务事件，等待链路回退到轮询
+        org.mockito.Mockito.lenient().when(aiTaskService.watchTask(anyString())).thenReturn(Flux.never());
     }
 
     /**
@@ -146,6 +149,38 @@ class AbstractTaskProfileTest {
             Assertions.assertEquals("优化后的海报提示词", round.getString("generationPrompt"));
         });
         Assertions.assertTrue(savedTitles.stream().allMatch("生成一张海报"::equals));
+    }
+
+    /**
+     * 任务事件先于轮询返回终态时，应立即结束等待，不再依赖轮询间隔。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldFinishImmediatelyWhenTaskEventReportsTerminalStatus() {
+        when(persistenceService.saveOrUpdateGenerationRound(anyLong(), anyString(), anyString(), anyString(), any(JSONObject.class)))
+                .thenReturn(Mono.empty());
+        AiTaskDtos.AiGenerationTaskResponse created = response("pending", 0, new JSONObject());
+        when(aiTaskService.createTaskForUser(anyLong(), any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class)))
+                .thenAnswer(invocation -> {
+                    Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue = invocation.getArgument(2);
+                    return beforeEnqueue.apply(created).thenReturn(created);
+                });
+        // 轮询始终停在 running，只有任务事件能带来终态
+        when(aiTaskService.getTaskForUser(7L, "task-1"))
+                .thenReturn(Mono.just(response("running", 10, new JSONObject())));
+        when(aiTaskService.watchTask("task-1"))
+                .thenReturn(Flux.just(response("success", 100, successfulResultData())));
+
+        long startedAt = System.nanoTime();
+        ToolResult result = profile.executeTool(7L, "generate_image",
+                        Map.of("prompt", "海报", "model", "model-1", "size", "1:1", "quality", "high"),
+                        "生成一张海报", List.of(), eventEmitter, "session-1", "call-1")
+                .block(Duration.ofSeconds(5));
+        long elapsedMilliseconds = (System.nanoTime() - startedAt) / 1_000_000;
+
+        Assertions.assertNotNull(result);
+        Assertions.assertTrue(result.ok());
+        Assertions.assertTrue(elapsedMilliseconds < 2_000, "任务事件到达后不应等待下一次轮询");
     }
 
     /**

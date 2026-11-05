@@ -57,12 +57,12 @@
 | 表 | 作用 | 关键字段、约束与索引 |
 | --- | --- | --- |
 | `credit_products` | 平台可售积分商品配置 | `credits` 为基础积分数量，`bonus_credits` 为购买时额外赠送的积分数量，`price_amount` 为人民币金额；`enabled` 控制启停，`sort_order` 控制展示顺序；启用状态、排序和标识联合索引；仅平台作用域可读写 |
-| `credit_purchase_orders` | 用户购买积分的订单和渠道快照 | `order_no` 唯一；保存商品、最终到账积分和金额快照，客户端不能覆盖金额；`payment_method` 当前为 `alipay`，预留 `wechat`；状态为 `pending`、`processing`、`paid`、`closed` 或 `cancelled`；`wallet_team_id` 固定为 `0`；用户+创建时间、待支付过期时间、钱包+状态索引；渠道交易号按支付方式唯一；`first_purchase_bonus_credits` 记录该单实发的首充赠送积分，大于 `0` 时由部分唯一索引保证每个用户最多一条 |
+| `credit_purchase_orders` | 用户购买积分的订单和渠道快照 | `order_no` 唯一；保存商品、最终到账积分和金额快照，客户端不能覆盖金额；`payment_method` 支持 `alipay` 和 `wechat`；状态为 `pending`、`processing`、`paid`、`closed` 或 `cancelled`；`wallet_team_id` 固定为 `0`；用户+创建时间、待支付过期时间、钱包+状态及微信待支付分页扫描索引；渠道交易号按支付方式唯一；`first_purchase_bonus_credits` 记录该单实发的首充赠送积分，大于 `0` 时由部分唯一索引保证每个用户最多一条 |
 | `user_credit_transactions` | 积分余额变更流水 | 新增 `credit_purchase` 类型；`billing_reference` 使用平台订单号并建立唯一约束，支付宝重复通知不会重复入账；V77 追加 `first_purchase_bonus` 类型，`billing_reference` 为订单号加 `:first-bonus` 后缀 |
 
 首次迁移创建 `10/20/50/100` 积分商品，默认价格分别为 `1/2/5/10` 元。管理员可在系统管理的“积分商品”配置中新增、编辑、排序和停用商品；已创建订单继续使用订单快照，不受商品后续修改影响。
 
-订单创建接口为 `GET /api/v1/payment/credit/listProducts`、`POST /api/v1/payment/credit/createOrder` 和 `GET /api/v1/payment/credit/getOrderStatus`。支付宝回调接口为 `POST /api/v1/payment/alipay/notify` 和 `GET /api/v1/payment/alipay/return`。同步回跳只重定向到前端购买页，到账必须以验签后的异步通知或支付宝交易查询为准；服务端核对 `app_id`、商户订单号、金额和 `TRADE_SUCCESS`/`TRADE_FINISHED` 状态后，在事务内更新订单、余额和 `credit_purchase` 流水，并发布积分余额事件。
+订单创建接口为 `GET /api/v1/payment/credit/listProducts`、`POST /api/v1/payment/credit/createOrder` 和 `GET /api/v1/payment/credit/getOrderStatus`。支付宝回调接口为 `POST /api/v1/payment/alipay/notify` 和 `GET /api/v1/payment/alipay/return`；微信 Native 回调为 `POST /api/v1/payment/wechat/notify`。同步回跳只重定向到前端购买页，到账必须以验签后的异步通知或渠道查单为准；服务端核对支付渠道、应用标识、商户订单号、金额和成功状态（支付宝 `TRADE_SUCCESS`/`TRADE_FINISHED`、微信 `SUCCESS`），微信额外核对商户号、人民币币种和 Native 交易类型，在事务内更新订单、余额和 `credit_purchase` 流水，并发布积分余额事件。微信待支付订单由后台每 30 秒分页查单，新增 `idx_credit_purchase_orders_wechat_pending` 部分索引（索引键 `id`，限定平台钱包的微信待支付订单）；超时订单先查单、关单，再更新本地状态。新商户订单号统一为 32 位随机标识。微信部署要求见 [微信支付接入说明](wechatpay/接入说明.md)。
 
 商品管理接口位于 `/api/v1/config/creditProduct/`，仅平台管理员可用。支付宝密钥和网关配置只通过部署环境注入，异步通知地址必须可以被支付宝公网访问。
 
