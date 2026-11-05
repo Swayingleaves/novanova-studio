@@ -4,7 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
-import com.wechat.pay.java.core.RSAAutoCertificateConfig;
+import com.wechat.pay.java.core.RSAPublicKeyConfig;
 import com.wechat.pay.java.core.exception.ServiceException;
 import com.wechat.pay.java.core.http.DefaultHttpClientBuilder;
 import com.wechat.pay.java.core.notification.NotificationParser;
@@ -50,7 +50,7 @@ public class WechatNativePaymentProvider implements PaymentProvider {
     public static final String METHOD = "wechat";
     /** 服务端支付配置。 */
     private final NovanovaProperties properties;
-    /** 延迟初始化并复用客户端，关闭微信支付时不下载平台证书。 */
+    /** 延迟初始化并复用使用微信支付公钥验签的客户端。 */
     private volatile Client client;
 
     /**
@@ -230,7 +230,7 @@ public class WechatNativePaymentProvider implements PaymentProvider {
     }
 
     /**
-     * 创建并复用自动更新平台证书的官方客户端。
+     * 创建并复用微信支付公钥客户端，应答与回调共享同一份验签配置。
      * @return 支付客户端和通知解析器
      */
     private synchronized Client client() {
@@ -240,12 +240,12 @@ public class WechatNativePaymentProvider implements PaymentProvider {
                     .readTimeout(10, TimeUnit.SECONDS).writeTimeout(10, TimeUnit.SECONDS).callTimeout(15, TimeUnit.SECONDS)
                     .addNetworkInterceptor(this::logExchange).build();
             DefaultHttpClientBuilder builder = new DefaultHttpClientBuilder().okHttpClient(transport).enableRetryMultiDomain();
-            RSAAutoCertificateConfig configurationWithCertificates = new RSAAutoCertificateConfig.Builder()
+            RSAPublicKeyConfig sdkConfiguration = new RSAPublicKeyConfig.Builder()
                     .merchantId(configuration.getMerchantId()).privateKeyFromPath(configuration.getPrivateKeyPath())
                     .merchantSerialNumber(configuration.getMerchantSerialNumber()).apiV3Key(configuration.getApiV3Key())
-                    .httpClientBuilder(builder).build();
-            client = new Client(new NativePayService.Builder().httpClient(builder.config(configurationWithCertificates).build()).build(),
-                    new NotificationParser(configurationWithCertificates));
+                    .publicKeyFromPath(configuration.getPublicKeyPath()).publicKeyId(configuration.getPublicKeyId()).build();
+            client = new Client(new NativePayService.Builder().httpClient(builder.config(sdkConfiguration).build()).build(),
+                    new NotificationParser(sdkConfiguration));
         }
         return client;
     }
@@ -277,8 +277,15 @@ public class WechatNativePaymentProvider implements PaymentProvider {
         if (!configuration.isEnabled() || configuration.getAppId().isBlank() || configuration.getMerchantId().isBlank()
                 || configuration.getPrivateKeyPath().isBlank() || configuration.getMerchantSerialNumber().isBlank()
                 || configuration.getApiV3Key().getBytes(StandardCharsets.UTF_8).length != 32 || configuration.getNotifyUrl().isBlank()
+                || !Files.isRegularFile(Path.of(configuration.getPrivateKeyPath()))
                 || !Files.isReadable(Path.of(configuration.getPrivateKeyPath()))) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, "微信支付尚未完成配置");
+        }
+        // 公钥 ID 与商户证书序列号用途不同，不允许缺失公钥时退回平台证书模式。
+        if (!configuration.getPublicKeyId().startsWith("PUB_KEY_ID_") || configuration.getPublicKeyPath().isBlank()
+                || !Files.isRegularFile(Path.of(configuration.getPublicKeyPath()))
+                || !Files.isReadable(Path.of(configuration.getPublicKeyPath()))) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "微信支付公钥尚未完成配置，请检查公钥 ID 和公钥文件");
         }
         URI uri = URI.create(configuration.getNotifyUrl());
         if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null
@@ -301,7 +308,7 @@ public class WechatNativePaymentProvider implements PaymentProvider {
     }
 
     /**
-     * 共享同一份平台证书配置的 SDK 客户端。
+     * 共享同一份微信支付公钥配置的 SDK 客户端。
      * @param service Native 支付服务
      * @param parser 回调验签解密器
      */
