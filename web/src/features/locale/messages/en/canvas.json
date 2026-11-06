@@ -47,7 +47,7 @@
     "messageCopied": "Message copied",
     "queued": "Queued...",
     "generating": "Generating...",
-    "typeAMessageEnterToSend": "Type a message, Enter to send...",
+    "typeAMessageEnterToSend": "Type a message, Enter to send; type @ to reference canvas nodes...",
     "selectTextModel": "Select text model",
     "text": "Text",
     "copyMessage": "Copy message",

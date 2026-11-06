@@ -47,7 +47,7 @@
     "messageCopied": "消息已复制",
     "queued": "排队中...",
     "generating": "生成中...",
-    "typeAMessageEnterToSend": "输入消息，Enter 发送...",
+    "typeAMessageEnterToSend": "输入消息，Enter 发送；@ 引用画布节点...",
     "selectTextModel": "选择文本模型",
     "text": "文",
     "copyMessage": "复制消息",

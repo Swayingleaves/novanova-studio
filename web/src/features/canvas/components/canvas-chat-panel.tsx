@@ -20,6 +20,7 @@ import { formatGroupedGenerationStyleMessage } from "@/features/generation/lib/s
 import { MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { GenerationStyleChips, useGenerationStyles } from "@/features/generation/components/generation-style-picker";
 import { isImageNode, isTextNode, isVideoNode } from "../domain/canvas-node";
+import { buildCanvasAgentMentionMessage, formatCanvasAgentMentionDisplayText, readCanvasAgentMentionNodeIds } from "../utils/canvas-agent-mentions";
 import { AgentChatComposer } from "./canvas-agent-chat-ui";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
@@ -36,7 +37,7 @@ type CanvasChatPanelProps = {
     messages: CanvasAssistantMessage[];
     completedThinkings?: ThinkingBlockState[];
     activeThinking?: ThinkingBlockState | null;
-    onSend: (text: string, references?: CanvasAssistantReference[], generationStyleIds?: number[], generationStyles?: GenerationStyleOption[]) => void;
+    onSend: (text: string, references?: CanvasAssistantReference[], generationStyleIds?: number[], generationStyles?: GenerationStyleOption[], agentText?: string) => void;
     onNewSession: () => void;
     onStop: () => void;
     isStreaming?: boolean;
@@ -104,19 +105,23 @@ export function CanvasChatPanel({
 
     const handleSend = useCallback(
         (text: string) => {
-            if (!text.trim()) return;
-            const references = droppedNodes.map(nodeToReference).filter((item): item is CanvasAssistantReference => Boolean(item));
+            const agentText = text.trim();
+            if (!agentText) return;
+            const mentionedNodes = readCanvasAgentMentionNodeIds(agentText, nodes).map((nodeId) => nodes.find((node) => node.id === nodeId)).filter((node): node is CanvasNode => Boolean(node));
+            const referenceList = [...droppedNodes, ...mentionedNodes].map(nodeToReference).filter((item): item is CanvasAssistantReference => Boolean(item));
+            const references = Array.from(new Map(referenceList.map((reference) => [reference.id, reference])).values());
             onSend(
-                text.trim(),
+                formatCanvasAgentMentionDisplayText(agentText, nodes),
                 references,
                 selectedStyles.map((style) => style.id),
                 selectedStyles,
+                buildCanvasAgentMentionMessage(agentText, nodes),
             );
             setPrompt("");
             setDroppedNodeIds(new Set());
             setSelectedStyles([]);
         },
-        [droppedNodes, onSend, selectedStyles],
+        [droppedNodes, nodes, onSend, selectedStyles],
     );
 
     const handleNewSession = useCallback(() => {
@@ -296,6 +301,7 @@ export function CanvasChatPanel({
                     onStyleRemove={(id) => setSelectedStyles((current) => current.filter((style) => style.id !== id))}
                     onStyleLimit={() => message.warning(translate("canvas.selectUpToStyles", { value0: MAX_GENERATION_STYLE_SELECTION_COUNT }))}
                     droppedNodes={droppedNodes}
+                    nodes={nodes}
                     onDroppedNodeRemove={(nodeId) => {
                         setDroppedNodeIds((prev) => {
                             const next = new Set(prev);

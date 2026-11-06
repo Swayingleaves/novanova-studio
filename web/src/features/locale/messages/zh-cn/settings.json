@@ -19,7 +19,7 @@
     "textToVideo": "文生视频",
     "imageToVideo": "图生视频",
     "universalReference": "全能参考",
-    "nativeFirstAndLastFrames": "首尾帧原生生成",
+    "nativeFirstAndLastFrames": "首尾帧",
     "defaultObjectStorage": "默认对象存储",
     "objectStorage": "对象存储 {value0}",
     "unnamedObjectStorage": "未命名对象存储"

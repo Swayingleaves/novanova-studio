@@ -40,6 +40,7 @@ Add nodes from the bottom toolbar (move/select, undo, redo, text, image, audio, 
 - Changes to the canvas arrive as a "等待确认" card and only run after you click "执行".
 - Sending another message while it is working is ignored; the panel supports "新对话" and collapsing, and history is limited to the most recent 12 turns.
 - You can hold `Ctrl/Cmd + Shift` and drag nodes into the panel to add context.
+- Type `@` in the input box to search canvas nodes by name; a chosen node stays in the message as an `@name` chip and is sent with its real node ID.
 
 ## Referencing media with @
 
@@ -47,7 +48,7 @@ Typing `@` in a node's prompt field opens the "引用画布资产" picker, which
 
 - Referencing audio requires a model with audio input, otherwise it reports "当前模型或生成模式不支持音频输入".
 - The `@` list only covers canvas nodes. For assets from the library, use "从提示词库选择" in the panel or "我的资产" in the toolbar.
-- The Agent panel does not use `@`; use `Ctrl/Cmd + Shift` with a node drag instead.
+- The canvas Agent panel also supports `@`: it references the node itself without creating a connection, and the chosen node appears as a chip in the message.
 
 ## Setting images
 
@@ -63,6 +64,10 @@ Add audio by dragging a file in, using the toolbar's "上传素材", or clicking
 **Trimming**: hover the audio node toolbar and pick "裁剪（裁剪为新音频节点）", adjust the range in the dialog with preview, then click "创建音频节点". The original node keeps the full audio and the new node references the selected range. Ranges that are too short are rejected.
 
 **Audio for video**: only video nodes support it, the model must have audio input enabled, and the mode must be 全能参考 — otherwise the canvas reports that it is unsupported and switches the mode automatically.
+
+## Video generation mode
+
+A video node switches its generation mode based on the references connected to it: text-only connections keep text-to-video; images switch it to image-to-video; videos or audio switch it to universal reference. Uploaded references and references kept from the previous run count as well, and once every reference is removed it falls back to text-to-video. First and last frames stays manual and is never switched automatically.
 
 ## Autosave and projects
 
