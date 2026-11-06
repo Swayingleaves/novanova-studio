@@ -1,11 +1,14 @@
 package com.novanovastudio.payment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.common.BusinessException;
@@ -30,12 +33,23 @@ import java.time.OffsetDateTime;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Answers;
+import org.mockito.MockedConstruction;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 import reactor.test.StepVerifier;
@@ -49,6 +63,8 @@ import reactor.test.StepVerifier;
 class WechatNativePaymentProviderTest {
     /** 测试 APIv3 密钥，仅用于离线生成测试密文。 */
     private static final String TEST_API_KEY = "0123456789abcdef0123456789abcdef";
+    /** 仅用于测试的微信支付公钥 ID。 */
+    private static final String TEST_PUBLIC_KEY_ID = "PUB_KEY_ID_TEST0000000001";
     /** 临时目录，不包含真实商户凭据。 */
     @TempDir
     Path temporaryDirectory;
@@ -58,7 +74,7 @@ class WechatNativePaymentProviderTest {
     private WechatNativePaymentProvider provider;
     /** 仅模拟对微信的业务请求边界。 */
     private NativePayService service;
-    /** 本地生成的平台测试密钥。 */
+    /** 本地生成的微信支付测试密钥。 */
     private KeyPair platformKeyPair;
 
     /**
@@ -75,14 +91,16 @@ class WechatNativePaymentProviderTest {
         configuration.setMerchantSerialNumber("test-merchant-serial");
         configuration.setApiV3Key(TEST_API_KEY);
         configuration.setNotifyUrl("https://example.com/api/v1/payment/wechat/notify");
-        configuration.setPrivateKeyPath(Files.writeString(temporaryDirectory.resolve("private-key.pem"), "测试占位文件").toString());
         provider = new WechatNativePaymentProvider(properties);
         service = mock(NativePayService.class);
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         platformKeyPair = generator.generateKeyPair();
+        configuration.setPrivateKeyPath(writeKeyFile("private-key.pem", "PRIVATE KEY", generator.generateKeyPair().getPrivate().getEncoded()));
+        configuration.setPublicKeyPath(writeKeyFile("pub_key.pem", "PUBLIC KEY", platformKeyPair.getPublic().getEncoded()));
+        configuration.setPublicKeyId(TEST_PUBLIC_KEY_ID);
         NotificationParser parser = new NotificationParser(
-                Map.of("WECHATPAY2-SHA256-RSA2048", new RSAVerifier(platformKeyPair.getPublic(), "test-platform-serial")),
+                Map.of("WECHATPAY2-SHA256-RSA2048", new RSAVerifier(platformKeyPair.getPublic(), TEST_PUBLIC_KEY_ID)),
                 Map.of("AEAD_AES_256_GCM", new AeadAesCipher(TEST_API_KEY.getBytes(StandardCharsets.UTF_8))));
         ReflectionTestUtils.setField(provider, "client", new WechatNativePaymentProvider.Client(service, parser));
     }
@@ -131,6 +149,69 @@ class WechatNativePaymentProviderTest {
         verify(service, never()).queryOrderByOutTradeNo(any());
     }
 
+    /** 公钥 ID 缺失、误填商户证书序列号或公钥文件无效时，不能请求微信。 */
+    @Test
+    void shouldRejectMissingPublicKeyConfiguration() {
+        for (String publicKeyId : new String[]{"", "test-merchant-serial"}) {
+            properties.getWechat().setPublicKeyId(publicKeyId);
+            StepVerifier.create(provider.queryOrder("order_123"))
+                    .expectErrorMatches(error -> error instanceof BusinessException && error.getMessage().contains("公钥"))
+                    .verify();
+        }
+        properties.getWechat().setPublicKeyId(TEST_PUBLIC_KEY_ID);
+        for (String publicKeyPath : new String[]{"", temporaryDirectory.resolve("missing.pem").toString(), temporaryDirectory.toString()}) {
+            properties.getWechat().setPublicKeyPath(publicKeyPath);
+            StepVerifier.create(provider.queryOrder("order_123")).expectError(BusinessException.class).verify();
+        }
+        verify(service, never()).queryOrderByOutTradeNo(any());
+    }
+
+    /** 实际客户端从 PEM 文件初始化后必须直接验签解密，不依赖平台证书下载。 */
+    @Test
+    void shouldInitializePublicKeyClientAndVerifyNotificationWithoutNetwork() throws Exception {
+        OkHttpClient offlineTransport = new OkHttpClient.Builder().addInterceptor(chain -> {
+            throw new AssertionError("离线回调验签不应发起网络请求");
+        }).build();
+        try (MockedConstruction<OkHttpClient.Builder> ignored = mockConstruction(OkHttpClient.Builder.class,
+                withSettings().defaultAnswer(Answers.RETURNS_SELF), (builder, context) -> when(builder.build()).thenReturn(offlineTransport))) {
+            ReflectionTestUtils.setField(provider, "client", null);
+            ReflectionTestUtils.invokeMethod(provider, "client");
+            StepVerifier.create(provider.verifyNotification(signedNotification()))
+                    .assertNext(notification -> assertEquals("order_123", notification.orderNo())).verifyComplete();
+        }
+    }
+
+    /** 用真实 SDK 请求链验证公钥 ID 请求头及响应验签，篡改响应必须被拒绝。 */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void shouldSendPublicKeyIdAndVerifyResponse(boolean tampered) throws Exception {
+        String codeUrl = "weixin://wxpay/bizpayurl?pr=test-code";
+        String body = JSON.toJSONString(Map.of("code_url", codeUrl));
+        Map<String, String> response = signBody(body);
+        AtomicReference<Request> capturedRequest = new AtomicReference<>();
+        OkHttpClient offlineTransport = new OkHttpClient.Builder().addInterceptor(chain -> {
+            capturedRequest.set(chain.request());
+            assertEquals("/v3/pay/transactions/native", chain.request().url().encodedPath());
+            return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                    .header("Wechatpay-Serial", response.get("Wechatpay-Serial"))
+                    .header("Wechatpay-Timestamp", response.get("Wechatpay-Timestamp"))
+                    .header("Wechatpay-Nonce", response.get("Wechatpay-Nonce"))
+                    .header("Wechatpay-Signature", response.get("Wechatpay-Signature"))
+                    .body(ResponseBody.create(tampered ? body + " " : body, MediaType.get("application/json"))).build();
+        }).build();
+        try (MockedConstruction<OkHttpClient.Builder> ignored = mockConstruction(OkHttpClient.Builder.class,
+                withSettings().defaultAnswer(Answers.RETURNS_SELF), (builder, context) -> when(builder.build()).thenReturn(offlineTransport))) {
+            ReflectionTestUtils.setField(provider, "client", null);
+            ReflectionTestUtils.invokeMethod(provider, "client");
+            var verification = StepVerifier.create(provider.createPayment(new PaymentProvider.PaymentOrder(
+                    "order_123", "购买积分", BigDecimal.ONE, OffsetDateTime.now().plusMinutes(15))));
+            if (tampered) verification.expectError(BusinessException.class).verify();
+            else verification.expectNext(codeUrl).verifyComplete();
+        }
+        assertEquals(TEST_PUBLIC_KEY_ID, capturedRequest.get().header("Wechatpay-Serial"));
+        assertTrue(capturedRequest.get().header("Authorization").contains("serial_no=\"test-merchant-serial\""));
+    }
+
     /** 真实 SDK 必须能验证签名并解密通知，解密后金额按整数分转换。 */
     @Test
     void shouldVerifyAndDecryptSignedNotification() throws Exception {
@@ -157,7 +238,7 @@ class WechatNativePaymentProviderTest {
         StepVerifier.create(provider.verifyNotification(parameters)).expectError(BusinessException.class).verify();
         parameters = signedNotification();
         NotificationParser wrongKeyParser = new NotificationParser(
-                Map.of("WECHATPAY2-SHA256-RSA2048", new RSAVerifier(platformKeyPair.getPublic(), "test-platform-serial")),
+                Map.of("WECHATPAY2-SHA256-RSA2048", new RSAVerifier(platformKeyPair.getPublic(), TEST_PUBLIC_KEY_ID)),
                 Map.of("AEAD_AES_256_GCM", new AeadAesCipher("abcdef0123456789abcdef0123456789".getBytes(StandardCharsets.UTF_8))));
         ReflectionTestUtils.setField(provider, "client", new WechatNativePaymentProvider.Client(service, wrongKeyParser));
         StepVerifier.create(provider.verifyNotification(parameters)).expectError(BusinessException.class).verify();
@@ -244,11 +325,35 @@ class WechatNativePaymentProviderTest {
         String ciphertext = Base64.getEncoder().encodeToString(cipher.doFinal(transaction.getBytes(StandardCharsets.UTF_8)));
         String body = " {\n\"event_type\":\"TRANSACTION.SUCCESS\", \"resource\":" + JSON.toJSONString(Map.of(
                 "algorithm", "AEAD_AES_256_GCM", "ciphertext", ciphertext, "nonce", nonce, "associated_data", associatedData)) + "\n}";
+        return signBody(body);
+    }
+
+    /**
+     * 为原始通知或响应正文生成测试签名。
+     * @param body 保留原始格式的正文
+     * @return 原始正文和对应的微信支付签名头
+     * @throws Exception 测试签名失败时抛出
+     */
+    private Map<String, String> signBody(String body) throws Exception {
         String timestamp = Long.toString(java.time.Instant.now().getEpochSecond());
         Signature signature = Signature.getInstance("SHA256withRSA");
         signature.initSign(platformKeyPair.getPrivate());
         signature.update((timestamp + "\n" + "test-nonce" + "\n" + body + "\n").getBytes(StandardCharsets.UTF_8));
-        return new HashMap<>(Map.of("Wechatpay-Serial", "test-platform-serial", "Wechatpay-Timestamp", timestamp,
+        return new HashMap<>(Map.of("Wechatpay-Serial", TEST_PUBLIC_KEY_ID, "Wechatpay-Timestamp", timestamp,
                 "Wechatpay-Nonce", "test-nonce", "Wechatpay-Signature", Base64.getEncoder().encodeToString(signature.sign()), "body", body));
+    }
+
+    /**
+     * 把本地生成的测试密钥写入临时 PEM 文件，不使用任何真实商户凭据。
+     * @param name 临时文件名称
+     * @param type PEM 密钥类型
+     * @param encoded 测试密钥的标准编码
+     * @return 测试文件绝对路径
+     * @throws Exception 临时文件写入失败时抛出
+     */
+    private String writeKeyFile(String name, String type, byte[] encoded) throws Exception {
+        return Files.writeString(temporaryDirectory.resolve(name), "-----BEGIN " + type + "-----\n"
+                + Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(encoded)
+                + "\n-----END " + type + "-----\n").toString();
     }
 }

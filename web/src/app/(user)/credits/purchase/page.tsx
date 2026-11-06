@@ -5,7 +5,6 @@ import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { Alert, App, Button, Empty, Modal, QRCode, Skeleton, Tag } from "antd";
-import { WechatOutlined } from "@ant-design/icons";
 import { ArrowLeft, CheckCircle2, Clock, ExternalLink, Gift, LoaderCircle, QrCode, ScanLine, ShoppingCart, Ticket, WalletCards, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -20,6 +19,15 @@ import { cn } from "@/shared/lib/utils";
 import { FirstPurchaseBonusModal } from "./first-purchase-bonus-modal";
 
 const creditStoreUrl = process.env.NEXT_PUBLIC_CREDIT_STORE_URL?.trim();
+
+/** 从官方原图中展示绿色支付标识，保留原始颜色、透明度和比例。 */
+function WechatPaymentIcon({ className }: { className: string }) {
+    return (
+        <svg viewBox="0 0 324 273" width={32} height={32} overflow="hidden" className={className} aria-hidden="true" focusable="false">
+            <image href="/payment/wechat-pay.png" width={1152} height={468} />
+        </svg>
+    );
+}
 
 /**
  * 计算距目标时间的剩余秒数。
@@ -397,7 +405,7 @@ export default function CreditPurchasePage() {
                                 paymentMethod === "wechat" ? "border-[var(--studio-action)] bg-[var(--studio-surface-soft)]" : "border-[var(--studio-line)] bg-[var(--studio-surface)] hover:border-[var(--studio-action)]",
                             )}
                         >
-                            <WechatOutlined className="text-3xl text-[var(--studio-action)]" aria-hidden />
+                            <WechatPaymentIcon className="size-9 shrink-0" />
                             <span className="min-w-0 flex-1">
                                 <span className="block font-medium text-[var(--studio-ink)]">{translate("credits.wechat")}</span>
                                 <span className="mt-1 block text-xs text-[var(--studio-muted)]">{translate("credits.wechatAvailable")}</span>
@@ -478,7 +486,7 @@ export default function CreditPurchasePage() {
                         ) : (
                             <div>
                                 <div className="flex items-center justify-center gap-2">
-                                    {isWechatPayment ? <WechatOutlined className="text-2xl text-[var(--studio-action)]" aria-hidden /> : <img src="/payment/alipay.png" alt="支付宝" className="size-6 rounded object-contain" />}
+                                    {isWechatPayment ? <WechatPaymentIcon className="size-6 shrink-0" /> : <img src="/payment/alipay.png" alt="支付宝" className="size-6 rounded object-contain" />}
                                     <span className="text-base font-semibold text-[var(--studio-ink)]">{scanPayTitle}</span>
                                 </div>
 

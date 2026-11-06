@@ -60,7 +60,7 @@ public class NovanovaProperties {
     }
 
     /**
-     * 普通商户 APIv3 支付配置，使用自动更新的平台证书验签。
+     * 普通商户 APIv3 支付配置，使用微信支付公钥验签。
      * @author zhenglin.cn.cq@gmail.com
      * @date 2026-11-05 14:00
      */
@@ -76,7 +76,11 @@ public class NovanovaProperties {
         private String privateKeyPath = "";
         /** 商户 API 证书序列号。 */
         private String merchantSerialNumber = "";
-        /** 用于解密回调和平台证书的 APIv3 密钥。 */
+        /** 微信支付公钥文件路径，与商户 API 私钥分开配置。 */
+        private String publicKeyPath = "";
+        /** 微信支付公钥 ID，以 PUB_KEY_ID_ 开头，不是商户证书序列号。 */
+        private String publicKeyId = "";
+        /** 用于解密回调的 APIv3 密钥。 */
         @lombok.ToString.Exclude
         private String apiV3Key = "";
         /** 微信可访问且不含查询参数的 HTTPS 支付通知地址。 */
