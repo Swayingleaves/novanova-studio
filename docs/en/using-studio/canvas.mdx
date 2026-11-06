@@ -64,6 +64,10 @@ Add audio by dragging a file in, using the toolbar's "上传素材", or clicking
 
 **Audio for video**: only video nodes support it, the model must have audio input enabled, and the mode must be 全能参考 — otherwise the canvas reports that it is unsupported and switches the mode automatically.
 
+## Video generation mode
+
+A video node switches its generation mode based on the references connected to it: text-only connections keep text-to-video; images switch it to image-to-video; videos or audio switch it to universal reference. Uploaded references and references kept from the previous run count as well, and once every reference is removed it falls back to text-to-video. First and last frames stays manual and is never switched automatically.
+
 ## Autosave and projects
 
 - The canvas saves to the server automatically (nodes, connections, viewport, conversation, preferences) about 400ms after a change. There is no manual save button.

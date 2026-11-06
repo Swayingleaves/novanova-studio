@@ -139,6 +139,7 @@ import { useCopyText } from "@/shared/hooks/use-copy-text";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { positionCanvasAgentAddNodeOps, type CanvasAgentToolResult } from "../utils/canvas-agent-tools";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, getGenerationResourceNodes } from "../utils/canvas-resource-references";
+import { synchronizeVideoNodeGenerationModes, readCanvasVideoNodeReferenceCounts, resolveVideoGenerationMode, resolveVideoNodeGenerationMode } from "../utils/canvas-video-node-mode";
 import {
     createStoryboardAssetGenerationState,
     readStoryboardAssetGenerationProgress,
@@ -505,6 +506,8 @@ function CanvasWorkspacePage() {
     const activeAgentSessionIdRef = useRef<string | null>(null);
     const compositionPollControllersRef = useRef<Map<string, AbortController>>(new Map());
     const compositionSubmittingNodeIdsRef = useRef<Set<string>>(new Set());
+    /** 上一次同步时各视频节点连线接入的素材数量，用于判断参考内容是否被移除。 */
+    const previousVideoConnectedMediaCountRef = useRef<Map<string, number>>(new Map());
 
     const applyVideoCompositionTask = useCallback((compositionNodeId: string, resultVideoNodeId: string | undefined, task: VideoCompositionTask) => {
         setNodes((currentNodes) => applyVideoCompositionTaskToNodes(currentNodes, compositionNodeId, resultVideoNodeId, task));
@@ -826,6 +829,16 @@ function CanvasWorkspacePage() {
         setNodes((currentNodes) => synchronizeVideoCompositionInputs(currentNodes, connections));
     }, [connections, projectLoaded]);
 
+    // 视频节点按实际接入的参考内容自动切换生成模式：仅图片→图生视频，含视频或音频→全能参考，参考被移除后回落文生视频。
+    useEffect(() => {
+        if (!projectLoaded) return;
+        const previousCounts = previousVideoConnectedMediaCountRef.current;
+        const sync = synchronizeVideoNodeGenerationModes(nodesRef.current, connectionsRef.current, previousCounts);
+        previousVideoConnectedMediaCountRef.current = sync.connectedMediaCounts;
+        // 用函数式更新合并同一批次里其他副作用对节点的修改，避免覆盖合成节点刚同步好的输入列表。
+        if (sync.nodes !== nodesRef.current) setNodes((currentNodes) => synchronizeVideoNodeGenerationModes(currentNodes, connectionsRef.current, previousCounts).nodes);
+    }, [connections, nodes, projectLoaded]);
+
     useEffect(() => {
         if (!projectLoaded || historyPausedRef.current) return;
         replaceConversation(projectId, {
@@ -963,7 +976,9 @@ function CanvasWorkspacePage() {
             const previous = buildNodeGenerationContext(node.id, nodesRef.current, connectionsRef.current, "");
             const next = buildNodeGenerationContext(node.id, nextNodes, nextConnections, "");
             if (next.imageCount <= previous.imageCount && next.videoCount <= previous.videoCount && next.audioCount <= previous.audioCount) continue;
-            const issue = readVideoGenerationConstraintIssue({ config, imageCount: next.imageCount, videoCount: next.videoCount, audioCount: next.audioCount, addingReferences: true });
+            // 连线补齐参考内容后会按新的参考组合切换模式，校验必须使用切换后的模式，否则自定义模型会按旧模式拒绝接入。
+            const mode = resolveVideoNodeGenerationMode(node.generation.videoGenerationMode || "text-to-video", readCanvasVideoNodeReferenceCounts(node, nextNodes, nextConnections));
+            const issue = readVideoGenerationConstraintIssue({ config, mode, imageCount: next.imageCount, videoCount: next.videoCount, audioCount: next.audioCount, addingReferences: true });
             if (issue) return issue;
         }
         return "";
@@ -3663,7 +3678,7 @@ function CanvasWorkspacePage() {
             if (sourceNode?.execution.phase === "running" && sourceNode.execution.taskId) {
                 return failedCanvasGenerationResult(nodeId, canvasError("configuration", translate("canvas.nodeIsGeneratingWaitForCompletion")));
             }
-            const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
+            let generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 showMissingAiConfig(mode);
                 return failedCanvasGenerationResult(nodeId, canvasError("configuration", translate("canvas.incompleteModelConfiguration")));
@@ -3704,6 +3719,13 @@ function CanvasWorkspacePage() {
                 }
             }
             if (mode === "video") {
+                // Agent 批量操作可能刚接入参考内容尚未触发节点同步，生成前按实际参考素材再修正一次模式。
+                const referenceMode = resolveVideoGenerationMode(generationConfig.videoGenerationMode || "text-to-video", {
+                    image: generationContext.referenceImages.length,
+                    video: generationContext.referenceVideos.length,
+                    audio: generationContext.referenceAudios.length,
+                });
+                if (referenceMode !== generationConfig.videoGenerationMode) generationConfig = { ...generationConfig, videoGenerationMode: referenceMode };
                 const videoQuote = quoteVideoGeneration({
                     config: generationConfig,
                     model: generationConfig.model,
