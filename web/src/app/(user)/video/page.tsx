@@ -13,7 +13,7 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { BookOpen, Cloud, CloudUpload, Download, FolderPlus, Cog, HelpCircle, Link2, LoaderCircle, Palette, Play, RefreshCw, Sparkles, TriangleAlert, Upload, VideoIcon } from "lucide-react";
+import { BookOpen, Cloud, CloudUpload, Download, FolderPlus, Cog, HelpCircle, Link2, LoaderCircle, Palette, Play, RefreshCw, Sparkles, Upload, VideoIcon } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -2527,10 +2527,6 @@ function ResultCard({
                         </Tooltip>
                     ) : null}
                 </div>
-            </div>
-            <div className="flex items-center gap-1 border-t border-[var(--studio-line)] px-3 py-2 text-xs text-amber-500">
-                <TriangleAlert className="size-3.5 shrink-0" />
-                <span>{translate("video.downloadResultsBeforeTheyExpire")}</span>
             </div>
         </div>
     );

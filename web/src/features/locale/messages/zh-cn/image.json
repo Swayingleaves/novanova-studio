@@ -62,7 +62,6 @@
     "yesterday": "昨天",
     "result": "结果 {value0}",
     "cloudStorage": "云储存",
-    "downloadResultsBeforeTheyExpire": "请尽快下载生成结果，超时将无法下载",
     "copyCloudStorageURL": "复制云储存地址",
     "uploadToCloudStorage": "上传到云储存",
     "addToAssets": "添加到素材",

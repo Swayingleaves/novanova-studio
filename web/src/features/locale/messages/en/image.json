@@ -62,7 +62,6 @@
     "yesterday": "Yesterday",
     "result": "Result {value0}",
     "cloudStorage": "Cloud storage",
-    "downloadResultsBeforeTheyExpire": "Download results before they expire",
     "copyCloudStorageURL": "Copy cloud storage URL",
     "uploadToCloudStorage": "Upload to cloud storage",
     "addToAssets": "Add to assets",

@@ -122,7 +122,6 @@
     "addToAssets": "添加到素材",
     "download": "下载",
     "regenerate": "重新生成",
-    "downloadResultsBeforeTheyExpire": "请尽快下载生成结果，超时将无法下载",
     "skipped": "已跳过",
     "untitled": "未命名",
     "workflow": "工作流"

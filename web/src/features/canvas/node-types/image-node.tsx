@@ -7,7 +7,7 @@ import { NodeResizer, useUpdateNodeInternals, type NodeProps, type Node } from "
 import { AlertTriangle, ChevronRight, Image as ImageIcon, Images, LoaderCircle, Sparkles } from "lucide-react";
 import type { CanvasImageNode } from "../types";
 import { type BatchImagePreview, useNodeActions } from "./node-action-context";
-import { CanvasConnectionHandles, CanvasNodeTitle, MediaDownloadHint, NodeHoverSurface, NodeMediaUnavailable } from "./shared";
+import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface, NodeMediaUnavailable } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 
 const BATCH_COLLAPSE_TRANSITION_MS = 260;
@@ -231,7 +231,6 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                         ) : hasContent ? (
                             <div className="relative h-full w-full">
                                 <img src={data.content.source} alt={data.title || ""} className="h-full w-full object-contain" draggable={false} onError={() => setFailedSource(data.content.source)} />
-                                <MediaDownloadHint />
                             </div>
                         ) : (
                             <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-sm" style={{ color: theme.node.placeholder }}>

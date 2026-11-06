@@ -530,7 +530,6 @@
     "emptyImageNode": "空图片节点",
     "failedToLoadImage": "图片加载失败",
     "failedToLoadVideo": "视频加载失败",
-    "downloadResultsBeforeTheyExpire": "请尽快下载生成结果，超时将无法下载",
     "nodeName": "节点名称",
     "doubleClickToRenameNode": "{value0}，双击编辑节点名称",
     "uploading_ce1c9d": "上传中…",

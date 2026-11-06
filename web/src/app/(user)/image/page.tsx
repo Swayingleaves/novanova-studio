@@ -9,7 +9,7 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { BookOpen, CloudUpload, Download, FolderPlus, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, TriangleAlert, Upload } from "lucide-react";
+import { BookOpen, CloudUpload, Download, FolderPlus, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, Upload } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -1612,10 +1612,6 @@ function ResultCard({
                         <Tag className="!m-0 !text-[10px]" color="blue">
                             {translate("image.cloudStorage")}</Tag>
                     ) : null}
-                </div>
-                <div className="flex items-center gap-1 text-xs text-amber-500">
-                    <TriangleAlert className="size-3.5 shrink-0" />
-                    <span>{translate("image.downloadResultsBeforeTheyExpire")}</span>
                 </div>
                 <div className="flex gap-1">
                     <ShareResultButton mediaId={image.id} storageKey={image.storageKey} />

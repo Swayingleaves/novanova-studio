@@ -238,6 +238,38 @@ class CreationPlanValidatorTest {
     }
 
     /**
+     * 创建生成配置节点但不立即生成时只是普通画布操作，不得要求固定子Agent类型。
+     */
+    @Test
+    void shouldAllowIdleCanvasGenerationFlowAsCanvasTask() {
+        CreationTask task = new CreationTask("image-node-task", "canvas", "tool", "添加参考图生成节点", List.of(),
+                "canvas_create_generation_flow", Map.of("prompt", "参考图生成", "mode", "image",
+                        "title", "参考图生成节点（人物三视图 / 首帧）", "x", 0, "y", 1788,
+                        "size", "16:9", "quality", "medium", "imageResolution", "720p", "count", 1,
+                        "autoRun", false));
+
+        CreationPlan result = validator.validate(plan(CreationEntrySource.CANVAS, List.of(task)),
+                CreationEntrySource.CANVAS, new CreationSettings("image-model", "16:9", "720p", "medium", 1, null, null));
+
+        Assertions.assertEquals(1, result.tasks().size());
+        Assertions.assertEquals("canvas_create_generation_flow", result.tasks().getFirst().toolName());
+    }
+
+    /**
+     * 自动运行生成配置节点会真实生成内容，仍必须交给固定图片子Agent。
+     */
+    @Test
+    void shouldRejectAutoRunningCanvasGenerationFlowLabeledAsCanvasTask() {
+        CreationTask task = new CreationTask("image-task", "canvas", "tool", "生成一只小猫", List.of(),
+                "canvas_create_generation_flow", Map.of("prompt", "生成一只小猫", "mode", "image",
+                        "size", "16:9", "autoRun", true));
+
+        Assertions.assertThrows(BusinessException.class,
+                () -> validator.validate(plan(CreationEntrySource.CANVAS, List.of(task)),
+                        CreationEntrySource.CANVAS, new CreationSettings("image-model", "16:9", "720p", "medium", 1, null, null)));
+    }
+
+    /**
      * 循环依赖必须在任何子任务执行前被拒绝。
      */
     @Test
