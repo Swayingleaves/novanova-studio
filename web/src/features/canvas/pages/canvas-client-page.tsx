@@ -5449,7 +5449,7 @@ function CanvasWorkspacePage() {
                     onStop={() => void cancelAgentMessage().catch((error) => message.error(error instanceof Error ? error.message : translate("canvas.failedToStop")))}
                     initialPrompt={initialPrompt}
                     sessionId={activeChatId}
-                    onSend={async (text, references = [], generationStyleIds = [], generationStyles = []) => {
+                    onSend={async (text, references = [], generationStyleIds = [], generationStyles = [], agentText = text) => {
                         if (agentRunning || agentQueued) return;
                         const now = new Date().toISOString();
                         const sessionId = activeChatId || nanoid();
@@ -5477,7 +5477,7 @@ function CanvasWorkspacePage() {
 
                         try {
                             const submitted = await sendAgentMessage(
-                                text,
+                                agentText,
                                 references.map((reference) => ({ title: reference.title, text: reference.text || "" })),
                                 config.agentModel || undefined,
                                 history,

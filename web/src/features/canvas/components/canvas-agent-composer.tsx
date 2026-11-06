@@ -2,7 +2,7 @@
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Button, Tooltip } from "antd";
 import { ArrowUp, ImagePlus, LoaderCircle, X } from "lucide-react";
 
@@ -10,6 +10,8 @@ import { canvasThemes } from "@/shared/lib/canvas-theme";
 import type { CanvasAgentChatAttachment } from "../domain/canvas-agent-message";
 import { isImageNode } from "../domain/canvas-node";
 import type { CanvasNode } from "../types";
+import { buildCanvasAgentMentionCandidates } from "../utils/canvas-agent-mentions";
+import { CanvasAgentMentionInput } from "./canvas-agent-mention-input";
 import type { GenerationStyleOption } from "@/services/api/server";
 import { GenerationStyleChips, GenerationStyleMenu } from "@/features/generation/components/generation-style-picker";
 import { filterGenerationStyles, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
@@ -30,6 +32,7 @@ type AgentChatComposerProps = {
     onRemoveAttachment?: (id: string) => void;
     left?: ReactNode;
     droppedNodes?: CanvasNode[];
+    nodes?: CanvasNode[];
     onDroppedNodeRemove?: (nodeId: string) => void;
     styleOptions?: GenerationStyleOption[];
     selectedStyles?: GenerationStyleOption[];
@@ -53,6 +56,7 @@ export function AgentChatComposer({
     onRemoveAttachment,
     left,
     droppedNodes = [],
+    nodes = [],
     onDroppedNodeRemove,
     styleOptions = [],
     selectedStyles = [],
@@ -69,6 +73,7 @@ export function AgentChatComposer({
     const [styleQuery, setStyleQuery] = useState("");
     const [highlightedStyleIndex, setHighlightedStyleIndex] = useState(0);
     const filteredStyles = useMemo(() => filterGenerationStyles(styleOptions, styleQuery), [styleOptions, styleQuery, translate.locale]);
+    const mentionCandidates = useMemo(() => buildCanvasAgentMentionCandidates(nodes), [nodes]);
 
     useEffect(() => {
         const missingNodeIds = droppedNodes.map((node) => node.id).filter((nodeId) => !containsToken(prompt, nodeId));
@@ -80,7 +85,7 @@ export function AgentChatComposer({
         onPromptChange(removeToken(prompt, nodeId));
         onDroppedNodeRemove?.(nodeId);
     };
-    const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    const handleKeyDown = (event: KeyboardEvent) => {
         if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
         event.preventDefault();
         if (!disabled && !sending && (prompt.trim() || attachments.length)) onSubmit();
@@ -112,67 +117,59 @@ export function AgentChatComposer({
         closeStyleMenu();
     };
 
+    const handleInputKeyDown = (event: KeyboardEvent) => {
+        if (styleMenuOpen) {
+            if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setHighlightedStyleIndex((value) => Math.min(value + 1, Math.max(0, filteredStyles.length - 1)));
+                return;
+            }
+            if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setHighlightedStyleIndex((value) => Math.max(value - 1, 0));
+                return;
+            }
+            if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                const style = filteredStyles[highlightedStyleIndex];
+                if (style) chooseStyle(style);
+                return;
+            }
+            if (event.key === "Escape") {
+                event.preventDefault();
+                closeStyleMenu();
+                return;
+            }
+        }
+        handleKeyDown(event);
+    };
+    const handlePaste = (event: ClipboardEvent) => {
+        const pastedText = event.clipboardData.getData("text/plain");
+        const parsed = parseGroupedGenerationStyleMessage(pastedText, styleOptions) || parseGenerationStyleMessage(pastedText, styleOptions);
+        if (parsed && onStyleSelect) {
+            event.preventDefault();
+            const additions = parsed.styles.filter((style) => !selectedStyles.some((selected) => selected.id === style.id));
+            const remaining = Math.max(0, MAX_GENERATION_STYLE_SELECTION_COUNT - selectedStyles.length);
+            if (additions.length > remaining) onStyleLimit?.();
+            additions.slice(0, remaining).forEach((style) => onStyleSelect(style as GenerationStyleOption));
+            onPromptChange(parsed.prompt);
+            closeStyleMenu();
+            return;
+        }
+        if (!onAddFiles) return;
+        const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+        if (!images.length) return;
+        event.preventDefault();
+        void onAddFiles(images);
+    };
+
     return (
         <div className="px-2 pb-2 pt-2" onWheelCapture={(event) => event.stopPropagation()}>
             <div className="rounded-2xl border p-3 shadow-lg" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke }}>
                 {selectedStyles.length ? <GenerationStyleChips styles={selectedStyles} onRemove={(id) => onStyleRemove?.(id)} className="mb-2" /> : null}
                 {droppedNodes.length ? <NodeReferenceList nodes={droppedNodes} theme={theme} onRemove={removeNode} /> : null}
                 {attachments.length ? <AttachmentList attachments={attachments} theme={theme} onRemove={onRemoveAttachment} /> : null}
-                <textarea
-                    autoFocus
-                    value={prompt}
-                    disabled={disabled}
-                    rows={4}
-                    placeholder={placeholder}
-                    className="thin-scrollbar max-h-36 min-h-20 w-full resize-none bg-transparent px-1 py-1 text-sm leading-5 outline-none"
-                    style={{ color: theme.node.text }}
-                    onChange={(event) => updatePrompt(event.target.value, event.target.selectionStart ?? event.target.value.length)}
-                    onKeyDown={(event) => {
-                        if (styleMenuOpen) {
-                            if (event.key === "ArrowDown") {
-                                event.preventDefault();
-                                setHighlightedStyleIndex((value) => Math.min(value + 1, Math.max(0, filteredStyles.length - 1)));
-                                return;
-                            }
-                            if (event.key === "ArrowUp") {
-                                event.preventDefault();
-                                setHighlightedStyleIndex((value) => Math.max(value - 1, 0));
-                                return;
-                            }
-                            if (event.key === "Enter" && !event.shiftKey) {
-                                event.preventDefault();
-                                const style = filteredStyles[highlightedStyleIndex];
-                                if (style) chooseStyle(style);
-                                return;
-                            }
-                            if (event.key === "Escape") {
-                                event.preventDefault();
-                                closeStyleMenu();
-                                return;
-                            }
-                        }
-                        handleKeyDown(event);
-                    }}
-                    onPaste={(event) => {
-                        const pastedText = event.clipboardData.getData("text/plain");
-                        const parsed = parseGroupedGenerationStyleMessage(pastedText, styleOptions) || parseGenerationStyleMessage(pastedText, styleOptions);
-                        if (parsed && onStyleSelect) {
-                            event.preventDefault();
-                            const additions = parsed.styles.filter((style) => !selectedStyles.some((selected) => selected.id === style.id));
-                            const remaining = Math.max(0, MAX_GENERATION_STYLE_SELECTION_COUNT - selectedStyles.length);
-                            if (additions.length > remaining) onStyleLimit?.();
-                            additions.slice(0, remaining).forEach((style) => onStyleSelect(style as GenerationStyleOption));
-                            onPromptChange(parsed.prompt);
-                            closeStyleMenu();
-                            return;
-                        }
-                        if (!onAddFiles) return;
-                        const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
-                        if (!images.length) return;
-                        event.preventDefault();
-                        void onAddFiles(images);
-                    }}
-                />
+                <CanvasAgentMentionInput value={prompt} disabled={disabled} placeholder={placeholder} theme={theme} candidates={mentionCandidates} onChange={updatePrompt} onKeyDown={handleInputKeyDown} onPaste={handlePaste} />
                 <div className="mt-2 flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-1">
                         {onAddFiles ? (
