@@ -9,7 +9,6 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { Alert, App, Button, Checkbox, Form, Grid, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Tabs } from "antd";
-import type { TextAreaRef } from "antd/es/input/TextArea";
 import { nanoid } from "nanoid";
 import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Copy, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -70,6 +69,7 @@ import { cloneImageSizeMappings, IMAGE_RESOLUTIONS, normalizeImageSizeMappings, 
 import { ImageSizeMappingsEditor } from "./image-size-mappings-editor";
 import { ModelSelectModal, type ChannelModelGroup } from "./model-select-modal";
 import { ModelConfigCopyModal } from "./model-config-copy-modal";
+import { ModelConfigTextArea } from "./model-config-textarea";
 import { applyCustomConfigCopy } from "./model-config-copy";
 import type { CustomGroupField, CustomModelMode } from "./model-config-copy";
 import { ModelConfigAutoFillModal } from "./model-config-auto-fill-modal";
@@ -334,11 +334,12 @@ export function SystemConfiguration() {
         if (resetCollapsed) setCollapsedChannelIds(channels.map((channel) => channel.id));
     }, []);
 
-    const resetModelConfigDraft = useCallback(() => {
+    const resetModelConfigDraft = useCallback((resetCollapsed = false) => {
         const configs = cloneModelConfigs(useConfigStore.getState().modelConfigs);
         setModelConfigBaseline(configs);
         setDraftModelConfigs(cloneModelConfigs(configs));
-        setCollapsedModelCapabilityTypes(createCapabilityGroups(translate).map((group) => group.capability));
+        // 只有首次进入页签（或重试加载）才默认收起全部能力分组，保存后保留用户当前的展开状态。
+        if (resetCollapsed) setCollapsedModelCapabilityTypes(createCapabilityGroups(translate).map((group) => group.capability));
     }, []);
 
     const resetObjectStorageDraft = useCallback(() => {
@@ -358,7 +359,7 @@ export function SystemConfiguration() {
 
     const resetAllDrafts = useCallback(() => {
         resetChannelDraft(true);
-        resetModelConfigDraft();
+        resetModelConfigDraft(true);
         resetObjectStorageDraft();
         resetCommunityDraft();
         setTestedObjectStorageId("");
@@ -2292,26 +2293,14 @@ function AutoFillButton({ onClick }: { onClick: () => void }) {
 /** 自定义模型单个能力/模式分组的调用配置编辑器。 */
 function CustomModelGroupEditor({ label, group, isVideo, onAutoFill, onChange }: { label: string; group: CustomModelGroupConfig | undefined; isVideo: boolean; onAutoFill?: () => void; onChange: (group: CustomModelGroupConfig) => void }) {
     const translate = useTranslation();
-    const requestTemplateRef = useRef<TextAreaRef | null>(null);
-    const queryRequestTemplateRef = useRef<TextAreaRef | null>(null);
     const current = { ...emptyCustomModelGroup(), ...(group || {}) };
     const update = (patch: Partial<CustomModelGroupConfig>) => onChange({ ...current, ...patch });
     const requestIsPost = current.requestMethod !== "GET";
     const queryIsPost = current.queryMethod !== "GET";
     // 图片能力按开关决定是否走异步查询；视频一直是「配了查询字段即异步」
     const imageAsync = !isVideo && current.asyncQuery === true;
-    const insertPlaceholder = (placeholder: string, ref: React.RefObject<TextAreaRef | null>, field: "requestTemplate" | "queryRequestTemplate") => {
-        const textArea = ref.current?.resizableTextArea?.textArea;
-        const latest = textArea?.value ?? current[field];
-        const start = textArea?.selectionStart ?? latest.length;
-        const end = textArea?.selectionEnd ?? latest.length;
-        const next = latest.slice(0, start) + placeholder + latest.slice(end);
-        update({ [field]: next } as Partial<CustomModelGroupConfig>);
-        requestAnimationFrame(() => {
-            textArea?.setSelectionRange(start + placeholder.length, start + placeholder.length);
-            textArea?.focus();
-        });
-    };
+    /** 放大弹窗标题带上能力/模式名称，避免多个分组同时展开时分不清正在编辑哪一项。 */
+    const fieldTitle = (name: string) => `${name} · ${label}`;
     return (
         <div className="mt-3 space-y-3 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2361,50 +2350,46 @@ function CustomModelGroupEditor({ label, group, isVideo, onAutoFill, onChange }:
                 <div className="space-y-2">
                     <div className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-2.5">
                         <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.aIRequestPromptOptionalGeneratesRequestBody")}</div>
-                        <Input.TextArea
+                        <ModelConfigTextArea
+                            title={fieldTitle(translate("appShell.aiRequestPrompt"))}
                             value={current.aiRequestPrompt}
-                            autoSize={{ minRows: 2, maxRows: 5 }}
+                            minRows={2}
+                            maxRows={5}
                             placeholder={translate("appShell.eGBuildAComfyUIWorkflowBodyWithPrompt")}
-                            onChange={(event) => update({ aiRequestPrompt: event.target.value })}
+                            onChange={(value) => update({ aiRequestPrompt: value })}
                         />
                         <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.aIGeneratesRequestBodiesFromThePromptAndActual")}</p>
                     </div>
                     <div>
                         <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.requestExampleJSONTemplateRequiredWithoutAIPrompt")}</div>
-                        <div className="mb-1 flex flex-wrap items-center gap-1">
-                            <span className="text-xs text-[var(--studio-muted)]">{translate("appShell.insertPlaceholder")}</span>
-                            {customTemplatePlaceholderOptions.map((option) => (
-                                <Button key={option.value} size="small" className="!px-1.5 font-mono text-[11px]" onClick={() => insertPlaceholder(option.value, requestTemplateRef, "requestTemplate")}>
-                                    {option.label}
-                                </Button>
-                            ))}
-                        </div>
                         <p className="mb-1 text-xs text-[var(--studio-muted)]">
                             {translate("appShell.referenceActualParametersWithPlaceholdersEG")}
                             {"{{prompt}}"}
                             {translate("appShell.fieldsWithoutPlaceholdersAreSentAsEnteredAndMay")}
                         </p>
-                        <Input.TextArea
-                            ref={requestTemplateRef}
+                        <ModelConfigTextArea
+                            title={fieldTitle(translate("appShell.requestExample"))}
                             value={current.requestTemplate}
-                            autoSize={{ minRows: 3, maxRows: 8 }}
-                            spellCheck={false}
-                            className="font-mono text-xs"
+                            minRows={3}
+                            maxRows={8}
+                            mono
+                            placeholders={customTemplatePlaceholderOptions}
                             placeholder='{"model":"{{model}}","prompt":"{{prompt}}","image":{{references}}}'
-                            onChange={(event) => update({ requestTemplate: event.target.value })}
+                            onChange={(value) => update({ requestTemplate: value })}
                         />
                     </div>
                 </div>
             ) : null}
             <div>
                 <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.responseExampleJSONStructure")}</div>
-                <Input.TextArea
+                <ModelConfigTextArea
+                    title={fieldTitle(translate("appShell.responseExample"))}
                     value={current.responseExample}
-                    autoSize={{ minRows: 2, maxRows: 6 }}
-                    spellCheck={false}
-                    className="font-mono text-xs"
+                    minRows={2}
+                    maxRows={6}
+                    mono
                     placeholder='{"data":{"image":{"url":"https://..."}}}'
-                    onChange={(event) => update({ responseExample: event.target.value })}
+                    onChange={(value) => update({ responseExample: value })}
                 />
             </div>
             {isVideo || imageAsync ? (
@@ -2427,44 +2412,46 @@ function CustomModelGroupEditor({ label, group, isVideo, onAutoFill, onChange }:
                         <div className="space-y-2">
                             <div className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-2.5">
                                 <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.aIQueryPromptOptionalGeneratesQueryBody")}</div>
-                                <Input.TextArea
+                                <ModelConfigTextArea
+                                    title={fieldTitle(translate("appShell.aiQueryPrompt"))}
                                     value={current.aiQueryPrompt}
-                                    autoSize={{ minRows: 2, maxRows: 4 }}
+                                    minRows={2}
+                                    maxRows={4}
                                     placeholder={translate("appShell.eGBuildQueryBodyFromTaskIDIncluding")}
-                                    onChange={(event) => update({ aiQueryPrompt: event.target.value })}
+                                    onChange={(value) => update({ aiQueryPrompt: value })}
                                 />
                                 <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.aIGeneratesQueryBodyUsingThisPromptAndTask")}</p>
                             </div>
                             <div>
                                 <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.queryExampleJSONTemplateRequiredWithoutAIPrompt")}</div>
-                                <div className="mb-1 flex flex-wrap items-center gap-1">
-                                    <span className="text-xs text-[var(--studio-muted)]">{translate("appShell.insertPlaceholder")}</span>
-                                    {customTemplatePlaceholderOptions.map((option) => (
-                                        <Button key={option.value} size="small" className="!px-1.5 font-mono text-[11px]" onClick={() => insertPlaceholder(option.value, queryRequestTemplateRef, "queryRequestTemplate")}>
-                                            {option.label}
-                                        </Button>
-                                    ))}
-                                </div>
                                 <p className="mb-1 text-xs text-[var(--studio-muted)]">
                                     {translate("appShell.use")}
                                     {"{{taskId}}"}
                                     {translate("appShell.referenceThePollingTaskIDFieldsWithoutPlaceholdersAre")}
                                 </p>
-                                <Input.TextArea
-                                    ref={queryRequestTemplateRef}
+                                <ModelConfigTextArea
+                                    title={fieldTitle(translate("appShell.queryRequestExample"))}
                                     value={current.queryRequestTemplate}
-                                    autoSize={{ minRows: 2, maxRows: 6 }}
-                                    spellCheck={false}
-                                    className="font-mono text-xs"
+                                    minRows={2}
+                                    maxRows={6}
+                                    mono
+                                    placeholders={customTemplatePlaceholderOptions}
                                     placeholder='{"task_id":"{{taskId}}"}'
-                                    onChange={(event) => update({ queryRequestTemplate: event.target.value })}
+                                    onChange={(value) => update({ queryRequestTemplate: value })}
                                 />
                             </div>
                         </div>
                     ) : null}
                     <div>
                         <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.queryResponseExampleJSON")}</div>
-                        <Input.TextArea value={current.queryResponseExample} autoSize={{ minRows: 2, maxRows: 6 }} spellCheck={false} className="font-mono text-xs" onChange={(event) => update({ queryResponseExample: event.target.value })} />
+                        <ModelConfigTextArea
+                            title={fieldTitle(translate("appShell.queryResponseExample"))}
+                            value={current.queryResponseExample}
+                            minRows={2}
+                            maxRows={6}
+                            mono
+                            onChange={(value) => update({ queryResponseExample: value })}
+                        />
                     </div>
                     <div>
                         <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.queryResultPathRequiredWithQueryPath")}</div>
