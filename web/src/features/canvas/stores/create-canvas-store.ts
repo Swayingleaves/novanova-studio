@@ -22,7 +22,7 @@ export interface CanvasStoreState {
     importDocument: (document: CanvasDocument) => string;
     findDocument: (documentId: string) => CanvasDocument | null;
     renameDocument: (documentId: string, title: string) => void;
-    replaceScene: (documentId: string, scene: CanvasScene) => void;
+    replaceScene: (documentId: string, scene: CanvasScene, options?: { immediate?: boolean }) => void;
     replaceConversation: (documentId: string, conversation: CanvasConversation) => void;
     updatePreferences: (documentId: string, preferences: CanvasPreferences) => void;
     deleteDocuments: (documentIds: string[]) => void;
@@ -86,9 +86,11 @@ export function createCanvasStore(dependencies: CreateCanvasStoreDependencies) {
             const updated = updateDocument(set, documentId, (document) => renameCanvasDocument(document, title, dependencies.createTimestamp()));
             if (updated) void dependencies.saveScheduler.saveNow(updated);
         },
-        replaceScene: (documentId, scene) => {
+        replaceScene: (documentId, scene, options) => {
             const updated = updateDocument(set, documentId, (document) => replaceCanvasScene(document, scene, dependencies.createTimestamp()));
-            if (updated) dependencies.saveScheduler.schedule(updated);
+            if (!updated) return;
+            if (options?.immediate) void dependencies.saveScheduler.saveNow(updated);
+            else dependencies.saveScheduler.schedule(updated);
         },
         replaceConversation: (documentId, conversation) => {
             const updated = updateDocument(set, documentId, (document) => replaceCanvasConversation(document, conversation, dependencies.createTimestamp()));

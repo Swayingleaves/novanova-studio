@@ -47,6 +47,8 @@ import { resolveImageUrl, uploadImage } from "@/features/storage/services/image-
 import { uploadRemoteObjectToStorage } from "@/features/storage/services/object-storage";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
+import { useHomepageCreationDraft } from "@/features/homepage/hooks/use-homepage-creation-draft";
+import { consumeHomepageCreationHandoff, peekHomepageCreationHandoff } from "@/features/homepage/lib/homepage-creation-handoff";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
@@ -309,6 +311,9 @@ export default function VideoPage() {
     const [managementMode, setManagementMode] = useState(false);
     const [pendingStopping, setPendingStopping] = useState(false);
     const initialPromptAppliedRef = useRef(false);
+    const homepageStartedRef = useRef(false);
+    const homepageDraft = useHomepageCreationDraft("video");
+    const [homepageReady, setHomepageReady] = useState(false);
     const [focusInitialPrompt, setFocusInitialPrompt] = useState(false);
 
     useEffect(() => {
@@ -320,6 +325,18 @@ export default function VideoPage() {
         setFocusInitialPrompt(true);
         clearInitialPromptFromLocation();
     }, []);
+
+    useEffect(() => {
+        if (!homepageDraft) return;
+        setPrompt(homepageDraft.prompt);
+        setReferences(homepageDraft.images);
+        setVideoReferences(homepageDraft.videos);
+        setSelectedStyles(homepageDraft.creationMode === "chat" ? [] : homepageDraft.styles);
+        setSelectedSkill(homepageDraft.creationMode === "chat" ? null : homepageDraft.skill);
+        changeCreationMode(homepageDraft.creationMode);
+        setFocusInitialPrompt(true);
+        setHomepageReady(true);
+    }, [homepageDraft, changeCreationMode]);
 
     useEffect(() => {
         let cancelled = false;
@@ -360,7 +377,7 @@ export default function VideoPage() {
     }, [message]);
 
     useEffect(() => {
-        if (!configHydrated) return;
+        if (!configHydrated || peekHomepageCreationHandoff("video")) return;
         void loadVideoLastUsedSettings()
             .then((settings) => {
                 updateConfig("vquality", settings.vquality);
@@ -1045,6 +1062,13 @@ export default function VideoPage() {
         setVideoReferences([]);
         setSelectedStyles([]);
     };
+
+    useEffect(() => {
+        if (!homepageReady || !homepageDraft || homepageStartedRef.current || prompt.trim() !== homepageDraft.prompt.trim()) return;
+        homepageStartedRef.current = true;
+        consumeHomepageCreationHandoff("video");
+        void generate();
+    }, [homepageReady, homepageDraft, prompt, references, videoReferences, selectedStyles, selectedSkill, creationMode]);
 
     const handleActionReply = async (value: string) => {
         if (isStreaming || isQueued) return;

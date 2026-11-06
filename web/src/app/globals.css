@@ -11,6 +11,15 @@
 }
 
 @font-face {
+    font-family: "Nana Fredoka";
+    src: url("/fonts/fredoka-nana.woff2") format("woff2");
+    font-display: swap;
+    font-style: normal;
+    font-weight: 500;
+    unicode-range: U+41, U+4E, U+61, U+6E;
+}
+
+@font-face {
     font-family: "Novanova Syne";
     src: url("/fonts/syne-latin-wght-normal.woff2") format("woff2");
     font-display: swap;
@@ -1677,6 +1686,35 @@ html[data-theme="purple"] {
     padding: 10px;
 }
 
+.creation-composer-toolbar-main {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+}
+
+.creation-composer-toolbar-main > * {
+    flex-shrink: 0;
+}
+
+.creation-composer-settings-slot {
+    display: flex;
+    width: max-content;
+    min-width: 0;
+    max-width: min(240px, 36vw);
+    flex: 0 1 auto;
+    overflow: hidden;
+}
+
+.creation-composer-settings-slot > * {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+}
+
 .creation-composer-chip {
     border-radius: 6px;
     background: var(--studio-surface-raised);
@@ -1698,7 +1736,8 @@ html[data-theme="purple"] {
 }
 
 .creation-composer-action-settings.ant-btn {
-    max-width: min(240px, 36vw);
+    width: 100%;
+    max-width: 100%;
     min-width: 0;
     overflow: hidden;
 }

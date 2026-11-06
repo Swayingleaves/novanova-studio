@@ -6,7 +6,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { App, Button, Input, Popover, Segmented, Tooltip } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { ArrowUp, BookOpenText, Bot, LoaderCircle, Square, X } from "lucide-react";
 
 import type { CreationComposerProps, CreationStyleOption } from "@/features/generation/components/creation-workspace-types";
@@ -52,6 +52,8 @@ export function CreationComposer({
     onSubmit,
     onStop,
     notice,
+    embedded = false,
+    toolbarLeading,
 }: CreationComposerProps) {
     const translate = useTranslation();
     const brand = useSpaceBrand();
@@ -232,19 +234,22 @@ export function CreationComposer({
                 {action.iconOnly ? null : <span className="creation-composer-action-label">{action.label}</span>}
             </Button>
         );
-        if (action.popoverContent) {
-            return (
-                <Popover key={action.key} content={action.popoverContent} trigger="hover" placement="topLeft" mouseEnterDelay={0.1} mouseLeaveDelay={0.15}>
-                    {button}
-                </Popover>
-            );
+        const trigger = action.popoverContent ? (
+            <Popover content={action.popoverContent} trigger="hover" placement="topLeft" mouseEnterDelay={0.1} mouseLeaveDelay={0.15}>
+                {button}
+            </Popover>
+        ) : (
+            <Tooltip title={action.label}>{button}</Tooltip>
+        );
+        if (action.className?.includes("creation-composer-action-settings")) {
+            return <div key={action.key} className="creation-composer-settings-slot">{trigger}</div>;
         }
-        return <Tooltip key={action.key} title={action.label}>{button}</Tooltip>;
+        return <Fragment key={action.key}>{trigger}</Fragment>;
     };
 
     return (
         <div className="creation-composer-band">
-            <div className="relative mx-auto w-full max-w-5xl lg:-left-4">
+            <div className={`relative mx-auto w-full max-w-5xl${embedded ? "" : " lg:-left-4"}`}>
                 <div className={`creation-composer-tray px-3 py-3 sm:px-4${compact ? " creation-composer-tray-compact" : ""}`}>
                     <div className="creation-composer-head">
                         <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -313,38 +318,40 @@ export function CreationComposer({
                         />}
                     </div>
 
-                    <div className={`creation-composer-toolbar flex flex-wrap items-center gap-2 overflow-hidden transition-all duration-200 ${compact ? "invisible mt-0 max-h-0 opacity-0" : "mt-3 max-h-24 opacity-100"}`}>
-                        <GenerationStyleMenu
-                            styles={availableStyles}
-                            selected={activeStyles}
-                            loading={styleLoading}
-                            error={styleError}
-                            open={styleMenuOpen}
-                            disabled={chatMode}
-                            query={styleQuery}
-                            highlightedIndex={highlightedStyleIndex}
-                            placement="topLeft"
-                            dataTour="composer-style"
-                            onOpenChange={(open) => {
-                                if (open) openStyleMenu();
-                                else closeStyleMenu();
-                            }}
-                            onQueryChange={setStyleQuery}
-                            onHighlightedIndexChange={setHighlightedStyleIndex}
-                            onSelect={chooseStyle}
-                        />
-                        <SkillMenu
-                            skills={availableSkills}
-                            selectedSkill={activeSkill}
-                            loading={skillLoading}
-                            error={skillError}
-                            open={skillMenuOpen}
-                            disabled={chatMode}
-                            onOpenChange={setSkillMenuOpen}
-                            onSelect={onSkillSelect}
-                        />
-                        {toolbarActions.map(renderAction)}
-                        <div className="flex-1" />
+                    <div className={`creation-composer-toolbar flex flex-nowrap items-center gap-2 overflow-hidden transition-all duration-200 ${compact ? "invisible mt-0 max-h-0 opacity-0" : embedded ? "mt-3 max-h-none opacity-100" : "mt-3 max-h-24 opacity-100"}`}>
+                        <div className="creation-composer-toolbar-main">
+                            {toolbarLeading}
+                            <GenerationStyleMenu
+                                styles={availableStyles}
+                                selected={activeStyles}
+                                loading={styleLoading}
+                                error={styleError}
+                                open={styleMenuOpen}
+                                disabled={chatMode}
+                                query={styleQuery}
+                                highlightedIndex={highlightedStyleIndex}
+                                placement="topLeft"
+                                dataTour="composer-style"
+                                onOpenChange={(open) => {
+                                    if (open) openStyleMenu();
+                                    else closeStyleMenu();
+                                }}
+                                onQueryChange={setStyleQuery}
+                                onHighlightedIndexChange={setHighlightedStyleIndex}
+                                onSelect={chooseStyle}
+                            />
+                            <SkillMenu
+                                skills={availableSkills}
+                                selectedSkill={activeSkill}
+                                loading={skillLoading}
+                                error={skillError}
+                                open={skillMenuOpen}
+                                disabled={chatMode}
+                                onOpenChange={setSkillMenuOpen}
+                                onSelect={onSkillSelect}
+                            />
+                            {toolbarActions.map(renderAction)}
+                        </div>
                         <div className="flex shrink-0 items-center gap-2">
                             <Tooltip title={requestActive ? translate("generation.modeSwitchLocked") : chatMode ? translate("generation.switchToAgentMode") : translate("generation.switchToChatMode")}>
                                 <span className="inline-flex h-9 items-center" data-tour="composer-mode">

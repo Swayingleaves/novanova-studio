@@ -139,6 +139,10 @@ export type CreationComposerProps = {
     onPasteImages?: (files: File[]) => void;
     onSubmit: () => void;
     onStop?: () => void;
+    /** 首页居中使用时去掉工作区左侧对齐偏移。 */
+    embedded?: boolean;
+    /** 工具栏左侧额外控件，例如首页的图片/视频切换。 */
+    toolbarLeading?: ReactNode;
 };
 
 export type CreationWorkspaceSidebarProps = CreationSidebarProps & {

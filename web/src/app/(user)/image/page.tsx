@@ -61,6 +61,8 @@ import { createMediaDownloadFileName } from "@/features/storage/services/media-d
 import { uploadRemoteObjectToStorage } from "@/features/storage/services/object-storage";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
+import { useHomepageCreationDraft } from "@/features/homepage/hooks/use-homepage-creation-draft";
+import { consumeHomepageCreationHandoff, peekHomepageCreationHandoff } from "@/features/homepage/lib/homepage-creation-handoff";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { deleteGenerationLogs, getAgentSessionHistory, getAiTaskPollingIntervalMilliseconds, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
@@ -181,6 +183,9 @@ export default function ImagePage() {
     const [uploadingObjectStorageId, setUploadingObjectStorageId] = useState("");
     const [managementMode, setManagementMode] = useState(false);
     const initialPromptAppliedRef = useRef(false);
+    const homepageStartedRef = useRef(false);
+    const homepageDraft = useHomepageCreationDraft("image");
+    const [homepageReady, setHomepageReady] = useState(false);
     const [focusInitialPrompt, setFocusInitialPrompt] = useState(false);
 
     useEffect(() => {
@@ -200,6 +205,17 @@ export default function ImagePage() {
         setFocusInitialPrompt(true);
         clearInitialPromptFromLocation();
     }, []);
+
+    useEffect(() => {
+        if (!homepageDraft) return;
+        setPrompt(homepageDraft.prompt);
+        setReferences(homepageDraft.images);
+        setSelectedStyles(homepageDraft.creationMode === "chat" ? [] : homepageDraft.styles);
+        setSelectedSkill(homepageDraft.creationMode === "chat" ? null : homepageDraft.skill);
+        changeCreationMode(homepageDraft.creationMode);
+        setFocusInitialPrompt(true);
+        setHomepageReady(true);
+    }, [homepageDraft, changeCreationMode]);
 
     useEffect(() => {
         let cancelled = false;
@@ -240,7 +256,7 @@ export default function ImagePage() {
     }, [message]);
 
     useEffect(() => {
-        if (!configHydrated) return;
+        if (!configHydrated || peekHomepageCreationHandoff("image")) return;
         void loadImageLastUsedSettings()
             .then((settings) => {
                 updateConfig("quality", settings.quality);
@@ -594,6 +610,13 @@ export default function ImagePage() {
         setReferences([]);
         setSelectedStyles([]);
     };
+
+    useEffect(() => {
+        if (!homepageReady || !homepageDraft || homepageStartedRef.current || prompt.trim() !== homepageDraft.prompt.trim()) return;
+        homepageStartedRef.current = true;
+        consumeHomepageCreationHandoff("image");
+        void generate();
+    }, [homepageReady, homepageDraft, prompt, references, selectedStyles, selectedSkill, creationMode]);
 
     const handleActionReply = async (value: string) => {
         if (isStreaming || isQueued) return;
