@@ -89,7 +89,7 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                                     {round.userText ? (
                                                         <div className="relative rounded-[28px] bg-[rgba(83,96,116,0.08)] px-5 py-4 pr-14">
                                                             <MessageCopyButton side="right" placement="inside" onClick={() => copyText(round.userCopyText || round.userText, translate("generation.userMessageCopied"))} />
-                                                            <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--studio-ink)] sm:text-[15px]">{round.userText}</p>
+                                                            <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--studio-ink)] sm:text-[15px]">{round.userContent ?? round.userText}</p>
                                                         </div>
                                                     ) : null}
                                                 </div>

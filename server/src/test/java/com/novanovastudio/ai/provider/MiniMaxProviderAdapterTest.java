@@ -14,7 +14,6 @@ import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.ai.AiMediaSupport;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.AiTaskExecutionContext;
-import com.novanovastudio.ai.GeneratedBinary;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
@@ -185,7 +184,7 @@ class MiniMaxProviderAdapterTest {
     }
 
     /**
-     * 成功任务应完成状态轮询、下载限时视频地址并转存媒体库。
+     * 成功任务应完成状态轮询、把限时视频地址转存媒体库并保留原始链接。
      *
      * @return void 无返回值
      */
@@ -197,27 +196,27 @@ class MiniMaxProviderAdapterTest {
         String providerTaskId = "provider-task-1";
         String remoteUrl = "https://cdn.example.com/video.mp4";
         PersistenceDtos.UploadedMediaResponse stored = new PersistenceDtos.UploadedMediaResponse(
-                "video:stored-1", "https://storage.example.com/video.mp4", 3L, "video/mp4", null, null, 5000, null);
+                "video:stored-1", "https://storage.example.com/video.mp4", 3L, "video/mp4", null, null, 5000, null, remoteUrl);
         when(aiHttpClient.sendJsonRequest(any(AiTaskDtos.AiChannelConfig.class), eq("POST"), eq("/v2/video_generation"), any()))
                 .thenReturn(Mono.just(JSON.parseObject("{\"task_id\":\"provider-task-1\"}")));
         when(aiHttpClient.sendJsonRequest(any(AiTaskDtos.AiChannelConfig.class), eq("GET"), eq("/v2/query/video_generation/" + providerTaskId), isNull()))
                 .thenReturn(Mono.just(JSON.parseObject("{\"task\":{\"status\":\"succeeded\",\"duration\":5,\"content\":{\"url\":\"" + remoteUrl + "\"}}}")));
-        when(aiHttpClient.downloadRemoteBinary(remoteUrl, "video/mp4"))
-                .thenReturn(Mono.just(new GeneratedBinary(new byte[]{1, 2, 3}, "video/mp4")));
-        when(mediaSupport.storeGeneratedMedia(eq(7L), eq(AiTaskTypes.VIDEO), eq("generated-minimax-h3-video.mp4"),
-                any(GeneratedBinary.class), isNull(Integer.class), isNull(Integer.class), eq(5000)))
+        when(mediaSupport.storeGeneratedMediaUrl(eq(7L), eq(AiTaskTypes.VIDEO), eq(remoteUrl), eq("video/mp4"),
+                isNull(Integer.class), isNull(Integer.class), eq(5000)))
                 .thenReturn(Mono.just(stored));
 
         VirtualTimeScheduler scheduler = VirtualTimeScheduler.create();
         StepVerifier.withVirtualTime(() -> adapter.execute(videoContext(() -> Mono.just(false))), () -> scheduler, 1)
                 .thenAwait(Duration.ofSeconds(5))
-                .assertNext(result -> Assertions.assertEquals("https://storage.example.com/video.mp4",
-                        result.getJSONObject("item").getString("url")))
+                .assertNext(result -> {
+                    Assertions.assertEquals("https://storage.example.com/video.mp4",
+                            result.getJSONObject("item").getString("url"));
+                    Assertions.assertEquals(remoteUrl, result.getJSONObject("item").getString("sourceUrl"));
+                })
                 .verifyComplete();
 
-        verify(aiHttpClient).downloadRemoteBinary(remoteUrl, "video/mp4");
-        verify(mediaSupport).storeGeneratedMedia(eq(7L), eq(AiTaskTypes.VIDEO), eq("generated-minimax-h3-video.mp4"),
-                any(GeneratedBinary.class), isNull(Integer.class), isNull(Integer.class), eq(5000));
+        verify(mediaSupport).storeGeneratedMediaUrl(eq(7L), eq(AiTaskTypes.VIDEO), eq(remoteUrl), eq("video/mp4"),
+                isNull(Integer.class), isNull(Integer.class), eq(5000));
     }
 
     /**

@@ -610,7 +610,14 @@ public class CreationAgentOrchestrator {
                 ? candidate.creationSettings()
                 : request != null && request.creationSettings() != null
                 ? request.creationSettings() : candidate == null ? null : candidate.creationSettings();
-        return planValidator.validate(candidate, request.entrySource(), settings);
+        try {
+            return planValidator.validate(candidate, request.entrySource(), settings);
+        } catch (BusinessException exception) {
+            // 校验失败时记录模型原始计划，便于区分模型标注错误与服务端约束缺陷。
+            log.warn("主Agent候选计划校验失败: entrySource={}, plan={}",
+                    request.entrySource(), JSON.toJSONString(candidate));
+            throw exception;
+        }
     }
 
     /**
@@ -757,6 +764,7 @@ public class CreationAgentOrchestrator {
             if (!StringUtils.hasText(storageKey)) storageKey = first.getString("key");
             image.put("storageKey", storageKey);
             image.put("mimeType", first.getString("mimeType"));
+            image.put("sourceUrl", first.getString("sourceUrl"));
             images.put(role, image);
         }
         if (images.isEmpty()) {

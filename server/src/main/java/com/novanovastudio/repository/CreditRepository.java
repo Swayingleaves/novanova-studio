@@ -854,14 +854,15 @@ public class CreditRepository {
                                          String generationType) {
     }
 
-    /** 用户统一积分明细查询条件。 */
+    /** 用户统一积分明细查询条件，keyword 仅管理员查询用于按用户名/昵称/邮箱搜索。 */
     public record UserCreditQuery(Long userId,
                                   LocalDate startDate,
                                   LocalDate endDate,
                                   OffsetDateTime startAt,
                                   OffsetDateTime endAt,
                                   String direction,
-                                  String source) {
+                                  String source,
+                                  String keyword) {
     }
 
     /** 用户统一积分明细基础查询条件。 */
@@ -902,6 +903,9 @@ public class CreditRepository {
         StringBuilder sql = new StringBuilder(ADMIN_TRANSACTION_QUERY);
         if (query.userId() != null) {
             sql.append(" AND credit_transactions.user_id = :userId\n");
+        }
+        if (query.keyword() != null) {
+            sql.append(" AND (users.username ILIKE :keyword OR users.nickname ILIKE :keyword OR users.email ILIKE :keyword)\n");
         }
         return transactionQuery(sql, query);
     }
@@ -946,6 +950,9 @@ public class CreditRepository {
                 .bind("endAt", query.endAt());
         if (query.userId() != null) {
             boundSpec = boundSpec.bind("userId", query.userId());
+        }
+        if (query.keyword() != null) {
+            boundSpec = boundSpec.bind("keyword", "%" + query.keyword() + "%");
         }
         return query.source() == null ? boundSpec : boundSpec.bind("source", query.source());
     }

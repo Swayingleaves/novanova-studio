@@ -433,7 +433,13 @@ public class CreationPlanValidator {
         }
         String generationType = canvasGenerationType(task.toolName(), task.toolArguments());
         if (StringUtils.hasText(generationType)) {
-            if (!generationType.equals(task.taskType()) || !"generate".equals(task.action())) {
+            // autoRun 不为 true 的生成配置节点只创建节点、不触发生成，属于普通画布操作，不需要固定子Agent。
+            boolean idleGenerationFlow = "canvas_create_generation_flow".equals(task.toolName())
+                    && !Boolean.TRUE.equals(arguments.get("autoRun"));
+            boolean matchesFixedAgent = generationType.equals(task.taskType()) && "generate".equals(task.action());
+            boolean plainCanvasOperation = idleGenerationFlow
+                    && "canvas".equals(task.taskType()) && "tool".equals(task.action());
+            if (!matchesFixedAgent && !plainCanvasOperation) {
                 throw invalid(SystemMessage.of("business.canvasGenerationToolDoesNotMatchItsFixedAgentType"));
             }
         } else if (!("canvas".equals(task.taskType()) && "tool".equals(task.action()))) {

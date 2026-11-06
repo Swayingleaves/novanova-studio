@@ -884,6 +884,11 @@ public class AgentTaskOrchestrator {
         image.put("durationMs", toNumberOrZero(firstItem.get("durationMs")));
         Object mimeType = firstItem.get("mimeType");
         if (mimeType != null) image.put("mimeType", mimeType.toString());
+        // 保留上游原始链接和云存储详情，刷新或恢复历史会话时结果仍带两个链接。
+        Object sourceUrl = firstItem.get("sourceUrl");
+        image.put("sourceUrl", sourceUrl == null ? null : sourceUrl.toString());
+        Object objectStorage = firstItem.get("objectStorage");
+        if (objectStorage != null) image.put("objectStorage", JSON.toJSON(objectStorage));
         return image;
     }
 

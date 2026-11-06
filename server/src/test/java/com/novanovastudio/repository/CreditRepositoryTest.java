@@ -128,6 +128,7 @@ class CreditRepositoryTest {
                 OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
                 OffsetDateTime.of(2026, 7, 2, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
                 "add",
+                null,
                 null);
 
         String sql = CreditRepository.userTransactionQuery(query);
@@ -147,6 +148,7 @@ class CreditRepositoryTest {
                 OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
                 OffsetDateTime.of(2026, 7, 2, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
                 "spend",
+                null,
                 null);
 
         String sql = CreditRepository.userTransactionQuery(query);
@@ -167,7 +169,8 @@ class CreditRepositoryTest {
                 OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
                 OffsetDateTime.of(2026, 7, 2, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
                 null,
-                "card_redeem");
+                "card_redeem",
+                null);
 
         String sql = CreditRepository.userTransactionQuery(query);
 
@@ -187,7 +190,8 @@ class CreditRepositoryTest {
                 OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
                 OffsetDateTime.of(2026, 7, 2, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
                 null,
-                "image");
+                "image",
+                null);
 
         String sql = CreditRepository.userTransactionQuery(query);
 
@@ -207,6 +211,7 @@ class CreditRepositoryTest {
                 OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
                 OffsetDateTime.of(2026, 7, 2, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
                 null,
+                null,
                 null);
 
         String sql = CreditRepository.adminTransactionQuery(query);
@@ -214,6 +219,28 @@ class CreditRepositoryTest {
         Assertions.assertTrue(sql.contains("JOIN users users ON users.id = credit_transactions.user_id"));
         Assertions.assertFalse(sql.contains(":userId"));
         Assertions.assertFalse(sql.contains("transaction_type = 'task_charge'"));
+    }
+
+    /**
+     * 管理员明细查询带搜索词时应按用户名、昵称或邮箱模糊匹配。
+     */
+    @Test
+    void shouldFilterAdminTransactionQueryByUserKeyword() {
+        CreditRepository.UserCreditQuery query = new CreditRepository.UserCreditQuery(
+                null,
+                LocalDate.of(2026, 7, 1),
+                LocalDate.of(2026, 7, 1),
+                OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                OffsetDateTime.of(2026, 7, 2, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                null,
+                null,
+                "user8@example.com");
+
+        String sql = CreditRepository.adminTransactionQuery(query);
+
+        Assertions.assertTrue(sql.contains("users.username ILIKE :keyword"));
+        Assertions.assertTrue(sql.contains("users.nickname ILIKE :keyword"));
+        Assertions.assertTrue(sql.contains("users.email ILIKE :keyword"));
     }
 
     /**
@@ -228,7 +255,8 @@ class CreditRepositoryTest {
                 OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
                 OffsetDateTime.of(2026, 7, 2, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
                 null,
-                "daily_check_in");
+                "daily_check_in",
+                null);
 
         String sql = CreditRepository.adminTransactionQuery(query);
 

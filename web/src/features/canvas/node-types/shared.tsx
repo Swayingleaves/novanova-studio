@@ -3,7 +3,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { Handle, Position } from "@xyflow/react";
-import { LoaderCircle, AlertTriangle, TriangleAlert, ImageOff, VideoOff } from "lucide-react";
+import { LoaderCircle, AlertTriangle, ImageOff, VideoOff } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type MouseEventHandler, type PointerEvent, type ReactNode, type WheelEvent } from "react";
 import { CANVAS_CONNECTION_HANDLE_SIZE } from "../constants";
 import type { CanvasNode } from "../types";
@@ -64,33 +64,6 @@ export function NodeMediaUnavailable({ kind, compact = false }: { kind: "image" 
     );
 }
 
-/** 媒体节点下载提示：生成结果有时效，超时将无法下载 */
-export function MediaDownloadHint() {
-    const translate = useTranslation();
-    return (
-        <div className="group/media-download-hint pointer-events-auto absolute bottom-2 left-2 z-10">
-            <span
-                role="img"
-                tabIndex={0}
-                aria-label={translate("canvas.downloadResultsBeforeTheyExpire")}
-                className="flex size-6 cursor-help items-center justify-center rounded-full text-amber-300 outline-none transition-colors hover:bg-black/70 focus-visible:bg-black/70 focus-visible:ring-2 focus-visible:ring-amber-300/80 motion-reduce:transition-none"
-                style={{ background: "rgba(0,0,0,0.55)" }}
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-                onWheel={(event) => event.stopPropagation()}
-            >
-                <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
-            </span>
-            <span
-                role="tooltip"
-                aria-hidden="true"
-                className="pointer-events-none absolute bottom-full left-0 mb-1.5 w-max max-w-56 -translate-y-1 text-[11px] leading-4 text-white opacity-0 transition-[opacity,transform] duration-150 group-hover/media-download-hint:translate-y-0 group-hover/media-download-hint:opacity-100 group-focus-within/media-download-hint:translate-y-0 group-focus-within/media-download-hint:opacity-100 motion-reduce:transition-none"
-                style={{ background: "rgba(0,0,0,0.78)", padding: "5px 8px", borderRadius: 6 }}
-            >
-                {translate("canvas.downloadResultsBeforeTheyExpire")}</span>
-        </div>
-    );
-}
 
 /** 节点默认最小尺寸 */
 export const NODE_MIN_WIDTH = 220;

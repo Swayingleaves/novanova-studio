@@ -82,6 +82,36 @@ public class AliyunOssObjectStorageProviderAdapter implements ObjectStorageProvi
     }
 
     /**
+     * 在上传请求中设置私有权限，避免上传后再修改权限产生公开窗口。
+     * @param config 已验证的存储配置
+     * @param key 专用对象键
+     * @param file 临时媒体文件
+     * @throws BusinessException 上传或权限设置失败时抛出
+     */
+    @Override
+    public void putPrivateObject(PersistenceDtos.ObjectStorageConfig config, String key, java.nio.file.Path file) {
+        putPrivateObject(config, key, file, "application/octet-stream");
+    }
+
+    /** @param config 私有存储配置 @param key 专用对象键 @param file 临时文件 @param mimeType 服务端确认的实际媒体类型 */
+    @Override
+    public void putPrivateObject(PersistenceDtos.ObjectStorageConfig config, String key, java.nio.file.Path file, String mimeType) {
+        validate(config);
+        OSS client = new OSSClientBuilder().build(config.endpoint(), config.accessKey(), config.secretKey());
+        try {
+            ObjectMetadata metadata = new ObjectMetadata();
+            metadata.setContentType(mimeType);
+            metadata.setObjectAcl(com.aliyun.oss.model.CannedAccessControlList.Private);
+            var request = new com.aliyun.oss.model.PutObjectRequest(config.bucket(), key, file.toFile());
+            request.setMetadata(metadata);
+            client.putObject(request);
+        } catch (RuntimeException exception) {
+            log.error("上传阿里云私有对象失败：key={}", key, exception);
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "上传阿里云私有对象失败，请检查对象存储权限");
+        } finally { client.shutdown(); }
+    }
+
+    /**
      * 校验阿里云OSS配置。
      *
      * @param config ObjectStorageConfig 对象存储配置

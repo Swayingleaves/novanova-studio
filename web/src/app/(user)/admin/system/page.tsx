@@ -1,4 +1,5 @@
 "use client";
+import { SharedWorkList } from "@/features/shared-work/components/shared-work-list";
 import { listTeams } from "@/services/api/team";
 
 import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
@@ -82,6 +83,7 @@ import { GenerationStyleCover } from "@/features/generation/components/generatio
 import { uploadImage } from "@/features/storage/services/image-storage";
 import { createCreditDirectionOptions, createCreditSourceOptions, CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactionIcon, creditTransactionTypeLabel, formatCreditChange, formatCredits, formatCreditTime, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
 import { TaskRecordPanel } from "@/app/(user)/credits/components/task-record-panel";
+import { useCopyText } from "@/shared/hooks/use-copy-text";
 
 const PAGE_SIZE = 20;
 
@@ -140,6 +142,7 @@ export default function AdminSystemPage() {
                         { key: "styles", label: translate("administration.styleManagement"), children: <TeamContentScope moduleName="styles"><GenerationStyleManagement /></TeamContentScope> },
                         { key: "skills", label: translate("administration.skillManagement"), children: <TeamContentScope moduleName="skills"><SkillManagement /></TeamContentScope> },
                         { key: "homepage", label: translate("administration.homepageShowcase"), children: <TeamContentScope moduleName="homepage"><HomepageShowcaseManagement /></TeamContentScope> },
+                        { key: "sharedWorks", label: "投稿审核", children: <SharedWorkList review /> },
                         {
                             key: "scriptPricing", label: translate("administration.creationPricing"), children: <Tabs
                                 items={[
@@ -159,6 +162,25 @@ export default function AdminSystemPage() {
     );
 }
 
+/** 积分明细里的用户邮箱：过长时悬停查看完整内容，点击整行复制邮箱。 */
+function AdminCreditEmail({ email }: { email: string }) {
+    const translate = useTranslation();
+    const copyText = useCopyText();
+    if (!email) return null;
+    return (
+        <Tooltip title={email}>
+            <button
+                type="button"
+                className="mt-0.5 block w-full cursor-pointer truncate text-left text-xs text-[var(--studio-muted)] transition-colors hover:text-[var(--studio-ink)]"
+                aria-label={`${translate("administration.copyEmail")}：${email}`}
+                onClick={() => copyText(email, translate("administration.emailCopied"))}
+            >
+                {email}
+            </button>
+        </Tooltip>
+    );
+}
+
 const createAdminCreditColumns = (translator: typeof translate = translate): ColumnsType<ServerAdminCreditTransaction> => ([
     {
         get title() { return translator("administration.user"); },
@@ -166,7 +188,7 @@ const createAdminCreditColumns = (translator: typeof translate = translate): Col
         render: (_, transaction) => (
             <div className="min-w-0">
                 <div className="truncate font-medium text-[var(--studio-ink)]">{adminCreditUserLabel(transaction)}</div>
-                <div className="mt-0.5 truncate text-xs text-[var(--studio-muted)]">{transaction.email}</div>
+                <AdminCreditEmail email={transaction.email} />
             </div>
         ),
     },
@@ -222,6 +244,8 @@ function CreditConsumptionManagement() {
     const [detailDateRange, setDetailDateRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")]);
     const [detailDirection, setDetailDirection] = useState<"all" | ServerCreditDirection>("all");
     const [detailSource, setDetailSource] = useState<"all" | ServerCreditSource>("all");
+    const [detailKeyword, setDetailKeyword] = useState("");
+    const [detailSearchKeyword, setDetailSearchKeyword] = useState("");
     const [selectedUser, setSelectedUser] = useState<ServerUserProfile | null>(null);
     const [userKeyword, setUserKeyword] = useState("");
     const [page, setPage] = useState(1);
@@ -254,15 +278,16 @@ function CreditConsumptionManagement() {
             endDate: detailDateRange[1].format("YYYY-MM-DD"),
             direction: detailDirection === "all" ? undefined : detailDirection,
             source: detailSource === "all" ? undefined : detailSource,
+            keyword: detailSearchKeyword || undefined,
         }),
-        [detailDateRange, detailDirection, detailSource, selectedUser?.id, filterTeamId, translate.locale],
+        [detailDateRange, detailDirection, detailSource, detailSearchKeyword, selectedUser?.id, filterTeamId, translate.locale],
     );
     const overviewQuery = useQuery({
         queryKey: ["admin-credit-overview", filterTeamId, ...filterKey, trendUnit],
         queryFn: () => getAdminCreditOverview({ ...filters, trendUnit }),
     });
     const transactionsQuery = useQuery({
-        queryKey: ["admin-credit-transactions", filterTeamId, detailFilters.userId ?? null, detailFilters.startDate, detailFilters.endDate, detailFilters.direction ?? null, detailFilters.source ?? null, page],
+        queryKey: ["admin-credit-transactions", filterTeamId, detailFilters.userId ?? null, detailFilters.startDate, detailFilters.endDate, detailFilters.direction ?? null, detailFilters.source ?? null, detailFilters.keyword ?? null, page],
         queryFn: () => listAdminCreditTransactions({ ...detailFilters, page, pageSize: CREDIT_TRANSACTION_PAGE_SIZE }),
     });
 
@@ -275,6 +300,16 @@ function CreditConsumptionManagement() {
     const hasError = overviewQuery.isError || transactionsQuery.isError;
 
     const resetPage = () => setPage(1);
+    /** 查询按钮与搜索框回车共用：关键词变化时更新筛选条件，否则只刷新当前结果。 */
+    const queryTransactions = () => {
+        const keyword = detailKeyword.trim();
+        if (keyword !== detailSearchKeyword) {
+            setDetailSearchKeyword(keyword);
+            resetPage();
+            return;
+        }
+        void transactionsQuery.refetch();
+    };
 
     return (
         <div>
@@ -394,15 +429,7 @@ function CreditConsumptionManagement() {
                             key: "transactions",
                             label: translate("administration.creditDetails"),
                             children: (
-                                <div aria-labelledby="admin-credit-transactions-title">
-                                    <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-                                        <div>
-                                            <h2 id="admin-credit-transactions-title" className="text-base font-semibold text-[var(--studio-ink)]">
-                                                {translate("administration.creditDetails")}</h2>
-                                            <p className="mt-1 text-sm text-[var(--studio-muted)]">{selectedUser ? translate("administration.creditRecordsFor", { value0: adminCreditUserLabel(selectedUser) }) : translate("administration.creditRecordsForAllUsers")}{translate("administration.includingUsageRefundsTopUpsAndCheckIns")}</p>
-                                        </div>
-                                        <span className="text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} {translate("administration.records")}</span>
-                                    </div>
+                                <div>
                                     <div className="mb-4 flex flex-wrap items-center gap-3">
                                         <DatePicker.RangePicker
                                             value={detailDateRange}
@@ -431,9 +458,24 @@ function CreditConsumptionManagement() {
                                                 resetPage();
                                             }}
                                         />
-                                        <Button icon={<Search className="size-4" />} loading={transactionsQuery.isFetching} onClick={() => void transactionsQuery.refetch()}>
-                                            {translate("administration.query")}
-                                        </Button>
+                                        <div className="flex items-center gap-3">
+                                            <Input
+                                                placeholder={translate("administration.searchDisplayNameUsernameOrEmail")}
+                                                value={detailKeyword}
+                                                onChange={(event) => setDetailKeyword(event.target.value)}
+                                                onPressEnter={(event) => {
+                                                    if (!event.nativeEvent.isComposing) queryTransactions();
+                                                }}
+                                                className="w-64 max-w-full"
+                                                prefix={<Search className="size-3.5 text-[var(--studio-faint)]" />}
+                                                aria-label={translate("administration.searchDisplayNameUsernameOrEmail")}
+                                                allowClear
+                                            />
+                                            <Button icon={<Search className="size-4" />} loading={transactionsQuery.isFetching} onClick={queryTransactions}>
+                                                {translate("administration.query")}
+                                            </Button>
+                                        </div>
+                                        <span className="ml-auto text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} {translate("administration.records")}</span>
                                     </div>
                                     <Table<ServerAdminCreditTransaction>
                                         rowKey="id"

@@ -71,6 +71,31 @@ test("分镜节点及其剧本连线可随画布场景序列化保存", () => {
     assert.equal(scheduledScenes.length, 1);
 });
 
+test("立即替换场景时直接保存，不等待防抖", async () => {
+    const savedNodeCounts: number[] = [];
+    const store = createCanvasStore({
+        createId: () => "document-1",
+        createTimestamp: () => "2026-11-07T00:00:00.000Z",
+        persistence: createMemoryPersistence(),
+        onDeleteError: () => assert.fail("不应删除失败"),
+        saveScheduler: {
+            saveNow: async (document) => {
+                savedNodeCounts.push(document.scene.nodes.length);
+            },
+            schedule: () => assert.fail("立即保存不应进入防抖队列"),
+            cancel: () => undefined,
+        },
+    });
+    const documentId = store.getState().createDocument("模板画布");
+    const node = createTextNode({ id: "text-1", position: { x: 0, y: 0 }, text: "开场" });
+
+    store.getState().replaceScene(documentId, { nodes: [node], connections: [], viewport: { offsetX: 0, offsetY: 0, zoom: 1 } }, { immediate: true });
+    await Promise.resolve();
+
+    assert.deepEqual(savedNodeCounts, [0, 1]);
+    assert.equal(store.getState().findDocument(documentId)?.scene.nodes[0]?.id, "text-1");
+});
+
 test("并发加载画布文档只请求一次", async () => {
     let loadCount = 0;
     let releaseLoad: (() => void) | undefined;

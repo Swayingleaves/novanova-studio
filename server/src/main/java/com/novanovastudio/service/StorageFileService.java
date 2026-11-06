@@ -100,7 +100,9 @@ public class StorageFileService {
     public Mono<JSONObject> deleteFile(String objectId) {
         return currentUserProvider.currentUserId().flatMap(userId -> owned(userId, objectId).flatMap(object -> {
             if (object.get("deletedAt") != null) return Mono.just(JSONObject.of("objectId", objectId, "status", "deleted"));
-            return repository.requestDeletion(userId, object.getLongValue("objectId"))
+            return repository.sharedWorkReference(object.getString("storageId"), object.getString("objectKey"))
+                    .flatMap(referenced -> referenced ? Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT, "文件正在用于分享或画布复制，请等待准备完成或先在我的分享中撤回作品"))
+                            : repository.requestDeletion(userId, object.getLongValue("objectId")))
                     .thenReturn(JSONObject.of("objectId", objectId, "status", "pendingDeletion"))
                     .doOnSuccess(result -> log.info("登记本人云文件删除：userId={}, objectId={}", userId, objectId));
         })).as(transactionalOperator::transactional);

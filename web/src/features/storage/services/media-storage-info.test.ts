@@ -48,3 +48,12 @@ test("mergeMediaStorageInfo 在服务端读取失败时保留会话数据", () =
     assert.equal(resolved.url, "https://source.example.com/generated/video.mp4");
     assert.deepEqual(resolved.objectStorage, objectStorage);
 });
+
+test("mergeMediaStorageInfo 恢复服务端保存的上游原始链接", () => {
+    const resolved = mergeMediaStorageInfo("https://cloud.example.com/generated/video.mp4", undefined, {
+        url: "https://cloud.example.com/generated/video.mp4",
+        sourceUrl: "https://upstream.example.com/generated/video.mp4",
+    });
+
+    assert.equal(resolved.sourceUrl, "https://upstream.example.com/generated/video.mp4");
+});

@@ -26,6 +26,7 @@ import { formatGenerationStyleMessage } from "../lib/style-command.ts";
  * @param renderPendingToolCall (call) => ReactNode 可选：工具执行中卡片的自定义渲染
  * @param choiceDisabledReasons  Record<string,string> 可选：choice 选项禁用原因，key 为选项 value（如"确认生成"），命中后按钮置灰并提示
  * @param renderChoiceSettings   (roundId) => ReactNode 可选：choice 轮次的内联设置内容（如工作流图片参数卡片），按 user round id 返回内容；返回非空时展示在助手文本与选项按钮之间
+ * @param renderUserContent      (round) => ReactNode 可选：渲染用户消息内容（如把 @ 图片/视频引用渲染成芯片），提供时替代纯文本
  */
 export function buildChatThreadSection(
     messages: ChatMessageItem[],
@@ -37,6 +38,7 @@ export function buildChatThreadSection(
     renderPendingToolCall?: (call: ToolCallState) => React.ReactNode,
     choiceDisabledReasons?: Record<string, string>,
     renderChoiceSettings?: (roundId: string) => React.ReactNode,
+    renderUserContent?: (round: { id: string; userText: string; attachments?: ChatAttachment[] }) => React.ReactNode,
 ): CreationThreadSection | null {
     if (!messages.length && !thinkings.length && !activeThinking && !streamingText) return null;
     const allThinkings = (activeThinking ? [...thinkings, activeThinking] : thinkings).filter((thinking) => thinking.text);
@@ -72,7 +74,7 @@ export function buildChatThreadSection(
     for (const msg of messages) {
         if (msg.role === "user") {
             if (currentUserText || currentActivities.length) {
-                rounds.push(makeRound(currentRoundId, currentUserText, currentUserStyles, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, buildResultContent(), currentAction, choiceDisabledReasons, isChoiceConfirmRound(currentAction) ? renderChoiceSettings?.(currentRoundId) : null));
+                rounds.push(makeRound(currentRoundId, currentUserText, currentUserStyles, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, buildResultContent(), currentAction, choiceDisabledReasons, isChoiceConfirmRound(currentAction) ? renderChoiceSettings?.(currentRoundId) : null, renderUserContent?.({ id: currentRoundId, userText: currentUserText, attachments: currentRawAttachments })));
             }
             currentRoundId = msg.id;
             currentUserText = msg.text;
@@ -114,7 +116,7 @@ export function buildChatThreadSection(
         }
     }
     if (currentUserText || currentActivities.length) {
-        rounds.push(makeRound(currentRoundId, currentUserText, currentUserStyles, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, buildResultContent(), currentAction, choiceDisabledReasons, isChoiceConfirmRound(currentAction) ? renderChoiceSettings?.(currentRoundId) : null));
+        rounds.push(makeRound(currentRoundId, currentUserText, currentUserStyles, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, buildResultContent(), currentAction, choiceDisabledReasons, isChoiceConfirmRound(currentAction) ? renderChoiceSettings?.(currentRoundId) : null, renderUserContent?.({ id: currentRoundId, userText: currentUserText, attachments: currentRawAttachments })));
     }
 
     if (streamingText) {
@@ -143,10 +145,12 @@ function makeRound(
     action?: AgentAction,
     choiceDisabledReasons?: Record<string, string>,
     choiceSettingsContent?: React.ReactNode,
+    userContent?: React.ReactNode,
 ): CreationThreadRound {
     return {
         id: id || nanoid(),
         userText,
+        userContent,
         userCopyText: formatGenerationStyleMessage(userText, userStyles),
         activities,
         statusText,

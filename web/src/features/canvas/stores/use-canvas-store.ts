@@ -34,6 +34,13 @@ export const useCanvasStore = createCanvasStore({
 
 storeReference = useCanvasStore;
 
+/** 分享必须等待最新场景保存成功，不能使用仅排队的自动保存结果。 */
+export async function saveCanvasForShare(documentId: string) {
+    const document = useCanvasStore.getState().documents.find((item) => item.identity.id === documentId);
+    if (!document) throw new Error("画布尚未加载，请稍后重试");
+    await saveScheduler.saveNow(document, true);
+}
+
 /** 切换空间前同步保存已加载文档，失败由调用方提示并保留原空间。 */
 export async function saveCanvasBeforeTeamSwitch() {
     const state = useCanvasStore.getState();

@@ -1,4 +1,6 @@
 "use client";
+import { saveCanvasForShare } from "../stores/use-canvas-store";
+import { useSharedWorkStore } from "@/features/shared-work/stores/use-shared-work-store";
 import { isInsufficientCreditsError, showInsufficientCredits } from "@/features/credits/insufficient-credits";
 import { modelCreditBalance } from "@/features/team/credit-balance";
 import { getWalletBalances } from "@/services/api/team";
@@ -5089,6 +5091,12 @@ function CanvasWorkspacePage() {
 
     if (!projectLoaded) return <CanvasLoadingShell />;
 
+    const canShare = !useTeamStore.getState().team || useTeamStore.getState().team?.memberRole === "administrator";
+    const openCanvasShare = (node?: CanvasDomainNode) => useSharedWorkStore.getState().open({ sourceType: "canvas", sourceId: projectId, workType: node?.kind === "image" || node?.kind === "video" ? node.kind : "canvas", nodeId: node?.id }, async () => {
+        replaceScene(projectId, { nodes, connections, viewport: { offsetX: viewport.x, offsetY: viewport.y, zoom: viewport.k } });
+        await saveCanvasForShare(projectId);
+    });
+
     return (
         <main
             className="flex h-full min-h-0 overflow-hidden"
@@ -5099,6 +5107,7 @@ function CanvasWorkspacePage() {
         >
             <section ref={containerRef} className="relative min-w-0 flex-1 overflow-hidden">
                 <CanvasTopBar
+                    onShare={canShare ? () => openCanvasShare() : undefined}
                     title={currentDocument?.identity.title || translate("canvas.untitledCanvas")}
                     titleDraft={titleDraft}
                     isTitleEditing={titleEditing}
@@ -5285,6 +5294,7 @@ function CanvasWorkspacePage() {
                 ) : null}
 
                 <CanvasNodeHoverToolbar
+                    onShare={canShare ? openCanvasShare : undefined}
                     node={isNodeDragging || nodeImageSettingsOpen || selectedSourceNodes.length >= 2 ? null : toolbarNode}
                     viewport={viewport}
                     onKeep={keepNodeToolbar}

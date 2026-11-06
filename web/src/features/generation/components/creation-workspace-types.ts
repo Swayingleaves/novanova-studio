@@ -31,6 +31,8 @@ export type CreationStyleOption = GenerationStyleOption;
 export type CreationThreadRound = {
     id: string;
     userText: string;
+    /** 用户消息的行内展示内容；提供时替代纯文本，用于渲染 @ 图片/视频芯片。 */
+    userContent?: ReactNode;
     userCopyText?: string;
     userAttachments?: ReactNode;
     thinkings?: ThinkingBlockState[];
@@ -137,6 +139,10 @@ export type CreationComposerProps = {
     onPasteImages?: (files: File[]) => void;
     onSubmit: () => void;
     onStop?: () => void;
+    /** 首页居中使用时去掉工作区左侧对齐偏移。 */
+    embedded?: boolean;
+    /** 工具栏左侧额外控件，例如首页的图片/视频切换。 */
+    toolbarLeading?: ReactNode;
 };
 
 export type CreationWorkspaceSidebarProps = CreationSidebarProps & {

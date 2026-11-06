@@ -21,6 +21,7 @@ type RequestOptions = {
 export type VideoGenerationResult = {
     blob?: Blob;
     url?: string;
+    sourceUrl?: string;
     mimeType?: string;
     uploadedFile?: UploadedFile;
     generationStyleSnapshots?: GenerationStyleSnapshot[];
@@ -134,10 +135,12 @@ function videoResultFromTask(task: ServerAiTask): VideoGenerationResult {
     if (!item?.url) throw new Error(translate("generation.videoTaskReturnedNoResult"));
     return {
         url: item.url,
+        sourceUrl: item.sourceUrl,
         mimeType: item.mimeType || "video/mp4",
         generationStyleSnapshots: readGenerationStyleSnapshots(task.requestData),
         uploadedFile: {
             url: item.url,
+            sourceUrl: item.sourceUrl,
             storageKey: item.storageKey || "",
             bytes: item.bytes || 0,
             mimeType: item.mimeType || "video/mp4",

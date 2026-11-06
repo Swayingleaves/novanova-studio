@@ -1,7 +1,7 @@
 import type { CanvasDocument } from "../types.ts";
 
 export interface CanvasDocumentSaveScheduler {
-    saveNow: (document: CanvasDocument) => Promise<void>;
+    saveNow: (document: CanvasDocument, propagateError?: boolean) => Promise<void>;
     schedule: (document: CanvasDocument) => void;
     cancel: (documentId: string) => void;
 }
@@ -23,14 +23,14 @@ export function createCanvasDocumentSaveScheduler(options: CreateCanvasDocumentS
         timers.delete(documentId);
     };
 
-    const saveNow = async (document: CanvasDocument) => {
+    const saveNow = async (document: CanvasDocument, propagateError = false) => {
         cancel(document.identity.id);
         const documentId = document.identity.id;
         const previousSave = activeSaves.get(documentId) || Promise.resolve();
         const currentSave = previousSave
             .catch(() => undefined)
             .then(() => options.saveDocument(document))
-            .catch((error) => options.onError(documentId, error))
+            .catch((error) => { options.onError(documentId, error); if (propagateError) throw error; })
             .finally(() => {
                 if (activeSaves.get(documentId) === currentSave) activeSaves.delete(documentId);
             });

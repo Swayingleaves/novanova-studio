@@ -1,4 +1,6 @@
 "use client";
+import { ShareResultButton } from "@/features/shared-work/components/share-result-button";
+import { useGenerationShareSources } from "@/features/shared-work/use-generation-share-sources";
 import { useInsufficientCreditsPrompt } from "@/features/credits/use-insufficient-credits-prompt";
 import { showInsufficientCredits } from "@/features/credits/insufficient-credits";
 
@@ -11,7 +13,7 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { BookOpen, CloudUpload, Download, FolderPlus, Cog, HelpCircle, Link2, LoaderCircle, Palette, Play, RefreshCw, Sparkles, TriangleAlert, Upload, VideoIcon } from "lucide-react";
+import { BookOpen, Cloud, CloudUpload, Download, FolderPlus, Cog, HelpCircle, Link2, LoaderCircle, Palette, Play, RefreshCw, Sparkles, Upload, VideoIcon } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -45,6 +47,8 @@ import { resolveImageUrl, uploadImage } from "@/features/storage/services/image-
 import { uploadRemoteObjectToStorage } from "@/features/storage/services/object-storage";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
+import { useHomepageCreationDraft } from "@/features/homepage/hooks/use-homepage-creation-draft";
+import { consumeHomepageCreationHandoff, peekHomepageCreationHandoff } from "@/features/homepage/lib/homepage-creation-handoff";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
@@ -53,6 +57,7 @@ import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import type { AgentActivityState, ChatAttachment, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
+import { chatAttachmentsToMentionReferences, PromptMentionText } from "@/features/generation/components/prompt-mention-text";
 import { ChoiceHistoryBar } from "@/features/generation/components/creation-message-thread";
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import {
@@ -98,6 +103,7 @@ import { findLatestPlayableVideo, hasPlayableVideoUrl } from "./video-display";
 type GeneratedVideo = {
     id: string;
     url: string;
+    sourceUrl?: string;
     storageKey: string;
     durationMs: number;
     width: number;
@@ -122,6 +128,7 @@ type WorkflowOutput = {
     taskId?: string;
     taskType?: "image" | "video" | string;
     url?: string;
+    sourceUrl?: string;
     storageKey?: string;
     key?: string;
     mimeType?: string;
@@ -234,6 +241,7 @@ export default function VideoPage() {
     const [activeId, setActiveId] = useState<string | null>(null);
     const activeIdRef = useRef(activeId);
     const { conversations, setConversations, conversationsRef, refreshConversations, loadMoreConversations, conversationsLoading, hasMoreConversations, conversationsError, retryConversations } = useGenerationConversations("video", userId, activeIdRef, normalizeConversation);
+    useGenerationShareSources(conversations, "video");
     const [prompt, setPrompt] = useState("");
     const [styleOptions, setStyleOptions] = useState<CreationStyleOption[]>([]);
     const [selectedStyles, setSelectedStyles] = useState<CreationStyleOption[]>([]);
@@ -303,6 +311,9 @@ export default function VideoPage() {
     const [managementMode, setManagementMode] = useState(false);
     const [pendingStopping, setPendingStopping] = useState(false);
     const initialPromptAppliedRef = useRef(false);
+    const homepageStartedRef = useRef(false);
+    const homepageDraft = useHomepageCreationDraft("video");
+    const [homepageReady, setHomepageReady] = useState(false);
     const [focusInitialPrompt, setFocusInitialPrompt] = useState(false);
 
     useEffect(() => {
@@ -314,6 +325,18 @@ export default function VideoPage() {
         setFocusInitialPrompt(true);
         clearInitialPromptFromLocation();
     }, []);
+
+    useEffect(() => {
+        if (!homepageDraft) return;
+        setPrompt(homepageDraft.prompt);
+        setReferences(homepageDraft.images);
+        setVideoReferences(homepageDraft.videos);
+        setSelectedStyles(homepageDraft.creationMode === "chat" ? [] : homepageDraft.styles);
+        setSelectedSkill(homepageDraft.creationMode === "chat" ? null : homepageDraft.skill);
+        changeCreationMode(homepageDraft.creationMode);
+        setFocusInitialPrompt(true);
+        setHomepageReady(true);
+    }, [homepageDraft, changeCreationMode]);
 
     useEffect(() => {
         let cancelled = false;
@@ -354,7 +377,7 @@ export default function VideoPage() {
     }, [message]);
 
     useEffect(() => {
-        if (!configHydrated) return;
+        if (!configHydrated || peekHomepageCreationHandoff("video")) return;
         void loadVideoLastUsedSettings()
             .then((settings) => {
                 updateConfig("vquality", settings.vquality);
@@ -1040,6 +1063,13 @@ export default function VideoPage() {
         setSelectedStyles([]);
     };
 
+    useEffect(() => {
+        if (!homepageReady || !homepageDraft || homepageStartedRef.current || prompt.trim() !== homepageDraft.prompt.trim()) return;
+        homepageStartedRef.current = true;
+        consumeHomepageCreationHandoff("video");
+        void generate();
+    }, [homepageReady, homepageDraft, prompt, references, videoReferences, selectedStyles, selectedSkill, creationMode]);
+
     const handleActionReply = async (value: string) => {
         if (isStreaming || isQueued) return;
         const text = value.trim();
@@ -1333,7 +1363,7 @@ export default function VideoPage() {
 
     const openVideoResultDetail = (video: GeneratedVideo, round: Round) => {
         setResultDetail({
-            media: { kind: "video", url: video.url, ossUrl: video.objectStorage?.url, width: video.width, height: video.height, bytes: video.bytes, durationMs: video.durationMs, mimeType: video.mimeType },
+            media: { id: video.id, storageKey: video.storageKey, kind: "video", url: video.url, sourceUrl: video.sourceUrl, ossUrl: video.objectStorage?.url, width: video.width, height: video.height, bytes: video.bytes, durationMs: video.durationMs, mimeType: video.mimeType },
             prompt: round.prompt,
             generationPrompt: round.generationPrompt,
             references: round.references,
@@ -1366,16 +1396,6 @@ export default function VideoPage() {
     };
 
     const uploadResultToObjectStorage = async (video: GeneratedVideo) => {
-        if (video.objectStorage?.url) {
-            try {
-                await navigator.clipboard.writeText(video.objectStorage.url);
-                message.success(translate("video.cloudStorageURLCopied"));
-            } catch {
-                message.error(translate("video.failedToCopyCloudStorageURL"));
-            }
-            return;
-        }
-
         setUploadingObjectStorageId(video.id);
         try {
             const file = await uploadRemoteObjectToStorage({
@@ -1673,6 +1693,11 @@ export default function VideoPage() {
         }
         return null;
     })();
+    // 聊天区用户消息里的 @ 引用按图片/视频编号渲染成与输入框一致的芯片。
+    const renderVideoUserContent = ({ userText, attachments }: { userText: string; attachments?: ChatAttachment[] }) => {
+        const mentionReferences = chatAttachmentsToMentionReferences(attachments, seedanceReferenceLabel);
+        return mentionReferences.length ? <PromptMentionText text={userText} references={mentionReferences} /> : userText;
+    };
     const chatThreadSection = buildChatThreadSection(
         chatMessages,
         completedThinkings,
@@ -1691,7 +1716,7 @@ export default function VideoPage() {
                 onUploadObjectStorage: uploadResultToObjectStorage,
                 onOpenDetail: (video) =>
                     setResultDetail({
-                        media: { kind: "video", url: video.url, ossUrl: video.objectStorage?.url, width: video.width, height: video.height, bytes: video.bytes, durationMs: video.durationMs, mimeType: video.mimeType },
+                        media: { id: video.id, storageKey: video.storageKey, kind: "video", url: video.url, sourceUrl: video.sourceUrl, ossUrl: video.objectStorage?.url, width: video.width, height: video.height, bytes: video.bytes, durationMs: video.durationMs, mimeType: video.mimeType },
                         prompt: round?.userText || prompt,
                         references: workflowReferences.length ? workflowReferences : roundReferences.images.length ? roundReferences.images : references,
                         videoReferences: roundReferences.videos.length ? roundReferences.videos : videoReferences,
@@ -1707,6 +1732,7 @@ export default function VideoPage() {
             if (imageConfirmUserRoundId && roundId === imageConfirmUserRoundId) return workflowVideoSettingsNode;
             return null;
         },
+        renderVideoUserContent,
     );
     // 聊天区已实时渲染的生成轮次不再进入历史区，避免同一轮重复展示；纯文本对话保留在聊天区。
     // 当前会话激活时（chatMessages 非空），已落库的纯对话轮次也在聊天区渲染过，历史区一并跳过；
@@ -2071,12 +2097,15 @@ function renderResultVideos(
                 const video: GeneratedVideo = {
                     id,
                     url,
+                    // 实时结果同样保留上游原始链接和云存储详情，否则“复制原链接”只能回退到展示地址。
+                    sourceUrl: typeof item.sourceUrl === "string" && item.sourceUrl.trim() ? item.sourceUrl : undefined,
                     storageKey: readVideoStorageKey(item),
                     durationMs: typeof item.durationMs === "number" ? item.durationMs : 0,
                     width: typeof item.width === "number" ? item.width : 0,
                     height: typeof item.height === "number" ? item.height : 0,
                     bytes: typeof item.bytes === "number" ? item.bytes : 0,
                     mimeType: typeof item.mimeType === "string" ? item.mimeType : "video/mp4",
+                    objectStorage: item.objectStorage && typeof item.objectStorage === "object" ? (item.objectStorage as ObjectStorageFile) : undefined,
                 };
                 return React.createElement(ResultCard, {
                     key: i,
@@ -2146,9 +2175,26 @@ function buildVideoThreadSections(
         }
         const label = formatThreadSectionLabel(round.createdAt);
         const rounds = sectionMap.get(label) || [];
+        const mentionReferences: PromptImageReference[] = [
+            ...round.references.map((reference, index) => ({
+                id: reference.id,
+                name: reference.name,
+                label: seedanceReferenceLabel("image", index),
+                previewUrl: reference.dataUrl,
+                kind: "image" as const,
+            })),
+            ...round.videoReferences.filter((reference) => hasPlayableVideoUrl(reference.url)).map((reference, index) => ({
+                id: reference.id,
+                name: reference.name,
+                label: seedanceReferenceLabel("video", index),
+                previewUrl: reference.url,
+                kind: "video" as const,
+            })),
+        ];
         rounds.push({
             id: round.id,
             userText: round.prompt,
+            userContent: mentionReferences.length ? <PromptMentionText text={round.prompt} references={mentionReferences} /> : undefined,
             userCopyText: formatGenerationStyleMessage(round.prompt, round.generationStyleSnapshots),
             userAttachments:
                 round.references.length || round.videoReferences.length || round.generationStyleSnapshots?.length || round.skill ? (
@@ -2308,6 +2354,7 @@ function workflowOutputToVideo(output: WorkflowOutput): GeneratedVideo | null {
     return {
         id: output.id || output.storageKey || output.url,
         url: output.url,
+        sourceUrl: output.sourceUrl,
         storageKey: output.storageKey || output.key || "",
         durationMs: output.durationMs || 0,
         width: output.width || 0,
@@ -2481,11 +2528,16 @@ function ResultCard({
                     ) : null}
                 </div>
                 <div className="flex gap-1">
-                    <Tooltip title={translate("video.copyLink")}>
-                        <Button aria-label={translate("video.copyLink")} size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<Link2 className="size-3.5" />} onClick={() => copyText(video.objectStorage?.url || video.url, translate("video.linkCopied"))} />
+                    <ShareResultButton mediaId={video.id} storageKey={video.storageKey} />
+                    <Tooltip title={translate("video.copySourceURL")}>
+                        <Button aria-label={translate("video.copySourceURL")} size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<Link2 className="size-3.5" />} onClick={() => copyText(video.sourceUrl || video.url, translate("video.linkCopied"))} />
                     </Tooltip>
                     <Tooltip title={video.objectStorage?.url ? translate("video.copyCloudStorageURL") : translate("video.uploadToCloudStorage")}>
-                        <Button size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" loading={uploadingObjectStorage} icon={<CloudUpload className="size-3.5" />} onClick={() => void onUploadObjectStorage(video)} />
+                        {video.objectStorage?.url ? (
+                            <Button aria-label={translate("video.copyCloudStorageURL")} size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<Cloud className="size-3.5" />} onClick={() => copyText(video.objectStorage?.url || "", translate("video.cloudStorageURLCopied"))} />
+                        ) : (
+                            <Button aria-label={translate("video.uploadToCloudStorage")} size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" loading={uploadingObjectStorage} icon={<CloudUpload className="size-3.5" />} onClick={() => void onUploadObjectStorage(video)} />
+                        )}
                     </Tooltip>
                     <Tooltip title={translate("video.addToAssets")}>
                         <Button size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<FolderPlus className="size-3.5" />} onClick={() => onSaveAsset(video)} />
@@ -2499,10 +2551,6 @@ function ResultCard({
                         </Tooltip>
                     ) : null}
                 </div>
-            </div>
-            <div className="flex items-center gap-1 border-t border-[var(--studio-line)] px-3 py-2 text-xs text-amber-500">
-                <TriangleAlert className="size-3.5 shrink-0" />
-                <span>{translate("video.downloadResultsBeforeTheyExpire")}</span>
             </div>
         </div>
     );
@@ -2538,8 +2586,9 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
                     outputs: await Promise.all(
                         (stage.outputs || []).map(async (output) => {
                             const storageKey = readMediaStorageKey(output);
-                            const url = output.taskType === "image" ? await resolveImageUrl(storageKey, output.url || "") : (await resolveMediaStorageInfo(storageKey, output.url || "", output.objectStorage))?.url || output.url;
-                            return { ...output, storageKey, url };
+                            const storageInfo = output.taskType === "image" ? null : await resolveMediaStorageInfo(storageKey, output.url || "", output.objectStorage);
+                            const url = output.taskType === "image" ? await resolveImageUrl(storageKey, output.url || "") : storageInfo?.url || output.url;
+                            return { ...output, storageKey, url, sourceUrl: storageInfo?.sourceUrl || output.sourceUrl };
                         }),
                     ),
                 })),
@@ -2574,6 +2623,7 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
                               video: {
                                   ...video,
                                   url: storageInfo.url,
+                                  sourceUrl: storageInfo.sourceUrl || video.sourceUrl,
                                   objectStorage: storageInfo.objectStorage,
                               },
                           }

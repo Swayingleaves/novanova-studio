@@ -65,7 +65,26 @@ public interface ObjectStorageProviderAdapter {
      * @throws com.novanovastudio.common.BusinessException 服务商不支持私有对象时抛出
      */
     default boolean verifyPrivateBucket(PersistenceDtos.ObjectStorageConfig config) {
-        throw unsupportedPrivateObject();
+        String key = "private-probe/" + java.util.UUID.randomUUID();
+        Path probe = null;
+        boolean uploaded = false;
+        try {
+            probe = java.nio.file.Files.createTempFile("novanova-private-probe-", ".txt");
+            java.nio.file.Files.writeString(probe, "private-probe");
+            putPrivateObject(config, key, probe);
+            uploaded = true;
+            String signed = createReadUrl(config, key, "private-probe.txt", "text/plain", false, java.time.Instant.now().plusSeconds(60));
+            java.net.URI unsigned = java.net.URI.create(signed.split("\\?", 2)[0]);
+            var request = java.net.http.HttpRequest.newBuilder(unsigned).timeout(java.time.Duration.ofSeconds(10))
+                    .method("HEAD", java.net.http.HttpRequest.BodyPublishers.noBody()).build();
+            return java.net.http.HttpClient.newHttpClient().send(request, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode() == 403;
+        } catch (Exception exception) {
+            org.slf4j.LoggerFactory.getLogger(ObjectStorageProviderAdapter.class).error("验证私有对象访问失败：provider={}", provider(), exception);
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "无法验证私有对象访问，请检查对象存储权限及访问域名");
+        } finally {
+            try { if (uploaded) deletePrivateObject(config, key); }
+            finally { if (probe != null) try { java.nio.file.Files.deleteIfExists(probe); } catch (java.io.IOException exception) { org.slf4j.LoggerFactory.getLogger(ObjectStorageProviderAdapter.class).error("清理私有探针临时文件失败", exception); } }
+        }
     }
 
     /**
@@ -77,6 +96,11 @@ public interface ObjectStorageProviderAdapter {
      * @throws com.novanovastudio.common.BusinessException 服务商不支持私有对象或上传失败时抛出
      */
     default void putPrivateObject(PersistenceDtos.ObjectStorageConfig config, String key, Path file) {
+        throw unsupportedPrivateObject();
+    }
+
+    /** @param config 私有存储配置 @param key 对象键 @param file 临时文件 @param mimeType 已验证媒体类型 @throws BusinessException 提供方未支持媒体类型元数据时抛出 */
+    default void putPrivateObject(PersistenceDtos.ObjectStorageConfig config, String key, Path file, String mimeType) {
         throw unsupportedPrivateObject();
     }
 
@@ -109,6 +133,6 @@ public interface ObjectStorageProviderAdapter {
      * @return BusinessException 不受支持异常
      */
     private static BusinessException unsupportedPrivateObject() {
-        return new BusinessException(ErrorCode.BUSINESS_ERROR, "当前默认对象存储不支持私有原文存储，请更换为腾讯云COS");
+        return new BusinessException(ErrorCode.BUSINESS_ERROR, "当前对象存储提供方不支持私有对象操作，请调整存储配置");
     }
 }

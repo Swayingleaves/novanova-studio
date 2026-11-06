@@ -6,14 +6,14 @@ import { deleteServerMedia, downloadServerMedia, getServerMediaInfo, registerRem
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { mergeMediaStorageInfo } from "./media-storage-info";
 
-export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number; objectStorage?: ObjectStorageFile };
+export type UploadedFile = { url: string; sourceUrl?: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number; objectStorage?: ObjectStorageFile };
 
 const resolvedUrls = new Map<string, string>();
 
 export async function uploadMediaFile(input: string | Blob, prefix = "file", options: { mimeType?: string; durationMs?: number } = {}): Promise<UploadedFile> {
     if (typeof input === "string" && /^https?:\/\//i.test(input)) {
         const media = await registerRemoteMedia({ kind: prefix, sourceUrl: input, storageKey: `${prefix}:${nanoid()}`, mimeType: options.mimeType });
-        return { url: media.url || input, storageKey: media.storageKey, bytes: media.bytes || 0, mimeType: media.mimeType || options.mimeType || "application/octet-stream", width: media.width, height: media.height, durationMs: media.durationMs, objectStorage: media.objectStorage };
+        return { url: media.url || input, sourceUrl: media.sourceUrl || input, storageKey: media.storageKey, bytes: media.bytes || 0, mimeType: media.mimeType || options.mimeType || "application/octet-stream", width: media.width, height: media.height, durationMs: media.durationMs, objectStorage: media.objectStorage };
     }
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
     const localUrl = URL.createObjectURL(blob);
@@ -32,7 +32,7 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file", opt
         input instanceof File ? input.name : `${prefix}.bin`,
     );
     resolvedUrls.set(media.storageKey, media.url);
-    return { url: media.url, storageKey: media.storageKey, bytes: media.bytes || blob.size, mimeType: media.mimeType || options.mimeType || blob.type || "application/octet-stream", width: media.width || meta.width, height: media.height || meta.height, durationMs: media.durationMs || options.durationMs || meta.durationMs, objectStorage: media.objectStorage };
+    return { url: media.url, sourceUrl: media.sourceUrl, storageKey: media.storageKey, bytes: media.bytes || blob.size, mimeType: media.mimeType || options.mimeType || blob.type || "application/octet-stream", width: media.width || meta.width, height: media.height || meta.height, durationMs: media.durationMs || options.durationMs || meta.durationMs, objectStorage: media.objectStorage };
 }
 
 export async function resolveMediaUrl(storageKey?: string, fallback = "") {

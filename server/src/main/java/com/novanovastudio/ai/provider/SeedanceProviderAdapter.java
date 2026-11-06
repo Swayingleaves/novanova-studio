@@ -292,11 +292,9 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
         Integer durationMilliseconds = duration == null ? null : duration * 1000;
         log.info("Seedance视频任务完成: taskId={}, providerTaskId={}, duration={}",
                 context.task().getId(), providerTaskId, duration);
-        // Seedance结果地址仅短期有效，必须下载到项目媒体存储后再返回给前端。
-        return aiHttpClient.downloadRemoteBinary(videoUrl, "video/mp4")
-                .flatMap(binary -> mediaSupport.storeGeneratedMedia(
-                        context.task().getUserId(), AiTaskTypes.VIDEO, "generated-seedance-video.mp4",
-                        binary, null, null, durationMilliseconds))
+        // Seedance结果地址仅短期有效，流式转存项目媒体存储并保留原始链接，避免整段视频进入堆内存。
+        return mediaSupport.storeGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, videoUrl,
+                        "video/mp4", null, null, durationMilliseconds)
                 .map(media -> AiJsonUtils.jsonObject(Map.of(
                         "item", media,
                         "providerTaskId", providerTaskId

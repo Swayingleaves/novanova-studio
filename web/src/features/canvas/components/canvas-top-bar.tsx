@@ -4,7 +4,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Bot, Keyboard, PanelLeftOpen } from "lucide-react";
+import { ArrowLeft, Bot, Keyboard, PanelLeftOpen, Share2 } from "lucide-react";
 import { Button, Modal, Tooltip } from "antd";
 
 import { UserStatusActions } from "@/features/app-shell/components/user-status-actions";
@@ -26,6 +26,7 @@ type CanvasTopBarProps = {
     onOpenNavigationPanel: () => void;
     agentOpen: boolean;
     onToggleAgent: () => void;
+    onShare?: () => void;
 };
 
 const SHORTCUT_GROUPS = () => ([
@@ -114,6 +115,7 @@ export function CanvasTopBar(props: CanvasTopBarProps) {
                     ) : null}
                     <UserStatusActions variant="canvas" onOpenShortcuts={() => setShortcutsOpen(true)} />
                     <LanguageMenu />
+                    {props.onShare ? <Button type="text" icon={<Share2 className="size-4" />} style={toolbarButtonStyle} onClick={props.onShare}>分享</Button> : null}
                     <ThemePreferenceMenu variant="toolbar" />
                     <UserCreditMenu />
                     <Button

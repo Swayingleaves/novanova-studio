@@ -131,7 +131,7 @@ public class AgentToolRegistry {
             JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"autoRun\":{\"type\":\"boolean\"}},\"additionalProperties\":false}"),
             true));
         register(new AgentTool("canvas_create_generation_flow",
-            "创建文本、图片或视频生成配置节点；autoRun为true时立即开始生成。",
+            "创建文本、图片或视频生成配置节点；autoRun为true时立即开始生成，为false或未填时只创建节点、不生成。",
             JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\"},\"mode\":{\"type\":\"string\",\"enum\":[\"text\",\"image\",\"video\"]},\"title\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"size\":{\"type\":\"string\"},\"quality\":{\"type\":\"string\"},\"imageResolution\":{\"type\":\"string\"},\"count\":{\"type\":\"number\"},\"seconds\":{\"type\":\"string\"},\"vquality\":{\"type\":\"string\"},\"model\":{\"type\":\"string\",\"description\":\"必须严格使用用户设置 [视频模型=X] 中的 X 值，不得自行选择\"},\"videoGenerationMode\":{\"type\":\"string\",\"enum\":[\"text-to-video\",\"image-to-video\",\"reference-to-video\",\"first-last-frame-to-video\"],\"description\":\"必须严格使用用户设置中的视频生成模式\"},\"watermark\":{\"type\":\"boolean\",\"description\":\"必须严格使用用户设置中的水印设置\"},\"autoRun\":{\"type\":\"boolean\"}},\"required\":[\"prompt\",\"mode\"],\"additionalProperties\":false}"),
             true));
         register(new AgentTool("canvas_update_node",

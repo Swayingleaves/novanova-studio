@@ -17,6 +17,9 @@ import { exportCanvasDocuments } from "@/features/canvas/utils/canvas-export";
 import { setMediaBlob } from "@/features/storage/services/file-storage";
 import { setImageBlob } from "@/features/storage/services/image-storage";
 import { readZip } from "@/shared/lib/zip";
+import { getCanvasNodeTemplate } from "@/features/canvas/constants";
+import { createCanvasNode } from "@/features/canvas/pages/canvas-client-page-helpers";
+import { readHomepageCanvasStarter } from "@/features/homepage/lib/homepage-navigation";
 import { readInitialPromptFromLocation, storeInitialPromptForNavigation } from "@/shared/lib/initial-prompt";
 
 export default function CanvasPage() {
@@ -27,6 +30,7 @@ export default function CanvasPage() {
     const hydrated = useCanvasStore((state) => state.hydrated);
     const documents = useCanvasStore((state) => state.documents);
     const createDocument = useCanvasStore((state) => state.createDocument);
+    const replaceScene = useCanvasStore((state) => state.replaceScene);
     const importDocument = useCanvasStore((state) => state.importDocument);
     const selectedDocumentIds = useCanvasUiStore((state) => state.selectedDocumentIds);
     const requestDocumentDeletion = useCanvasUiStore((state) => state.requestDocumentDeletion);
@@ -36,13 +40,20 @@ export default function CanvasPage() {
 
     useEffect(() => {
         if (!hydrated || initialPromptHandledRef.current) return;
+        const starter = readHomepageCanvasStarter(window.location.search);
         const initialPrompt = readInitialPromptFromLocation();
-        if (!initialPrompt) return;
+        if (!starter && !initialPrompt) return;
         initialPromptHandledRef.current = true;
         const documentId = createDocument(`${translate("canvas.infiniteCanvas")} ${documents.length + 1}`);
-        storeInitialPromptForNavigation(initialPrompt);
+        if (starter === "image" || starter === "video") {
+            const template = getCanvasNodeTemplate(starter);
+            // 节点坐标是中心点。左侧导航宽 280，顶栏高 56，起点放在它们右边，打开后就能看到。
+            const node = createCanvasNode(starter, { x: 312 + template.width / 2, y: 96 + template.height / 2 });
+            replaceScene(documentId, { nodes: [node], connections: [], viewport: { offsetX: 0, offsetY: 0, zoom: 1 } }, { immediate: true });
+        }
+        if (initialPrompt) storeInitialPromptForNavigation(initialPrompt);
         router.replace(`/canvas/${documentId}`);
-    }, [createDocument, documents.length, hydrated, router, translate]);
+    }, [createDocument, documents.length, hydrated, replaceScene, router, translate]);
 
     const openProject = (projectId: string) => {
         router.push(`/canvas/${projectId}`);

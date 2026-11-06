@@ -3,19 +3,24 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { App, Button, Image, Modal } from "antd";
-import { Copy, Download, Link2, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { Cloud, Copy, Download, Link2, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { cloneElement, useId, useRef, useState, type CSSProperties, type ReactElement } from "react";
 
 import { MEDIA_FALLBACK_IMAGE, useMediaFallback } from "@/features/generation/components/media-fallback";
 import { formatBytes, formatDuration } from "@/features/generation/lib/image-utils";
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceVideo } from "@/features/generation/types/media";
+import { ShareResultButton } from "@/features/shared-work/components/share-result-button";
 
 /** 详情弹窗左侧展示的媒体信息 */
 export type ResultDetailMedia = {
+    id?: string;
+    storageKey?: string;
     kind: "image" | "video";
     url: string;
-    /** 已转存云储存时的 OSS 地址，用于「拷贝链接」优先复制 */
+    /** 上游原始链接，缺失时回退 url */
+    sourceUrl?: string;
+    /** 已转存云储存时的 OSS 地址，用于复制云储存链接 */
     ossUrl?: string;
     width?: number;
     height?: number;
@@ -155,8 +160,17 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
                             {media.mimeType ? <span>{media.mimeType}</span> : null}
                         </div>
                         <div className="flex items-center gap-1.5">
-                            <Button size="small" icon={<Link2 className="size-3.5" />} onClick={() => void copyText(media.ossUrl || media.url, translate("generation.linkCopied"))}>
-                                {translate("generation.copyLink")}</Button>
+                            <ShareResultButton mediaId={media.id} storageKey={media.storageKey} />
+                            {media.kind === "video" ? (
+                                <>
+                                    <Button size="small" icon={<Link2 className="size-3.5" />} onClick={() => void copyText(media.sourceUrl || media.url, translate("video.linkCopied"))}>
+                                        {translate("video.copySourceURL")}
+                                    </Button>
+                                    <Button size="small" icon={<Cloud className="size-3.5" />} disabled={!media.ossUrl} onClick={() => void copyText(media.ossUrl || "", translate("video.cloudStorageURLCopied"))}>
+                                        {translate("video.copyCloudStorageURL")}
+                                    </Button>
+                                </>
+                            ) : null}
                             {detail.onDownload ? (
                                 <Button size="small" icon={<Download className="size-3.5" />} loading={isDownloading} disabled={isDownloading} aria-busy={isDownloading} onClick={() => void downloadResult()}>
                                     {isDownloading ? translate("generation.downloading") : translate("generation.download", { value0: media.kind === "video" ? translate("generation.video") : translate("generation.image_d24c10") })}

@@ -10,13 +10,17 @@ import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.service.PersistenceService;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.net.URLConnection;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Base64;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * @title        AiMediaSupport.java
@@ -94,13 +98,10 @@ public class AiMediaSupport {
     public Mono<PersistenceDtos.UploadedMediaResponse> storeGeneratedImageItem(Long userId, JSONObject item, Integer width, Integer height, Integer durationMs) {
         String url = AiTaskParameterReader.firstNonEmpty(item.getString("url"));
         if (isHttpUrl(url)) {
-            if (isInsecureHttpUrl(url) && properties.getAi().getImage().isUploadHttpResultToObjectStorage()) {
-                // HTTPS页面不能直接加载HTTP图片，开启配置后必须转存成功才返回生成结果。
-                log.info("检测到HTTP图片结果，开始转存默认对象存储: userId={}", userId);
-                return imageBinary(item).flatMap(binary -> storeGeneratedMedia(userId, AiTaskTypes.IMAGE, "generated.png", binary, width, height, durationMs));
-            }
-            // 保持默认行为：仅登记第三方URL，不下载后上传对象存储。
-            return registerGeneratedMediaUrl(userId, AiTaskTypes.IMAGE, url, AiTaskParameterReader.firstNonEmpty(item.getString("mime_type"), item.getString("mimeType"), "image/png"), width, height, durationMs);
+            // 上游返回的图片链接先下载转存默认对象存储，同时保留原始链接。
+            return storeGeneratedMediaUrl(userId, AiTaskTypes.IMAGE, url,
+                    AiTaskParameterReader.firstNonEmpty(item.getString("mime_type"), item.getString("mimeType"), "image/png"),
+                    width, height, durationMs);
         }
         return imageBinary(item).flatMap(binary -> storeGeneratedMedia(userId, AiTaskTypes.IMAGE,
                 "generated." + fileExtension(binary.mimeType(), "png"), binary, width, height, durationMs));
@@ -180,11 +181,61 @@ public class AiMediaSupport {
      * @return Mono<UploadedMediaResponse> 媒体响应
      */
     public Mono<PersistenceDtos.UploadedMediaResponse> storeGeneratedMedia(Long userId, String kind, String fileName, GeneratedBinary binary, Integer width, Integer height, Integer durationMs) {
-        return persistenceService.storeGeneratedMediaForUser(userId, kind, fileName, binary.mimeType(), binary.data(), width, height, durationMs);
+        return storeGeneratedMedia(userId, kind, fileName, binary, width, height, durationMs, null);
+    }
+
+    /**
+     * 保存AI生成媒体，并记录下载前的上游原始链接
+     *
+     * @param userId Long 用户ID
+     * @param kind String 媒体类型
+     * @param fileName String 文件名
+     * @param binary GeneratedBinary 媒体二进制
+     * @param width Integer 宽度
+     * @param height Integer 高度
+     * @param durationMs Integer 时长毫秒
+     * @param sourceUrl String 上游返回的原始链接，base64或二进制结果为null
+     * @return Mono<UploadedMediaResponse> 媒体响应
+     */
+    public Mono<PersistenceDtos.UploadedMediaResponse> storeGeneratedMedia(Long userId, String kind, String fileName, GeneratedBinary binary, Integer width, Integer height, Integer durationMs, String sourceUrl) {
+        if (!StringUtils.hasText(sourceUrl)) {
+            return persistenceService.storeGeneratedMediaForUser(userId, kind, fileName, binary.mimeType(), binary.data(), width, height, durationMs);
+        }
+        return persistenceService.storeGeneratedMediaForUser(userId, kind, fileName, binary.mimeType(), binary.data(), width, height, durationMs, sourceUrl);
+    }
+
+    /**
+     * 将上游生成媒体下载并转存全站默认对象存储，同时保留原始链接。
+     * <p>
+     * 视频流式下载到临时文件后上传，避免整段视频进入堆内存；转存失败时回退为仅登记原始链接，
+     * 不因下载、超限、容量不足或上传失败拖垮生成任务。
+     *
+     * @param userId Long 用户ID
+     * @param kind String 媒体类型
+     * @param sourceUrl String 第三方返回的媒体URL
+     * @param mimeType String MIME类型
+     * @param width Integer 宽度
+     * @param height Integer 高度
+     * @param durationMs Integer 时长毫秒
+     * @return Mono<UploadedMediaResponse> 媒体响应
+     */
+    public Mono<PersistenceDtos.UploadedMediaResponse> storeGeneratedMediaUrl(Long userId, String kind, String sourceUrl, String mimeType, Integer width, Integer height, Integer durationMs) {
+        if (!isHttpUrl(sourceUrl)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.generatedMediaURLMustUseHTTPOrHTTPS")));
+        }
+        String trimmedUrl = sourceUrl.trim();
+        return downloadAndStoreGeneratedMedia(userId, kind, trimmedUrl, mimeType, width, height, durationMs)
+                .onErrorResume(error -> {
+                    log.error("AI生成媒体转存对象存储失败，回退登记原始链接: userId={}, kind={}, sourceUrl={}",
+                            userId, kind, sanitizeMediaUrlForLog(trimmedUrl), error);
+                    return registerGeneratedMediaUrl(userId, kind, trimmedUrl, mimeType, width, height, durationMs);
+                });
     }
 
     /**
      * 登记AI生成媒体URL
+     * <p>
+     * 只登记第三方媒体地址和元数据，不下载不上传对象存储；用于转存失败时回退保留原始链接。
      *
      * @param userId Long 用户ID
      * @param kind String 媒体类型
@@ -205,6 +256,90 @@ public class AiMediaSupport {
                     String resolvedMimeType = AiTaskParameterReader.firstNonEmpty(mimeType, headers.mimeType(), "application/octet-stream");
                     return persistenceService.registerRemoteMediaForUser(userId, new PersistenceDtos.RegisterRemoteMediaRequest(kind, trimmedUrl, null, resolvedMimeType, headers.bytes(), width, height, durationMs, null));
                 });
+    }
+
+    /**
+     * 下载上游生成媒体并转存对象存储。
+     *
+     * @param userId Long 用户ID
+     * @param kind String 媒体类型
+     * @param sourceUrl String 第三方媒体地址
+     * @param mimeType String MIME类型
+     * @param width Integer 宽度
+     * @param height Integer 高度
+     * @param durationMs Integer 时长毫秒
+     * @return Mono<UploadedMediaResponse> 媒体响应
+     */
+    private Mono<PersistenceDtos.UploadedMediaResponse> downloadAndStoreGeneratedMedia(Long userId, String kind, String sourceUrl, String mimeType, Integer width, Integer height, Integer durationMs) {
+        String resolvedMimeType = AiTaskParameterReader.firstNonEmpty(mimeType,
+                AiTaskTypes.VIDEO.equals(kind) ? "video/mp4" : "image/png");
+        if (AiTaskTypes.VIDEO.equals(kind)) {
+            return storeRemoteVideoFile(userId, sourceUrl, resolvedMimeType, durationMs);
+        }
+        return aiHttpClient.downloadRemoteBinary(sourceUrl, resolvedMimeType)
+                .flatMap(binary -> storeGeneratedMedia(userId, kind, "generated." + fileExtension(binary.mimeType(), "bin"),
+                        binary, width, height, durationMs, sourceUrl));
+    }
+
+    /**
+     * 流式下载视频到临时文件后上传对象存储，成功、失败和取消都会清理临时文件。
+     *
+     * @param userId Long 用户ID
+     * @param sourceUrl String 第三方视频地址
+     * @param mimeType String 默认MIME类型
+     * @param durationMs Integer 时长毫秒
+     * @return Mono<UploadedMediaResponse> 媒体响应
+     */
+    private Mono<PersistenceDtos.UploadedMediaResponse> storeRemoteVideoFile(Long userId, String sourceUrl, String mimeType, Integer durationMs) {
+        return Mono.usingWhen(
+                Mono.fromCallable(() -> Files.createTempFile("novanova-generated-video-", ".mp4"))
+                        .subscribeOn(Schedulers.boundedElastic()),
+                file -> aiHttpClient.downloadRemoteMediaToFile(sourceUrl, mimeType, file, maximumGeneratedVideoBytes())
+                        .flatMap(downloaded -> persistenceService.storeGeneratedMediaFileForUser(userId, AiTaskTypes.VIDEO,
+                                "generated." + fileExtension(downloaded.mimeType(), "mp4"), downloaded.mimeType(), file,
+                                null, null, durationMs, sourceUrl)),
+                this::deleteTemporaryFile,
+                (file, error) -> deleteTemporaryFile(file),
+                file -> deleteTemporaryFile(file));
+    }
+
+    /**
+     * 清理生成媒体转存临时文件。
+     *
+     * @param file Path 临时文件
+     * @return Mono<Void> 清理结果
+     */
+    private Mono<Void> deleteTemporaryFile(Path file) {
+        return Mono.fromRunnable(() -> {
+            try {
+                Files.deleteIfExists(file);
+            } catch (IOException exception) {
+                log.info("清理生成媒体临时文件失败: file={}", file);
+            }
+        }).subscribeOn(Schedulers.boundedElastic()).then();
+    }
+
+    /**
+     * 获取生成视频转存允许的最大字节数，沿用视频合成源文件限制。
+     *
+     * @return long 最大字节数
+     */
+    private long maximumGeneratedVideoBytes() {
+        return Math.max(1L, properties.getAi().getVideoComposition().getMaximumInputBytes());
+    }
+
+    /**
+     * 去除媒体地址中的查询参数，避免签名信息进入日志。
+     *
+     * @param url String 媒体地址
+     * @return String 可安全记录的媒体地址
+     */
+    private String sanitizeMediaUrlForLog(String url) {
+        if (!StringUtils.hasText(url)) {
+            return "";
+        }
+        int queryIndex = url.indexOf('?');
+        return queryIndex < 0 ? url : url.substring(0, queryIndex) + "?***";
     }
 
     /**
@@ -258,15 +393,5 @@ public class AiMediaSupport {
      */
     private boolean isDataUrl(String url) {
         return StringUtils.hasText(url) && url.regionMatches(true, 0, "data:", 0, 5);
-    }
-
-    /**
-     * 判断是否为不安全的HTTP媒体地址。
-     *
-     * @param url String 媒体地址
-     * @return boolean true表示HTTP地址，false表示其他协议或HTTPS地址
-     */
-    private boolean isInsecureHttpUrl(String url) {
-        return StringUtils.hasText(url) && url.trim().toLowerCase(java.util.Locale.ROOT).startsWith("http://");
     }
 }

@@ -480,15 +480,21 @@ public final class PersistenceDtos {
      * 上传媒体响应
      *
      * @param storageKey String 媒体存储键
-     * @param url String 可访问URL
+     * @param url String 可访问URL，转存成功时为云存储链接
      * @param bytes Long 文件大小
      * @param mimeType String MIME类型
      * @param width Integer 宽度
      * @param height Integer 高度
      * @param durationMs Integer 时长毫秒
      * @param objectStorage ObjectStorageFile 对象存储信息
+     * @param sourceUrl String 上游返回的原始链接，base64或二进制结果时为null
      */
-    public record UploadedMediaResponse(String storageKey, String url, Long bytes, String mimeType, Integer width, Integer height, Integer durationMs, ObjectStorageFile objectStorage) {
+    public record UploadedMediaResponse(String storageKey, String url, Long bytes, String mimeType, Integer width, Integer height, Integer durationMs, ObjectStorageFile objectStorage, String sourceUrl) {
+
+        /** 保持旧调用方只传入8个参数，base64或二进制结果没有原始第三方链接。 */
+        public UploadedMediaResponse(String storageKey, String url, Long bytes, String mimeType, Integer width, Integer height, Integer durationMs, ObjectStorageFile objectStorage) {
+            this(storageKey, url, bytes, mimeType, width, height, durationMs, objectStorage, null);
+        }
     }
 
     /**

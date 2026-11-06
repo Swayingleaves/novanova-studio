@@ -70,6 +70,7 @@ public class AdminCreditController {
      * @param endDate LocalDate 筛选结束日期
      * @param direction String 变动方向：all 全部 / add 增加 / spend 消耗，可为空默认全部
      * @param source String 来源筛选：image/video/task_refund/card_redeem/admin_adjustment/initial_grant/invitation_reward/daily_check_in/credit_expired/storage_purchase/storage_charge/credit_purchase，可为空
+     * @param keyword String 用户名、昵称或邮箱搜索词，可为空
      * @param page int 页码
      * @param pageSize int 每页数量
      * @return Mono<ApiResponse<AdminCreditTransactionListResponse>> 积分明细
@@ -81,10 +82,11 @@ public class AdminCreditController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(required = false) String direction,
             @RequestParam(required = false) String source,
+            @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize) {
         return adminGuard.requireAdmin()
-                .then(Mono.defer(() -> creditService.listAdminCreditTransactions(userId, startDate, endDate, direction, source, page, pageSize)))
+                .then(Mono.defer(() -> creditService.listAdminCreditTransactions(userId, startDate, endDate, direction, source, keyword, page, pageSize)))
                 .map(ApiResponse::ok);
     }
 

@@ -313,7 +313,7 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
             return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.newAPITaskCompletedWithoutVideoURL")));
         }
         Integer durationMilliseconds = parseDurationMilliseconds(response.getString("seconds"));
-        return mediaSupport.registerGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, resultUrl, "video/mp4", null, null, durationMilliseconds)
+        return mediaSupport.storeGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, resultUrl, "video/mp4", null, null, durationMilliseconds)
                 .map(media -> AiJsonUtils.jsonObject(Map.of("item", media, "providerTaskId", providerTaskId)));
     }
 

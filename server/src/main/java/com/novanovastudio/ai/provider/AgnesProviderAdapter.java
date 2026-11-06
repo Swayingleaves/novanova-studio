@@ -305,8 +305,8 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                                 if (!StringUtils.hasText(resultUrl)) {
                                     return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.agnesTaskSucceededWithoutVideoURL")));
                                 }
-                                // 由服务端将 AI 渠道返回的地址登记为受信任媒体，避免浏览器读取内网结果地址。
-                                return mediaSupport.registerGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, resultUrl,
+                                // 由服务端将 AI 渠道返回的地址转存对象存储并保留原始链接，避免浏览器读取内网结果地址。
+                                return mediaSupport.storeGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, resultUrl,
                                                 "video/mp4", null, null, null)
                                         .map(media -> AiJsonUtils.jsonObject(Map.of(
                                                 "item", media,

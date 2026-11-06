@@ -7,7 +7,7 @@ import { NodeResizer, type NodeProps, type Node } from "@xyflow/react";
 import { Play, Video } from "lucide-react";
 import type { CanvasVideoNode } from "../types";
 import { useNodeActions } from "./node-action-context";
-import { CanvasConnectionHandles, CanvasNodeTitle, MediaDownloadHint, NodeError, NodeHoverSurface, NodeLoading, NodeMediaUnavailable } from "./shared";
+import { CanvasConnectionHandles, CanvasNodeTitle, NodeError, NodeHoverSurface, NodeLoading, NodeMediaUnavailable } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 
 export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<Node<CanvasVideoNode>>) {
@@ -59,7 +59,6 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
                 ) : hasContent ? (
                     <div className="relative h-full min-h-0 w-full min-w-0 overflow-hidden rounded-[inherit]">
                         <video src={data.content.source} className="pointer-events-none block h-full w-full object-contain" data-canvas-no-zoom muted preload="metadata" onError={() => setFailedSource(data.content.source)} />
-                        <MediaDownloadHint />
                         {hovered ? (
                             <div className="pointer-events-auto absolute inset-0 flex items-center justify-center" style={{ background: "rgba(2,6,23,0.22)" }}>
                                 <button

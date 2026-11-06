@@ -542,7 +542,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                     .map(media -> AiJsonUtils.jsonObject(Map.of("item", media)));
         }
         String mimeType = AiTaskTypes.VIDEO.equals(taskKind) ? "video/mp4" : null;
-        return mediaSupport.registerGeneratedMediaUrl(context.task().getUserId(), taskKind, value, mimeType, null, null, null)
+        return mediaSupport.storeGeneratedMediaUrl(context.task().getUserId(), taskKind, value, mimeType, null, null, null)
                 .map(media -> AiJsonUtils.jsonObject(Map.of("item", media)));
     }
 

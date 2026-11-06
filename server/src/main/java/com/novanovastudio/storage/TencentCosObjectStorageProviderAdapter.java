@@ -148,8 +148,9 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
             byte[] marker = "private-probe".getBytes(java.nio.charset.StandardCharsets.UTF_8);
             ObjectMetadata metadata = new ObjectMetadata();
             metadata.setContentLength(marker.length);
-            client.putObject(config.bucket().trim(), key, new ByteArrayInputStream(marker), metadata);
-            client.setObjectAcl(config.bucket().trim(), key, CannedAccessControlList.Private);
+            var upload = new com.qcloud.cos.model.PutObjectRequest(config.bucket().trim(), key, new ByteArrayInputStream(marker), metadata);
+            upload.setCannedAcl(CannedAccessControlList.Private);
+            client.putObject(upload);
             String base = StringUtils.hasText(config.publicBaseUrl()) ? config.publicBaseUrl().replaceAll("/+$", "")
                     : "https://" + config.bucket().trim() + ".cos." + config.region().trim() + ".myqcloud.com";
             HttpRequest request = HttpRequest.newBuilder(URI.create(base + "/" + key)).timeout(Duration.ofSeconds(10)).method("HEAD", HttpRequest.BodyPublishers.noBody()).build();
@@ -177,11 +178,19 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
      */
     @Override
     public void putPrivateObject(PersistenceDtos.ObjectStorageConfig config, String key, Path file) {
+        putPrivateObject(config, key, file, "application/octet-stream");
+    }
+
+    /** @param config 私有存储配置 @param key 专用对象键 @param file 临时文件 @param mimeType 服务端确认的实际媒体类型 */
+    @Override
+    public void putPrivateObject(PersistenceDtos.ObjectStorageConfig config, String key, Path file, String mimeType) {
         validate(config);
         COSClient client = createClient(config);
         try {
-            client.putObject(config.bucket().trim(), key, file.toFile());
-            client.setObjectAcl(config.bucket().trim(), key, CannedAccessControlList.Private);
+            var upload = new com.qcloud.cos.model.PutObjectRequest(config.bucket().trim(), key, file.toFile());
+            var metadata = new ObjectMetadata(); metadata.setContentType(mimeType); upload.setMetadata(metadata);
+            upload.setCannedAcl(CannedAccessControlList.Private);
+            client.putObject(upload);
         } catch (CosClientException exception) {
             log.error("上传腾讯云COS私有对象失败: bucket={}, key={}", config.bucket(), key, exception);
             throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "上传腾讯云COS失败: " + exception.getMessage());
