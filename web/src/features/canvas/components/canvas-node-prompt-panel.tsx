@@ -8,7 +8,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ArrowUp, BookOpenText, ChevronDown, FileText, Image as ImageIcon, LoaderCircle, Plus, Search, Sparkles, Square, AudioLines, Video, X } from "lucide-react";
+import { ArrowUp, BookOpenText, ChevronDown, FileText, Image as ImageIcon, Info, LoaderCircle, Plus, Search, Sparkles, Square, AudioLines, Video, X } from "lucide-react";
 import { App, Button, Modal, Tooltip } from "antd";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
@@ -595,10 +595,13 @@ export function CanvasNodePromptPanel({
             {mode !== "text" ? <GenerationStyleChips styles={selectedStyles} onRemove={(id) => setSelectedStyles((current) => current.filter((style) => style.id !== id))} className="mt-2" /> : null}
 
             {mode === "video" && videoQuote && !videoQuote.available ? (
-                <p className="mt-2 text-xs text-red-500">
-                    {videoQuote.reason}
-                    {config.videoGenerationMode !== "text-to-video" && videoReferenceCounts.images + videoReferenceCounts.videos + videoReferenceCounts.audios === 0 ? translate("canvas.uploadReferencesUsingThePlusCardOrConnectImage") : ""}
-                </p>
+                <div className="mt-2 flex items-start gap-1 text-xs" style={{ color: theme.node.muted }}>
+                    <Info className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+                    <p>
+                        {videoQuote.reason}
+                        {config.videoGenerationMode !== "text-to-video" && videoReferenceCounts.images + videoReferenceCounts.videos + videoReferenceCounts.audios === 0 ? translate("canvas.uploadReferencesUsingThePlusCardOrConnectImage") : ""}
+                    </p>
+                </div>
             ) : null}
 
             <div className="mt-2 flex min-w-0 items-center gap-2">
