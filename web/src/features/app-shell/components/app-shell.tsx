@@ -20,6 +20,7 @@ import { ProductTour } from "@/features/onboarding/components/product-tour";
 import { navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
 import { creditAmount } from "@/shared/lib/credit-amounts";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
+import { ShareWorkDialog } from "@/features/shared-work/components/share-work-dialog";
 
 export function AppShell({ children }: { children: ReactNode }) {
     const translate = useTranslation();
@@ -100,6 +101,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
 
             <AuthModal />
+            <ShareWorkDialog />
             <WelcomeModal />
             <ProductTour />
         </div>

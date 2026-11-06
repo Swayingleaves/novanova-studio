@@ -1,8 +1,10 @@
 package com.novanovastudio.ai.provider;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -16,6 +18,7 @@ import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.ai.AiMediaSupport;
 import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.ai.GeneratedBinary;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
@@ -29,6 +32,7 @@ import io.agentscope.core.model.Model;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -129,27 +133,47 @@ class CustomProviderAdapterTest {
     }
 
     /**
-     * 普通图片和视频地址应继续登记远程媒体，不作为Base64转存。
+     * 链接图片结果应转存对象存储，同时保留原始链接。
      *
-     * @param taskKind String 任务类型
-     * @param sourceUrl String 第三方媒体地址
-     * @param mimeType String 媒体类型
      * @return void 无返回值
      */
-    @ParameterizedTest
-    @CsvSource({"image,https://provider.example/generated.jpg,image/jpeg",
-            "image,http://provider.example/generated.jpg,image/jpeg",
-            "video,https://provider.example/generated.mp4,video/mp4"})
-    void shouldKeepRegisteringRemoteMedia(String taskKind, String sourceUrl, String mimeType) {
-        when(aiHttpClient.readRemoteMediaHeaders(sourceUrl))
-                .thenReturn(Mono.just(new AiHttpClient.RemoteMediaHeaders(12L, mimeType)));
-        when(persistenceService.registerRemoteMediaForUser(eq(1L), any()))
-                .thenReturn(Mono.just(mediaResponse(sourceUrl, mimeType)));
+    @Test
+    void shouldStoreLinkedImageAndKeepSourceUrl() {
+        String sourceUrl = "https://provider.example/generated.jpg";
+        when(aiHttpClient.downloadRemoteBinary(sourceUrl, "image/png"))
+                .thenReturn(Mono.just(new GeneratedBinary(new byte[] {1, 2, 3}, "image/jpeg")));
+        when(persistenceService.storeGeneratedMediaForUser(eq(1L), eq(AiTaskTypes.IMAGE), eq("generated.jpg"), eq("image/jpeg"),
+                any(byte[].class), isNull(), isNull(), isNull(), eq(sourceUrl)))
+                .thenReturn(Mono.just(mediaResponse("https://storage.example/generated.jpg", sourceUrl, "image/jpeg")));
 
-        JSONObject result = execute(taskKind, sourceUrl, false);
+        JSONObject result = execute(AiTaskTypes.IMAGE, sourceUrl, false);
 
-        Assertions.assertEquals(sourceUrl, result.getJSONObject("item").getString("url"));
-        verify(persistenceService, never()).storeGeneratedMediaForUser(any(), anyString(), anyString(), anyString(), any(), any(), any(), any());
+        JSONObject item = result.getJSONObject("item");
+        Assertions.assertEquals("https://storage.example/generated.jpg", item.getString("url"));
+        Assertions.assertEquals(sourceUrl, item.getString("sourceUrl"));
+        verify(persistenceService, never()).registerRemoteMediaForUser(any(), any());
+        verifyNoInteractions(modelFactory);
+    }
+
+    /**
+     * 链接视频结果应流式转存对象存储，同时保留原始链接。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldStoreLinkedVideoByStreamingAndKeepSourceUrl() {
+        String sourceUrl = "https://provider.example/generated.mp4";
+        when(aiHttpClient.downloadRemoteMediaToFile(eq(sourceUrl), eq("video/mp4"), any(Path.class), anyLong()))
+                .thenReturn(Mono.just(new AiHttpClient.RemoteMediaFile(12L, "video/mp4")));
+        when(persistenceService.storeGeneratedMediaFileForUser(eq(1L), eq(AiTaskTypes.VIDEO), eq("generated.mp4"), eq("video/mp4"),
+                any(Path.class), isNull(), isNull(), isNull(), eq(sourceUrl)))
+                .thenReturn(Mono.just(mediaResponse("https://storage.example/generated.mp4", sourceUrl, "video/mp4")));
+
+        JSONObject result = execute(AiTaskTypes.VIDEO, sourceUrl, false);
+
+        JSONObject item = result.getJSONObject("item");
+        Assertions.assertEquals("https://storage.example/generated.mp4", item.getString("url"));
+        Assertions.assertEquals(sourceUrl, item.getString("sourceUrl"));
         verifyNoInteractions(modelFactory);
     }
 
@@ -359,10 +383,11 @@ class CustomProviderAdapterTest {
         String sourceUrl = "https://provider.example/generated.mp4";
         when(aiHttpClient.sendBearerJsonUrlRequest(any(), eq("POST"), eq("https://provider.example/v1/videos/generations"), any()))
                 .thenReturn(Mono.just(JSON.parseObject("{\"data\":{\"url\":\"" + sourceUrl + "\"}}")));
-        when(aiHttpClient.readRemoteMediaHeaders(sourceUrl))
-                .thenReturn(Mono.just(new AiHttpClient.RemoteMediaHeaders(12L, "video/mp4")));
-        when(persistenceService.registerRemoteMediaForUser(eq(1L), any()))
-                .thenReturn(Mono.just(mediaResponse(sourceUrl, "video/mp4")));
+        when(aiHttpClient.downloadRemoteMediaToFile(eq(sourceUrl), eq("video/mp4"), any(Path.class), anyLong()))
+                .thenReturn(Mono.just(new AiHttpClient.RemoteMediaFile(12L, "video/mp4")));
+        when(persistenceService.storeGeneratedMediaFileForUser(eq(1L), eq(AiTaskTypes.VIDEO), anyString(), anyString(),
+                any(Path.class), isNull(), isNull(), isNull(), eq(sourceUrl)))
+                .thenReturn(Mono.just(mediaResponse("https://storage.example/generated.mp4", sourceUrl, "video/mp4")));
     }
 
     /**
@@ -390,15 +415,16 @@ class CustomProviderAdapterTest {
                 Map.of("text-to-video", group), false, null);
     }
 
-    /** 模拟已完成的图片接口及其媒体登记。 */
+    /** 模拟已完成的图片接口及其媒体转存。 */
     private void stubImageResult() {
         String sourceUrl = "https://provider.example/generated.png";
         when(aiHttpClient.sendBearerJsonUrlRequest(any(), eq("POST"), anyString(), any()))
                 .thenReturn(Mono.just(JSON.parseObject("{\"data\":{\"url\":\"" + sourceUrl + "\"}}")));
-        when(aiHttpClient.readRemoteMediaHeaders(sourceUrl))
-                .thenReturn(Mono.just(new AiHttpClient.RemoteMediaHeaders(12L, "image/png")));
-        when(persistenceService.registerRemoteMediaForUser(eq(1L), any()))
-                .thenReturn(Mono.just(mediaResponse(sourceUrl, "image/png")));
+        when(aiHttpClient.downloadRemoteBinary(sourceUrl, "image/png"))
+                .thenReturn(Mono.just(new GeneratedBinary(new byte[] {1, 2, 3}, "image/png")));
+        when(persistenceService.storeGeneratedMediaForUser(eq(1L), eq(AiTaskTypes.IMAGE), anyString(), anyString(),
+                any(byte[].class), isNull(), isNull(), isNull(), eq(sourceUrl)))
+                .thenReturn(Mono.just(mediaResponse("https://storage.example/generated.png", sourceUrl, "image/png")));
     }
 
     /**
@@ -415,14 +441,16 @@ class CustomProviderAdapterTest {
         when(aiHttpClient.sendBearerJsonUrlRequest(any(), eq("GET"), eq("https://provider.example/v1/images/tasks/img-1"), any()))
                 .thenReturn(Mono.just(JSON.parseObject("{\"data\":{\"status\":\"processing\"}}")))
                 .thenReturn(Mono.just(JSON.parseObject("{\"data\":{\"status\":\"succeeded\",\"url\":\"" + sourceUrl + "\"}}")));
-        when(aiHttpClient.readRemoteMediaHeaders(sourceUrl))
-                .thenReturn(Mono.just(new AiHttpClient.RemoteMediaHeaders(12L, "image/png")));
-        when(persistenceService.registerRemoteMediaForUser(eq(1L), any()))
-                .thenReturn(Mono.just(mediaResponse(sourceUrl, "image/png")));
+        when(aiHttpClient.downloadRemoteBinary(sourceUrl, "image/png"))
+                .thenReturn(Mono.just(new GeneratedBinary(new byte[] {1, 2, 3}, "image/png")));
+        when(persistenceService.storeGeneratedMediaForUser(eq(1L), eq(AiTaskTypes.IMAGE), anyString(), anyString(),
+                any(byte[].class), isNull(), isNull(), isNull(), eq(sourceUrl)))
+                .thenReturn(Mono.just(mediaResponse("https://storage.example/out.png", sourceUrl, "image/png")));
 
         JSONObject result = adapter.execute(asyncImageContext(asyncImageGroup("/images/tasks/{{taskId}}", "data.url"))).block();
 
-        Assertions.assertEquals(sourceUrl, result.getJSONObject("item").getString("url"));
+        Assertions.assertEquals("https://storage.example/out.png", result.getJSONObject("item").getString("url"));
+        Assertions.assertEquals(sourceUrl, result.getJSONObject("item").getString("sourceUrl"));
         // 一次提交加两次查询：第一轮仍在处理，第二轮取到地址
         verify(aiHttpClient, org.mockito.Mockito.times(3)).sendBearerJsonUrlRequest(any(), anyString(), anyString(), any());
         verifyNoInteractions(modelFactory);
@@ -464,17 +492,18 @@ class CustomProviderAdapterTest {
         String sourceUrl = "https://provider.example/generated.png";
         when(aiHttpClient.sendBearerJsonUrlRequest(any(), eq("POST"), eq("https://provider.example/v1/images/generations"), any()))
                 .thenReturn(Mono.just(JSON.parseObject("{\"data\":{\"url\":\"" + sourceUrl + "\"}}")));
-        when(aiHttpClient.readRemoteMediaHeaders(sourceUrl))
-                .thenReturn(Mono.just(new AiHttpClient.RemoteMediaHeaders(12L, "image/png")));
-        when(persistenceService.registerRemoteMediaForUser(eq(1L), any()))
-                .thenReturn(Mono.just(mediaResponse(sourceUrl, "image/png")));
+        when(aiHttpClient.downloadRemoteBinary(sourceUrl, "image/png"))
+                .thenReturn(Mono.just(new GeneratedBinary(new byte[] {1, 2, 3}, "image/png")));
+        when(persistenceService.storeGeneratedMediaForUser(eq(1L), eq(AiTaskTypes.IMAGE), anyString(), anyString(),
+                any(byte[].class), isNull(), isNull(), isNull(), eq(sourceUrl)))
+                .thenReturn(Mono.just(mediaResponse("https://storage.example/generated.png", sourceUrl, "image/png")));
         PersistenceDtos.CustomModelGroupConfig group = new PersistenceDtos.CustomModelGroupConfig(
                 "/images/generations", "POST", "image-model", "{}", null, null, "data.url",
                 "/images/tasks/{{taskId}}", "GET", null, null, null, "data.url", null, null);
 
         JSONObject result = adapter.execute(asyncImageContext(group)).block();
 
-        Assertions.assertEquals(sourceUrl, result.getJSONObject("item").getString("url"));
+        Assertions.assertEquals("https://storage.example/generated.png", result.getJSONObject("item").getString("url"));
         verify(aiHttpClient, org.mockito.Mockito.times(1)).sendBearerJsonUrlRequest(any(), anyString(), anyString(), any());
         verifyNoInteractions(modelFactory);
     }
@@ -588,5 +617,17 @@ class CustomProviderAdapterTest {
      */
     private PersistenceDtos.UploadedMediaResponse mediaResponse(String url, String mimeType) {
         return new PersistenceDtos.UploadedMediaResponse("image:test", url, 12L, mimeType, null, null, null, null);
+    }
+
+    /**
+     * 构造同时带原始链接的媒体持久化响应。
+     *
+     * @param url String 云存储访问地址
+     * @param sourceUrl String 上游原始链接
+     * @param mimeType String 媒体类型
+     * @return UploadedMediaResponse 媒体响应
+     */
+    private PersistenceDtos.UploadedMediaResponse mediaResponse(String url, String sourceUrl, String mimeType) {
+        return new PersistenceDtos.UploadedMediaResponse("media:test", url, 12L, mimeType, null, null, null, null, sourceUrl);
     }
 }

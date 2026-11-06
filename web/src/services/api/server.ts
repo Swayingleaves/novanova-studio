@@ -53,6 +53,7 @@ export type ServerMediaInput = {
 export type ServerMediaInfo = {
     storageKey: string;
     url: string;
+    sourceUrl?: string;
     bytes: number;
     mimeType: string;
     width?: number;
@@ -1428,7 +1429,7 @@ export function getAdminCreditOverview(params: { filterTeamId?: number; userId?:
     return serverGet<ServerCreditOverview>(`/admin/credit/getCreditOverview?${query}`);
 }
 
-export function listAdminCreditTransactions(params: { filterTeamId?: number; userId?: number; startDate: string; endDate: string; direction?: ServerCreditDirection; source?: ServerCreditSource; page: number; pageSize: number }) {
+export function listAdminCreditTransactions(params: { filterTeamId?: number; userId?: number; startDate: string; endDate: string; direction?: ServerCreditDirection; source?: ServerCreditSource; keyword?: string; page: number; pageSize: number }) {
     const query = new URLSearchParams({
         startDate: params.startDate,
         endDate: params.endDate,
@@ -1439,6 +1440,7 @@ export function listAdminCreditTransactions(params: { filterTeamId?: number; use
     if (params.userId !== undefined) query.set("userId", String(params.userId));
     if (params.direction) query.set("direction", params.direction);
     if (params.source) query.set("source", params.source);
+    if (params.keyword) query.set("keyword", params.keyword);
     return serverGet<ServerAdminCreditTransactionList>(`/admin/credit/listCreditTransactions?${query}`);
 }
 
@@ -1624,7 +1626,7 @@ async function serverFetch<T>(path: string, init: RequestInit, options: ServerRe
     if (payload.code !== 0) {
         throw new ServerApiError(payload.msg || translate("common.serverRequestFailed_5ed90b"), response.status, payload.code, response.headers.get("X-System-Message-Key"));
     }
-    if (init.method === "POST" && /^\/(media|script\/source|storage)\//.test(path)) notifyStorageCapacityChanged();
+    if (init.method === "POST" && /^\/(media|script\/source|storage|sharedWork)\//.test(path)) notifyStorageCapacityChanged();
     return payload.data;
 }
 

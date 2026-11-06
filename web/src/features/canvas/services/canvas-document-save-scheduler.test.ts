@@ -4,6 +4,17 @@ import test from "node:test";
 import { createCanvasDocument } from "../domain/canvas-document.ts";
 import { createCanvasDocumentSaveScheduler } from "./canvas-document-save-scheduler.ts";
 
+test("分享要求的立即保存向调用方传递失败，失败后仍能保存新版本", async () => {
+    let fail = true;
+    const errors: unknown[] = [];
+    const scheduler = createCanvasDocumentSaveScheduler({ delayMilliseconds: 5, saveDocument: async () => { if (fail) throw new Error("保存失败"); }, onError: (_, error) => errors.push(error) });
+    const document = createCanvasDocument({ id: "shared", title: "分享", now: "2026-11-06T00:00:00Z" });
+    await assert.rejects(scheduler.saveNow(document, true), /保存失败/);
+    assert.equal(errors.length, 1);
+    fail = false;
+    await scheduler.saveNow(document, true);
+});
+
 test("同一文档连续调度只保存最后一次状态", async () => {
     const savedTitles: string[] = [];
     const scheduler = createCanvasDocumentSaveScheduler({

@@ -33,7 +33,7 @@ public class TeamScopeWebFilter implements WebFilter {
     private final CurrentUserProvider currentUserProvider;
     /** 可由团队管理员复用的后台控制器，其他管理入口保持全局专属。 */
     private static final Set<String> TEAM_ADMIN_PREFIXES = Set.of("/api/v1/admin/prompt/", "/api/v1/admin/notification/",
-            "/api/v1/admin/style/", "/api/v1/admin/skill/", "/api/v1/admin/homepage/",
+            "/api/v1/admin/style/", "/api/v1/admin/skill/", "/api/v1/admin/homepage/", "/api/v1/admin/sharedWork/",
             "/api/v1/admin/storyBible/", "/api/v1/admin/episodeBodies/");
     /** 浏览器原生事件订阅无法携带自定义请求头，仅这两个入口从查询参数读取当前团队。 */
     private static final Set<String> EVENT_STREAM_PATHS = Set.of("/api/v1/ai/task/subscribe", "/api/v1/ai/agent/events");

@@ -303,11 +303,9 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
         Integer durationMilliseconds = duration == null ? null : duration * 1000;
         log.info("MiniMax H3视频任务完成: taskId={}, providerTaskId={}, duration={}",
                 context.task().getId(), providerTaskId, duration);
-        // MiniMax 返回的下载地址具有时效，必须转存到项目媒体存储后再返回前端。
-        return aiHttpClient.downloadRemoteBinary(videoUrl, "video/mp4")
-                .flatMap(binary -> mediaSupport.storeGeneratedMedia(
-                        context.task().getUserId(), AiTaskTypes.VIDEO, "generated-minimax-h3-video.mp4",
-                        binary, null, null, durationMilliseconds))
+        // MiniMax 返回的下载地址具有时效，流式转存项目媒体存储并保留原始链接，避免整段视频进入堆内存。
+        return mediaSupport.storeGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, videoUrl,
+                        "video/mp4", null, null, durationMilliseconds)
                 .map(media -> AiJsonUtils.jsonObject(Map.of(
                         "item", media,
                         "providerTaskId", providerTaskId

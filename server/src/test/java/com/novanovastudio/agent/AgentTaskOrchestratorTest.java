@@ -367,7 +367,12 @@ class AgentTaskOrchestratorTest {
                         "{\"prompt\":\"生成第二张图片\",\"model\":\"model-1\",\"size\":\"1:1\"}"))));
         ToolResult firstResult = new ToolResult(true, "生成完成", Map.of(
                 "taskId", "task-1",
-                "items", List.of(Map.of("url", "https://example.com/image.png", "width", 1024, "height", 1024))));
+                "items", List.of(Map.of(
+                        "url", "https://example.com/image.png",
+                        "sourceUrl", "https://provider.example.com/source.png",
+                        "storageKey", "image:generated-1",
+                        "objectStorage", Map.of("provider", "tencentCos", "url", "https://example.com/image.png"),
+                        "width", 1024, "height", 1024))));
         ToolResult secondResult = new ToolResult(true, "生成完成", Map.of(
                 "taskId", "task-2",
                 "items", List.of(Map.of("url", "https://example.com/image-2.png", "width", 1024, "height", 1024))));
@@ -687,7 +692,7 @@ class AgentTaskOrchestratorTest {
          * @param channels List<AiChannelConfig> 全站渠道列表
          */
         private StubPersistenceService(List<AiTaskDtos.AiChannelConfig> channels) {
-            super(null, com.novanovastudio.TeamTestSupport.teamRepository(), com.novanovastudio.TeamTestSupport.storageBilling(), null, null, null, null, null, null, null);
+            super(null, null, com.novanovastudio.TeamTestSupport.teamRepository(), com.novanovastudio.TeamTestSupport.storageBilling(), null, null, null, null, null, null, null);
             this.channels = channels;
         }
 
@@ -754,7 +759,11 @@ class AgentTaskOrchestratorTest {
             Assertions.assertEquals("task-1", result.getString("taskId"));
             Assertions.assertEquals("success", result.getString("status"));
             Assertions.assertEquals(100, result.getIntValue("progress"));
-            Assertions.assertEquals("https://example.com/image.png", result.getJSONObject("image").getString("url"));
+            com.alibaba.fastjson2.JSONObject image = result.getJSONObject("image");
+            Assertions.assertEquals("https://example.com/image.png", image.getString("url"));
+            // 生成记录必须保留上游原始链接和云存储详情，刷新或恢复历史会话后才能还原两个链接。
+            Assertions.assertEquals("https://provider.example.com/source.png", image.getString("sourceUrl"));
+            Assertions.assertEquals("tencentCos", image.getJSONObject("objectStorage").getString("provider"));
             Assertions.assertEquals(2, round.getJSONArray("results").size());
             Assertions.assertEquals("call-2", round.getJSONArray("results").getJSONObject(1).getString("id"));
         }

@@ -76,4 +76,21 @@ public class StorageFileRepository {
         return databaseClient.sql("UPDATE storage_objects SET deletion_requested_at = COALESCE(deletion_requested_at, CURRENT_TIMESTAMP), deletion_error = NULL, deletion_last_attempt_at = NULL WHERE team_id = current_team_id() AND user_id = :user AND id = :id AND deleted_at IS NULL")
                 .bind("user", userId).bind("id", objectId).fetch().rowsUpdated().then();
     }
+
+    /**
+     * 已分配给未撤回投稿的专用副本只能通过撤回分享回收。
+     * @param storageId 存储配置
+     * @param objectKey 实际对象键
+     * @return 是否仍被投稿使用
+     */
+    public Mono<Boolean> sharedWorkReference(String storageId, String objectKey) {
+        return databaseClient.sql("""
+                SELECT EXISTS(SELECT 1 FROM shared_work_media media JOIN shared_works works USING(share_code)
+                    WHERE media.storage_id = :storage AND media.object_key = :key AND media.cleaned_at IS NULL
+                      AND works.work_status NOT IN ('withdrawn', 'failed'))
+                    OR EXISTS(SELECT 1 FROM shared_work_copy_jobs WHERE copy_status = 'preparing'
+                      AND media_manifest @> jsonb_build_array(jsonb_build_object('targetStorageId', CAST(:storage AS text), 'targetObjectKey', CAST(:key AS text))))
+                """)
+                .bind("storage", storageId).bind("key", objectKey).map((row, metadata) -> row.get(0, Boolean.class)).one();
+    }
 }

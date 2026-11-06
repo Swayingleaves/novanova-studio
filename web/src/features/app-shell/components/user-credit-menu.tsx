@@ -127,6 +127,11 @@ export function UserCreditMenu({ className, tourAnchor }: UserCreditMenuProps) {
                 </Link>
             ),
         },
+        {
+            key: "shares",
+            icon: <UserCircle className="size-4" />,
+            label: <Link href="/shares" onClick={closeMenu} className="text-sm">我的分享</Link>,
+        },
         { type: "divider" },
         {
             key: "checkIn",

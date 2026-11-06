@@ -5,7 +5,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Clapperboard, CloudUpload, Copy, Download, FolderPlus, ImagePlus, Info, LoaderCircle, Minus, Plus, RefreshCw, Scissors, Trash2, Upload, Video } from "lucide-react";
+import { Clapperboard, CloudUpload, Copy, Download, FolderPlus, ImagePlus, Info, LoaderCircle, Minus, Plus, RefreshCw, Scissors, Share2, Trash2, Upload, Video } from "lucide-react";
 
 import { formatAudioTime } from "@/features/storage/utils/audio-waveform";
 import { formatBytes, getDataUrlByteSize } from "@/features/generation/lib/image-utils";
@@ -50,6 +50,7 @@ type ToolbarActionFactoryContext = {
 };
 
 type CanvasNodeHoverToolbarProps = {
+    onShare?: (node: CanvasNode) => void;
     node: CanvasNode | null;
     viewport: CanvasViewTransform;
     onKeep: (nodeId: string) => void;
@@ -134,6 +135,7 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
         onClick: tool.onClick,
     }));
     const allActions: ToolbarAction[] = hasImage ? [...baseActions, ...imageActions] : baseActions;
+    if ((hasImage || hasVideo) && props.onShare) allActions.push({ id: "share", title: "分享作品", label: "分享", icon: <Share2 className="size-4" />, onClick: () => props.onShare?.(node) });
 
     const left = props.viewport.x + (node.frame.position.x + node.frame.width / 2) * props.viewport.k;
     // 工具栏上移，为节点外侧左上角的浮动名称预留独立间距，避免两者重叠。

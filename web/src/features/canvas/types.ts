@@ -556,6 +556,8 @@ export interface CanvasPreferences {
 }
 
 export interface CanvasDocument {
+    /** 从公开分享独立复制的个人媒体，用于重新打开文档时刷新临时授权。 */
+    sharedMedia?: Array<{ assetId: string; storageKey: string; url: string }>;
     identity: CanvasDocumentIdentity;
     scene: CanvasScene;
     conversation: CanvasConversation;

@@ -111,6 +111,8 @@ public class PersistenceService {
 
     /** 业务仓储 */
     private final PersistenceRepository repository;
+    /** 刷新个人复制画布的私有媒体授权，不影响其他媒体。 */
+    private final SharedCopyMediaAccessService sharedCopyMediaAccessService;
 
     /** 团队资源归属与偏好。 */
     private final TeamRepository teamRepository;
@@ -929,8 +931,8 @@ public class PersistenceService {
     public Mono<List<JSONObject>> listProjects() {
         // 只读取当前用户自己的画布项目，并将数据库JSON字符串还原为节点。
         return currentUserProvider.currentUserId()
-                .flatMapMany(repository::listProjects)
-                .map(record -> parseJson(record.getData()))
+                .flatMapMany(userId -> repository.listProjects(userId)
+                        .concatMap(record -> sharedCopyMediaAccessService.document(userId, parseJson(record.getData()))))
                 .collectList();
     }
 
@@ -943,8 +945,8 @@ public class PersistenceService {
     public Mono<JSONObject> getProject(String id) {
         // 查询时同时限定用户ID和项目ID，避免跨用户读取。
         return currentUserProvider.currentUserId()
-                .flatMap(userId -> repository.getProject(userId, id))
-                .map(record -> parseJson(record.getData()))
+                .flatMap(userId -> repository.getProject(userId, id)
+                        .flatMap(record -> sharedCopyMediaAccessService.document(userId, parseJson(record.getData()))))
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.canvasNotFound"))));
     }
 
@@ -1523,6 +1525,24 @@ public class PersistenceService {
      * @return Mono<UploadedMediaResponse> 媒体响应
      */
     public Mono<PersistenceDtos.UploadedMediaResponse> storeGeneratedMediaForUser(Long userId, String kind, String fileName, String mimeType, byte[] data, Integer width, Integer height, Integer durationMs) {
+        return storeGeneratedMediaForUser(userId, kind, fileName, mimeType, data, width, height, durationMs, null);
+    }
+
+    /**
+     * 为指定用户保存AI生成媒体，同时记录上游返回的原始链接
+     *
+     * @param userId Long 用户ID
+     * @param kind String 媒体类型
+     * @param fileName String 文件名
+     * @param mimeType String MIME类型
+     * @param data byte[] 媒体字节
+     * @param width Integer 宽度
+     * @param height Integer 高度
+     * @param durationMs Integer 时长毫秒
+     * @param sourceUrl String 上游返回的原始链接，base64或二进制结果为null
+     * @return Mono<UploadedMediaResponse> 媒体响应
+     */
+    public Mono<PersistenceDtos.UploadedMediaResponse> storeGeneratedMediaForUser(Long userId, String kind, String fileName, String mimeType, byte[] data, Integer width, Integer height, Integer durationMs, String sourceUrl) {
         // AI异步任务可能脱离请求线程，但始终使用全站默认对象存储。
         return getPlatformObjectStorageConfig().flatMap(objectStorageConfig -> {
             String normalizedKind = normalizeMediaKind(kind);
@@ -1531,7 +1551,7 @@ public class PersistenceService {
             return putObject(objectStorageConfig, objectKey, data, firstNonEmpty(mimeType, "application/octet-stream"),
                             StorageFileService.describe(firstNonEmpty(fileName, objectKey), normalizedKind, mimeType, "generated"))
                     .flatMap(publicUrl -> {
-                        PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, null, publicUrl, objectKey, objectStorageConfig, mimeType, (long) data.length, width, height, durationMs, null);
+                        PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, sourceUrl, publicUrl, objectKey, objectStorageConfig, mimeType, (long) data.length, width, height, durationMs, null);
                         return saveUploadedMedia(record);
                     });
         });
@@ -1554,6 +1574,25 @@ public class PersistenceService {
      */
     public Mono<PersistenceDtos.UploadedMediaResponse> storeGeneratedMediaFileForUser(
             Long userId, String kind, String fileName, String mimeType, Path file, Integer width, Integer height, Integer durationMs) {
+        return storeGeneratedMediaFileForUser(userId, kind, fileName, mimeType, file, width, height, durationMs, null);
+    }
+
+    /**
+     * 为指定用户从本地文件保存生成媒体，同时记录上游返回的原始链接。
+     *
+     * @param userId Long 用户ID
+     * @param kind String 媒体类型
+     * @param fileName String 文件名
+     * @param mimeType String MIME类型
+     * @param file Path 本地媒体文件
+     * @param width Integer 宽度
+     * @param height Integer 高度
+     * @param durationMs Integer 时长毫秒
+     * @param sourceUrl String 上游返回的原始链接，base64或二进制结果为null
+     * @return Mono<UploadedMediaResponse> 媒体响应
+     */
+    public Mono<PersistenceDtos.UploadedMediaResponse> storeGeneratedMediaFileForUser(
+            Long userId, String kind, String fileName, String mimeType, Path file, Integer width, Integer height, Integer durationMs, String sourceUrl) {
         return getPlatformObjectStorageConfig().flatMap(objectStorageConfig -> Mono.fromCallable(() -> Files.size(file))
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMap(bytes -> {
@@ -1563,7 +1602,7 @@ public class PersistenceService {
                     return putObject(objectStorageConfig, objectKey, file, firstNonEmpty(mimeType, "application/octet-stream"),
                                     StorageFileService.describe(firstNonEmpty(fileName, objectKey), normalizedKind, mimeType, "generated"))
                             .flatMap(publicUrl -> {
-                                PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, null, publicUrl, objectKey,
+                                PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, sourceUrl, publicUrl, objectKey,
                                         objectStorageConfig, mimeType, bytes, width, height, durationMs, null);
                                 return saveUploadedMedia(record);
                             });
@@ -1621,7 +1660,7 @@ public class PersistenceService {
      */
     public Mono<PersistenceDtos.UploadedMediaResponse> getMediaInfoForUser(Long userId, String storageKey) {
         // 媒体查询同时限定用户ID和媒体存储键。
-        return repository.getMedia(userId, storageKey)
+        return repository.getMedia(userId, storageKey).flatMap(sharedCopyMediaAccessService::resolve)
                 .map(this::mediaResponse)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.mediaNotFound"))));
     }
@@ -1639,7 +1678,7 @@ public class PersistenceService {
         if (!StringUtils.hasText(normalizedStorageKey)) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.videoStorageKeyIsRequired")));
         }
-        return repository.getMedia(userId, normalizedStorageKey)
+        return repository.getMedia(userId, normalizedStorageKey).flatMap(sharedCopyMediaAccessService::resolve)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.videoMediaNotFound"))))
                 .flatMap(record -> {
                     if (!"video".equals(normalizeMediaKind(record.getKind()))) {
@@ -1665,7 +1704,7 @@ public class PersistenceService {
      * @return 已下载的媒体文件
      */
     public Mono<DownloadedMediaFile> downloadAudioMediaToFileForUser(Long userId, String storageKey, Path target) {
-        return repository.getMedia(userId, storageKey)
+        return repository.getMedia(userId, storageKey).flatMap(sharedCopyMediaAccessService::resolve)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.audioMediaNotFound"))))
                 .flatMap(record -> {
                     if (!"audio".equals(normalizeMediaKind(record.getKind()))) {
@@ -1693,7 +1732,7 @@ public class PersistenceService {
         if (!StringUtils.hasText(normalizedStorageKey)) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.videoStorageKeyIsRequired")));
         }
-        return repository.getMedia(userId, normalizedStorageKey)
+        return repository.getMedia(userId, normalizedStorageKey).flatMap(sharedCopyMediaAccessService::resolve)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.videoMediaNotFound"))))
                 .flatMap(record -> {
                     if (!"video".equals(normalizeMediaKind(record.getKind()))) {
@@ -1719,7 +1758,7 @@ public class PersistenceService {
         if (!StringUtils.hasText(normalizedStorageKey)) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.mediaStorageKeyIsRequired")));
         }
-        return currentUserProvider.currentUserId().flatMap(userId -> repository.getMedia(userId, normalizedStorageKey)
+        return currentUserProvider.currentUserId().flatMap(userId -> repository.getMedia(userId, normalizedStorageKey).flatMap(sharedCopyMediaAccessService::resolve)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.mediaNotFound"))))
                 .flatMap(record -> {
                     String sourceUrl = firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl());
@@ -1745,7 +1784,7 @@ public class PersistenceService {
      * @return 媒体数据流
      */
     public Mono<Flux<DataBuffer>> streamVideoMediaForCurrentUser(String storageKey) {
-        return currentUserProvider.currentUserId().flatMap(userId -> repository.getMedia(userId, storageKey)
+        return currentUserProvider.currentUserId().flatMap(userId -> repository.getMedia(userId, storageKey).flatMap(sharedCopyMediaAccessService::resolve)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "导出视频媒体不存在")))
                 .map(record -> {
                     if (!"video".equals(normalizeMediaKind(record.getKind()))) {
@@ -1771,7 +1810,7 @@ public class PersistenceService {
             return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.mediaStorageKeyIsRequired")));
         }
         log.info("开始转存远程媒体到默认对象存储: storageKey={}", normalizedStorageKey);
-        return currentUserProvider.currentUserId().flatMap(userId -> repository.getMedia(userId, normalizedStorageKey)
+        return currentUserProvider.currentUserId().flatMap(userId -> repository.getMedia(userId, normalizedStorageKey).flatMap(sharedCopyMediaAccessService::resolve)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.mediaNotFound"))))
                 .flatMap(record -> {
                     if (StringUtils.hasText(record.getObjectStorageUrl())) {
@@ -2046,12 +2085,12 @@ public class PersistenceService {
      * @return UploadedMediaResponse 媒体响应
      */
     private PersistenceDtos.UploadedMediaResponse mediaResponse(PersistenceRecords.MediaFileRecord record) {
-        // 已转存媒体额外返回对象存储详情，远程媒体只返回来源URL。
+        // 已转存媒体额外返回对象存储详情，远程媒体只返回来源URL；sourceUrl始终保留上游原始链接。
         PersistenceDtos.ObjectStorageFile objectStorage = null;
         if (StringUtils.hasText(record.getObjectStorageUrl())) {
             objectStorage = new PersistenceDtos.ObjectStorageFile(record.getObjectStorageProvider(), record.getObjectStorageUrl(), record.getObjectStorageKey(), record.getBucket(), record.getRegion(), record.getBytes(), record.getMimeType(), formatTime(record.getUpdatedAt()));
         }
-        return new PersistenceDtos.UploadedMediaResponse(record.getStorageKey(), firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl()), record.getBytes(), record.getMimeType(), record.getWidth(), record.getHeight(), record.getDurationMs(), objectStorage);
+        return new PersistenceDtos.UploadedMediaResponse(record.getStorageKey(), firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl()), record.getBytes(), record.getMimeType(), record.getWidth(), record.getHeight(), record.getDurationMs(), objectStorage, record.getSourceUrl());
     }
 
     /**

@@ -353,7 +353,7 @@ class CreditServiceTest {
                 .thenReturn(Flux.just(transaction));
         when(creditRepository.countAdminTransactions(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.just(1L));
 
-        StepVerifier.create(creditService.listAdminCreditTransactions(8L, LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 1), "spend", "image", 1, 20))
+        StepVerifier.create(creditService.listAdminCreditTransactions(8L, LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 1), "spend", "image", null, 1, 20))
                 .assertNext(result -> {
                     Assertions.assertEquals(1L, result.total());
                     Assertions.assertEquals("user8@example.com", result.transactions().getFirst().email());

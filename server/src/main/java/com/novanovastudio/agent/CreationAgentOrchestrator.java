@@ -757,6 +757,7 @@ public class CreationAgentOrchestrator {
             if (!StringUtils.hasText(storageKey)) storageKey = first.getString("key");
             image.put("storageKey", storageKey);
             image.put("mimeType", first.getString("mimeType"));
+            image.put("sourceUrl", first.getString("sourceUrl"));
             images.put(role, image);
         }
         if (images.isEmpty()) {

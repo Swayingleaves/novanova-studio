@@ -20,7 +20,7 @@ export default function UserLayout({ children }: { children: ReactNode }) {
     const user = useUserStore((state) => state.user);
     const team = useTeamStore((state) => state.team);
     const openAuthModal = useUserStore((state) => state.openAuthModal);
-    const publicPath = pathname === "/" || pathname === "/editions";
+    const publicPath = pathname === "/" || pathname === "/editions" || /^\/share\/[^/]+\/?$/.test(pathname);
 
     useEffect(() => {
         hydrateSession();

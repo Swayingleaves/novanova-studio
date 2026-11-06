@@ -56,14 +56,14 @@ class DatabaseMigrationHistoryIntegrationTest {
 
         // V76 之后的新迁移只能追加执行，已发布历史不得改写
         Flyway upgraded = migration("classpath:db/migration", "latest");
-        Assertions.assertEquals(3, upgraded.migrate().migrationsExecuted);
+        Assertions.assertEquals(5, upgraded.migrate().migrationsExecuted);
         Assertions.assertEquals(history, readHistory(76));
         assertUserPreserved();
         Assertions.assertThrows(FlywayException.class, () -> migration("classpath:db/migration-community", "latest").validate());
     }
 
     /**
-     * 开源版从 V38 升至 V81，仅追加迁移并保留原历史与用户，禁止切换企业版目录。
+     * 开源版从 V38 升至 V83，仅追加迁移并保留原历史与用户，禁止切换企业版目录。
      *
      * @throws Exception 访问测试数据库失败时抛出
      */
@@ -74,8 +74,8 @@ class DatabaseMigrationHistoryIntegrationTest {
         List<String> history = readHistory(38);
 
         Flyway upgraded = migration("classpath:db/migration-community", "latest");
-        Assertions.assertEquals(42, upgraded.migrate().migrationsExecuted);
-        Assertions.assertEquals(80, upgraded.info().applied().length);
+        Assertions.assertEquals(44, upgraded.migrate().migrationsExecuted);
+        Assertions.assertEquals(82, upgraded.info().applied().length);
         Assertions.assertEquals(history, readHistory(38));
         assertUserPreserved();
 

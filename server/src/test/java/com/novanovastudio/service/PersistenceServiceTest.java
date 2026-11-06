@@ -92,13 +92,21 @@ class PersistenceServiceTest {
     /**
      * 初始化测试对象。
      */
+    /** 创建透传普通媒体的测试签名器。 */
+    private SharedCopyMediaAccessService sharedMediaAccess() {
+        var access = org.mockito.Mockito.mock(SharedCopyMediaAccessService.class);
+        org.mockito.Mockito.lenient().when(access.resolve(org.mockito.ArgumentMatchers.any())).thenAnswer(call -> reactor.core.publisher.Mono.just(call.getArgument(0)));
+        org.mockito.Mockito.lenient().when(access.document(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any())).thenAnswer(call -> reactor.core.publisher.Mono.just(call.getArgument(1)));
+        return access;
+    }
+
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(agentActivityService.activitiesForRound(
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(JSONObject.class)))
                 .thenReturn(new JSONArray());
         teamRepository = com.novanovastudio.TeamTestSupport.teamRepository();
-        service = new PersistenceService(repository, teamRepository, com.novanovastudio.TeamTestSupport.storageBilling(), aiTaskRepository, agentActivityService, aiHttpClient, currentUserProvider, properties, objectStorageService, modelTaskExecutionDispatcher);
+        service = new PersistenceService(repository, sharedMediaAccess(), teamRepository, com.novanovastudio.TeamTestSupport.storageBilling(), aiTaskRepository, agentActivityService, aiHttpClient, currentUserProvider, properties, objectStorageService, modelTaskExecutionDispatcher);
         org.mockito.Mockito.lenient().when(modelTaskExecutionDispatcher.refresh(org.mockito.ArgumentMatchers.anyString())).thenReturn(Mono.empty());
     }
 
@@ -672,6 +680,7 @@ class PersistenceServiceTest {
 
         Assertions.assertNotNull(response);
         Assertions.assertEquals("https://cdn.example.com/image.png", response.url());
+        Assertions.assertEquals("https://example.com/image.png", response.sourceUrl());
         Assertions.assertEquals("qiniuKodo", response.objectStorage().provider());
         verify(aiHttpClient, times(0)).downloadRemoteBinary(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
     }
@@ -689,6 +698,8 @@ class PersistenceServiceTest {
         PersistenceDtos.UploadedMediaResponse response = service.registerRemoteMediaForUser(9L, input).block();
 
         Assertions.assertNotNull(response);
+        Assertions.assertEquals(sourceUrl, response.url());
+        Assertions.assertEquals(sourceUrl, response.sourceUrl());
         ArgumentCaptor<PersistenceRecords.MediaFileRecord> recordCaptor = ArgumentCaptor.forClass(PersistenceRecords.MediaFileRecord.class);
         verify(repository).saveMedia(recordCaptor.capture());
         Assertions.assertNotNull(recordCaptor.getValue().getMetadata());

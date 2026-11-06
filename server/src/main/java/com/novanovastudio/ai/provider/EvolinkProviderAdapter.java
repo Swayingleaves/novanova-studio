@@ -195,8 +195,7 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
         JSONArray results = response.getJSONArray("results");
         String resultUrl = results == null || results.isEmpty() ? "" : results.getString(0);
         if (!StringUtils.hasText(resultUrl)) return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.evolinkTaskCompletedWithoutVideoURL")));
-        return aiHttpClient.downloadRemoteBinary(resultUrl, "video/mp4")
-                .flatMap(binary -> mediaSupport.storeGeneratedMedia(context.task().getUserId(), AiTaskTypes.VIDEO, "generated-evolink-video.mp4", binary, null, null, null))
+        return mediaSupport.storeGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, resultUrl, "video/mp4", null, null, null)
                 .map(media -> AiJsonUtils.jsonObject(Map.of("item", media, "providerTaskId", providerTaskId)));
     }
 
@@ -325,11 +324,13 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
     private Mono<PersistenceDtos.UploadedMediaResponse> storeImage(AiTaskExecutionContext context, String url) {
         return aiHttpClient.downloadRemoteBinary(url, "image/png")
                 .timeout(IMAGE_TRANSFER_TIMEOUT)
-                .flatMap(binary -> mediaSupport.storeGeneratedMedia(context.task().getUserId(), AiTaskTypes.IMAGE, imageFileName(binary.mimeType()), binary, null, null, null))
+                .flatMap(binary -> mediaSupport.storeGeneratedMedia(context.task().getUserId(), AiTaskTypes.IMAGE,
+                        imageFileName(binary.mimeType()), binary, null, null, null, url))
                 .onErrorResume(error -> {
                     // 供应商图片链接24小时内可用，转存超时或失败时先登记远程地址，保证任务能正常结束。
                     log.warn("Evolink图片转存失败，改为登记远程地址: taskId={}, url={}, error={}", context.task().getId(), url, error.getMessage());
-                    return mediaSupport.storeGeneratedImageItem(context.task().getUserId(), AiJsonUtils.jsonObject(Map.of("url", url)), null, null, 0)
+                    return mediaSupport.registerGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.IMAGE, url,
+                                    "image/png", null, null, null)
                             .timeout(IMAGE_REGISTER_TIMEOUT);
                 });
     }

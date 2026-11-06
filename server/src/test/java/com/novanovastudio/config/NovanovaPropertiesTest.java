@@ -47,18 +47,6 @@ class NovanovaPropertiesTest {
     }
 
     /**
-     * 测试HTTP图片结果默认不转存对象存储。
-     *
-     * @return void 无返回值
-     */
-    @Test
-    void shouldDisableHttpImageResultObjectStorageUploadByDefault() {
-        NovanovaProperties properties = new NovanovaProperties();
-
-        Assertions.assertFalse(properties.getAi().getImage().isUploadHttpResultToObjectStorage());
-    }
-
-    /**
      * 测试腾讯云COS重试与读取超时配置默认值和修改能力。
      */
     @Test

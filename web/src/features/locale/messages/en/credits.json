@@ -163,6 +163,7 @@
     "taskRecordsHint": "Image and video generation tasks, searchable by prompt or model",
     "noTaskRecordsInThisPeriod": "No task records in this period",
     "searchPromptOrModel": "Search prompt or model",
+    "query": "Query",
     "taskType": "Task type",
     "consumedCredits": "Credits used",
     "taskStatus": "Status",

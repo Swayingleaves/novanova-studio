@@ -73,6 +73,11 @@ public class ObjectStorageService {
         providerAdapter(config).putPrivateObject(config, key, file);
     }
 
+    /** @param config 存储配置 @param key 专用对象键 @param file 临时文件 @param mimeType 已确认的媒体类型 */
+    public void putPrivateObject(PersistenceDtos.ObjectStorageConfig config, String key, Path file, String mimeType) {
+        providerAdapter(config).putPrivateObject(config, key, file, mimeType);
+    }
+
     /**
      * 下载私有对象到本地路径。
      *

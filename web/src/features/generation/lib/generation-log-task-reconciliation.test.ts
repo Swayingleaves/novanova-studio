@@ -126,7 +126,7 @@ test("成功任务实际没有返回图片时明确显示错误，不能继续�
 });
 
 test("视频历史共用恢复逻辑时保留视频地址与存储信息", async (context) => {
-    const media = { url: "https://example.com/result.mp4", storageKey: "video:result", durationMs: 5000 };
+    const media = { url: "https://example.com/result.mp4", sourceUrl: "https://upstream.example.com/result.mp4", storageKey: "video:result", durationMs: 5000 };
     mockTaskQueries(context, { "task-1": { status: "success", resultData: { item: media } } });
     const original = { id: "video-conversation", rounds: [{ taskId: "task-1", result: { id: "video-result", status: "pending" } }] };
 

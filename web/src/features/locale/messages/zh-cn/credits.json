@@ -163,6 +163,7 @@
     "taskRecordsHint": "生成的图片与视频任务明细，可按提示词或模型搜索",
     "noTaskRecordsInThisPeriod": "所选范围没有任务记录",
     "searchPromptOrModel": "搜索提示词或模型",
+    "query": "查询",
     "taskType": "任务类型",
     "consumedCredits": "消耗积分",
     "taskStatus": "任务状态",

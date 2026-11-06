@@ -76,6 +76,35 @@ public class QiniuKodoObjectStorageProviderAdapter implements ObjectStorageProvi
     }
 
     /**
+     * 七牛私有权限属于存储空间，上传前必须确认目标空间为私有。
+     * @param config 存储配置
+     * @param key 专用对象键
+     * @param file 临时媒体文件
+     * @throws BusinessException 空间公开或上传失败时抛出
+     */
+    @Override
+    public void putPrivateObject(PersistenceDtos.ObjectStorageConfig config, String key, java.nio.file.Path file) {
+        putPrivateObject(config, key, file, "application/octet-stream");
+    }
+
+    /** @param config 私有存储配置 @param key 专用对象键 @param file 临时文件 @param mimeType 服务端确认的实际媒体类型 */
+    @Override
+    public void putPrivateObject(PersistenceDtos.ObjectStorageConfig config, String key, java.nio.file.Path file, String mimeType) {
+        validate(config);
+        Auth auth = Auth.create(config.accessKey(), config.secretKey());
+        Configuration configuration = Configuration.create(Region.createWithRegionId(config.region()));
+        try {
+            if (new com.qiniu.storage.BucketManager(auth, configuration).getBucketInfo(config.bucket()).getPrivate() != 1) {
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "七牛分享副本需要私有空间，请配置私有存储后重试");
+            }
+            new UploadManager(configuration).put(file.toFile(), key, auth.uploadToken(config.bucket()), null, mimeType, true);
+        } catch (QiniuException exception) {
+            log.error("上传七牛私有对象失败：key={}", key, exception);
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "上传七牛私有对象失败，请检查存储配置");
+        }
+    }
+
+    /**
      * 校验七牛云Kodo配置。
      *
      * @param config ObjectStorageConfig 对象存储配置

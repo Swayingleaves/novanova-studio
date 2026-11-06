@@ -912,9 +912,6 @@ public class NovanovaProperties {
         /** 故事知识库分析Agent配置，复用剧本Agent的超时配置结构 */
         private ScriptAgent storyBibleAgent = new ScriptAgent();
 
-        /** AI图片结果配置 */
-        private Image image = new Image();
-
         /** 视频合成任务配置 */
         private VideoComposition videoComposition = new VideoComposition();
 
@@ -1009,24 +1006,6 @@ public class NovanovaProperties {
         }
 
         /**
-         * 获取AI图片结果配置。
-         *
-         * @return Image AI图片结果配置
-         */
-        public Image getImage() {
-            return image;
-        }
-
-        /**
-         * 设置AI图片结果配置。
-         *
-         * @param image Image AI图片结果配置
-         */
-        public void setImage(Image image) {
-            this.image = image;
-        }
-
-        /**
          * 获取视频合成任务配置。
          *
          * @return VideoComposition 视频合成任务配置
@@ -1116,33 +1095,6 @@ public class NovanovaProperties {
              */
             public void setTimeoutSeconds(int timeoutSeconds) {
                 this.timeoutSeconds = timeoutSeconds;
-            }
-        }
-
-        /**
-         * AI图片结果配置。
-         */
-        public static class Image {
-
-            /** 是否将HTTP图片结果转存到默认对象存储 */
-            private boolean uploadHttpResultToObjectStorage;
-
-            /**
-             * 判断是否将HTTP图片结果转存到默认对象存储。
-             *
-             * @return boolean true表示转存，false表示保留第三方原始URL
-             */
-            public boolean isUploadHttpResultToObjectStorage() {
-                return uploadHttpResultToObjectStorage;
-            }
-
-            /**
-             * 设置是否将HTTP图片结果转存到默认对象存储。
-             *
-             * @param uploadHttpResultToObjectStorage boolean 是否转存HTTP图片结果
-             */
-            public void setUploadHttpResultToObjectStorage(boolean uploadHttpResultToObjectStorage) {
-                this.uploadHttpResultToObjectStorage = uploadHttpResultToObjectStorage;
             }
         }
 

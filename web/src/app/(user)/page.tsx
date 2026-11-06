@@ -4,7 +4,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { ArrowUp, ArrowUpRight, Bot, BookOpenText, Clapperboard, ImageIcon, Images, Paperclip, Pause, Play, Search, SendToBack, SlidersHorizontal, Sparkles } from "lucide-react";
+import { ArrowUp, Bot, BookOpenText, Images, Paperclip, Pause, Play, SlidersHorizontal, Sparkles } from "lucide-react";
 import Link from "@/shared/lib/team-navigation";
 import { motion, useReducedMotion } from "motion/react";
 
@@ -12,15 +12,9 @@ import { useSpaceBrand } from "@/features/team/use-space-brand";
 import { getHomepageTargetPath, homepageFallbackEditorialShowcaseId, homepageFallbackEditorialVideoUrls } from "@/features/homepage/api/homepage-showcases";
 import { useHomepageShowcases } from "@/features/homepage/hooks/use-homepage-showcases";
 import { startHomepageCreation } from "@/features/homepage/lib/homepage-navigation";
-import { FANTASTIC_SHOWCASE_LIMIT, FANTASTIC_SHOW_CATEGORIES, creatorMonogram, filterFantasticShowcases, getFantasticShowcases, type FantasticShowCategory } from "@/features/homepage/lib/fantastic-show";
+import { FantasticShow } from "@/features/shared-work/components/fantastic-show";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import type { HomepageShowcase } from "@/services/api/server";
-
-const createPrimaryEntries = (translator: typeof translate = translate) => ([
-    { href: "/image", get label() { return translator("page.imageCreation"); }, get description() { return translator("page.exploreCompositionStyleMaterialsAndBatches"); }, icon: ImageIcon },
-    { href: "/video", get label() { return translator("page.videoCreation"); }, get description() { return translator("page.cameraLanguageMotionControlAndConceptFilms"); }, icon: Clapperboard },
-    { href: "/canvas", get label() { return translator("page.infiniteCanvas"); }, get description() { return translator("page.composeCompareAndKeepTheCreativeProcess"); }, icon: SendToBack },
-] as const);
 
 const promptSuggestions = ["一组具有工业未来感的黑银产品海报，冷白硬光，精密材质细节", "为独立音乐人设计一支低饱和电影感概念短片，克制构图与缓慢镜头", "建立一套前卫时装品牌视觉语言，并在无限画布中排列灵感、构图和成片"];
 const studioInterfaceFont = { fontFamily: "var(--studio-interface-font)" } as const;
@@ -153,31 +147,7 @@ export default function IndexPage() {
                     <ShowcaseWall {...showcases} />
                 </section>
 
-                <section className="border-t border-[var(--studio-line)] pt-8">
-                    <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between md:gap-6">
-                        <h2 className="text-2xl font-medium text-[var(--studio-ink)]">{translate("page.chooseCreationMode")}</h2>
-                        <p className="max-w-[420px] text-sm leading-6 text-[var(--studio-muted)] md:text-right">{translate("page.imageVideoAndCanvasWorkflowsShareCreativeContextThrough")}</p>
-                    </div>
-                    <div className="grid border-t border-[var(--studio-line)] md:grid-cols-3">
-                        {createPrimaryEntries(translate).map((entry, index) => (
-                            <Link
-                                key={entry.href}
-                                href={entry.href}
-                                className="group grid min-h-40 grid-cols-[auto_1fr_auto] gap-4 border-b border-[var(--studio-line)] px-3 py-6 transition hover:-translate-y-0.5 hover:bg-[var(--studio-surface)] motion-reduce:transform-none md:border-b-0 md:border-r md:px-5 last:md:border-r-0"
-                            >
-                                <span className="text-[10px] text-[var(--studio-faint)]">0{index + 1}</span>
-                                <span>
-                                    <entry.icon className="mb-5 size-5 text-[var(--studio-action)]" strokeWidth={1.4} aria-hidden="true" />
-                                    <strong className="block text-lg font-medium text-[var(--studio-ink)]">{entry.label}</strong>
-                                    <span className="mt-1.5 block text-xs leading-5 text-[var(--studio-muted)]">{entry.description}</span>
-                                </span>
-                                <ArrowUpRight className="size-4 text-[var(--studio-faint)] transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-[var(--studio-action)]" strokeWidth={1.5} aria-hidden="true" />
-                            </Link>
-                        ))}
-                    </div>
-                </section>
-
-                <FantasticShow {...showcases} />
+                <FantasticShow />
 
                 <footer className="mt-9 flex flex-col gap-2 border-t border-[var(--studio-line)] pt-4 text-[10px] text-[var(--studio-faint)] sm:flex-row sm:items-center sm:justify-between">
                     <span className={brand.isTeam ? "wrap-anywhere" : "uppercase"}>{brand.name} / AI Visual Agent</span>
@@ -428,115 +398,5 @@ function VideoPlaybackButton({ isVideoPlaying, onClick }: { isVideoPlaying: bool
         >
             {isVideoPlaying ? <Pause className="size-4" fill="currentColor" aria-hidden="true" /> : <Play className="size-4" fill="currentColor" aria-hidden="true" />}
         </button>
-    );
-}
-
-function FantasticShow({ items, loading, error, reload }: ReturnType<typeof useHomepageShowcases>) {
-    const categoryMessageKeys: Record<string, string> = {"全部":"page.all","视觉海报":"page.visualPoster","概念短片":"page.conceptFilm","商业广告":"page.commercial","游戏美术":"page.gameArt","时尚影像":"page.fashionFilm","产品视觉":"page.productVisuals","生活方式":"page.lifestyle"};
-    const translateCategory = (category: string) => translate(categoryMessageKeys[category]);
-    const translate = useTranslation();
-    const [category, setCategory] = useState<FantasticShowCategory>("全部");
-    const [keyword, setKeyword] = useState("");
-    const showcases = useMemo(() => getFantasticShowcases(items), [items, translate.locale]);
-    const filteredShowcases = useMemo(() => filterFantasticShowcases(showcases, category, keyword), [category, keyword, showcases, translate.locale]);
-
-    return (
-        <section className="mt-12 border-t border-[var(--studio-line)] pt-8" aria-labelledby="fantastic-show-heading">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-                    <h2 id="fantastic-show-heading" style={studioInterfaceFont} className="text-2xl font-medium text-[var(--studio-ink)]">
-                        Fantastic Show
-                    </h2>
-                    <p className="mt-2 text-sm text-[var(--studio-muted)]">{translate("page.discoverYourNextCreativeDirectionThroughArtwork")}</p>
-                </div>
-                <label className="flex h-10 w-full items-center gap-2 border border-[var(--studio-line-strong)] bg-[var(--studio-surface)] px-3 text-[var(--studio-muted)] lg:w-80">
-                    <Search className="size-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />
-                    <input
-                        type="search"
-                        value={keyword}
-                        onChange={(event) => setKeyword(event.target.value)}
-                        placeholder={translate("page.searchArtworkOrCreator")}
-                        aria-label={translate("page.searchShowcases")}
-                        className="min-w-0 flex-1 bg-transparent text-sm text-[var(--studio-ink)] outline-none placeholder:text-[var(--studio-faint)]"
-                    />
-                </label>
-            </div>
-
-            <div className="mt-6 overflow-x-auto pb-1">
-                <div className="flex min-w-max gap-2" role="tablist" aria-label={translate("page.showcaseCategory")}>
-                    {FANTASTIC_SHOW_CATEGORIES.map((item) => {
-                        const selected = item === category;
-                        return (
-                            <button
-                                key={item}
-                                type="button"
-                                role="tab"
-                                aria-selected={selected}
-                                className={`h-9 rounded-[6px] border px-3 text-sm transition ${selected ? "border-[var(--studio-action)] bg-[var(--studio-surface-raised)] text-[var(--studio-action)]" : "border-[var(--studio-line)] bg-transparent text-[var(--studio-muted)] hover:border-[var(--studio-line-strong)] hover:bg-[var(--studio-surface)] hover:text-[var(--studio-ink)]"}`}
-                                onClick={() => setCategory(item)}
-                            >
-                                {translateCategory(item)}
-                            </button>
-                        );
-                    })}
-                </div>
-            </div>
-
-            {loading ? (
-                <div className="mt-6 grid gap-x-4 gap-y-7 md:grid-cols-2 xl:grid-cols-4" aria-label={translate("page.loadingShowcases")}>
-                    {Array.from({ length: FANTASTIC_SHOWCASE_LIMIT }, (_, index) => (
-                        <div key={index} className="space-y-3">
-                            <div className="studio-skeleton aspect-[4/3]" />
-                            <div className="studio-skeleton h-4 w-2/5" />
-                            <div className="studio-skeleton h-3 w-3/5" />
-                        </div>
-                    ))}
-                </div>
-            ) : error ? (
-                <div className="mt-6 flex min-h-56 flex-col items-center justify-center border border-[var(--studio-line)] bg-[var(--studio-surface)] px-6 text-center">
-                    <p className="text-sm text-[var(--studio-muted)]">{translate("page.showcasesTemporarilyUnavailable")}</p>
-                    <button type="button" className="mt-4 h-9 border border-[var(--studio-line-strong)] px-3 text-sm text-[var(--studio-ink)] transition hover:border-[var(--studio-action)] hover:text-[var(--studio-action)]" onClick={() => void reload()}>
-                        {translate("page.retry")}</button>
-                </div>
-            ) : filteredShowcases.length ? (
-                <div className="mt-6 grid gap-x-4 gap-y-7 md:grid-cols-2 xl:grid-cols-4">
-                    {filteredShowcases.map((item) => (
-                        <FantasticShowCard key={item.id} item={item} />
-                    ))}
-                </div>
-            ) : (
-                <div className="mt-6 flex min-h-56 items-center justify-center border border-dashed border-[var(--studio-line-strong)] px-6 text-center text-sm text-[var(--studio-muted)]">
-                    {translate("page.noMatchingShowcases")}</div>
-            )}
-        </section>
-    );
-}
-
-function FantasticShowCard({ item }: { item: HomepageShowcase }) {
-    const targetPath = item.targetPath || getHomepageTargetPath(item.targetType);
-    const href = item.promptContent ? `${targetPath}${targetPath.includes("?") ? "&" : "?"}initialPrompt=${encodeURIComponent(item.promptContent)}` : targetPath;
-
-    return (
-        <article className="min-w-0">
-            <Link href={href} className="group block overflow-hidden rounded-[8px] border border-[var(--studio-line)] bg-[var(--studio-media)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]">
-                <div className="relative aspect-[4/3] overflow-hidden">
-                    {item.mediaType === "video" ? (
-                        <video src={item.mediaUrl} poster={item.thumbnailUrl || undefined} muted playsInline preload="metadata" className="size-full object-cover" aria-label={item.title} />
-                    ) : (
-                        <img src={item.mediaUrl} alt={item.title} loading="lazy" className="size-full object-cover transition duration-300 group-hover:scale-[1.025] motion-reduce:transition-none" />
-                    )}
-                    {item.mediaType === "video" ? <span className="absolute right-3 top-3 grid size-8 place-items-center rounded-full border border-white/20 bg-black/70 text-white"><Play className="size-3.5 fill-current" aria-hidden="true" /></span> : null}
-                </div>
-            </Link>
-            <div className="mt-3 flex min-w-0 gap-2.5">
-                <span className="grid size-7 shrink-0 place-items-center rounded-full bg-[var(--studio-surface-hover)] text-[10px] font-semibold text-[var(--studio-ink)]" aria-hidden="true">
-                    {creatorMonogram(item.creatorName)}
-                </span>
-                <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-[var(--studio-ink)]">{item.creatorName}</p>
-                    <p className="mt-0.5 truncate text-xs text-[var(--studio-muted)]">{item.title}</p>
-                </div>
-            </div>
-        </article>
     );
 }

@@ -172,7 +172,7 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
                             .flatMap(finished -> {
                                 String resultUrl = AiTaskParameterReader.firstNonEmpty(finished.getString("url"), finished.getString("output_url"), finished.getString("video_url"), finished.getString("content_url"));
                                 if (mediaSupport.isHttpUrl(resultUrl)) {
-                                    return mediaSupport.registerGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, resultUrl, AiTaskParameterReader.firstNonEmpty(finished.getString("mime_type"), finished.getString("mimeType"), "video/mp4"), null, null, null)
+                                    return mediaSupport.storeGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, resultUrl, AiTaskParameterReader.firstNonEmpty(finished.getString("mime_type"), finished.getString("mimeType"), "video/mp4"), null, null, null)
                                             .map(media -> AiJsonUtils.jsonObject(Map.of("item", media, "providerTaskId", providerTaskId)));
                                 }
                                 return aiHttpClient.downloadBinary(context.channel(), "/videos/" + providerTaskId + "/content").flatMap(binary -> {

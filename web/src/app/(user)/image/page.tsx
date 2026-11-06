@@ -1,4 +1,6 @@
 "use client";
+import { ShareResultButton } from "@/features/shared-work/components/share-result-button";
+import { useGenerationShareSources } from "@/features/shared-work/use-generation-share-sources";
 import { useInsufficientCreditsPrompt } from "@/features/credits/use-insufficient-credits-prompt";
 import { showInsufficientCredits } from "@/features/credits/insufficient-credits";
 import { currentLanguageTag } from "@/features/locale/translate";
@@ -7,7 +9,7 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { BookOpen, CloudUpload, Download, FolderPlus, Link2, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, TriangleAlert, Upload } from "lucide-react";
+import { BookOpen, CloudUpload, Download, FolderPlus, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, TriangleAlert, Upload } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -29,6 +31,7 @@ import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import type { AgentActivityState, ChatAttachment, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
+import { chatAttachmentsToMentionReferences, PromptMentionText } from "@/features/generation/components/prompt-mention-text";
 import { ChoiceHistoryBar } from "@/features/generation/components/creation-message-thread";
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, mergePlanTaskActivityMessage, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
@@ -59,7 +62,6 @@ import { uploadRemoteObjectToStorage } from "@/features/storage/services/object-
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
-import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { deleteGenerationLogs, getAgentSessionHistory, getAiTaskPollingIntervalMilliseconds, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
 
@@ -136,6 +138,7 @@ export default function ImagePage() {
     const [activeId, setActiveId] = useState<string | null>(null);
     const activeIdRef = useRef(activeId);
     const { conversations, setConversations, conversationsRef, refreshConversations, loadMoreConversations, conversationsLoading, hasMoreConversations, conversationsError, retryConversations } = useGenerationConversations("image", userId, activeIdRef, normalizeConversation);
+    useGenerationShareSources(conversations, "image");
     const [conversationHistory, setConversationHistory] = useState<{ id: string; messages: ChatMessageItem[]; loading: boolean; error: string } | null>(null);
     const historyRequestVersion = useRef(0);
     const [prompt, setPrompt] = useState("");
@@ -761,7 +764,7 @@ export default function ImagePage() {
 
     const openImageResultDetail = (image: GeneratedImage, index: number, round: Round) => {
         setResultDetail({
-            media: { kind: "image", url: image.dataUrl, ossUrl: image.objectStorage?.url, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
+            media: { id: image.id, storageKey: image.storageKey, kind: "image", url: image.dataUrl, ossUrl: image.objectStorage?.url, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
             prompt: round.prompt,
             generationPrompt: round.generationPrompt,
             references: round.references,
@@ -1011,6 +1014,11 @@ export default function ImagePage() {
           })
         : [];
 
+    // 聊天区用户消息里的 @ 引用按图片编号渲染成与输入框一致的芯片。
+    const renderImageUserContent = ({ userText, attachments }: { userText: string; attachments?: ChatAttachment[] }) => {
+        const mentionReferences = chatAttachmentsToMentionReferences(attachments, (_kind, index) => imageReferenceLabel(index));
+        return mentionReferences.length ? <PromptMentionText text={userText} references={mentionReferences} /> : userText;
+    };
     const chatThreadSection = buildChatThreadSection(
         chatMessages,
         completedThinkings,
@@ -1027,7 +1035,7 @@ export default function ImagePage() {
                 onOpenDetail: (image, index) => {
                     const roundReferences = chatAttachmentsToImageReferences(round?.attachments);
                     setResultDetail({
-                        media: { kind: "image", url: image.dataUrl, ossUrl: image.objectStorage?.url, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
+                        media: { id: image.id, storageKey: image.storageKey, kind: "image", url: image.dataUrl, ossUrl: image.objectStorage?.url, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
                         prompt: round?.userText || prompt,
                         references: roundReferences.length ? roundReferences : references,
                         onDownload: () => downloadImage(image),
@@ -1035,11 +1043,14 @@ export default function ImagePage() {
                 },
             }),
         renderPendingImageToolCall,
+        undefined,
+        undefined,
+        renderImageUserContent,
     );
     // 历史记录与当前生成中消息同时展示；当前待生成轮次仅在聊天区渲染。
     const activeHistory = conversationHistory?.id === activeId ? conversationHistory : null;
     const historyThreadSection = activeHistory?.messages.length
-        ? buildChatThreadSection(activeHistory.messages, [], null, null, [], () => null)
+        ? buildChatThreadSection(activeHistory.messages, [], null, null, [], () => null, undefined, undefined, undefined, renderImageUserContent)
         : null;
     const allThreadSections = [
         ...(historyThreadSection ? [{ ...historyThreadSection, id: `history-${activeId}` }] : []),
@@ -1345,9 +1356,17 @@ function buildImageThreadSections(
     for (const round of activeConversation.rounds) {
         const label = formatThreadSectionLabel(round.createdAt);
         const rounds = sectionMap.get(label) || [];
+        const mentionReferences: PromptImageReference[] = round.references.map((reference, index) => ({
+            id: reference.id,
+            name: reference.name,
+            label: imageReferenceLabel(index),
+            previewUrl: reference.dataUrl,
+            kind: "image",
+        }));
         rounds.push({
             id: round.id,
             userText: round.prompt,
+            userContent: mentionReferences.length ? <PromptMentionText text={round.prompt} references={mentionReferences} /> : undefined,
             userCopyText: formatGenerationStyleMessage(round.prompt, round.generationStyleSnapshots),
             userAttachments: round.references.length || round.generationStyleSnapshots?.length || round.skill
                 ? (
@@ -1523,7 +1542,6 @@ function ResultCard({
     const translate = useTranslation();
     const [loadedMeta, setLoadedMeta] = useState<{ width: number; height: number; bytes: number }>({ width: image.width, height: image.height, bytes: image.bytes });
     const [isDownloading, setIsDownloading] = useState(false);
-    const copyText = useCopyText();
     const preview = useMediaFallback(image.dataUrl);
     const displayWidth = image.width > 0 ? image.width : loadedMeta.width;
     const displayHeight = image.height > 0 ? image.height : loadedMeta.height;
@@ -1600,9 +1618,7 @@ function ResultCard({
                     <span>{translate("image.downloadResultsBeforeTheyExpire")}</span>
                 </div>
                 <div className="flex gap-1">
-                    <Tooltip title={translate("image.copyLink")}>
-                        <Button aria-label={translate("image.copyLink")} size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<Link2 className="size-3.5" />} onClick={() => copyText(image.objectStorage?.url || image.dataUrl, translate("image.linkCopied"))} />
-                    </Tooltip>
+                    <ShareResultButton mediaId={image.id} storageKey={image.storageKey} />
                     <Tooltip title={image.objectStorage?.url ? translate("image.copyCloudStorageURL") : translate("image.uploadToCloudStorage")}>
                         <Button size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" loading={uploadingObjectStorage} icon={<CloudUpload className="size-3.5" />} onClick={() => void onUploadObjectStorage(image, index)} />
                     </Tooltip>

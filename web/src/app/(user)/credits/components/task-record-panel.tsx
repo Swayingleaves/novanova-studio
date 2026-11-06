@@ -5,7 +5,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "@/features/locale/use-translation";
 import { Button, Empty, Input, Modal, Pagination, Segmented, Skeleton, Table, Tag, DatePicker, type TableProps } from "antd";
-import { Image as ImageIcon, Play, Video } from "lucide-react";
+import { Image as ImageIcon, Play, Search, Video } from "lucide-react";
 
 import { listAdminTaskRecords, listTaskRecords, type ServerAdminTaskRecord, type ServerTaskRecord } from "@/services/api/server";
 
@@ -47,6 +47,16 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
     });
 
     const records: TaskRecordView[] = recordsQuery.data?.records || [];
+    /** 查询按钮与搜索框回车共用：关键词变化时更新筛选条件，否则只刷新当前结果。 */
+    const queryRecords = () => {
+        const nextKeyword = keywordDraft.trim();
+        if (nextKeyword !== keyword) {
+            setKeyword(nextKeyword);
+            setPage(1);
+            return;
+        }
+        void recordsQuery.refetch();
+    };
     const columns = useMemo<TableProps<TaskRecordView>["columns"]>(() => [
         ...(admin ? [{
             title: translate("administration.user"),
@@ -132,25 +142,23 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
                         setPage(1);
                     }}
                 />
-                <Input.Search
-                    allowClear
-                    className="w-full sm:w-64"
-                    value={keywordDraft}
-                    placeholder={translate("credits.searchPromptOrModel")}
-                    onChange={(event) => {
-                        const nextValue = event.target.value;
-                        setKeywordDraft(nextValue);
-                        if (!nextValue) {
-                            setKeyword("");
-                            setPage(1);
-                        }
-                    }}
-                    onSearch={(value) => {
-                        setKeywordDraft(value);
-                        setKeyword(value.trim());
-                        setPage(1);
-                    }}
-                />
+                <div className="flex w-full items-center gap-3 sm:w-auto">
+                    <Input
+                        allowClear
+                        className="w-full sm:w-64"
+                        value={keywordDraft}
+                        placeholder={translate("credits.searchPromptOrModel")}
+                        prefix={<Search className="size-3.5 text-[var(--studio-faint)]" />}
+                        aria-label={translate("credits.searchPromptOrModel")}
+                        onChange={(event) => setKeywordDraft(event.target.value)}
+                        onPressEnter={(event) => {
+                            if (!event.nativeEvent.isComposing) queryRecords();
+                        }}
+                    />
+                    <Button icon={<Search className="size-4" />} loading={recordsQuery.isFetching} onClick={queryRecords}>
+                        {translate("credits.query")}
+                    </Button>
+                </div>
                 <span className="ml-auto text-sm tabular-nums text-[var(--studio-muted)]">{recordsQuery.data?.total || 0} {translate("credits.records")}</span>
             </div>
 
