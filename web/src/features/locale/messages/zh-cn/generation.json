@@ -203,7 +203,7 @@
     "textToVideo": "文生视频",
     "imageToVideo": "图生视频",
     "universalReference": "全能参考",
-    "nativeFirstAndLastFrames": "首尾帧原生生成",
+    "nativeFirstAndLastFrames": "首尾帧",
     "videoGeneration": "视频生成",
     "selectAConfiguredVideoModel": "请选择已配置的视频模型",
     "selectedVideoModeIsNotConfigured": "当前模型未配置所选视频生成模式",
