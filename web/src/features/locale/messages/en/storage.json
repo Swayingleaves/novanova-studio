@@ -112,5 +112,8 @@
     "fileSort_newest": "Stored: newest",
     "fileSort_oldest": "Stored: oldest",
     "fileSort_largest": "Size: largest",
-    "fileSort_smallest": "Size: smallest"
+    "fileSort_smallest": "Size: smallest",
+    "enterCloudflareR2Endpoint": "Enter the Cloudflare R2 S3 API endpoint",
+    "enterCloudflareR2PublicURL": "Enter a public domain bound to the R2 bucket",
+    "cloudflareR2RequiresAPublicURL": "Cloudflare R2 requires a public base URL"
 }

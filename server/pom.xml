@@ -190,6 +190,12 @@
             <artifactId>jaxb-runtime</artifactId>
             <version>2.3.3</version>
         </dependency>
+        <!-- Cloudflare R2 S3-compatible SDK -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>2.56.0</version>
+        </dependency>
         <!-- 七牛云Kodo对象存储SDK -->
         <dependency>
             <groupId>com.qiniu</groupId>

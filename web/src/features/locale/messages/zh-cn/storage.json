@@ -112,5 +112,8 @@
     "fileSort_newest": "存储时间：最新",
     "fileSort_oldest": "存储时间：最早",
     "fileSort_largest": "文件大小：最大",
-    "fileSort_smallest": "文件大小：最小"
+    "fileSort_smallest": "文件大小：最小",
+    "enterCloudflareR2Endpoint": "请填写 Cloudflare R2 S3 API Endpoint",
+    "enterCloudflareR2PublicURL": "请填写绑定到 R2 Bucket 的公开访问域名",
+    "cloudflareR2RequiresAPublicURL": "Cloudflare R2 需要配置公开访问域名"
 }

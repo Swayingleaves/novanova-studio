@@ -84,7 +84,7 @@ flowchart LR
 - **Conversational image and video generation**: Generate, edit, reference historical results, and iterate further within one conversation.
 - **Multi-provider model configuration**: Manage AI providers, model capabilities, default models, and credit consumption rules in Configuration & User Preferences; video models support tiered credit pricing by specifications such as resolution and duration.
 - **Assets and generation records**: Save reusable assets, generation history, and prompts to reduce repeated uploads and configuration.
-- **Object storage integration**: Supports Tencent Cloud COS, Alibaba Cloud OSS, and Qiniu Kodo for uploads and generated results.
+- **Object storage integration**: Supports Tencent Cloud COS, Alibaba Cloud OSS, Qiniu Kodo, and [Cloudflare R2](docs-api/cloudflare-r2.md#english) for uploads and generated results.
 - **User and operations features**: Email login, OAuth2 login, credits with a canvas-header balance shortcut and filterable credit history, notifications, a prompt library, home-page showcases, and an administrator console.
 - **Asynchronous task processing**: Redis Stream consumer groups, task locks, failure recovery, and SSE event streams support traceable long-running tasks.
 
@@ -131,7 +131,7 @@ Provider keys and object-storage credentials stay on the server. Docker Compose,
 | Web | Next.js 16, React 19, TypeScript, Ant Design 6, Tailwind CSS, Zustand, React Flow | Creation workspace, conversations, canvas, and configuration interface. |
 | Server | Java 21, Spring Boot 3.5, Spring WebFlux, AgentScope Java, Fastjson2 | Reactive APIs, Agent orchestration, task scheduling, authentication, and business services. |
 | Data and tasks | PostgreSQL 17, Flyway, R2DBC (reactive database connectivity), Redis 8.6, Redis Stream | Persistence for users, projects, tasks, assets, and generation records; asynchronous task delivery and recovery. |
-| AI and storage | OpenAI-, Evolink-, Gemini-, Agnes-, Anthropic-, Seedance-, and MiniMax-format providers; COS, OSS, Kodo | Connect models and object storage through the administrator console instead of exposing credentials in the browser. |
+| AI and storage | OpenAI-, Evolink-, Gemini-, Agnes-, Anthropic-, Seedance-, and MiniMax-format providers; COS, OSS, Kodo, R2 | Connect models and object storage through the administrator console instead of exposing credentials in the browser. |
 | Deployment | Docker Compose, Nginx, Node.js 22, Maven | Local dependencies, containerized builds, and Linux server deployment. |
 
 ## 📁 Repository Layout
