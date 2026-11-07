@@ -116,22 +116,13 @@ Provider keys and object-storage credentials stay on the server. Docker Compose,
 
 ## 🤖 Supported Models and Providers
 
-The project selects an adapter by a provider's `apiFormat` (API request format). Administrators synchronize and configure model names from providers, so there is no fixed, exhaustive model allowlist. Any model that implements the corresponding provider protocol and API can be added to the relevant image, video, or chat model catalog. Actual availability still depends on the models enabled for the provider account.
-
-### Provider Capability Matrix
-
-| Provider Format | Image Generation | Video Generation | Chat / Primary Agent | Default Base URL | Notes |
-| --- | --- | --- | --- | --- | --- |
-| OpenAI-compatible (`openai`) | ✅ | ✅ | ✅ | `https://api.openai.com/v1` | Supports OpenAI's official service and compatible providers that implement the same API protocol. |
-| Gemini (`gemini`) | ✅ | ❌ | ✅ | `https://generativelanguage.googleapis.com/v1beta` | Uses Gemini's native `generateContent` API. |
-| Agnes (`agnes`) | ✅ | ✅ | ⚠️ | Configured by the administrator | The text-task adapter supports Agnes Chat Completions, but the AgentScope model factory for the primary Agent does not yet support Agnes. |
-| Anthropic (`anthropic`) | ❌ | ❌ | ✅ | `https://api.anthropic.com/v1` | Uses the Anthropic Messages API for Claude models. |
-| Seedance (`seedance`) | ❌ | ✅ | ❌ | `https://ark.cn-beijing.volces.com/api/v3` | Uses the Volcano Engine Ark video-generation task API. |
-| MiniMax (`minimax`) | ❌ | ✅ | ❌ | `https://api.minimaxi.com` | Uses the MiniMax H3 video-generation V2 API; the model must be configured manually. |
-| Evolink (`evolink`) | ❌ | ✅ | ❌ | `https://api.evolink.ai/v1` | Uses Evolink's native asynchronous video-generation API and supports model-list synchronization. |
-| Custom (`custom`) | ✅ | ✅ | ❌ | Configured by the administrator | Calls self-hosted image or video APIs through per-model request/response templates; asynchronous video polling is supported and models must be entered manually. |
-
-> ⚠️ A model being available from a provider does not mean it has the corresponding generation capability. Administrators must still mark each model as text, image, or video, configure its specific capabilities, and set default models for each type.
+| Protocol | Image models | Video models |
+| --- | --- | --- |
+| Agnes (`agnes`) | agnes-image-2.x series | agnes-video-2.x series |
+| OpenAI-compatible (`openai`) | gpt-image-2.x series | wan series |
+| Gemini (`gemini`) | Nanobanana series | — |
+| Seedance (`seedance`) | — | Seedance 2.x series |
+| MiniMax (`minimax`) | — | MiniMax-H3 series |
 
 ## ⚙️ Technical Architecture
 

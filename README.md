@@ -184,51 +184,13 @@ Agent 不只是一次性调用模型，而是贯穿需求理解、工具选择�
 
 ## 🤖 支持的模型与渠道
 
-项目通过渠道的 `apiFormat`（接口调用格式）选择对应适配器，模型名称由管理员从渠道同步后配置，不维护固定的全量模型白名单。因此，除下表明确写出的专用模型外，只要模型实现对应渠道协议和接口，就可以加入相应的图片、视频或 Chat 模型目录；最终可用范围仍取决于渠道账号实际开通的模型。
-
-### 渠道能力矩阵
-
-| 渠道格式 | 生成图片 | 生成视频 | Chat / 主 Agent | 默认 Base URL | 说明 |
-| --- | --- | --- | --- | --- | --- |
-| OpenAI 兼容（`openai`） | ✅ | ✅ | ✅ | `https://api.openai.com/v1` | 支持 OpenAI 官方服务及实现相同接口协议的兼容渠道。 |
-| Evolink（`evolink`） | ❌ | ✅ | ❌ | `https://api.evolink.ai/v1` | 使用 Evolink 自有异步视频生成接口，支持从渠道拉取模型列表。 |
-| Gemini（`gemini`） | ✅ | ❌ | ✅ | `https://generativelanguage.googleapis.com/v1beta` | 使用 Gemini 原生 `generateContent` 接口。 |
-| Agnes（`agnes`） | ✅ | ✅ | ⚠️ | 由管理员填写 | 文本任务适配器支持 Agnes Chat Completions，但当前主 Agent 的 AgentScope 模型工厂未接入 Agnes。 |
-| Anthropic（`anthropic`） | ❌ | ❌ | ✅ | `https://api.anthropic.com/v1` | 使用 Anthropic Messages 接口，适用于 Claude 模型。 |
-| Seedance（`seedance`） | ❌ | ✅ | ❌ | `https://ark.cn-beijing.volces.com/api/v3` | 使用火山方舟视频生成任务接口。 |
-| MiniMax（`minimax`） | ❌ | ✅ | ❌ | `https://api.minimaxi.com` | 使用 MiniMax H3 视频生成 V2 接口，模型需手动配置。 |
-| 自定义（`custom`） | ✅ | ✅ | ❌ | 由管理员填写 | 按模型配置的请求/响应模板调用自有图片或视频 API；视频支持异步轮询，模型列表需手动配置。 |
-
-### 生成图片模型
-
-| 渠道 | 当前支持的模型范围 | 已实现能力 |
+| 协议 | 图片模型 | 视频模型 |
 | --- | --- | --- |
-| OpenAI 兼容 | 提供 OpenAI Images API 的图片模型，不限制具体模型名称。 | 文生图调用 `/images/generations`；带参考图时调用 `/images/edits`。 |
-| Gemini | 支持通过 Gemini `generateContent` 返回图片的模型，不限制具体模型名称。 | 文生图、参考图生成；请求 `TEXT` 和 `IMAGE` 两种响应模态。 |
-| Agnes | `agnes-image-2.1-flash` | 文生图、图生图和多参考图生成。 |
-
-### 生成视频模型
-
-| 渠道 | 当前支持的模型范围 | 已实现能力 |
-| --- | --- | --- |
-| OpenAI 兼容 | 提供 OpenAI 兼容 Videos API 的视频模型，不限制具体模型名称。 | 文生视频、最多 7 张参考图生成；不支持参考视频。 |
-| Agnes | `agnes-video-v2.0` | 文生视频、单图或多图参考生成；不支持参考视频。 |
-| Seedance | Doubao Seedance 2.0 系列、Doubao Seedance 1.5 Pro、Doubao Seedance 1.0 Pro、Doubao Seedance 1.0 Pro Fast，以及兼容同一任务接口的模型 ID 或推理接入点 ID。 | 文生视频、参考图生成；Seedance 2.0 系列支持最多 9 张参考图和 3 个参考视频。 |
-| MiniMax | `MiniMax-H3` | 文生视频、图片或视频参考生成；支持最多 9 张参考图和 3 个参考视频，分辨率为 `768P` 或 `2K`，时长为 4～15 秒。 |
-| Evolink | Evolink 文档中开通的 Seedance 2.0 模型 | 文生视频、图片或视频参考生成；通过 Evolink 自有 `/v1/videos/generations` 异步接口创建任务，并通过 `/v1/tasks/{task_id}` 查询结果。 |
-| 自定义 | 管理员配置的模型 | 按模型模板调用自有视频 API，支持文生视频、参考素材和异步任务轮询；具体能力取决于配置。 |
-
-首尾帧技能工作流默认包含“生成首帧”“生成尾帧”“合成视频”三个阶段。只有各阶段模型能力和积分价格均配置完成后，工作流才会显示可用报价。
-
-### Chat 模型
-
-| 渠道 | 当前支持的模型范围 | 接口与用途 |
-| --- | --- | --- |
-| OpenAI 兼容 | GPT 系列及其他实现 OpenAI Chat Completions 协议的模型，不限制具体模型名称。 | `/chat/completions`，支持流式输出和 Agent 工具调用。 |
-| Gemini | Gemini 文本或多模态 Chat 模型，不限制具体模型名称。 | Gemini 原生接口，用于主 Agent 对话与任务规划。 |
-| Anthropic | Claude 系列模型，不限制具体模型名称。 | `/v1/messages`，支持流式输出和 Agent 工具调用。 |
-
-> ⚠️ “渠道可拉取到模型”不等于“模型具备对应生成能力”。管理员仍需在模型配置中为每个模型标记文本、图片或视频类型及具体能力，并设置各类型的默认模型。
+| Agnes（`agnes`） | agnes-image-2.x 系列 | agnes-video-2.x 系列 |
+| OpenAI 兼容（`openai`） | gpt-image-2.x 系列 | wan 系列 |
+| Gemini（`gemini`） | Nanobanana 系列 | — |
+| Seedance（`seedance`） | — | Seedance 2.x 系列 |
+| MiniMax（`minimax`） | — | MiniMax-H3 系列 |
 
 ## ⚙️ 技术架构
 

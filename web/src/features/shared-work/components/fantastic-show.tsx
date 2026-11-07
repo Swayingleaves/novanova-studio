@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Empty, Input, Modal, Pagination, Tag } from "antd";
 import { Heart, Play, Search } from "lucide-react";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -146,7 +146,19 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
     const isCanvas = item.workType === "canvas";
     const [previewing, setPreviewing] = useState(false);
     const [ratio, setRatio] = useState<number | null>(null);
+    const videoRef = useRef<HTMLVideoElement>(null);
     const openPreview = () => setPreviewing(true);
+    const playVideo = () => {
+        const video = videoRef.current;
+        if (!video || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        void video.play().catch(() => undefined);
+    };
+    const stopVideo = () => {
+        const video = videoRef.current;
+        if (!video) return;
+        video.pause();
+        video.currentTime = 0;
+    };
     const rememberRatio = (width: number, height: number) => {
         if (width > 0 && height > 0) setRatio(width / height);
     };
@@ -157,7 +169,10 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
                 role="button"
                 tabIndex={0}
                 aria-label={`预览 ${item.title}`}
-                onClick={openPreview}
+                onClick={() => {
+                    stopVideo();
+                    openPreview();
+                }}
                 onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
@@ -165,11 +180,16 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
                     }
                 }}
             >
-                <div className="group relative overflow-hidden rounded-xl bg-[var(--studio-media)]" style={{ aspectRatio: isCanvas ? 16 / 9 : ratio ?? (isVideo ? 16 / 9 : 3 / 4) }}>
+                <div
+                    className="group relative overflow-hidden rounded-xl bg-[var(--studio-media)]"
+                    style={{ aspectRatio: isCanvas ? 16 / 9 : ratio ?? (isVideo ? 16 / 9 : 3 / 4) }}
+                    onMouseEnter={isVideo ? playVideo : undefined}
+                    onMouseLeave={isVideo ? stopVideo : undefined}
+                >
                     {isCanvas ? (
                         <FantasticCanvasPreview code={item.shareCode} title={item.title} />
                     ) : isVideo ? (
-                        <video src={item.mediaUrl} poster={item.thumbnailUrl || undefined} muted playsInline preload="metadata" className="pointer-events-none size-full object-cover" onLoadedMetadata={(event) => rememberRatio(event.currentTarget.videoWidth, event.currentTarget.videoHeight)} />
+                        <video ref={videoRef} src={item.mediaUrl} poster={item.thumbnailUrl || undefined} muted loop playsInline preload="metadata" className="pointer-events-none size-full object-cover" onLoadedMetadata={(event) => rememberRatio(event.currentTarget.videoWidth, event.currentTarget.videoHeight)} />
                     ) : (
                         <img
                             src={item.mediaUrl}
@@ -183,7 +203,7 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
                         />
                     )}
                     {isVideo ? (
-                        <span className="pointer-events-none absolute inset-0 grid place-items-center bg-black/0 opacity-0 transition group-hover:bg-black/25 group-hover:opacity-100 motion-reduce:transition-none">
+                        <span className="pointer-events-none absolute inset-0 grid place-items-center transition group-hover:opacity-0 motion-reduce:transition-none">
                             <span className="grid size-12 place-items-center rounded-full border border-white/35 bg-black/55 text-white backdrop-blur-sm">
                                 <Play className="size-5 fill-current" aria-hidden="true" />
                             </span>
