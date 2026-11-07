@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/nana-homepage.png" alt="Novanova Studio 首页截图">
+  <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/homepage2-compressed.webp" alt="Novanova Studio 首页截图">
 </p>
 <p align="center">
   <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/nova-s2.png" alt="Novanova Studio 画布截图">
