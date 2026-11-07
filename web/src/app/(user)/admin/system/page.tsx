@@ -162,16 +162,18 @@ export default function AdminSystemPage() {
     );
 }
 
-/** 积分明细里的用户邮箱：过长时悬停查看完整内容，点击整行复制邮箱。 */
+/** 积分明细里的用户邮箱：超出列宽时省略，悬停查看完整内容，点击复制邮箱。 */
 function AdminCreditEmail({ email }: { email: string }) {
     const translate = useTranslation();
     const copyText = useCopyText();
     if (!email) return null;
     return (
-        <Tooltip title={email}>
+        <Tooltip title={email} placement="topLeft" styles={{ container: { maxWidth: 480, overflowWrap: "anywhere" } }}>
             <button
                 type="button"
-                className="mt-0.5 block w-full cursor-pointer truncate text-left text-xs text-[var(--studio-muted)] transition-colors hover:text-[var(--studio-ink)]"
+                className="mt-0.5 block max-w-full cursor-pointer border-0 bg-transparent p-0 text-left text-xs text-[var(--studio-muted)] transition-colors hover:text-[var(--studio-ink)]"
+                // 按钮默认最小宽度会撑开表格列；先把宽度压到 0，再由单元格撑满。overflow 写在行内，避免被组件样式盖掉。
+                style={{ width: 0, minWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 aria-label={`${translate("administration.copyEmail")}：${email}`}
                 onClick={() => copyText(email, translate("administration.emailCopied"))}
             >
@@ -185,8 +187,9 @@ const createAdminCreditColumns = (translator: typeof translate = translate): Col
     {
         get title() { return translator("administration.user"); },
         width: 220,
+        onCell: () => ({ style: { maxWidth: 220, overflow: "hidden" } }),
         render: (_, transaction) => (
-            <div className="min-w-0">
+            <div className="w-0 min-w-full overflow-hidden">
                 <div className="truncate font-medium text-[var(--studio-ink)]">{adminCreditUserLabel(transaction)}</div>
                 <AdminCreditEmail email={transaction.email} />
             </div>
@@ -479,6 +482,7 @@ function CreditConsumptionManagement() {
                                     </div>
                                     <Table<ServerAdminCreditTransaction>
                                         rowKey="id"
+                                        tableLayout="fixed"
                                         columns={createAdminCreditColumns(translate)}
                                         dataSource={transactions?.transactions || []}
                                         loading={transactionsQuery.isLoading}
