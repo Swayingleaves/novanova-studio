@@ -110,13 +110,13 @@ export function FantasticShow() {
             {error ? (
                 <Alert className="mt-4" type="error" showIcon title={error} action={<Button onClick={() => setRevision((value) => value + 1)}>重试</Button>} />
             ) : loading ? (
-                <div className="mt-4 grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 xl:grid-cols-5">
-                    {Array.from({ length: 10 }, (_, index) => (
-                        <div key={index} className="studio-skeleton aspect-[16/10] rounded-xl" />
+                <div className={workWallClassName}>
+                    {["3/4", "16/9", "9/16", "1/1", "4/5", "16/10", "3/4", "9/16"].map((ratio, index) => (
+                        <div key={index} className="studio-skeleton mb-3 break-inside-avoid rounded-xl" style={{ aspectRatio: ratio }} />
                     ))}
                 </div>
             ) : items.length ? (
-                <div className="mt-4 grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 xl:grid-cols-5">
+                <div className={workWallClassName}>
                     {items.map((item) => (
                         <FantasticCard key={`${item.source}:${item.id}`} item={item} pending={liking.includes(item.id)} onToggleLike={() => toggleLike(item)} />
                     ))}
@@ -131,6 +131,8 @@ export function FantasticShow() {
     );
 }
 
+const workWallClassName = "mt-4 columns-2 gap-3 sm:columns-3 xl:columns-5";
+
 function FilterText({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
     return (
         <button type="button" aria-pressed={active} className={`text-sm transition ${active ? "font-medium text-[var(--studio-ink)]" : "text-[var(--studio-muted)] hover:text-[var(--studio-ink)]"}`} onClick={onClick}>
@@ -143,11 +145,15 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
     const isVideo = item.workType === "video";
     const isCanvas = item.workType === "canvas";
     const [previewing, setPreviewing] = useState(false);
+    const [ratio, setRatio] = useState<number | null>(null);
     const openPreview = () => setPreviewing(true);
+    const rememberRatio = (width: number, height: number) => {
+        if (width > 0 && height > 0) setRatio(width / height);
+    };
     return (
         <>
             <article
-                className="min-w-0 cursor-pointer rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--studio-action)]"
+                className="mb-3 min-w-0 cursor-pointer break-inside-avoid rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--studio-action)]"
                 role="button"
                 tabIndex={0}
                 aria-label={`预览 ${item.title}`}
@@ -159,13 +165,22 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
                     }
                 }}
             >
-                <div className="group relative aspect-[16/10] overflow-hidden rounded-xl bg-[var(--studio-media)]">
+                <div className="group relative overflow-hidden rounded-xl bg-[var(--studio-media)]" style={{ aspectRatio: isCanvas ? 16 / 9 : ratio ?? (isVideo ? 16 / 9 : 3 / 4) }}>
                     {isCanvas ? (
                         <FantasticCanvasPreview code={item.shareCode} title={item.title} />
                     ) : isVideo ? (
-                        <video src={item.mediaUrl} poster={item.thumbnailUrl || undefined} muted playsInline preload="metadata" className="pointer-events-none size-full object-cover" />
+                        <video src={item.mediaUrl} poster={item.thumbnailUrl || undefined} muted playsInline preload="metadata" className="pointer-events-none size-full object-cover" onLoadedMetadata={(event) => rememberRatio(event.currentTarget.videoWidth, event.currentTarget.videoHeight)} />
                     ) : (
-                        <img src={item.mediaUrl} alt="" loading="lazy" className="size-full object-cover transition-transform group-hover:scale-[1.025] motion-reduce:transform-none" />
+                        <img
+                            src={item.mediaUrl}
+                            alt=""
+                            loading="lazy"
+                            className="size-full object-cover transition-transform group-hover:scale-[1.025] motion-reduce:transform-none"
+                            ref={(node) => {
+                                if (node?.complete) rememberRatio(node.naturalWidth, node.naturalHeight);
+                            }}
+                            onLoad={(event) => rememberRatio(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+                        />
                     )}
                     {isVideo ? (
                         <span className="pointer-events-none absolute inset-0 grid place-items-center bg-black/0 opacity-0 transition group-hover:bg-black/25 group-hover:opacity-100 motion-reduce:transition-none">
@@ -324,7 +339,7 @@ function FantasticCanvasPreview({ code, title }: { code: string; title: string }
             });
         return () => controller.abort();
     }, [code]);
-    if (!snapshot?.scene) return <div className="grid size-full place-items-center text-sm text-[var(--studio-muted)]">{error ? "预览暂不可用" : "正在读取画布"}</div>;
+    if (!snapshot?.scene) return <div className="grid aspect-video w-full place-items-center text-sm text-[var(--studio-muted)]">{error ? "预览暂不可用" : "正在读取画布"}</div>;
     const document: CanvasDocument = {
         identity: { id: code, title, createdAt: "", updatedAt: "" },
         scene: snapshot.scene,
