@@ -142,7 +142,7 @@ flowchart LR
 - **对话式图片与视频生成**：在同一会话中完成生成、编辑、引用历史结果和继续迭代。
 - **多渠道模型配置**：在“配置与用户偏好”中维护 AI 渠道、模型能力、默认模型和积分消耗规则。
 - **素材与生成记录**：保存可复用资产、生成历史和提示词，减少重复上传与重复配置。
-- **对象存储接入**：支持腾讯云 COS、阿里云 OSS、七牛云 Kodo，用于上传素材与保存生成结果。
+- **对象存储接入**：支持腾讯云 COS、阿里云 OSS、七牛云 Kodo 和 [Cloudflare R2](docs-api/cloudflare-r2.md)，用于上传素材与保存生成结果。
 - **用户与运营能力**：邮箱登录、OAuth2 登录、积分、通知、提示词库、首页展示和管理员后台。
 - **异步任务机制**：Redis Stream 消费组、任务锁、失败恢复与 SSE 事件流支撑可追踪的长耗时任务。
 
@@ -199,7 +199,7 @@ Agent 不只是一次性调用模型，而是贯穿需求理解、工具选择�
 | Web | Next.js 16、React 19、TypeScript、Ant Design 6、Tailwind CSS、Zustand、React Flow | 创作工作台、对话、画布与配置界面。 |
 | 服务端 | Java 21、Spring Boot 3.5、Spring WebFlux、AgentScope Java、Fastjson2 | 响应式 API、Agent 编排、任务调度、鉴权与业务服务。 |
 | 数据与任务 | PostgreSQL 17、Flyway、R2DBC（响应式数据库连接）、Redis 8.6、Redis Stream | 用户、项目、任务、资产和生成记录持久化；异步任务分发与恢复。 |
-| AI 与存储 | OpenAI、Evolink、Gemini、Agnes、Anthropic、Seedance、MiniMax 格式渠道；COS、OSS、Kodo | 通过后台配置接入模型渠道和对象存储，而非把密钥放入浏览器。 |
+| AI 与存储 | OpenAI、Evolink、Gemini、Agnes、Anthropic、Seedance、MiniMax 格式渠道；COS、OSS、Kodo、R2 | 通过后台配置接入模型渠道和对象存储，而非把密钥放入浏览器。 |
 | 部署 | Docker Compose、Nginx、Node.js 22、Maven | 本地依赖服务、容器化构建与 Linux 服务器部署。 |
 
 ## 📁 目录说明

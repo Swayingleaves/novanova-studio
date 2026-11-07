@@ -197,6 +197,12 @@ const createObjectStorageProviderOptions = (translator: typeof translate = trans
         },
         value: "qiniuKodo",
     },
+    {
+        get label() {
+            return translator("appShell.cloudflareR2");
+        },
+        value: "cloudflareR2",
+    },
 ];
 
 const createQiniuRegionOptions = (translator: typeof translate = translate) => [
@@ -240,7 +246,7 @@ const createQiniuRegionOptions = (translator: typeof translate = translate) => [
 
 const createObjectStorageProviderFields = (
     translator: typeof translate = translate,
-): Record<ObjectStorageProvider, { accessKeyLabel: string; secretKeyLabel: string; bucketPlaceholder: string; regionLabel: string; regionPlaceholder: string; publicBaseUrlExtra: string }> => ({
+): Record<ObjectStorageProvider, { accessKeyLabel: string; secretKeyLabel: string; bucketPlaceholder: string; regionLabel: string; regionPlaceholder: string; endpointPlaceholder?: string; publicBaseUrlExtra: string }> => ({
     tencentCos: {
         accessKeyLabel: "SecretId",
         secretKeyLabel: "SecretKey",
@@ -275,6 +281,17 @@ const createObjectStorageProviderFields = (
         },
         get publicBaseUrlExtra() {
             return translator("appShell.enterACDNOrCustomDomainBoundToThis");
+        },
+    },
+    cloudflareR2: {
+        accessKeyLabel: "Access Key ID",
+        secretKeyLabel: "Secret Access Key",
+        bucketPlaceholder: "example-bucket",
+        regionLabel: "Region",
+        regionPlaceholder: "auto",
+        endpointPlaceholder: "https://<ACCOUNT_ID>.r2.cloudflarestorage.com",
+        get publicBaseUrlExtra() {
+            return translator("appShell.enterACloudflareR2PublicURL");
         },
     },
 });
@@ -1407,7 +1424,7 @@ export function SystemConfiguration() {
                                                                             accessKey: "",
                                                                             secretKey: "",
                                                                             bucket: "",
-                                                                            region: "",
+                                                                            region: provider === "cloudflareR2" ? "auto" : "",
                                                                             endpoint: "",
                                                                             publicBaseUrl: "",
                                                                             lastTestedAt: "",
@@ -1445,17 +1462,17 @@ export function SystemConfiguration() {
                                                                     />
                                                                 )}
                                                             </Form.Item>
-                                                            {storage.provider === "aliyunOss" ? (
-                                                                <Form.Item label="Endpoint" extra={translate("appShell.enterAnOSSEndpointIncludingHttpOrHttps")} className="mb-0 md:col-span-2">
+                                                            {storage.provider === "aliyunOss" || storage.provider === "cloudflareR2" ? (
+                                                                <Form.Item label="Endpoint" extra={translate(storage.provider === "cloudflareR2" ? "appShell.enterACloudflareR2Endpoint" : "appShell.enterAnOSSEndpointIncludingHttpOrHttps")} className="mb-0 md:col-span-2">
                                                                     <Input
                                                                         value={storage.endpoint}
-                                                                        placeholder="https://oss-cn-hangzhou.aliyuncs.com"
+                                                                        placeholder={providerFields.endpointPlaceholder || "https://oss-cn-hangzhou.aliyuncs.com"}
                                                                         disabled={isSaving}
                                                                         onChange={(event) => updateDraftObjectStorage(storage.id, { endpoint: event.target.value })}
                                                                     />
                                                                 </Form.Item>
                                                             ) : null}
-                                                            <Form.Item label={translate("appShell.publicURL")} required={storage.provider === "qiniuKodo"} extra={providerFields.publicBaseUrlExtra} className="mb-0 md:col-span-2">
+                                                            <Form.Item label={translate("appShell.publicURL")} required={storage.provider === "qiniuKodo" || storage.provider === "cloudflareR2"} extra={providerFields.publicBaseUrlExtra} className="mb-0 md:col-span-2">
                                                                 <Input
                                                                     value={storage.publicBaseUrl}
                                                                     placeholder="https://cdn.example.com"

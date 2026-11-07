@@ -309,5 +309,8 @@
     "autoFillOnlyEmpty": "Only empty fields are filled; existing content is kept.",
     "autoFillSourceEmpty": "This mode has nothing to fill yet",
     "autoFillTargetFilled": "Related fields in this mode are already filled",
-    "autoFilledFields": "Filled {value0} setting(s)"
+    "autoFilledFields": "Filled {value0} setting(s)",
+    "cloudflareR2": "Cloudflare R2",
+    "enterACloudflareR2Endpoint": "Enter the S3 API endpoint from R2, without a bucket path, for example https://ACCOUNT_ID.r2.cloudflarestorage.com. Region: auto.",
+    "enterACloudflareR2PublicURL": "Enter the bucket's custom domain or enabled r2.dev URL, not its S3 API endpoint. R2 currently supports public media storage; private source and shared-work uploads are not supported."
 }

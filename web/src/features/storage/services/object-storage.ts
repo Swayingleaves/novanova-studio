@@ -16,6 +16,7 @@ type UploadObjectInput = {
 export function isObjectStorageReady(config: ObjectStorageConfig) {
     if (!config.accessKey.trim() || !config.secretKey.trim() || !config.bucket.trim() || !config.region.trim()) return false;
     if (config.provider === "aliyunOss") return Boolean(config.endpoint.trim());
+    if (config.provider === "cloudflareR2") return Boolean(config.endpoint.trim() && config.publicBaseUrl.trim());
     return config.provider !== "qiniuKodo" || Boolean(config.publicBaseUrl.trim());
 }
 
@@ -56,6 +57,7 @@ export function buildObjectStoragePublicUrl(config: ObjectStorageConfig, key: st
         const endpoint = new URL(config.endpoint.trim());
         return `${endpoint.protocol}//${config.bucket.trim()}.${endpoint.host}/${path}`;
     }
+    if (config.provider === "cloudflareR2") throw new Error(translate("storage.cloudflareR2RequiresAPublicURL"));
     throw new Error(translate("storage.qiniuKodoRequiresAPublicURL"));
 }
 
@@ -65,6 +67,8 @@ export function objectStorageReadyMessage(config?: ObjectStorageConfig) {
         return translate("storage.enterAccessKeySecretKeyBucketAndRegion");
     }
     if (config.provider === "aliyunOss" && !config.endpoint.trim()) return translate("storage.enterAlibabaCloudOSSEndpoint");
+    if (config.provider === "cloudflareR2" && !config.endpoint.trim()) return translate("storage.enterCloudflareR2Endpoint");
+    if (config.provider === "cloudflareR2" && !config.publicBaseUrl.trim()) return translate("storage.enterCloudflareR2PublicURL");
     if (config.provider === "qiniuKodo" && !config.publicBaseUrl.trim()) return translate("storage.enterQiniuKodoPublicURL");
     return translate("storage.incompleteObjectStorageConfiguration");
 }
