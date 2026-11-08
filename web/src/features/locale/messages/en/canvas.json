@@ -51,6 +51,7 @@
     "selectTextModel": "Select text model",
     "text": "Text",
     "copyMessage": "Copy message",
+    "addNodeMenu": "Add node",
     "addTextNode": "Add text node",
     "addImageNode": "Add image node",
     "addAudioNode": "Add audio node",

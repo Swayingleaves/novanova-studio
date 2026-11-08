@@ -51,6 +51,7 @@
     "selectTextModel": "选择文本模型",
     "text": "文",
     "copyMessage": "复制消息",
+    "addNodeMenu": "添加节点",
     "addTextNode": "添加文本节点",
     "addImageNode": "添加图片节点",
     "addAudioNode": "添加音频节点",
