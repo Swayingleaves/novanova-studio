@@ -73,6 +73,18 @@ export const CANVAS_BACKGROUND_MIN_WIDTH = 320;
 export const CANVAS_BACKGROUND_MIN_HEIGHT = 220;
 export const CANVAS_BACKGROUND_PADDING = 32;
 export const CANVAS_BACKGROUND_DEFAULT_COLOR = "var(--studio-surface-raised)";
+export const CANVAS_BACKGROUND_LABEL_PADDING = 8;
+export const CANVAS_BACKGROUND_LABEL_MIN_BOX_WIDTH = 48;
+export const CANVAS_BACKGROUND_LABEL_MIN_BOX_HEIGHT = 24;
+export const CANVAS_BACKGROUND_LABEL_MIN_FONT_SIZE = 12;
+export const CANVAS_BACKGROUND_LABEL_MAX_FONT_SIZE = 72;
+export const CANVAS_BACKGROUND_LABEL_FONT_STEP = 2;
+export const CANVAS_BACKGROUND_LABEL_DEFAULT_FONT_SIZE = 16;
+/** 文字描述默认使用主题文字色，切换主题时自动更新。 */
+export const CANVAS_BACKGROUND_LABEL_DEFAULT_COLOR = "var(--studio-ink)";
+/** 早期默认色，读取时改写成当前主题文字色。 */
+export const CANVAS_BACKGROUND_LABEL_LEGACY_COLOR = "#1c1917";
+export const CANVAS_BACKGROUND_LABEL_COLORS = ["var(--studio-ink)", "var(--studio-text)", "var(--studio-primary)", "var(--studio-info)", "var(--studio-success)", "var(--studio-warning)", "var(--studio-danger)"] as const;
 
 /** 创建空音频节点。 */
 export function createAudioNode(input: CreateCanvasNodeInput): CanvasAudioNode {
@@ -257,6 +269,7 @@ export function createBackgroundNode(input: CreateCanvasNodeInput & { background
         execution: createIdleExecution(),
         backgroundColor: input.backgroundColor || CANVAS_BACKGROUND_DEFAULT_COLOR,
         memberNodeIds: [...(input.memberNodeIds || [])],
+        labels: [],
     };
 }
 

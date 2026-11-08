@@ -35,6 +35,7 @@ type CanvasWorkspaceOverlaysProps = {
     onAddToBackground: (nodeIds: string[]) => void;
     onDeleteNodes: (nodeIds: Set<string>) => void;
     onDeleteBackgroundOnly: (nodeId: string) => void;
+    onAddBackgroundLabel: (nodeId: string, clientX: number, clientY: number) => void;
     onDeleteConnection: (connectionId: string) => void;
     onImageInputChange: (event: ChangeEvent<HTMLInputElement>) => void;
     onUpload: (position: CanvasPoint) => void;
@@ -92,6 +93,10 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
                     }}
                     onDeleteBackgroundOnly={() => {
                         if (props.contextMenu?.type === "node") props.onDeleteBackgroundOnly(props.contextMenu.nodeId);
+                        props.onCloseContextMenu();
+                    }}
+                    onAddBackgroundLabel={() => {
+                        if (props.contextMenu?.type === "node") props.onAddBackgroundLabel(props.contextMenu.nodeId, props.contextMenu.x, props.contextMenu.y);
                         props.onCloseContextMenu();
                     }}
                     onAddToBackground={(nodeIds) => {

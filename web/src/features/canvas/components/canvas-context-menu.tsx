@@ -8,10 +8,10 @@ import { Box, Copy, Frame, Image, Trash2, Type, AudioLines, Upload, Video } from
 import type { CanvasNodeKind, CanvasPoint, ContextMenuState } from "../types";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
-type CanvasNodeContextMenuProps = { menu: ContextMenuState; onClose: () => void; onCreateNode: (kind: CanvasNodeKind) => void; onUpload: (position: CanvasPoint) => void; onDuplicate: () => void; onDelete: () => void; onDeleteBackgroundOnly: () => void; onAddToBackground: (nodeIds: string[]) => void };
+type CanvasNodeContextMenuProps = { menu: ContextMenuState; onClose: () => void; onCreateNode: (kind: CanvasNodeKind) => void; onUpload: (position: CanvasPoint) => void; onDuplicate: () => void; onDelete: () => void; onDeleteBackgroundOnly: () => void; onAddToBackground: (nodeIds: string[]) => void; onAddBackgroundLabel: () => void };
 type MenuAction = { key: string; label: string; icon: ComponentType<{ className?: string }>; danger?: boolean; run: () => void };
 
-export function CanvasNodeContextMenu({ menu, onClose, onCreateNode, onUpload, onDuplicate, onDelete, onDeleteBackgroundOnly, onAddToBackground }: CanvasNodeContextMenuProps) {
+export function CanvasNodeContextMenu({ menu, onClose, onCreateNode, onUpload, onDuplicate, onDelete, onDeleteBackgroundOnly, onAddToBackground, onAddBackgroundLabel }: CanvasNodeContextMenuProps) {
     const translate = useTranslation();
     const theme = useCanvasTheme();
     const menuRef = useRef<HTMLDivElement>(null);
@@ -27,7 +27,7 @@ export function CanvasNodeContextMenu({ menu, onClose, onCreateNode, onUpload, o
         : [
               ...(menu.type === "node" ? [{ key: "duplicate", label: translate("canvas.duplicate"), icon: Copy, run: onDuplicate }] : []),
               ...(menu.type === "selection" ? [{ key: "add-to-background", label: translate("canvas.addToBackground", { value0: menu.nodeIds.length }), icon: Frame, run: () => onAddToBackground(menu.nodeIds) }] : []),
-              ...(menu.type === "node" && menu.nodeKind === "background" ? [{ key: "delete-background-only", label: translate("canvas.deleteBackgroundOnly"), icon: Trash2, danger: true, run: onDeleteBackgroundOnly }] : []),
+              ...(menu.type === "node" && menu.nodeKind === "background" ? [{ key: "add-background-description", label: translate("canvas.addBackgroundDescription"), icon: Type, run: onAddBackgroundLabel }, { key: "delete-background-only", label: translate("canvas.deleteBackgroundOnly"), icon: Trash2, danger: true, run: onDeleteBackgroundOnly }] : []),
               { key: "delete", label: menu.type === "selection" ? translate("canvas.deleteSelectedNodes", { value0: menu.nodeIds.length }) : menu.type === "node" ? translate("canvas.deleteNode") : translate("canvas.deleteConnection"), icon: Trash2, danger: true, run: onDelete },
           ];
     const uploadPosition = menu.type === "canvas" || menu.type === "selection" ? menu.position : undefined;
