@@ -357,6 +357,8 @@ novanova:
       lock-ttl-seconds: ${AI_TASK_LOCK_TTL_SECONDS:300}
       # 任务执行期间锁自动续期间隔（秒），续期前校验锁值防止误续他人锁
       lock-renew-seconds: ${AI_TASK_LOCK_RENEW_SECONDS:60}
+      # 图片和视频入口同一用户可同时执行的主Agent请求数；画布入口固定为1
+      page-request-concurrency: ${AI_PAGE_REQUEST_CONCURRENCY:16}
       # Pending 列表中的消息空闲超过该时间（秒）后，通过 XCLAIM 转移给当前消费者重新执行
       pending-claim-idle-seconds: ${AI_TASK_PENDING_CLAIM_IDLE_SECONDS:300}
       # 服务启动时，running 状态超过该时间（秒）的任务视为异常，重置为 pending 并重新入队

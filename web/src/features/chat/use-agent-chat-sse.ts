@@ -1,6 +1,5 @@
 "use client";
 import { notifyInsufficientCredits, useInsufficientCreditsStore } from "@/features/credits/insufficient-credits";
-import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
@@ -14,6 +13,7 @@ import { isTerminalAgentRequestStatus, matchesAgentRequest, shouldApplyAgentQueu
 import type { ToolCallState } from "./types";
 
 const CLOSED_CONNECTION_ERROR_PATTERN = /(?:java\.io\.IOException:\s*)?closed\b/i;
+const LIVE_EVENT_TYPES = ["queue-status", "thought-delta", "thought-complete", "text-delta", "tool-execute", "progress", "tool-result", "task-complete", "canceled", "notice", "plan-created", "plan-task-status", "prompt-prepared"];
 
 type UseAgentChatSSEProps = {
   entrySource: "imagePage" | "videoPage" | "canvas";
@@ -35,6 +35,8 @@ type UseAgentChatSSEProps = {
   onPromptPrepared?: (planId: string, taskId: string, strategy: "KEEP" | "OPTIMIZE") => void;
   onQueueStatus?: (status: "queued" | "running") => void;
   onError?: (error: string) => void;
+  /** 任一会话请求被接受或结束时通知页面刷新会话列表。 */
+  onRequestActivity?: (sessionId: string) => void;
 };
 
 type AgentChatSSEReturn = {
@@ -45,14 +47,31 @@ type AgentChatSSEReturn = {
   isStopping: boolean;
   sendMessage: (message: string, attachments?: AgentAttachment[], creationSettings?: CreationSettings, skillIdOverride?: string) => Promise<void>;
   cancelMessage: () => Promise<void>;
-  canChangeSession: () => boolean;
+  /** 指定会话是否仍有未结束的本页请求。 */
+  isSessionBusy: (sessionId?: string | null) => boolean;
+  /** 当前页面是否还有任一未结束请求。 */
+  hasInflightWork: () => boolean;
   resetSession: () => boolean;
   restoreSession: (sid: string) => boolean;
 };
 
+type InflightRequest = {
+  key: string;
+  sessionId?: string;
+  requestId?: string;
+  phase: "sending" | "queued" | "running";
+  stopping: boolean;
+  cancelRequested: boolean;
+  settled: boolean;
+  queueStatus: AgentQueueStatus | null;
+  cancelWaiters: Array<() => void>;
+};
+
+let draftSequence = 0;
+
 /**
  * 通用 Agent SSE 通信 Hook，支持画布、图片和视频三类入口来源。
- * 图片与视频入口下后端自行执行工具，前端透传事件给回调。
+ * 图片与视频入口可以同时跟踪多个会话请求；实时聊天事件只写入当前正在查看的会话。
  */
 export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn {
     const translate = useTranslation();
@@ -60,79 +79,265 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
   const subscribedLocale = useRef(locale);
   const { entrySource, creationSettings, skillId, mode } = props;
 
-  const sessionIdRef = useRef<string | undefined>(undefined);
-  const requestIdRef = useRef<string | undefined>(undefined);
+  const viewedSessionIdRef = useRef<string | null>(null);
+  const focusKeyRef = useRef<string | null>(null);
+  const liveEventsRef = useRef(true);
+  const inflightRef = useRef<Map<string, InflightRequest>>(new Map());
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sseEnabledRef = useRef(false);
   const connectSSERef = useRef<() => void>(() => undefined);
-  const sendingRef = useRef(false);
-  const activeRequestRef = useRef(false);
-  const cancelRequestedRef = useRef(false);
-  const canceledHandledRef = useRef(false);
-  const cancelWaitersRef = useRef<Array<() => void>>([]);
   const pendingEventsRef = useRef<AgentEvent[]>([]);
-  const queueStatusRef = useRef<AgentQueueStatus | null>(null);
   const terminalRequestIdsRef = useRef(new Set<string>());
   const callbacksRef = useRef(props);
   callbacksRef.current = props;
+  const runtimeRef = useRef({
+    readEvent: (_event: MessageEvent): AgentEvent | null => null,
+    handleAgentEvent: (_data: AgentEvent) => undefined,
+  });
 
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [requestId, setRequestId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isQueued, setIsQueued] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [trackedRequestIds, setTrackedRequestIds] = useState<string[]>([]);
 
-  const completePendingCancellation = useCallback(() => {
-    const waiters = cancelWaitersRef.current;
-    cancelWaitersRef.current = [];
+  const syncTrackedRequestIds = useCallback(() => {
+    const ids = [...inflightRef.current.values()].flatMap((item) => (item.requestId ? [item.requestId] : [])).sort();
+    setTrackedRequestIds((current) => (current.length === ids.length && current.every((id, index) => id === ids[index]) ? current : ids));
+  }, []);
+
+  const presentFocus = useCallback(() => {
+    const item = focusKeyRef.current ? inflightRef.current.get(focusKeyRef.current) : undefined;
+    setIsStreaming(item?.phase === "running");
+    setIsQueued(Boolean(item && (item.phase === "sending" || item.phase === "queued")));
+    setIsStopping(Boolean(item?.stopping));
+    setRequestId(item?.requestId ?? null);
+  }, []);
+
+  const resolveWaiters = useCallback((item: InflightRequest) => {
+    const waiters = item.cancelWaiters;
+    item.cancelWaiters = [];
     waiters.forEach((resolve) => resolve());
   }, []);
 
-  const markRequestTerminal = useCallback((requestId?: string) => {
-    if (!requestId) return;
+  const showLive = useCallback((item: InflightRequest) => liveEventsRef.current && focusKeyRef.current === item.key, []);
+
+  const notifyActivity = useCallback((sessionIdToNotify?: string) => {
+    if (sessionIdToNotify) callbacksRef.current.onRequestActivity?.(sessionIdToNotify);
+  }, []);
+
+  const markRequestTerminal = useCallback((requestIdToMark?: string) => {
+    if (!requestIdToMark) return;
     const terminalRequestIds = terminalRequestIdsRef.current;
     if (terminalRequestIds.size >= 128) {
       const oldestRequestId = terminalRequestIds.values().next().value;
       if (oldestRequestId) terminalRequestIds.delete(oldestRequestId);
     }
-    terminalRequestIds.add(requestId);
+    terminalRequestIds.add(requestIdToMark);
   }, []);
 
-  const finishCanceledRequest = useCallback((requestId: string, message: string) => {
-    if (canceledHandledRef.current) return;
-    canceledHandledRef.current = true;
-    markRequestTerminal(requestId);
-    activeRequestRef.current = false;
-    queueStatusRef.current = null;
-    cancelRequestedRef.current = false;
-    setIsStreaming(false);
-    setIsQueued(false);
-    callbacksRef.current.onCanceled?.(message);
-  }, [markRequestTerminal]);
-
-  const flushPendingEvents = useCallback((sid: string, rid: string) => {
-    const pendingEvents = pendingEventsRef.current;
-    pendingEventsRef.current = [];
-    const eventSource = eventSourceRef.current;
-    if (!eventSource) return;
-    pendingEvents
-      .filter((event) => matchesAgentRequest(event, sid, rid))
-      .forEach((event) => eventSource.dispatchEvent(new MessageEvent(event.type, { data: JSON.stringify(event) })));
-  }, []);
-
-  const cancelSession = useCallback(async (sid: string, rid: string) => {
-    try {
-      await cancelAgentChat(sid, rid);
-      finishCanceledRequest(rid, translate("chat.generationStopped"));
-    } catch (error) {
-      cancelRequestedRef.current = false;
-      callbacksRef.current.onError?.(error instanceof Error ? error.message : translate("chat.failedToStopGeneration"));
-    } finally {
+  const beginSettle = useCallback((item: InflightRequest) => {
+    if (item.settled) return false;
+    item.settled = true;
+    item.stopping = false;
+    inflightRef.current.delete(item.key);
+    markRequestTerminal(item.requestId);
+    if (focusKeyRef.current === item.key) {
+      setIsStreaming(false);
+      setIsQueued(false);
       setIsStopping(false);
-      completePendingCancellation();
     }
-  }, [completePendingCancellation, finishCanceledRequest]);
+    resolveWaiters(item);
+    syncTrackedRequestIds();
+    return true;
+  }, [markRequestTerminal, resolveWaiters, syncTrackedRequestIds]);
+
+  const bindIdentity = useCallback((item: InflightRequest, nextSessionId: string, nextRequestId: string) => {
+    const previousKey = item.key;
+    item.sessionId = nextSessionId;
+    item.requestId = nextRequestId;
+    if (previousKey !== nextSessionId) {
+      inflightRef.current.delete(previousKey);
+      item.key = nextSessionId;
+      inflightRef.current.set(nextSessionId, item);
+      if (focusKeyRef.current === previousKey) {
+        focusKeyRef.current = nextSessionId;
+        viewedSessionIdRef.current = nextSessionId;
+        setSessionId(nextSessionId);
+      }
+    }
+    if (focusKeyRef.current === item.key) setRequestId(nextRequestId);
+    syncTrackedRequestIds();
+  }, [syncTrackedRequestIds]);
+
+  const applyQueueStatus = useCallback((item: InflightRequest, status: AgentQueueStatus) => {
+    if (item.cancelRequested || item.settled) return;
+    if (!shouldApplyAgentQueueStatus(item.queueStatus, status)) return;
+    const becameRunning = status === "running" && item.queueStatus !== "running";
+    item.queueStatus = status;
+    item.phase = status;
+    if (becameRunning) notifyActivity(item.sessionId);
+    if (focusKeyRef.current !== item.key) return;
+    setIsQueued(status === "queued");
+    setIsStreaming(status === "running");
+    if (liveEventsRef.current) callbacksRef.current.onQueueStatus?.(status);
+  }, [notifyActivity]);
+
+  const findByEvent = useCallback((event: AgentEvent) => {
+    for (const item of inflightRef.current.values()) {
+      if (matchesAgentRequest(event, item.sessionId, item.requestId)) return item;
+    }
+    return undefined;
+  }, []);
+
+  const hasUnresolvedSend = useCallback(() => [...inflightRef.current.values()].some((item) => item.phase === "sending" && !item.requestId), []);
+
+  const focusOn = useCallback((key: string | null, nextSessionId: string | null) => {
+    focusKeyRef.current = key;
+    viewedSessionIdRef.current = nextSessionId;
+    presentFocus();
+    setSessionId(nextSessionId);
+  }, [presentFocus]);
+
+  const cancelInflight = useCallback(async (item: InflightRequest) => {
+    if (!item.sessionId || !item.requestId || item.settled) return;
+    const sessionToCancel = item.sessionId;
+    const requestToCancel = item.requestId;
+    try {
+      await cancelAgentChat(sessionToCancel, requestToCancel);
+      const live = showLive(item);
+      if (!beginSettle(item)) return;
+      notifyActivity(item.sessionId);
+      if (live) callbacksRef.current.onCanceled?.(translate("chat.generationStopped"));
+    } catch (error) {
+      item.cancelRequested = false;
+      item.stopping = false;
+      if (focusKeyRef.current === item.key) setIsStopping(false);
+      if (showLive(item)) callbacksRef.current.onError?.(error instanceof Error ? error.message : translate("chat.failedToStopGeneration"));
+    } finally {
+      item.stopping = false;
+      if (focusKeyRef.current === item.key) setIsStopping(false);
+      resolveWaiters(item);
+    }
+  }, [beginSettle, notifyActivity, resolveWaiters, showLive]);
+
+  const settleFromStatus = useCallback((item: InflightRequest, status: string, message: string) => {
+    const live = showLive(item);
+    if (!beginSettle(item)) return;
+    notifyActivity(item.sessionId);
+    if (!live) return;
+    if (status === "failed") callbacksRef.current.onError?.(message || translate("chat.generationFailed"));
+    else if (status === "canceled" || status === "interrupted") callbacksRef.current.onCanceled?.(message || translate("chat.generationStopped"));
+    else callbacksRef.current.onTaskComplete?.("", "", undefined);
+  }, [beginSettle, notifyActivity, showLive]);
+
+  runtimeRef.current = {
+    readEvent: (event: MessageEvent): AgentEvent | null => {
+      try {
+        const data: AgentEvent = JSON.parse(event.data);
+        if (data.requestId && terminalRequestIdsRef.current.has(data.requestId)) return null;
+        if (findByEvent(data)) return data;
+        if (data.requestId && hasUnresolvedSend()) {
+          const pendingEvents = pendingEventsRef.current;
+          if (pendingEvents.length >= 256) pendingEvents.shift();
+          pendingEvents.push(data);
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    },
+    handleAgentEvent: (data: AgentEvent) => {
+      const item = findByEvent(data);
+      if (!item || item.settled) return;
+      const live = () => showLive(item);
+      switch (data.type) {
+        case "queue-status":
+          if (data.status === "queued" || data.status === "running") applyQueueStatus(item, data.status);
+          return;
+        case "thought-delta":
+          if (live()) callbacksRef.current.onThoughtDelta?.(data.thoughtId || "", data.thoughtDelta || "");
+          return;
+        case "thought-complete":
+          if (live()) callbacksRef.current.onThoughtComplete?.(data.thoughtId || "", data.thoughtDurationMs || 0);
+          return;
+        case "text-delta":
+          if (live()) callbacksRef.current.onTextDelta?.(data.messageId || "", data.delta || "");
+          return;
+        case "tool-execute":
+          notifyActivity(item.sessionId);
+          if (!data.name || !data.callId || !live()) return;
+          callbacksRef.current.onToolCall?.({ callId: data.callId, name: data.name, arguments: data.arguments || {}, status: "executing", progress: 0 });
+          return;
+        case "progress":
+          if (live()) callbacksRef.current.onToolProgress?.(data.callId || "", data.taskId || "", data.progress ?? 0, data.status || "");
+          return;
+        case "tool-result":
+          notifyActivity(item.sessionId);
+          if (live()) callbacksRef.current.onToolResult?.(data.callId || "", Boolean(data.resultOk), data.resultMessage || "", data.resultData || undefined);
+          return;
+        case "task-complete":
+          if (!beginSettle(item)) return;
+          notifyActivity(item.sessionId);
+          if (live()) callbacksRef.current.onTaskComplete?.(data.messageId || "", data.text || "", data.action);
+          return;
+        case "canceled":
+          if (!beginSettle(item)) return;
+          notifyActivity(item.sessionId);
+          if (live()) callbacksRef.current.onCanceled?.(data.text || translate("chat.generationStopped"));
+          return;
+        case "notice":
+          if (live()) callbacksRef.current.onNotice?.(data.text || "");
+          return;
+        case "plan-created":
+          if (!live()) return;
+          callbacksRef.current.onPlanCreated?.(String(data.resultData?.planId || ""), String(data.resultData?.summary || data.text || ""), Number(data.resultData?.taskCount || 0));
+          return;
+        case "plan-task-status":
+          if (!live()) return;
+          callbacksRef.current.onPlanTaskStatus?.(String(data.resultData?.planId || ""), String(data.resultData?.taskId || data.callId || ""), data.status || "", String(data.resultData?.message || data.text || ""));
+          return;
+        case "prompt-prepared":
+          if (!live()) return;
+          callbacksRef.current.onPromptPrepared?.(String(data.resultData?.planId || ""), String(data.resultData?.taskId || data.callId || ""), String(data.resultData?.strategy || "KEEP") as "KEEP" | "OPTIMIZE");
+          return;
+        case "error": {
+          notifyInsufficientCredits(data.systemMessage?.key, data.errorMessage, data.requestId ? `agent:${data.requestId}` : undefined, useInsufficientCreditsStore.getState().scope);
+          const errorMessage = data.errorMessage || translate("chat.unknownError");
+          const deliver = live();
+          if (CLOSED_CONNECTION_ERROR_PATTERN.test(errorMessage)) {
+            if (item.cancelRequested) {
+              if (!beginSettle(item)) return;
+              notifyActivity(item.sessionId);
+              if (deliver) callbacksRef.current.onCanceled?.(translate("chat.generationStopped"));
+              return;
+            }
+            if (!beginSettle(item)) return;
+            notifyActivity(item.sessionId);
+            if (deliver) callbacksRef.current.onError?.(translate("chat.generationConnectionClosedGenerateAgain"));
+            return;
+          }
+          if (!beginSettle(item)) return;
+          notifyActivity(item.sessionId);
+          if (deliver) callbacksRef.current.onError?.(errorMessage);
+          return;
+        }
+        default:
+          return;
+      }
+    },
+  };
+
+  const flushPending = useCallback((nextSessionId: string, nextRequestId: string) => {
+    const rest: AgentEvent[] = [];
+    for (const event of pendingEventsRef.current) {
+      if (event.sessionId === nextSessionId && event.requestId === nextRequestId) runtimeRef.current.handleAgentEvent(event);
+      else rest.push(event);
+    }
+    pendingEventsRef.current = rest;
+  }, []);
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -145,310 +350,129 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
     clearReconnectTimer();
     if (eventSourceRef.current) eventSourceRef.current.close();
     const es = agentSubscribeEvents();
-    const creditPromptScope = useInsufficientCreditsStore.getState().scope;
     eventSourceRef.current = es;
-
-    const readCurrentEvent = (event: MessageEvent): AgentEvent | null => {
-      try {
-        const data: AgentEvent = JSON.parse(event.data);
-        if (data.requestId && terminalRequestIdsRef.current.has(data.requestId)) return null;
-        if (matchesAgentRequest(data, sessionIdRef.current, requestIdRef.current)) return data;
-        if (sendingRef.current && data.requestId) {
-          const pendingEvents = pendingEventsRef.current;
-          if (pendingEvents.length >= 128) pendingEvents.shift();
-          pendingEvents.push(data);
-        }
-        return null;
-      } catch {
-        return null;
-      }
-    };
-
-    es.addEventListener("queue-status", (e: MessageEvent) => {
-      const data = readCurrentEvent(e);
-      if (!data || (data.status !== "queued" && data.status !== "running")) return;
-      if (cancelRequestedRef.current) return;
-      if (!shouldApplyAgentQueueStatus(queueStatusRef.current, data.status)) return;
-      queueStatusRef.current = data.status;
-      const queued = data.status === "queued";
-      activeRequestRef.current = true;
-      setIsQueued(queued);
-      setIsStreaming(!queued);
-      callbacksRef.current.onQueueStatus?.(data.status);
-    });
-
-    es.addEventListener("thought-delta", (e: MessageEvent) => {
-      const data = readCurrentEvent(e);
-      if (!data) return;
-      callbacksRef.current.onThoughtDelta?.(data.thoughtId || "", data.thoughtDelta || "");
-    });
-
-    es.addEventListener("thought-complete", (e: MessageEvent) => {
-      const data = readCurrentEvent(e);
-      if (!data) return;
-      callbacksRef.current.onThoughtComplete?.(data.thoughtId || "", data.thoughtDurationMs || 0);
-    });
-
-    es.addEventListener("text-delta", (e: MessageEvent) => {
-      const data = readCurrentEvent(e);
-      if (!data) return;
-      callbacksRef.current.onTextDelta?.(data.messageId || "", data.delta || "");
-    });
-
-    es.addEventListener("tool-execute", (e: MessageEvent) => {
-      const data = readCurrentEvent(e);
-      if (!data) return;
-      if (!data.name || !data.callId) return;
-      callbacksRef.current.onToolCall?.({
-        callId: data.callId,
-        name: data.name,
-        arguments: data.arguments || {},
-        status: "executing",
-        progress: 0,
+    const listen = (type: string) => {
+      es.addEventListener(type, (event: Event) => {
+        const message = event as MessageEvent;
+        if (!message.data) return;
+        const data = runtimeRef.current.readEvent(message);
+        if (data) runtimeRef.current.handleAgentEvent(data);
       });
+    };
+    for (const type of LIVE_EVENT_TYPES) listen(type);
+    es.addEventListener("error", (event: Event) => {
+      const message = event as MessageEvent;
+      if (!message.data) return;
+      const data = runtimeRef.current.readEvent(message);
+      if (data) runtimeRef.current.handleAgentEvent({ ...data, type: "error" });
     });
-
-    es.addEventListener("progress", (e: MessageEvent) => {
-      const data = readCurrentEvent(e);
-      if (!data) return;
-      callbacksRef.current.onToolProgress?.(
-        data.callId || "",
-        data.taskId || "",
-        data.progress ?? 0,
-        data.status || ""
-      );
-    });
-
-    es.addEventListener("tool-result", (e: MessageEvent) => {
-      const data = readCurrentEvent(e);
-      if (!data) return;
-      callbacksRef.current.onToolResult?.(
-        data.callId || "",
-        Boolean(data.resultOk),
-        data.resultMessage || "",
-        data.resultData || undefined
-      );
-    });
-
-    es.addEventListener("task-complete", (e: MessageEvent) => {
-      const data = readCurrentEvent(e);
-      if (!data) return;
-      setIsStreaming(false);
-      setIsQueued(false);
-      activeRequestRef.current = false;
-      queueStatusRef.current = null;
-      markRequestTerminal(data.requestId);
-      callbacksRef.current.onTaskComplete?.(data.messageId || "", data.text || "", data.action);
-    });
-
-    es.addEventListener("canceled", (e: MessageEvent) => {
-      const data = readCurrentEvent(e);
-      if (!data) return;
-      setIsStreaming(false);
-      setIsQueued(false);
-      setIsStopping(false);
-      completePendingCancellation();
-      finishCanceledRequest(data.requestId || "", data.text || translate("chat.generationStopped"));
-    });
-
-    es.addEventListener("notice", (e: MessageEvent) => {
-      const data = readCurrentEvent(e);
-      if (!data) return;
-      callbacksRef.current.onNotice?.(data.text || "");
-    });
-
-    es.addEventListener("plan-created", (e: MessageEvent) => {
-      const data = readCurrentEvent(e);
-      if (!data) return;
-      callbacksRef.current.onPlanCreated?.(
-        String(data.resultData?.planId || ""),
-        String(data.resultData?.summary || data.text || ""),
-        Number(data.resultData?.taskCount || 0),
-      );
-    });
-
-    es.addEventListener("plan-task-status", (e: MessageEvent) => {
-      const data = readCurrentEvent(e);
-      if (!data) return;
-      callbacksRef.current.onPlanTaskStatus?.(
-        String(data.resultData?.planId || ""),
-        String(data.resultData?.taskId || data.callId || ""),
-        data.status || "",
-        String(data.resultData?.message || data.text || ""),
-      );
-    });
-
-    es.addEventListener("prompt-prepared", (e: MessageEvent) => {
-      const data = readCurrentEvent(e);
-      if (!data) return;
-      callbacksRef.current.onPromptPrepared?.(
-        String(data.resultData?.planId || ""),
-        String(data.resultData?.taskId || data.callId || ""),
-        String(data.resultData?.strategy || "KEEP") as "KEEP" | "OPTIMIZE",
-      );
-    });
-
-    es.addEventListener("error", (e: MessageEvent) => {
-      if (!e.data) return;
-      try {
-        const data = readCurrentEvent(e);
-        if (!data) return;
-        notifyInsufficientCredits(data.systemMessage?.key, data.errorMessage, data.requestId ? `agent:${data.requestId}` : undefined, creditPromptScope);
-        const errorMessage = data.errorMessage || translate("chat.unknownError");
-        setIsStreaming(false);
-        setIsQueued(false);
-        activeRequestRef.current = false;
-        queueStatusRef.current = null;
-        markRequestTerminal(data.requestId);
-        if (CLOSED_CONNECTION_ERROR_PATTERN.test(errorMessage)) {
-          if (cancelRequestedRef.current || canceledHandledRef.current) {
-            finishCanceledRequest(data.requestId || "", translate("chat.generationStopped"));
-            return;
-          }
-          callbacksRef.current.onError?.(translate("chat.generationConnectionClosedGenerateAgain"));
-          return;
-        }
-        callbacksRef.current.onError?.(errorMessage);
-      } catch {
-        callbacksRef.current.onError?.(translate("chat.unknownError"));
-      }
-    });
-
     es.onerror = (event) => {
       if (event instanceof MessageEvent && event.data) return;
       if (!sseEnabledRef.current || eventSourceRef.current !== es || reconnectTimerRef.current !== null) return;
       reconnectTimerRef.current = setTimeout(() => {
         reconnectTimerRef.current = null;
-        if (sseEnabledRef.current && eventSourceRef.current === es) {
-          connectSSERef.current();
-        }
+        if (sseEnabledRef.current && eventSourceRef.current === es) connectSSERef.current();
       }, 3000);
     };
-  }, [clearReconnectTimer, completePendingCancellation, finishCanceledRequest, markRequestTerminal]);
+  }, [clearReconnectTimer]);
 
   connectSSERef.current = connectSSE;
 
-  const sendMessage = useCallback(
-    async (message: string, attachments?: AgentAttachment[], settingsOverride?: CreationSettings, skillIdOverride?: string) => {
-      if (sendingRef.current || activeRequestRef.current) return;
-      sendingRef.current = true;
-      activeRequestRef.current = true;
-      cancelRequestedRef.current = false;
-      canceledHandledRef.current = false;
-      const previousSessionId = sessionIdRef.current;
-      requestIdRef.current = undefined;
-      pendingEventsRef.current = [];
-      queueStatusRef.current = "queued";
-      setRequestId(null);
-      setIsStreaming(false);
-      setIsQueued(true);
-      try {
-        const { sessionId: sid, requestId: rid, status } = await agentChat({
-          sessionId: previousSessionId,
-          entrySource,
-          message,
-          mode,
-          attachments,
-          creationSettings: settingsOverride || creationSettings,
-          skillId: skillIdOverride ?? skillId,
-        });
-        sessionIdRef.current = sid;
-        requestIdRef.current = rid;
-        setSessionId(sid);
-        setRequestId(rid);
-        if ((status === "queued" || status === "running") && shouldApplyAgentQueueStatus(queueStatusRef.current, status)) {
-          queueStatusRef.current = status;
-          setIsQueued(status === "queued");
-          setIsStreaming(status === "running");
-          callbacksRef.current.onQueueStatus?.(status);
-        } else if (status !== "queued" && status !== "running") {
-          flushPendingEvents(sid, rid);
-          markRequestTerminal(rid);
-          activeRequestRef.current = false;
-          queueStatusRef.current = null;
-          setIsStreaming(false);
-          setIsQueued(false);
-          setIsStopping(false);
-          cancelRequestedRef.current = false;
-          completePendingCancellation();
-        }
-        if (!isTerminalAgentRequestStatus(status)) {
-          flushPendingEvents(sid, rid);
-        }
-        if (cancelRequestedRef.current && !isTerminalAgentRequestStatus(status)) {
-          await cancelSession(sid, rid);
-        }
-      } catch (err) {
-        pendingEventsRef.current = [];
-        callbacksRef.current.onError?.(err instanceof Error ? err.message : translate("chat.failedToSend"));
-        activeRequestRef.current = false;
-        queueStatusRef.current = null;
-        cancelRequestedRef.current = false;
-        setIsStreaming(false);
-        setIsQueued(false);
-        setIsStopping(false);
-        completePendingCancellation();
-      } finally {
-        sendingRef.current = false;
+  const sendMessage = useCallback(async (message: string, attachments?: AgentAttachment[], settingsOverride?: CreationSettings, skillIdOverride?: string) => {
+    const current = focusKeyRef.current ? inflightRef.current.get(focusKeyRef.current) : undefined;
+    if (current && !current.settled) return;
+    const nextSessionId = viewedSessionIdRef.current ?? undefined;
+    const key = nextSessionId ?? `draft:${Date.now().toString(36)}:${draftSequence += 1}`;
+    const item: InflightRequest = {
+      key,
+      sessionId: nextSessionId,
+      phase: "sending",
+      stopping: false,
+      cancelRequested: false,
+      settled: false,
+      queueStatus: "queued",
+      cancelWaiters: [],
+    };
+    inflightRef.current.set(key, item);
+    liveEventsRef.current = true;
+    focusOn(key, nextSessionId ?? null);
+    setIsQueued(true);
+    setIsStreaming(false);
+    try {
+      const { sessionId: sid, requestId: rid, status } = await agentChat({
+        sessionId: nextSessionId,
+        entrySource,
+        message,
+        mode,
+        attachments,
+        creationSettings: settingsOverride || creationSettings,
+        skillId: skillIdOverride ?? skillId,
+      });
+      if (item.settled) return;
+      bindIdentity(item, sid, rid);
+      notifyActivity(sid);
+      if ((status === "queued" || status === "running") && shouldApplyAgentQueueStatus(item.queueStatus, status)) {
+        applyQueueStatus(item, status);
       }
-    },
-    [entrySource, creationSettings, skillId, mode, cancelSession, completePendingCancellation, flushPendingEvents, markRequestTerminal]
-  );
+      flushPending(sid, rid);
+      if (isTerminalAgentRequestStatus(status)) {
+        if (!item.settled && beginSettle(item)) notifyActivity(sid);
+        return;
+      }
+      if (item.cancelRequested) await cancelInflight(item);
+    } catch (err) {
+      if (![...inflightRef.current.values()].some((candidate) => candidate !== item && candidate.phase === "sending" && !candidate.requestId)) {
+        pendingEventsRef.current = [];
+      }
+      const live = showLive(item);
+      if (beginSettle(item)) {
+        notifyActivity(item.sessionId);
+        if (live) callbacksRef.current.onError?.(err instanceof Error ? err.message : translate("chat.failedToSend"));
+      }
+    }
+  }, [applyQueueStatus, beginSettle, bindIdentity, cancelInflight, creationSettings, entrySource, flushPending, focusOn, mode, notifyActivity, showLive, skillId]);
 
-  const canChangeSession = useCallback(() => !sendingRef.current && !activeRequestRef.current, []);
+  const isSessionBusy = useCallback((sessionIdToCheck?: string | null) => {
+    if (!sessionIdToCheck) return false;
+    const item = inflightRef.current.get(sessionIdToCheck);
+    return Boolean(item && !item.settled);
+  }, []);
+
+  const hasInflightWork = useCallback(() => inflightRef.current.size > 0, []);
 
   const resetSession = useCallback(() => {
-    if (!canChangeSession()) return false;
-    sessionIdRef.current = undefined;
-    requestIdRef.current = undefined;
-    pendingEventsRef.current = [];
-    queueStatusRef.current = null;
-    activeRequestRef.current = false;
-    cancelRequestedRef.current = false;
-    canceledHandledRef.current = false;
-    setIsStopping(false);
-    setSessionId(null);
-    setRequestId(null);
-    setIsStreaming(false);
-    setIsQueued(false);
+    liveEventsRef.current = true;
+    focusOn(null, null);
     return true;
-  }, [canChangeSession]);
+  }, [focusOn]);
 
   const restoreSession = useCallback((sid: string) => {
-    if (!canChangeSession()) return false;
-    sessionIdRef.current = sid;
-    requestIdRef.current = undefined;
-    pendingEventsRef.current = [];
-    queueStatusRef.current = null;
-    activeRequestRef.current = false;
-    setSessionId(sid);
-    setRequestId(null);
+    liveEventsRef.current = false;
+    focusOn(sid, sid);
     return true;
-  }, [canChangeSession]);
+  }, [focusOn]);
 
   const cancelMessage = useCallback(async () => {
-    if (cancelRequestedRef.current) {
+    const item = focusKeyRef.current ? inflightRef.current.get(focusKeyRef.current) : undefined;
+    if (!item || item.settled || item.cancelRequested) return;
+    item.cancelRequested = true;
+    item.stopping = true;
+    if (focusKeyRef.current === item.key) setIsStopping(true);
+    if (item.sessionId && item.requestId) {
+      await cancelInflight(item);
       return;
     }
-    cancelRequestedRef.current = true;
-    setIsStopping(true);
-    const sid = sessionIdRef.current;
-    const rid = requestIdRef.current;
-    if (sid && rid) {
-      await cancelSession(sid, rid);
-      return;
-    }
-    if (!sendingRef.current) {
-      cancelRequestedRef.current = false;
+    if (item.phase !== "sending") {
+      item.cancelRequested = false;
+      item.stopping = false;
       setIsStopping(false);
       return;
     }
-    await new Promise<void>((resolve) => cancelWaitersRef.current.push(resolve));
-  }, [cancelSession]);
+    await new Promise<void>((resolve) => item.cancelWaiters.push(resolve));
+  }, [cancelInflight]);
 
   const token = useUserStore((s) => s.token);
 
-  // 仅登录后建立 SSE 连接，token 变化时自动重连
   useEffect(() => {
     if (!token) {
       sseEnabledRef.current = false;
@@ -466,53 +490,50 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
     };
   }, [token, clearReconnectTimer, connectSSE]);
 
-  // 仅替换订阅连接，保留会话、输入和现有终态对账定时器。
   useEffect(() => {
     if (subscribedLocale.current === locale) return;
     subscribedLocale.current = locale;
     if (sseEnabledRef.current) connectSSERef.current();
   }, [locale]);
 
-  // 终态对账兜底：SSE连接闪断重连会丢失task-complete等终态事件，导致前端永久loading；
-  // 请求进行中间歇查询服务端请求状态，发现已终态时按终态收敛本地状态。
+  const reconcileRef = useRef<(requestIdToCheck: string) => Promise<void>>(async () => undefined);
+  reconcileRef.current = async (requestIdToCheck: string) => {
+    const item = [...inflightRef.current.values()].find((candidate) => candidate.requestId === requestIdToCheck);
+    if (!item || item.cancelRequested || item.settled) return;
+    try {
+      const result = await agentRequestStatus(requestIdToCheck);
+      const current = [...inflightRef.current.values()].find((candidate) => candidate.requestId === requestIdToCheck);
+      if (!current || current.settled || current.cancelRequested) return;
+      if (result.status === "queued" || result.status === "running") {
+        applyQueueStatus(current, result.status);
+        return;
+      }
+      if (!isTerminalAgentRequestStatus(result.status)) return;
+      settleFromStatus(current, result.status, result.message);
+    } catch {
+      // 查询失败时等待下一轮对账，不中断当前请求。
+    }
+  };
+
   useEffect(() => {
-    if ((!isStreaming && !isQueued) || !requestId) return;
+    if (!trackedRequestIds.length) return;
     let cancelled = false;
     let reconcileTimer: number | undefined;
-    const reconcile = async () => {
-      if (cancelRequestedRef.current || !activeRequestRef.current) return;
-      try {
-        const result = await agentRequestStatus(requestId);
-        if (cancelled || !activeRequestRef.current || !isTerminalAgentRequestStatus(result.status)) return;
-        markRequestTerminal(requestId);
-        activeRequestRef.current = false;
-        queueStatusRef.current = null;
-        cancelRequestedRef.current = false;
-        setIsStreaming(false);
-        setIsQueued(false);
-        setIsStopping(false);
-        if (result.status === "failed") {
-          callbacksRef.current.onError?.(result.message || translate("chat.generationFailed"));
-        } else if (result.status === "canceled" || result.status === "interrupted") {
-          callbacksRef.current.onCanceled?.(result.message || translate("chat.generationStopped"));
-        } else {
-          callbacksRef.current.onTaskComplete?.("", "", undefined);
-        }
-      } catch {
-        // 查询失败时等待下一轮对账，不中断当前请求。
-      }
+    const reconcile = () => {
+      if (cancelled) return;
+      void Promise.all(trackedRequestIds.map((id) => reconcileRef.current(id)));
     };
     void getAiTaskPollingIntervalMilliseconds()
       .then((intervalMilliseconds) => {
         if (cancelled) return;
-        reconcileTimer = window.setInterval(() => void reconcile(), intervalMilliseconds);
+        reconcileTimer = window.setInterval(reconcile, intervalMilliseconds);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
       if (reconcileTimer !== undefined) window.clearInterval(reconcileTimer);
     };
-  }, [isStreaming, isQueued, requestId, markRequestTerminal]);
+  }, [trackedRequestIds]);
 
-  return { sessionId, requestId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, canChangeSession, resetSession, restoreSession };
+  return { sessionId, requestId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, isSessionBusy, hasInflightWork, resetSession, restoreSession };
 }

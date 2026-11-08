@@ -1313,6 +1313,9 @@ public class NovanovaProperties {
             /** 运行中任务恢复阈值秒数 */
             private int runningRecoverSeconds = 900;
 
+            /** 图片和视频入口同一用户可同时执行的主Agent请求数 */
+            private int pageRequestConcurrency = 16;
+
             /**
              * 获取Redis Stream键。
              *
@@ -1527,6 +1530,24 @@ public class NovanovaProperties {
              */
             public void setRunningRecoverSeconds(int runningRecoverSeconds) {
                 this.runningRecoverSeconds = runningRecoverSeconds;
+            }
+
+            /**
+             * 获取图片和视频入口同一用户可同时执行的主Agent请求数。
+             *
+             * @return int 并发请求数
+             */
+            public int getPageRequestConcurrency() {
+                return pageRequestConcurrency;
+            }
+
+            /**
+             * 设置图片和视频入口同一用户可同时执行的主Agent请求数。
+             *
+             * @param pageRequestConcurrency int 并发请求数
+             */
+            public void setPageRequestConcurrency(int pageRequestConcurrency) {
+                this.pageRequestConcurrency = pageRequestConcurrency;
             }
         }
 

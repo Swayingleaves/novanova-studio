@@ -37,6 +37,9 @@ class CreationAgentRequestQueueTest {
     /** 直接设置活动租约的Redis模板。 */
     private ReactiveStringRedisTemplate redisTemplate;
 
+    /** 测试使用的服务配置。 */
+    private NovanovaProperties properties;
+
     /**
      * 建立独立 Redis 连接和队列实例。
      */
@@ -46,8 +49,9 @@ class CreationAgentRequestQueueTest {
                 redisContainer.getHost(), redisContainer.getMappedPort(6379)));
         connectionFactory.afterPropertiesSet();
         connectionFactory.start();
-        NovanovaProperties properties = new NovanovaProperties();
+        properties = new NovanovaProperties();
         properties.getAi().getTask().setLockTtlSeconds(30);
+        properties.getAi().getTask().setPageRequestConcurrency(1);
         redisTemplate = new ReactiveStringRedisTemplate(connectionFactory);
         requestQueue = new CreationAgentRequestQueue(redisTemplate, properties);
     }
@@ -243,5 +247,33 @@ class CreationAgentRequestQueueTest {
         requestQueue.releaseActiveRequest(userId, entrySource, "image-request-first").block();
         Assertions.assertEquals(List.of("image-request-next"),
                 requestQueue.claimAvailable(userId, entrySource).collectList().block());
+    }
+
+    /**
+     * 图片和视频入口按配置并行领取，画布入口仍保持单槽。
+     */
+    @Test
+    void shouldClaimImageAndVideoRequestsConcurrentlyUpToConfiguredLimit() {
+        properties.getAi().getTask().setPageRequestConcurrency(2);
+        Long userId = 9108L;
+
+        requestQueue.enqueue(userId, CreationEntrySource.IMAGE_PAGE, "image-request-1").block();
+        requestQueue.enqueue(userId, CreationEntrySource.IMAGE_PAGE, "image-request-2").block();
+        requestQueue.enqueue(userId, CreationEntrySource.IMAGE_PAGE, "image-request-3").block();
+        requestQueue.enqueue(userId, "7:videoPage", "video-request-1").block();
+        requestQueue.enqueue(userId, "7:videoPage", "video-request-2").block();
+        requestQueue.enqueue(userId, CreationEntrySource.CANVAS, "canvas-request-1").block();
+        requestQueue.enqueue(userId, CreationEntrySource.CANVAS, "canvas-request-2").block();
+
+        Assertions.assertEquals(List.of("image-request-1", "image-request-2"),
+                requestQueue.claimAvailable(userId, CreationEntrySource.IMAGE_PAGE).collectList().block());
+        Assertions.assertEquals(List.of(),
+                requestQueue.claimAvailable(userId, CreationEntrySource.IMAGE_PAGE).collectList().block());
+        Assertions.assertEquals(List.of("video-request-1", "video-request-2"),
+                requestQueue.claimAvailable(userId, "7:videoPage").collectList().block());
+        Assertions.assertEquals(List.of("canvas-request-1"),
+                requestQueue.claimAvailable(userId, CreationEntrySource.CANVAS).collectList().block());
+        Assertions.assertEquals(List.of(),
+                requestQueue.claimAvailable(userId, CreationEntrySource.CANVAS).collectList().block());
     }
 }

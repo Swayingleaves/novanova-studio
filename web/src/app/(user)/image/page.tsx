@@ -299,11 +299,14 @@ export default function ImagePage() {
     const toolCallsRef = useRef(toolCalls);
     const chatMessagesRef = useRef(chatMessages);
 
-    const { sessionId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, canChangeSession, resetSession, restoreSession } = useAgentChatSSE({
+    const { sessionId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, isSessionBusy, hasInflightWork, resetSession, restoreSession } = useAgentChatSSE({
         entrySource: "imagePage",
         creationSettings: agentCreationSettings,
         skillId: selectedSkill ? String(selectedSkill.id) : undefined,
         mode: creationMode,
+        onRequestActivity: () => {
+            void refreshConversations();
+        },
         onTextDelta: (msgId, delta) => {
             setStreamingText((prev) => {
                 const next = prev?.messageId === msgId ? { ...prev, text: prev.text + delta } : { messageId: msgId, text: delta };
@@ -505,7 +508,7 @@ export default function ImagePage() {
     useEffect(() => {
         let cancelled = false;
         void refreshConversations().then((nextConversations) => {
-            if (cancelled || activeIdRef.current || !canChangeSession()) return;
+            if (cancelled || activeIdRef.current || hasInflightWork()) return;
             const pendingConversation = findLatestPendingConversation(nextConversations, hasPendingImageConversation);
             if (!pendingConversation) return;
             activeIdRef.current = pendingConversation.id;
@@ -515,7 +518,7 @@ export default function ImagePage() {
         return () => {
             cancelled = true;
         };
-    }, [canChangeSession, refreshConversations, restoreSession]);
+    }, [hasInflightWork, refreshConversations, restoreSession]);
 
     useEffect(() => {
         if (!hasRunningGeneration(conversations)) return;
@@ -660,7 +663,7 @@ export default function ImagePage() {
     };
 
     const regenerateRound = async (round: Round) => {
-        if (!canChangeSession()) return;
+        if (isStreaming || isQueued) return;
         if (!ensureModelConfiguration("image", round.config.imageModel || round.config.model || model) || !ensureModelConfiguration("text")) return;
         await regenerateImageRound(round, {
             fallbackModel: model,
@@ -677,10 +680,6 @@ export default function ImagePage() {
     };
 
     const newConversation = () => {
-        if (!canChangeSession()) {
-            message.warning(translate("image.generationIsRunningStopItOrWait"));
-            return;
-        }
         setActiveId(null);
         activeIdRef.current = null;
         historyRequestVersion.current += 1;
@@ -720,10 +719,6 @@ export default function ImagePage() {
     };
 
     const selectConversation = (conversation: Conversation) => {
-        if (!canChangeSession()) {
-            message.warning(translate("image.generationIsRunningStopItOrWait"));
-            return;
-        }
         if (getGenerationConversationStatus(conversation) !== "none" && conversation.generationStatus !== "running") {
             setConversations((current) => current.map((item) => (item.id === conversation.id ? { ...item, generationViewedAt: item.generationCompletedAt } : item)));
             void markGenerationLogViewed(conversation.id).catch(() => void refreshConversations());
@@ -753,7 +748,7 @@ export default function ImagePage() {
     };
 
     const deleteSelected = () => {
-        if (activeIdRef.current && selectedIds.includes(activeIdRef.current) && !canChangeSession()) {
+        if (selectedIds.some((id) => isSessionBusy(id))) {
             message.warning(translate("image.generationIsRunningStopItOrWait"));
             return;
         }
@@ -913,7 +908,7 @@ export default function ImagePage() {
     };
 
     const deleteConversation = async (conversationId: string) => {
-        if (activeIdRef.current === conversationId && !canChangeSession()) {
+        if (isSessionBusy(conversationId)) {
             message.warning(translate("image.generationIsRunningStopItOrWait"));
             return;
         }
@@ -926,7 +921,7 @@ export default function ImagePage() {
         await refreshConversations();
     };
 
-    const conversationItems = buildImageConversationItems(conversations, activeId, selectedIds);
+    const conversationItems = buildImageConversationItems(conversations, activeId, selectedIds, isSessionBusy);
     const referenceChips: CreationReferenceChip[] = references.map((reference, index) => {
         const uploading = uploadingReferenceIds.includes(reference.id);
         return {
@@ -1342,7 +1337,7 @@ function buildImageSettingsSummary(settings: Partial<Pick<AiConfig, "quality" | 
     });
 }
 
-function buildImageConversationItems(conversations: Conversation[], activeId: string | null, selectedIds: string[]): CreationConversationItem[] {
+function buildImageConversationItems(conversations: Conversation[], activeId: string | null, selectedIds: string[], isSessionBusy: (sessionId: string) => boolean): CreationConversationItem[] {
     return conversations.map((conversation) => {
         const latestImage = conversation.rounds
             .slice()
@@ -1357,7 +1352,7 @@ function buildImageConversationItems(conversations: Conversation[], activeId: st
             preview: <MediaPreview kind="image" src={latestImage?.dataUrl} className="size-10 rounded-xl object-cover" />,
             active: activeId === conversation.id,
             selected: selectedIds.includes(conversation.id),
-            status: getGenerationConversationStatus(conversation),
+            status: isSessionBusy(conversation.id) ? "running" : getGenerationConversationStatus(conversation),
         };
     });
 }

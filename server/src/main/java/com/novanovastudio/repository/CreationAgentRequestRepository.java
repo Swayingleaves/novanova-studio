@@ -93,6 +93,27 @@ public class CreationAgentRequestRepository {
     }
 
     /**
+     * 判断会话是否已有排队或执行中的主Agent请求。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @return Mono<Boolean> 是否存在未结束请求
+     */
+    public Mono<Boolean> hasOpenRequest(Long userId, String sessionId) {
+        return databaseClient.sql("""
+                SELECT 1 FROM creation_agent_request
+                WHERE user_id = :userId AND session_id = :sessionId AND status IN ('queued', 'running')
+                LIMIT 1
+                """)
+                .bind("userId", userId)
+                .bind("sessionId", sessionId)
+                .fetch()
+                .first()
+                .map(row -> true)
+                .defaultIfEmpty(false);
+    }
+
+    /**
      * 条件领取请求，避免被取消或已结束的请求重复执行。
      *
      * @param requestId String 请求ID
