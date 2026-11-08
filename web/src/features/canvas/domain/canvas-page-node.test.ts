@@ -17,6 +17,8 @@ import {
     expandBackgroundBoardsToMembers,
     reconcileBackgroundBoardMembership,
     normalizeBackgroundBoardMembers,
+    updateBackgroundBoardFrame,
+    createBackgroundLabel,
     findNonOverlappingCanvasNodePosition,
 } from "./canvas-page-node.ts";
 
@@ -61,6 +63,70 @@ test("恢复文档时清理不存在的成员和背景板互相引用", () => {
     const otherBoard = createBackgroundNode({ id: "background-2", position: { x: 0, y: 0 }, memberNodeIds: [board.id] });
     const [normalized] = normalizeBackgroundBoardMembers([board, otherBoard]);
     assert.deepEqual(normalized.kind === "background" ? normalized.memberNodeIds : [], []);
+});
+
+test("恢复文档时补齐缺失的背景板文字描述并夹回板内", () => {
+    const board = createBackgroundNode({ id: "background-1", position: { x: 0, y: 0 } });
+    const legacy = { ...board, labels: undefined } as unknown as typeof board;
+    const [missing] = normalizeBackgroundBoardMembers([legacy]);
+    assert.deepEqual(missing.kind === "background" ? missing.labels : null, []);
+
+    const dirty = {
+        ...board,
+        labels: [
+            { id: "", text: "无效", x: 0, y: 0, color: "#111111", fontSize: 16 },
+            { id: "label-1", text: "说明", x: -40, y: 4000, color: "#ffffff", fontSize: 99 },
+        ],
+    };
+    const [normalized] = normalizeBackgroundBoardMembers([dirty]);
+    assert.equal(normalized.kind, "background");
+    if (normalized.kind !== "background") return;
+    assert.equal(normalized.labels.length, 1);
+    assert.equal(normalized.labels[0]?.id, "label-1");
+    assert.equal(normalized.labels[0]?.color, "#ffffff");
+    assert.equal(normalized.labels[0]?.fontSize, 72);
+    assert.ok((normalized.labels[0]?.x ?? 0) >= 8);
+    assert.ok((normalized.labels[0]?.y ?? 0) <= normalized.frame.height - 8);
+});
+
+test("背景板文字描述默认跟随主题色，旧的固定深色也会改写", () => {
+    const created = createBackgroundLabel({ id: "label-1", text: "说明", x: 24, y: 24 }, 960, 640);
+    assert.equal(created.color, "var(--studio-ink)");
+    const board = createBackgroundNode({ id: "background-1", position: { x: 0, y: 0 } });
+    const labeled = { ...board, labels: [{ id: "label-1", text: "说明", x: 24, y: 24, color: "#1c1917", fontSize: 16 }, { id: "label-2", text: "强调", x: 24, y: 48, color: "var(--studio-danger)", fontSize: 16 }] };
+    const [normalized] = normalizeBackgroundBoardMembers([labeled]);
+    assert.equal(normalized.kind, "background");
+    if (normalized.kind !== "background") return;
+    assert.equal(normalized.labels[0]?.color, "var(--studio-ink)");
+    assert.equal(normalized.labels[1]?.color, "var(--studio-danger)");
+});
+
+test("背景板左上角移动时文字描述保持画面位置，缩小后夹回板内", () => {
+    const board = createBackgroundNode({ id: "background-1", position: { x: 100, y: 80 } });
+    const labeled = { ...board, labels: [{ id: "label-1", text: "说明", x: 30, y: 40, color: "#111827", fontSize: 16 }] };
+    const moved = updateBackgroundBoardFrame(labeled, { position: { x: 40, y: 80 }, width: board.frame.width + 60 });
+    assert.equal(moved.kind, "background");
+    if (moved.kind !== "background") return;
+    assert.equal(moved.frame.position.x + moved.labels[0].x, 130);
+    assert.equal(moved.frame.position.y + moved.labels[0].y, 120);
+
+    const far = { ...board, labels: [{ id: "label-1", text: "说明", x: 900, y: 600, color: "#111827", fontSize: 16 }] };
+    const shrunk = updateBackgroundBoardFrame(far, { width: 320, height: 220 });
+    assert.equal(shrunk.labels[0].x, 264);
+    assert.equal(shrunk.labels[0].y, 188);
+    assert.ok(shrunk.labels[0].x < shrunk.frame.width);
+    assert.ok(shrunk.labels[0].y < shrunk.frame.height);
+});
+
+test("背景板为包裹成员而移动时文字描述保持画面位置", () => {
+    const board = createBackgroundNode({ id: "background-1", position: { x: 0, y: 0 }, memberNodeIds: ["text-1"] });
+    const labeled = { ...board, labels: [{ id: "label-1", text: "说明", x: 48, y: 64, color: "#111827", fontSize: 16 }] };
+    const member = createTextNode({ id: "text-1", position: { x: 0, y: 0 } });
+    const expanded = expandBackgroundBoardsToMembers([labeled, member])[0];
+    assert.equal(expanded.kind, "background");
+    if (expanded.kind !== "background") return;
+    assert.equal(expanded.frame.position.x + expanded.labels[0].x, 48);
+    assert.equal(expanded.frame.position.y + expanded.labels[0].y, 64);
 });
 
 test("修改空图片节点尺寸配置时保持中心点不变", () => {

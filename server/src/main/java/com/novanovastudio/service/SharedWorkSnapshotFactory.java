@@ -198,6 +198,13 @@ public class SharedWorkSnapshotFactory {
             case "background" -> {
                 result.putAll(scalar(source, "backgroundColor"));
                 result.put("memberNodeIds", strings(array(source, "memberNodeIds")));
+                if (source.getJSONArray("labels") != null) {
+                    JSONArray labels = new JSONArray();
+                    for (Object value : array(source, "labels")) {
+                        if (value instanceof JSONObject label) labels.add(scalar(label, "id", "text", "x", "y", "color", "fontSize"));
+                    }
+                    result.put("labels", labels);
+                }
             }
             case "videoComposition" -> {
                 JSONObject composition = scalar(source.getJSONObject("composition"), "resultVideoNodeId");

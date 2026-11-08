@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { CanvasBackgroundNode, CanvasDirectorDeskNode, CanvasNode, CanvasPoint, CanvasStoryboardNode, CanvasVideoCompositionNode, CanvasVideoNode } from "../types";
+import type { CanvasBackgroundLabel, CanvasBackgroundLabelSelection, CanvasBackgroundNode, CanvasDirectorDeskNode, CanvasNode, CanvasPoint, CanvasStoryboardNode, CanvasVideoCompositionNode, CanvasVideoNode } from "../types";
 
 export type BatchImagePreview = {
     id: string;
@@ -51,6 +51,9 @@ export type NodeActions = {
     onResize?: (nodeId: string, width: number, height: number, position?: CanvasPoint) => void;
     onBackgroundTitleChange?: (node: CanvasBackgroundNode, title: string) => void;
     onBackgroundColorChange?: (node: CanvasBackgroundNode, color: string) => void;
+    selectedBackgroundLabel?: CanvasBackgroundLabelSelection | null;
+    onSelectBackgroundLabel?: (selection: CanvasBackgroundLabelSelection | null) => void;
+    onBackgroundLabelsChange?: (nodeId: string, labels: CanvasBackgroundLabel[]) => void;
 };
 
 const noop = () => {};

@@ -80,6 +80,9 @@ import {
     expandBackgroundBoardsToMembers,
     reconcileBackgroundBoardMembership,
     normalizeBackgroundBoardMembers,
+    createBackgroundLabel,
+    updateBackgroundBoardFrame,
+    updateBackgroundBoardLabels,
     normalizeCanvasConnection,
     readCanvasNodePrompt,
     resetInterruptedCanvasNodes,
@@ -89,6 +92,7 @@ import {
 } from "../domain/canvas-page-node";
 import { canComposeVideo, readVideoCompositionConnectionError, synchronizeVideoCompositionInputs } from "../domain/video-composition";
 import { canvasNodeContainsPoint, planBatchNodesToVideoConnections, readCanvasNodesBounds } from "../domain/canvas-batch-connection";
+import { createFirstLastFrameVideoTemplate } from "../domain/canvas-first-last-frame-template";
 import { ActiveConnectionPath, ConnectionPath } from "../components/canvas-connections";
 import { CanvasChatPanel } from "../components/canvas-chat-panel";
 import type { CanvasImageCropRect } from "../components/canvas-node-crop-dialog";
@@ -135,7 +139,7 @@ import { useCanvasStore } from "../stores/use-canvas-store";
 import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
 import { readCanvasSystemClipboard } from "../services/canvas-system-clipboard";
 import { layoutUploadedCanvasNodes, uploadCanvasFiles } from "../services/canvas-media-upload";
-import { saveCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
+import { readCanvasLastUsedGenerationSettings, saveCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
@@ -156,6 +160,8 @@ import {
 } from "../domain/storyboard";
 import {
     type CanvasAssistantImage,
+    type CanvasBackgroundLabel,
+    type CanvasBackgroundLabelSelection,
     type CanvasBackgroundNode,
     type CanvasDirectorDeskNode,
     type CanvasDirectorDeskExportSource,
@@ -428,6 +434,9 @@ function CanvasWorkspacePage() {
     const [mouseWorld, setMouseWorld] = useState<CanvasPoint>({ x: 0, y: 0 });
     const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+    const [selectedBackgroundLabel, setSelectedBackgroundLabel] = useState<CanvasBackgroundLabelSelection | null>(null);
+    const selectedBackgroundLabelRef = useRef(selectedBackgroundLabel);
+    selectedBackgroundLabelRef.current = selectedBackgroundLabel;
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("dots");
     const [showImageInfo, setShowImageInfo] = useState(false);
@@ -1397,6 +1406,29 @@ function CanvasWorkspacePage() {
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter, requestFocusNodes],
     );
 
+    const createFirstLastFrameVideoTemplateNodes = useCallback((position: CanvasPoint) => {
+        let serial = 0;
+        const created = createFirstLastFrameVideoTemplate(position, () => `template-${Date.now()}-${serial++}-${Math.random().toString(36).slice(2, 7)}`);
+        const bounds = readCanvasNodesBounds(created.nodes);
+        if (!bounds) return;
+        const safePosition = findNonOverlappingCanvasNodePosition(nodesRef.current, { x: bounds.left, y: bounds.top }, bounds.width, bounds.height);
+        const offsetX = safePosition.x - bounds.left;
+        const offsetY = safePosition.y - bounds.top;
+        const placedNodes = created.nodes.map((node) => {
+            // 说明相对背景板定位，只平移节点框，避免背景板尺寸更新把说明钉在原处。
+            const moved = offsetX === 0 && offsetY === 0 ? node : updateCanvasNodeFrame(node, { position: { x: node.frame.position.x + offsetX, y: node.frame.position.y + offsetY } });
+            if (!isImageNode(moved) && !isVideoNode(moved)) return moved;
+            const withSettings = applyCanvasNodeAttributes(moved, readCanvasLastUsedGenerationSettings(moved.kind));
+            return isVideoNode(withSettings) ? applyCanvasNodeAttributes(withSettings, { videoGenerationMode: "first-last-frame-to-video" }) : withSettings;
+        });
+        setNodes((prev) => [...prev, ...placedNodes]);
+        setConnections((prev) => [...prev, ...created.connections]);
+        requestFocusNodes(placedNodes.map((node) => node.id));
+        setSelectedNodeIds(new Set(placedNodes.map((node) => node.id)));
+        setSelectedConnectionId(null);
+        setDialogNodeId(null);
+    }, [requestFocusNodes]);
+
     const addToBackgroundBoard = useCallback(
         (nodeIds: string[]) => {
             const targets = nodesRef.current.filter((node) => nodeIds.includes(node.id) && !isBackgroundNode(node));
@@ -2264,10 +2296,18 @@ function CanvasWorkspacePage() {
                 if (!pasteCopiedNodes()) void pasteSystemClipboard();
             },
             delete: () => {
+                const selectedLabel = selectedBackgroundLabelRef.current;
+                if (selectedLabel?.editing) return;
+                if (selectedLabel) {
+                    setNodes((prev) => prev.map((node) => (node.id === selectedLabel.boardId && isBackgroundNode(node) ? updateBackgroundBoardLabels(node, (node.labels ?? []).filter((label) => label.id !== selectedLabel.labelId)) : node)));
+                    setSelectedBackgroundLabel(null);
+                    return;
+                }
                 if (selectedNodeIdsRef.current.size) confirmDeleteNodes(new Set(selectedNodeIdsRef.current));
                 else if (selectedConnectionId) confirmDeleteConnection(selectedConnectionId);
             },
             cancel: () => {
+                setSelectedBackgroundLabel(null);
                 setGroupConnectDrag(null);
                 deselectCanvas();
                 setConnecting(null);
@@ -2295,7 +2335,11 @@ function CanvasWorkspacePage() {
 
     const handleNodeResize = useCallback((nodeId: string, width: number, height: number, position?: CanvasPoint) => {
         setNodes((prev) => {
-            const resized = prev.map((node) => (node.id === nodeId ? updateCanvasNodeFrame(node, { width, height, position: position ?? node.frame.position }) : node));
+            const resized = prev.map((node) => {
+                if (node.id !== nodeId) return node;
+                if (isBackgroundNode(node)) return updateBackgroundBoardFrame(node, { width, height, position: position ?? node.frame.position });
+                return updateCanvasNodeFrame(node, { width, height, position: position ?? node.frame.position });
+            });
             return resized.some((node) => node.id === nodeId && isBackgroundNode(node)) ? expandBackgroundBoardsToMembers(resized) : resized;
         });
     }, []);
@@ -2366,6 +2410,26 @@ function CanvasWorkspacePage() {
     const handleBackgroundColorChange = useCallback((node: CanvasBackgroundNode, color: string) => {
         setNodes((prev) => prev.map((item) => (item.id === node.id && isBackgroundNode(item) ? { ...item, backgroundColor: color } : item)));
     }, []);
+
+    const handleBackgroundLabelsChange = useCallback((nodeId: string, labels: CanvasBackgroundLabel[]) => {
+        setNodes((prev) => prev.map((node) => (node.id === nodeId && isBackgroundNode(node) ? updateBackgroundBoardLabels(node, labels) : node)));
+    }, []);
+
+    const addBackgroundLabel = useCallback((nodeId: string, clientX: number, clientY: number) => {
+        const board = nodesRef.current.find((node): node is CanvasBackgroundNode => node.id === nodeId && isBackgroundNode(node));
+        if (!board) return;
+        const world = screenToCanvas(clientX, clientY);
+        const label = createBackgroundLabel({
+            id: nanoid(),
+            text: translate("canvas.backgroundDescription"),
+            x: world.x - board.frame.position.x,
+            y: world.y - board.frame.position.y,
+        }, board.frame.width, board.frame.height);
+        setNodes((prev) => prev.map((node) => (node.id === board.id && isBackgroundNode(node) ? updateBackgroundBoardLabels(node, [...(node.labels ?? []), label]) : node)));
+        setSelectedBackgroundLabel({ boardId: board.id, labelId: label.id, editing: true });
+        setSelectedNodeIds(new Set([board.id]));
+        setSelectedConnectionId(null);
+    }, [screenToCanvas, translate]);
 
     const toggleNodeFreeResize = useCallback((nodeId: string) => {
         setNodes((prev) =>
@@ -4914,6 +4978,9 @@ function CanvasWorkspacePage() {
             },
             onBackgroundTitleChange: handleBackgroundTitleChange,
             onBackgroundColorChange: handleBackgroundColorChange,
+            selectedBackgroundLabel,
+            onSelectBackgroundLabel: setSelectedBackgroundLabel,
+            onBackgroundLabelsChange: handleBackgroundLabelsChange,
         }),
         [
             batchCardStacks,
@@ -4924,7 +4991,9 @@ function CanvasWorkspacePage() {
             editingNodeId,
             handleConfigNodeChange,
             handleBackgroundColorChange,
+            handleBackgroundLabelsChange,
             handleBackgroundTitleChange,
+            selectedBackgroundLabel,
             handleNodeResize,
             handleGenerateNode,
             handleGenerateStoryboard,
@@ -4956,6 +5025,12 @@ function CanvasWorkspacePage() {
         setEdgeDeletePopover(null);
     }, [connections, edgeDeletePopover]);
 
+    useEffect(() => {
+        if (!selectedBackgroundLabel) return;
+        const board = nodes.find((node) => node.id === selectedBackgroundLabel.boardId);
+        if (!board || !isBackgroundNode(board) || !(board.labels ?? []).some((label) => label.id === selectedBackgroundLabel.labelId)) setSelectedBackgroundLabel(null);
+    }, [nodes, selectedBackgroundLabel]);
+
     const reactFlowViewport = useMemo(() => ({ x: viewport.x, y: viewport.y, zoom: viewport.k }), [viewport.k, viewport.x, viewport.y, translate.locale]);
     const handleViewportChange = useCallback((next: { x: number; y: number; zoom: number }) => {
         setViewport((current) => {
@@ -4982,7 +5057,9 @@ function CanvasWorkspacePage() {
         });
         if (nodeIds.length || !edgeIds.length) setEdgeDeletePopover(null);
     }, []);
-    const handleNodeClick = useCallback((_event: ReactMouseEvent, nodeId: string) => {
+    const handleNodeClick = useCallback((event: ReactMouseEvent, nodeId: string) => {
+        const target = event.target;
+        if (!(target instanceof Element) || !target.closest("[data-background-label]")) setSelectedBackgroundLabel(null);
         const node = nodesRef.current.find((item) => item.id === nodeId);
         setDialogNodeId(node && !isBackgroundNode(node) ? nodeId : null);
         setContextMenu(null);
@@ -5020,6 +5097,7 @@ function CanvasWorkspacePage() {
         setContextMenu(null);
     }, []);
     const handlePaneClick = useCallback(() => {
+        setSelectedBackgroundLabel(null);
         setSelectedNodeIds(new Set());
         setSelectedConnectionId(null);
         setEdgeDeletePopover(null);
@@ -5379,10 +5457,12 @@ function CanvasWorkspacePage() {
                     canvasAssets={navigationAssets.filter((asset): asset is Extract<CanvasNavigationAsset, { source: "storyboard" }> => asset.source === "storyboard" && Boolean(asset.asset.image?.source))}
                     onCloseContextMenu={() => setContextMenu(null)}
                     onCreateNode={createNode}
+                    onCreateFirstLastFrameVideoTemplate={createFirstLastFrameVideoTemplateNodes}
                     onDuplicateNode={duplicateNode}
                     onAddToBackground={addToBackgroundBoard}
                     onDeleteNodes={confirmDeleteNodes}
                     onDeleteBackgroundOnly={confirmDeleteBackgroundOnly}
+                    onAddBackgroundLabel={addBackgroundLabel}
                     onDeleteConnection={confirmDeleteConnection}
                     onImageInputChange={handleImageInputChange}
                     onUpload={(position) => handleUploadRequest(undefined, position)}

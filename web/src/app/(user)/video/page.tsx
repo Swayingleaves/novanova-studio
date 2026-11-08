@@ -525,11 +525,14 @@ export default function VideoPage() {
     const pendingVideoSizeRef = useRef("");
     const chatMessagesRef = useRef(chatMessages);
 
-    const { sessionId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, canChangeSession, resetSession, restoreSession } = useAgentChatSSE({
+    const { sessionId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, isSessionBusy, hasInflightWork, resetSession, restoreSession } = useAgentChatSSE({
         entrySource: "videoPage",
         skillId: selectedSkill ? String(selectedSkill.id) : undefined,
         creationSettings: agentCreationSettings,
         mode: creationMode,
+        onRequestActivity: () => {
+            void refreshConversations();
+        },
         onTextDelta: (msgId, delta) => {
             setStreamingText((prev) => {
                 const next = prev?.messageId === msgId ? { ...prev, text: prev.text + delta } : { messageId: msgId, text: delta };
@@ -821,14 +824,14 @@ export default function VideoPage() {
     useEffect(() => {
         let cancelled = false;
         void refreshConversations().then(() => {
-            if (cancelled || !canChangeSession()) return;
+            if (cancelled || activeIdRef.current || hasInflightWork()) return;
             activeIdRef.current = null;
             setActiveId(null);
         });
         return () => {
             cancelled = true;
         };
-    }, [canChangeSession, refreshConversations]);
+    }, [hasInflightWork, refreshConversations]);
 
     useEffect(() => {
         if (!hasRunningGeneration(conversations)) return;
@@ -1224,7 +1227,7 @@ export default function VideoPage() {
     };
 
     const regenerateRound = async (round: Round) => {
-        if (!canChangeSession()) return;
+        if (isStreaming || isQueued) return;
         const videoModel = round.config.videoModel || round.config.model || model;
         if (!ensureModelConfiguration("video", videoModel) || !ensureModelConfiguration("text")) return;
         const size = round.config.size;
@@ -1270,10 +1273,6 @@ export default function VideoPage() {
     };
 
     const newConversation = () => {
-        if (!canChangeSession()) {
-            message.warning(translate("video.generationIsRunningStopItOrWait"));
-            return;
-        }
         setActiveId(null);
         activeIdRef.current = null;
         setVideoDraftSettingsModified(false);
@@ -1296,10 +1295,6 @@ export default function VideoPage() {
     };
 
     const selectConversation = (conversation: Conversation) => {
-        if (!canChangeSession()) {
-            message.warning(translate("video.generationIsRunningStopItOrWait"));
-            return;
-        }
         if (getGenerationConversationStatus(conversation) !== "none" && conversation.generationStatus !== "running") {
             setConversations((current) => current.map((item) => (item.id === conversation.id ? { ...item, generationViewedAt: item.generationCompletedAt } : item)));
             void markGenerationLogViewed(conversation.id).catch(() => void refreshConversations());
@@ -1328,7 +1323,7 @@ export default function VideoPage() {
     };
 
     const deleteSelected = () => {
-        if (activeIdRef.current && selectedIds.includes(activeIdRef.current) && !canChangeSession()) {
+        if (selectedIds.some((id) => isSessionBusy(id))) {
             message.warning(translate("video.generationIsRunningStopItOrWait"));
             return;
         }
@@ -1478,7 +1473,7 @@ export default function VideoPage() {
     };
 
     const deleteConversation = async (conversationId: string) => {
-        if (activeIdRef.current === conversationId && !canChangeSession()) {
+        if (isSessionBusy(conversationId)) {
             message.warning(translate("video.generationIsRunningStopItOrWait"));
             return;
         }
@@ -1491,7 +1486,7 @@ export default function VideoPage() {
         await refreshConversations();
     };
 
-    const conversationItems = buildVideoConversationItems(conversations, activeId, selectedIds);
+    const conversationItems = buildVideoConversationItems(conversations, activeId, selectedIds, isSessionBusy);
     const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
     const referenceChips: CreationReferenceChip[] = [
         ...references.map((reference, index) => {
@@ -2139,7 +2134,7 @@ function buildVideoSettingsSummary(settings: Partial<Pick<AiConfig, "vquality" |
     });
 }
 
-function buildVideoConversationItems(conversations: Conversation[], activeId: string | null, selectedIds: string[]): CreationConversationItem[] {
+function buildVideoConversationItems(conversations: Conversation[], activeId: string | null, selectedIds: string[], isSessionBusy: (sessionId: string) => boolean): CreationConversationItem[] {
     return conversations.map((conversation) => {
         const latestVideo = findLatestPlayableVideo(conversation.rounds.flatMap((round) => workflowVideos(round).map((video) => ({ id: video.id, status: "success" as const, video }))));
 
@@ -2150,7 +2145,7 @@ function buildVideoConversationItems(conversations: Conversation[], activeId: st
             preview: <MediaPreview kind="video" src={latestVideo?.url} className="size-10 rounded-xl object-cover" />,
             active: activeId === conversation.id,
             selected: selectedIds.includes(conversation.id),
-            status: getGenerationConversationStatus(conversation),
+            status: isSessionBusy(conversation.id) ? "running" : getGenerationConversationStatus(conversation),
         };
     });
 }

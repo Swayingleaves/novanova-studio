@@ -82,12 +82,16 @@ public class CreationAgentRequestQueue {
             return 1
             """, Long.class);
 
-    /** 原子领取单个请求脚本，每个分区固定一个活动名额 */
+    /** 原子领取单个请求脚本。ARGV[2] 为分区活动名额，缺省时保持单槽。 */
     private static final RedisScript<String> CLAIM_SCRIPT = RedisScript.of("""
             if redis.call('exists', KEYS[4]) == 1 then
                 return nil
             end
-            if redis.call('zcard', KEYS[3]) >= 1 then
+            local limit = tonumber(ARGV[2])
+            if not limit or limit < 1 then
+                limit = 1
+            end
+            if redis.call('zcard', KEYS[3]) >= limit then
                 return nil
             end
             local time = redis.call('TIME')
@@ -199,24 +203,29 @@ public class CreationAgentRequestQueue {
             return removed
             """, Long.class);
 
-    /** 读取一个过期活动租约脚本，不直接删除以便调度器先完成中断收尾。 */
+    /** 读取全部过期活动租约脚本，不直接删除以便调度器先完成中断收尾。 */
     private static final RedisScript<String> EXPIRED_ACTIVE_REQUEST_SCRIPT = RedisScript.of("""
             local time = redis.call('TIME')
             local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
-            local requestIds = redis.call('zrangebyscore', KEYS[1], '-inf', now, 'LIMIT', 0, 1)
-            return requestIds[1]
+            local requestIds = redis.call('zrangebyscore', KEYS[1], '-inf', now)
+            if #requestIds == 0 then
+                return ''
+            end
+            return table.concat(requestIds, ',')
             """, String.class);
 
-    /** 读取当前活动租约脚本，不区分租约是否过期。 */
+    /** 读取当前全部活动租约脚本，不区分租约是否过期。 */
     private static final RedisScript<String> ACTIVE_REQUEST_SCRIPT = RedisScript.of("""
-            local requestIds = redis.call('zrange', KEYS[1], 0, 0)
-            return requestIds[1]
+            local requestIds = redis.call('zrange', KEYS[1], 0, -1)
+            if #requestIds == 0 then
+                return ''
+            end
+            return table.concat(requestIds, ',')
             """, String.class);
 
     /** 为已取消但仍持有活动名额的请求原子领取恢复权脚本。 */
     private static final RedisScript<Long> CLAIM_CANCELED_ACTIVE_RECOVERY_SCRIPT = RedisScript.of("""
-            local activeRequestIds = redis.call('zrange', KEYS[1], 0, 0)
-            if activeRequestIds[1] ~= ARGV[1] then
+            if not redis.call('zscore', KEYS[1], ARGV[1]) then
                 return 0
             end
             if redis.call('set', KEYS[2], ARGV[2], 'NX', 'PX', ARGV[3]) then
@@ -272,7 +281,7 @@ public class CreationAgentRequestQueue {
     }
 
     /**
-     * 领取当前分区可执行的全部请求；每个分区最多领取一个。
+     * 领取当前分区可执行的请求，直到达到该分区的活动名额或等待队列清空。
      *
      * @param userId Long 用户ID
      * @param entrySource String 入口来源
@@ -330,7 +339,7 @@ public class CreationAgentRequestQueue {
                 .distinct()
                 .concatMap(activeKey -> redisTemplate.execute(EXPIRED_ACTIVE_REQUEST_SCRIPT, List.of(activeKey), List.of())
                         .next()
-                        .filter(StringUtils::hasText)
+                        .flatMapMany(joined -> Flux.fromArray(splitRequestIds(joined)))
                         .flatMap(requestId -> Mono.justOrEmpty(parseExpiredActiveRequest(activeKey, requestId)))
                         .flatMap(this::claimExpiredRecovery));
     }
@@ -349,7 +358,7 @@ public class CreationAgentRequestQueue {
                 .distinct()
                 .concatMap(activeKey -> redisTemplate.execute(ACTIVE_REQUEST_SCRIPT, List.of(activeKey), List.of())
                         .next()
-                        .filter(StringUtils::hasText)
+                        .flatMapMany(joined -> Flux.fromArray(splitRequestIds(joined)))
                         .flatMap(requestId -> Mono.justOrEmpty(parseActiveRequest(activeKey, requestId))));
     }
 
@@ -600,7 +609,8 @@ public class CreationAgentRequestQueue {
      * @return Mono<String> 已领取请求ID，无可执行请求时为空
      */
     private Mono<String> claimNext(Long userId, String entrySource) {
-        return redisTemplate.execute(CLAIM_SCRIPT, queueKeys(userId, entrySource), List.of(activeLeaseMilliseconds()))
+        return redisTemplate.execute(CLAIM_SCRIPT, queueKeys(userId, entrySource),
+                        List.of(activeLeaseMilliseconds(), String.valueOf(activeLimit(entrySource))))
                 .next()
                 .filter(StringUtils::hasText);
     }
@@ -655,6 +665,37 @@ public class CreationAgentRequestQueue {
     private List<String> recoveryQueueKeys(Long userId, String entrySource) {
         return List.of(pendingQueueKey(userId, entrySource), queuedRequestKey(userId, entrySource),
                 activeRequestKey(userId, entrySource), recoveryKey(userId, entrySource));
+    }
+
+    /**
+     * 图片和视频入口允许同一用户并行执行多个会话；画布入口保持单槽。
+     *
+     * @param queueSource String 队列分区，可能带团队前缀
+     * @return int 同时持有的活动名额
+     */
+    private int activeLimit(String queueSource) {
+        if (!StringUtils.hasText(queueSource)) {
+            return 1;
+        }
+        int separator = queueSource.lastIndexOf(':');
+        String entrySource = separator >= 0 ? queueSource.substring(separator + 1) : queueSource;
+        if (!CreationEntrySource.IMAGE_PAGE.equals(entrySource) && !CreationEntrySource.VIDEO_PAGE.equals(entrySource)) {
+            return 1;
+        }
+        return Math.max(1, properties.getAi().getTask().getPageRequestConcurrency());
+    }
+
+    /**
+     * 拆开脚本返回的请求ID列表。
+     *
+     * @param joined String 逗号分隔的请求ID
+     * @return String[] 请求ID；空结果时为空数组
+     */
+    private static String[] splitRequestIds(String joined) {
+        if (!StringUtils.hasText(joined)) {
+            return new String[0];
+        }
+        return joined.split(",");
     }
 
     /**

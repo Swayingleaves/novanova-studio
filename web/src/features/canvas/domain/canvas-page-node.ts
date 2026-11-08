@@ -1,7 +1,7 @@
 
 import { translateMessage as translate } from "@/features/locale/translate";
-import { CANVAS_BACKGROUND_DEFAULT_COLOR, CANVAS_BACKGROUND_MIN_HEIGHT, CANVAS_BACKGROUND_MIN_WIDTH, CANVAS_BACKGROUND_PADDING, getCanvasNodeTemplate } from "../constants.ts";
-import type { CanvasBackgroundNode, CanvasConnection, CanvasNode, CanvasPoint } from "../types.ts";
+import { CANVAS_BACKGROUND_DEFAULT_COLOR, CANVAS_BACKGROUND_LABEL_DEFAULT_COLOR, CANVAS_BACKGROUND_LABEL_DEFAULT_FONT_SIZE, CANVAS_BACKGROUND_LABEL_LEGACY_COLOR, CANVAS_BACKGROUND_LABEL_MAX_FONT_SIZE, CANVAS_BACKGROUND_LABEL_MIN_BOX_HEIGHT, CANVAS_BACKGROUND_LABEL_MIN_BOX_WIDTH, CANVAS_BACKGROUND_LABEL_MIN_FONT_SIZE, CANVAS_BACKGROUND_LABEL_PADDING, CANVAS_BACKGROUND_MIN_HEIGHT, CANVAS_BACKGROUND_MIN_WIDTH, CANVAS_BACKGROUND_PADDING, getCanvasNodeTemplate } from "../constants.ts";
+import type { CanvasBackgroundLabel, CanvasBackgroundNode, CanvasConnection, CanvasNode, CanvasNodeFrame, CanvasPoint } from "../types.ts";
 import { MINIMUM_CONTENT_NODE_DIMENSION, nodeSizeFromRatio, nodeSizeFromRatioWithMinimum } from "../utils/canvas-node-size.ts";
 import {
     applyCanvasNodeAttributes,
@@ -195,6 +195,102 @@ export function findNonOverlappingCanvasNodePosition(nodes: CanvasNode[], prefer
     return { x: rightmost + gap, y: preferredPosition.y };
 }
 
+/** 把文字描述字号限制在可调整范围内。 */
+export function clampBackgroundLabelFontSize(fontSize: number): number {
+    if (!Number.isFinite(fontSize)) return CANVAS_BACKGROUND_LABEL_DEFAULT_FONT_SIZE;
+    return Math.min(CANVAS_BACKGROUND_LABEL_MAX_FONT_SIZE, Math.max(CANVAS_BACKGROUND_LABEL_MIN_FONT_SIZE, fontSize));
+}
+
+/** 把文字描述锚点限制在背景板内边距中，并留出可显示的最小区域。 */
+export function clampBackgroundLabelPoint(x: number, y: number, boardWidth: number, boardHeight: number): { x: number; y: number } {
+    const padding = CANVAS_BACKGROUND_LABEL_PADDING;
+    const maxX = Math.max(padding, boardWidth - padding - CANVAS_BACKGROUND_LABEL_MIN_BOX_WIDTH);
+    const maxY = Math.max(padding, boardHeight - padding - CANVAS_BACKGROUND_LABEL_MIN_BOX_HEIGHT);
+    return {
+        x: clampBackgroundLabelAxis(Number.isFinite(x) ? x : padding, padding, maxX),
+        y: clampBackgroundLabelAxis(Number.isFinite(y) ? y : padding, padding, maxY),
+    };
+}
+
+/** 夹紧一条文字描述的位置，未越界时保持原对象。 */
+export function clampBackgroundLabel(label: CanvasBackgroundLabel, boardWidth: number, boardHeight: number): CanvasBackgroundLabel {
+    const point = clampBackgroundLabelPoint(label.x, label.y, boardWidth, boardHeight);
+    return point.x === label.x && point.y === label.y ? label : { ...label, ...point };
+}
+
+/** 把文字颜色解析成会随主题变化的颜色。旧的固定默认色改用主题文字色。 */
+export function resolveBackgroundLabelColor(color: string | undefined): string {
+    const trimmed = color?.trim();
+    if (!trimmed || trimmed.toLowerCase() === CANVAS_BACKGROUND_LABEL_LEGACY_COLOR) return CANVAS_BACKGROUND_LABEL_DEFAULT_COLOR;
+    return trimmed;
+}
+
+/** 在指定背景板范围内创建一条文字描述。 */
+export function createBackgroundLabel(input: { id: string; text: string; x: number; y: number; color?: string; fontSize?: number }, boardWidth: number, boardHeight: number): CanvasBackgroundLabel {
+    const point = clampBackgroundLabelPoint(input.x, input.y, boardWidth, boardHeight);
+    return {
+        id: input.id,
+        text: input.text,
+        x: point.x,
+        y: point.y,
+        color: resolveBackgroundLabelColor(input.color),
+        fontSize: clampBackgroundLabelFontSize(input.fontSize ?? CANVAS_BACKGROUND_LABEL_DEFAULT_FONT_SIZE),
+    };
+}
+
+/** 清理缺失或越界的文字描述。历史文档没有该字段时返回空数组。 */
+export function normalizeBackgroundLabels(labels: unknown, boardWidth: number, boardHeight: number): CanvasBackgroundLabel[] {
+    if (!Array.isArray(labels)) return [];
+    return labels.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const label = item as Partial<CanvasBackgroundLabel>;
+        if (typeof label.id !== "string" || !label.id.trim()) return [];
+        const point = clampBackgroundLabelPoint(typeof label.x === "number" ? label.x : CANVAS_BACKGROUND_LABEL_PADDING, typeof label.y === "number" ? label.y : CANVAS_BACKGROUND_LABEL_PADDING, boardWidth, boardHeight);
+        return [{
+            id: label.id,
+            text: typeof label.text === "string" ? label.text : "",
+            x: point.x,
+            y: point.y,
+            color: resolveBackgroundLabelColor(typeof label.color === "string" ? label.color : undefined),
+            fontSize: clampBackgroundLabelFontSize(typeof label.fontSize === "number" ? label.fontSize : CANVAS_BACKGROUND_LABEL_DEFAULT_FONT_SIZE),
+        }];
+    });
+}
+
+/** 背景板左上角或尺寸变化后，平移文字描述并夹回新范围，使画面位置保持不动。 */
+export function relocateBackgroundLabels(labels: CanvasBackgroundLabel[], previous: CanvasNodeFrame, next: CanvasNodeFrame): CanvasBackgroundLabel[] {
+    const offsetX = previous.position.x - next.position.x;
+    const offsetY = previous.position.y - next.position.y;
+    const frameUnchanged = offsetX === 0 && offsetY === 0 && previous.width === next.width && previous.height === next.height;
+    if (frameUnchanged || !labels.length) return labels;
+    let changed = false;
+    const relocated = labels.map((label) => {
+        const nextLabel = clampBackgroundLabel({ ...label, x: label.x + offsetX, y: label.y + offsetY }, next.width, next.height);
+        if (nextLabel !== label) changed = true;
+        return nextLabel;
+    });
+    return changed ? relocated : labels;
+}
+
+/** 更新背景板尺寸，并同步夹紧板上的文字描述。 */
+export function updateBackgroundBoardFrame(node: CanvasBackgroundNode, patch: Partial<CanvasNodeFrame>): CanvasBackgroundNode {
+    const next = updateCanvasNodeFrame(node, patch);
+    const source = node.labels ?? [];
+    const labels = relocateBackgroundLabels(source, node.frame, next.frame);
+    return labels === source ? next : { ...next, labels };
+}
+
+/** 写回文字描述，并把每条都夹紧在当前背景板内。 */
+export function updateBackgroundBoardLabels(node: CanvasBackgroundNode, labels: CanvasBackgroundLabel[]): CanvasBackgroundNode {
+    const nextLabels = labels.map((label) => clampBackgroundLabel(label, node.frame.width, node.frame.height));
+    const current = node.labels ?? [];
+    const unchanged = current.length === nextLabels.length && current.every((label, index) => {
+        const nextLabel = nextLabels[index];
+        return !!nextLabel && label.id === nextLabel.id && label.text === nextLabel.text && label.x === nextLabel.x && label.y === nextLabel.y && label.color === nextLabel.color && label.fontSize === nextLabel.fontSize;
+    });
+    return unchanged ? node : { ...node, labels: nextLabels };
+}
+
 /** 将背景板扩展到完整包裹其成员，保持固定内边距。 */
 export function expandBackgroundBoardsToMembers(nodes: CanvasNode[]): CanvasNode[] {
     const nodeById = new Map(nodes.map((node) => [node.id, node]));
@@ -206,7 +302,7 @@ export function expandBackgroundBoardsToMembers(nodes: CanvasNode[]): CanvasNode
         const top = Math.min(node.frame.position.y, ...members.map((member) => member.frame.position.y - CANVAS_BACKGROUND_PADDING));
         const right = Math.max(node.frame.position.x + node.frame.width, ...members.map((member) => member.frame.position.x + member.frame.width + CANVAS_BACKGROUND_PADDING));
         const bottom = Math.max(node.frame.position.y + node.frame.height, ...members.map((member) => member.frame.position.y + member.frame.height + CANVAS_BACKGROUND_PADDING));
-        return updateCanvasNodeFrame(node, {
+        return updateBackgroundBoardFrame(node, {
             position: { x: left, y: top },
             width: Math.max(CANVAS_BACKGROUND_MIN_WIDTH, right - left),
             height: Math.max(CANVAS_BACKGROUND_MIN_HEIGHT, bottom - top),
@@ -245,11 +341,17 @@ export function normalizeBackgroundBoardMembers(nodes: CanvasNode[]): CanvasNode
             ...node,
             title: node.title || translate("canvas.background"),
             backgroundColor: node.backgroundColor || CANVAS_BACKGROUND_DEFAULT_COLOR,
+            labels: normalizeBackgroundLabels(node.labels, node.frame.width, node.frame.height),
         };
         const memberNodeIds = Array.isArray(node.memberNodeIds) ? node.memberNodeIds : [];
         return updateCanvasNodeMembersSafely(normalizedNode, memberNodeIds.filter((id) => validNodeIds.has(id)));
     });
     return expandBackgroundBoardsToMembers(normalized);
+}
+
+function clampBackgroundLabelAxis(value: number, min: number, max: number): number {
+    if (max < min) return min;
+    return Math.min(max, Math.max(min, value));
 }
 
 function updateCanvasNodeMembersSafely(node: CanvasBackgroundNode, memberNodeIds: string[]): CanvasBackgroundNode {

@@ -165,6 +165,40 @@ public class CreationAgentOrchestrator {
                     if (!request.entrySource().equals(session.profile())) {
                         return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.conversationEntryDoesNotMatchThisPage")));
                     }
+                    return rejectConcurrentPageRequest(userId, request.entrySource(), session.id())
+                            .then(Mono.defer(() -> enqueueChat(userId, scope, session, request)));
+                }));
+    }
+
+    /**
+     * 图片和视频会话同一时间只接受一个未结束请求，避免同一条对话并行改写。
+     *
+     * @param userId Long 用户ID
+     * @param entrySource String 入口来源
+     * @param sessionId String 会话ID
+     * @return Mono<Void> 可以继续提交时为空
+     */
+    private Mono<Void> rejectConcurrentPageRequest(Long userId, String entrySource, String sessionId) {
+        if (!CreationEntrySource.IMAGE_PAGE.equals(entrySource) && !CreationEntrySource.VIDEO_PAGE.equals(entrySource)) {
+            return Mono.empty();
+        }
+        return requestRepository.hasOpenRequest(userId, sessionId)
+                .flatMap(open -> Boolean.TRUE.equals(open)
+                        ? Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.conversationGenerationStillRunning")))
+                        : Mono.empty());
+    }
+
+    /**
+     * 持久化并入队一次主Agent请求。
+     *
+     * @param userId Long 用户ID
+     * @param scope TeamScope 当前团队空间
+     * @param session AgentSession 会话
+     * @param request AgentChatRequest 对话请求
+     * @return Mono<CreationAgentChatResponse> 会话、请求和状态
+     */
+    private Mono<CreationAgentChatResponse> enqueueChat(Long userId, com.novanovastudio.security.TeamScope scope,
+                                                        AgentSession session, AgentChatRequest request) {
                     AgentChatRequest snapshot = requestWithSessionId(request, session.id());
                     CreationAgentRequest queuedRequest = new CreationAgentRequest();
                     queuedRequest.setId(UUID.randomUUID().toString());
@@ -184,7 +218,6 @@ public class CreationAgentOrchestrator {
                             .then(requestRepository.findStatusById(queuedRequest.getId())
                                     .defaultIfEmpty("queued")
                                     .map(status -> new CreationAgentChatResponse(session.id(), queuedRequest.getId(), status)));
-                }));
     }
 
     /**

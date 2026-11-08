@@ -517,12 +517,31 @@ export type CanvasDirectorDeskNode = CanvasNodeBase<"directorDesk"> & {
     director: CanvasDirectorDeskData;
 }
 
+/** 背景板上的文字描述，坐标相对背景板左上角，并始终限制在板内。 */
+export interface CanvasBackgroundLabel {
+    id: string;
+    text: string;
+    x: number;
+    y: number;
+    color: string;
+    fontSize: number;
+}
+
+/** 当前选中的背景板文字描述。 */
+export type CanvasBackgroundLabelSelection = {
+    boardId: string;
+    labelId: string;
+    editing: boolean;
+}
+
 /** 画布背景板节点，使用绝对坐标包裹一组普通内容节点。 */
 export type CanvasBackgroundNode = CanvasNodeBase<"background"> & {
     /** 背景板填充颜色，使用主题预设颜色标识。 */
     backgroundColor: string;
     /** 背景板直接包含的普通节点标识。 */
     memberNodeIds: string[];
+    /** 绘制在背景板内部的文字描述。 */
+    labels: CanvasBackgroundLabel[];
 }
 
 export type CanvasNode = CanvasAudioNode | CanvasImageNode | CanvasTextNode | CanvasVideoNode | CanvasStoryboardNode | CanvasVideoCompositionNode | CanvasDirectorDeskNode | CanvasBackgroundNode;

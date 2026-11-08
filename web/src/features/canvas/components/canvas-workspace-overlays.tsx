@@ -31,10 +31,12 @@ type CanvasWorkspaceOverlaysProps = {
     canvasAssets: CanvasNavigationStoryboardAsset[];
     onCloseContextMenu: () => void;
     onCreateNode: (kind: CanvasNodeKind, position: CanvasPoint) => void;
+    onCreateFirstLastFrameVideoTemplate: (position: CanvasPoint) => void;
     onDuplicateNode: (nodeId: string) => void;
     onAddToBackground: (nodeIds: string[]) => void;
     onDeleteNodes: (nodeIds: Set<string>) => void;
     onDeleteBackgroundOnly: (nodeId: string) => void;
+    onAddBackgroundLabel: (nodeId: string, clientX: number, clientY: number) => void;
     onDeleteConnection: (connectionId: string) => void;
     onImageInputChange: (event: ChangeEvent<HTMLInputElement>) => void;
     onUpload: (position: CanvasPoint) => void;
@@ -81,6 +83,10 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
                         if (props.contextMenu?.type === "canvas") props.onCreateNode(kind, props.contextMenu.position);
                         props.onCloseContextMenu();
                     }}
+                    onCreateFirstLastFrameVideoTemplate={() => {
+                        if (props.contextMenu?.type === "canvas") props.onCreateFirstLastFrameVideoTemplate(props.contextMenu.position);
+                        props.onCloseContextMenu();
+                    }}
                     onDuplicate={() => {
                         if (props.contextMenu?.type === "node") props.onDuplicateNode(props.contextMenu.nodeId);
                         props.onCloseContextMenu();
@@ -92,6 +98,10 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
                     }}
                     onDeleteBackgroundOnly={() => {
                         if (props.contextMenu?.type === "node") props.onDeleteBackgroundOnly(props.contextMenu.nodeId);
+                        props.onCloseContextMenu();
+                    }}
+                    onAddBackgroundLabel={() => {
+                        if (props.contextMenu?.type === "node") props.onAddBackgroundLabel(props.contextMenu.nodeId, props.contextMenu.x, props.contextMenu.y);
                         props.onCloseContextMenu();
                     }}
                     onAddToBackground={(nodeIds) => {

@@ -52,8 +52,10 @@ test("背景板节点工厂使用默认尺寸和独立成员列表", () => {
     assert.equal(first.kind, "background");
     assert.deepEqual(first.frame, { position: { x: 0, y: 0 }, width: 960, height: 640 });
     assert.deepEqual(first.memberNodeIds, []);
+    assert.deepEqual(first.labels, []);
     assert.deepEqual(second.memberNodeIds, ["text-1"]);
     assert.notEqual(first.memberNodeIds, second.memberNodeIds);
+    assert.notEqual(first.labels, second.labels);
 });
 
 test("导演台节点工厂创建独立场景、机位和导出预设", () => {
