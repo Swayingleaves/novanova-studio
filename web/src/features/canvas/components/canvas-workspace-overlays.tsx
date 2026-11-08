@@ -31,6 +31,7 @@ type CanvasWorkspaceOverlaysProps = {
     canvasAssets: CanvasNavigationStoryboardAsset[];
     onCloseContextMenu: () => void;
     onCreateNode: (kind: CanvasNodeKind, position: CanvasPoint) => void;
+    onCreateFirstLastFrameVideoTemplate: (position: CanvasPoint) => void;
     onDuplicateNode: (nodeId: string) => void;
     onAddToBackground: (nodeIds: string[]) => void;
     onDeleteNodes: (nodeIds: Set<string>) => void;
@@ -80,6 +81,10 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
                     onClose={props.onCloseContextMenu}
                     onCreateNode={(kind) => {
                         if (props.contextMenu?.type === "canvas") props.onCreateNode(kind, props.contextMenu.position);
+                        props.onCloseContextMenu();
+                    }}
+                    onCreateFirstLastFrameVideoTemplate={() => {
+                        if (props.contextMenu?.type === "canvas") props.onCreateFirstLastFrameVideoTemplate(props.contextMenu.position);
                         props.onCloseContextMenu();
                     }}
                     onDuplicate={() => {

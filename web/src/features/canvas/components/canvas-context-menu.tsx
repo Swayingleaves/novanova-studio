@@ -2,25 +2,21 @@
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
-import { Box, ChevronRight, Copy, Frame, Image, Plus, Trash2, Type, AudioLines, Upload, Video } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { Box, ChevronRight, Copy, Frame, Image, LayoutTemplate, Plus, Trash2, Type, AudioLines, Upload, Video } from "lucide-react";
 
 import type { CanvasNodeKind, CanvasPoint, ContextMenuState } from "../types";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
-type CanvasNodeContextMenuProps = { menu: ContextMenuState; onClose: () => void; onCreateNode: (kind: CanvasNodeKind) => void; onUpload: (position: CanvasPoint) => void; onDuplicate: () => void; onDelete: () => void; onDeleteBackgroundOnly: () => void; onAddToBackground: (nodeIds: string[]) => void; onAddBackgroundLabel: () => void };
+type CanvasNodeContextMenuProps = { menu: ContextMenuState; onClose: () => void; onCreateNode: (kind: CanvasNodeKind) => void; onCreateFirstLastFrameVideoTemplate: () => void; onUpload: (position: CanvasPoint) => void; onDuplicate: () => void; onDelete: () => void; onDeleteBackgroundOnly: () => void; onAddToBackground: (nodeIds: string[]) => void; onAddBackgroundLabel: () => void };
 type MenuAction = { key: string; label: string; icon: ComponentType<{ className?: string }>; danger?: boolean; run: () => void };
 
 const menuItemClassName = "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs transition hover:bg-black/5";
 
-export function CanvasNodeContextMenu({ menu, onClose, onCreateNode, onUpload, onDuplicate, onDelete, onDeleteBackgroundOnly, onAddToBackground, onAddBackgroundLabel }: CanvasNodeContextMenuProps) {
+export function CanvasNodeContextMenu({ menu, onClose, onCreateNode, onCreateFirstLastFrameVideoTemplate, onUpload, onDuplicate, onDelete, onDeleteBackgroundOnly, onAddToBackground, onAddBackgroundLabel }: CanvasNodeContextMenuProps) {
     const translate = useTranslation();
     const theme = useCanvasTheme();
     const menuRef = useRef<HTMLDivElement>(null);
-    const nodeMenuAnchorRef = useRef<HTMLDivElement>(null);
-    const nodeSubmenuRef = useRef<HTMLDivElement>(null);
-    const [nodeMenuOpen, setNodeMenuOpen] = useState(false);
-    const [nodeMenuSide, setNodeMenuSide] = useState<"left" | "right">("right");
     const nodeActions: MenuAction[] = menu.type === "canvas"
         ? [
               { key: "add-text", label: translate("canvas.addTextNode"), icon: Type, run: () => onCreateNode("text") },
@@ -29,6 +25,9 @@ export function CanvasNodeContextMenu({ menu, onClose, onCreateNode, onUpload, o
               { key: "add-video", label: translate("canvas.addVideoNode"), icon: Video, run: () => onCreateNode("video") },
               { key: "add-director-desk", label: translate("canvas.add3DDirectorDeskNode"), icon: Box, run: () => onCreateNode("directorDesk") },
           ]
+        : [];
+    const templateActions: MenuAction[] = menu.type === "canvas"
+        ? [{ key: "first-last-frame-video", label: translate("canvas.firstLastFrameVideoTemplate"), icon: Video, run: onCreateFirstLastFrameVideoTemplate }]
         : [];
     const backgroundAction: MenuAction | null = menu.type === "canvas" ? { key: "add-background", label: translate("canvas.addBackground"), icon: Frame, run: () => onCreateNode("background") } : null;
     const actions: MenuAction[] = menu.type === "canvas"
@@ -41,19 +40,6 @@ export function CanvasNodeContextMenu({ menu, onClose, onCreateNode, onUpload, o
           ];
     const uploadPosition = menu.type === "canvas" || menu.type === "selection" ? menu.position : undefined;
     if (uploadPosition) actions.unshift({ key: "upload", label: translate("canvas.uploadAssets"), icon: Upload, run: () => onUpload(uploadPosition) });
-
-    useLayoutEffect(() => {
-        if (!nodeMenuOpen) return;
-        const anchor = nodeMenuAnchorRef.current;
-        const panel = nodeSubmenuRef.current;
-        if (!anchor || !panel) return;
-        const anchorRect = anchor.getBoundingClientRect();
-        const panelRect = panel.getBoundingClientRect();
-        const margin = 8;
-        const overflowsRight = anchorRect.right + panelRect.width > window.innerWidth - margin;
-        const fitsLeft = anchorRect.left - panelRect.width >= margin;
-        setNodeMenuSide(overflowsRight && fitsLeft ? "left" : "right");
-    }, [nodeMenuOpen]);
 
     useEffect(() => {
         const closeWhenOutside = (event: PointerEvent) => {
@@ -85,21 +71,46 @@ export function CanvasNodeContextMenu({ menu, onClose, onCreateNode, onUpload, o
     return (
         <div ref={menuRef} role="menu" aria-label={menu.type === "canvas" ? translate("canvas.addCanvasNode") : menu.type === "node" ? translate("canvas.nodeActions") : menu.type === "selection" ? translate("canvas.selectedNodeActions") : translate("canvas.connectionActions")} className="fixed z-[80] min-w-40 rounded-lg border p-1 shadow-xl" style={{ left: menu.x, top: menu.y, background: theme.node.panel, borderColor: theme.toolbar.border }} onPointerDown={(event) => event.stopPropagation()}>
             {actions.map(renderAction)}
-            {menu.type === "canvas" ? (
-                <div ref={nodeMenuAnchorRef} className="relative" onPointerEnter={() => setNodeMenuOpen(true)} onPointerLeave={() => setNodeMenuOpen(false)}>
-                    <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={nodeMenuOpen} className={`${menuItemClassName} ${nodeMenuOpen ? "bg-black/5" : ""}`} style={{ color: theme.node.text }}>
-                        <Plus className="size-4" />
-                        <span className="min-w-0 flex-1">{translate("canvas.addNodeMenu")}</span>
-                        <ChevronRight className="size-4" />
-                    </button>
-                    {nodeMenuOpen ? (
-                        <div ref={nodeSubmenuRef} role="menu" aria-label={translate("canvas.addNodeMenu")} className="absolute top-0 z-[81] min-w-40 rounded-lg border p-1 shadow-xl" style={{ left: nodeMenuSide === "right" ? "100%" : "auto", right: nodeMenuSide === "left" ? "100%" : "auto", background: theme.node.panel, borderColor: theme.toolbar.border }}>
-                            {nodeActions.map(renderAction)}
-                        </div>
-                    ) : null}
+            {menu.type === "canvas" ? <CanvasContextSubmenu label={translate("canvas.addNodeMenu")} icon={Plus} actions={nodeActions} renderAction={renderAction} /> : null}
+            {menu.type === "canvas" ? <CanvasContextSubmenu label={translate("canvas.templateMenu")} icon={LayoutTemplate} actions={templateActions} renderAction={renderAction} /> : null}
+            {backgroundAction ? renderAction(backgroundAction) : null}
+        </div>
+    );
+}
+
+/** 右键菜单里向左右展开的悬停子菜单，贴边时翻到另一侧。 */
+function CanvasContextSubmenu({ label, icon: Icon, actions, renderAction }: { label: string; icon: ComponentType<{ className?: string }>; actions: MenuAction[]; renderAction: (action: MenuAction) => ReactNode }) {
+    const theme = useCanvasTheme();
+    const anchorRef = useRef<HTMLDivElement>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
+    const [open, setOpen] = useState(false);
+    const [side, setSide] = useState<"left" | "right">("right");
+
+    useLayoutEffect(() => {
+        if (!open) return;
+        const anchor = anchorRef.current;
+        const panel = panelRef.current;
+        if (!anchor || !panel) return;
+        const anchorRect = anchor.getBoundingClientRect();
+        const panelRect = panel.getBoundingClientRect();
+        const margin = 8;
+        const overflowsRight = anchorRect.right + panelRect.width > window.innerWidth - margin;
+        const fitsLeft = anchorRect.left - panelRect.width >= margin;
+        setSide(overflowsRight && fitsLeft ? "left" : "right");
+    }, [open]);
+
+    return (
+        <div ref={anchorRef} className="relative" onPointerEnter={() => setOpen(true)} onPointerLeave={() => setOpen(false)}>
+            <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={open} className={`${menuItemClassName} ${open ? "bg-black/5" : ""}`} style={{ color: theme.node.text }}>
+                <Icon className="size-4" />
+                <span className="min-w-0 flex-1">{label}</span>
+                <ChevronRight className="size-4" />
+            </button>
+            {open ? (
+                <div ref={panelRef} role="menu" aria-label={label} className="absolute top-0 z-[81] min-w-40 rounded-lg border p-1 shadow-xl" style={{ left: side === "right" ? "100%" : "auto", right: side === "left" ? "100%" : "auto", background: theme.node.panel, borderColor: theme.toolbar.border }}>
+                    {actions.map(renderAction)}
                 </div>
             ) : null}
-            {backgroundAction ? renderAction(backgroundAction) : null}
         </div>
     );
 }

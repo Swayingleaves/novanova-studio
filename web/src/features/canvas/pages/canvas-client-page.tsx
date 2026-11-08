@@ -92,6 +92,7 @@ import {
 } from "../domain/canvas-page-node";
 import { canComposeVideo, readVideoCompositionConnectionError, synchronizeVideoCompositionInputs } from "../domain/video-composition";
 import { canvasNodeContainsPoint, planBatchNodesToVideoConnections, readCanvasNodesBounds } from "../domain/canvas-batch-connection";
+import { createFirstLastFrameVideoTemplate } from "../domain/canvas-first-last-frame-template";
 import { ActiveConnectionPath, ConnectionPath } from "../components/canvas-connections";
 import { CanvasChatPanel } from "../components/canvas-chat-panel";
 import type { CanvasImageCropRect } from "../components/canvas-node-crop-dialog";
@@ -138,7 +139,7 @@ import { useCanvasStore } from "../stores/use-canvas-store";
 import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
 import { readCanvasSystemClipboard } from "../services/canvas-system-clipboard";
 import { layoutUploadedCanvasNodes, uploadCanvasFiles } from "../services/canvas-media-upload";
-import { saveCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
+import { readCanvasLastUsedGenerationSettings, saveCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
@@ -1404,6 +1405,29 @@ function CanvasWorkspacePage() {
         },
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter, requestFocusNodes],
     );
+
+    const createFirstLastFrameVideoTemplateNodes = useCallback((position: CanvasPoint) => {
+        let serial = 0;
+        const created = createFirstLastFrameVideoTemplate(position, () => `template-${Date.now()}-${serial++}-${Math.random().toString(36).slice(2, 7)}`);
+        const bounds = readCanvasNodesBounds(created.nodes);
+        if (!bounds) return;
+        const safePosition = findNonOverlappingCanvasNodePosition(nodesRef.current, { x: bounds.left, y: bounds.top }, bounds.width, bounds.height);
+        const offsetX = safePosition.x - bounds.left;
+        const offsetY = safePosition.y - bounds.top;
+        const placedNodes = created.nodes.map((node) => {
+            // 说明相对背景板定位，只平移节点框，避免背景板尺寸更新把说明钉在原处。
+            const moved = offsetX === 0 && offsetY === 0 ? node : updateCanvasNodeFrame(node, { position: { x: node.frame.position.x + offsetX, y: node.frame.position.y + offsetY } });
+            if (!isImageNode(moved) && !isVideoNode(moved)) return moved;
+            const withSettings = applyCanvasNodeAttributes(moved, readCanvasLastUsedGenerationSettings(moved.kind));
+            return isVideoNode(withSettings) ? applyCanvasNodeAttributes(withSettings, { videoGenerationMode: "first-last-frame-to-video" }) : withSettings;
+        });
+        setNodes((prev) => [...prev, ...placedNodes]);
+        setConnections((prev) => [...prev, ...created.connections]);
+        requestFocusNodes(placedNodes.map((node) => node.id));
+        setSelectedNodeIds(new Set(placedNodes.map((node) => node.id)));
+        setSelectedConnectionId(null);
+        setDialogNodeId(null);
+    }, [requestFocusNodes]);
 
     const addToBackgroundBoard = useCallback(
         (nodeIds: string[]) => {
@@ -5433,6 +5457,7 @@ function CanvasWorkspacePage() {
                     canvasAssets={navigationAssets.filter((asset): asset is Extract<CanvasNavigationAsset, { source: "storyboard" }> => asset.source === "storyboard" && Boolean(asset.asset.image?.source))}
                     onCloseContextMenu={() => setContextMenu(null)}
                     onCreateNode={createNode}
+                    onCreateFirstLastFrameVideoTemplate={createFirstLastFrameVideoTemplateNodes}
                     onDuplicateNode={duplicateNode}
                     onAddToBackground={addToBackgroundBoard}
                     onDeleteNodes={confirmDeleteNodes}
