@@ -247,29 +247,6 @@ novanova:
       socket-timeout-milliseconds: ${TENCENT_COS_SOCKET_TIMEOUT_MILLISECONDS:120000}
 
   # ----------------------------------------------------------
-  # OAuth2 第三方登录配置
-  # ----------------------------------------------------------
-  oauth2:
-    linux-do:
-      # 是否启用 Linux.do 登录
-      enabled: ${OAUTH2_LINUX_DO_ENABLED:false}
-      # Linux.do OAuth2 客户端 ID
-      client-id: ${OAUTH2_LINUX_DO_CLIENT_ID:}
-      # Linux.do OAuth2 客户端密钥
-      client-secret: ${OAUTH2_LINUX_DO_CLIENT_SECRET:}
-      # 登录回调地址
-      redirect-uri: ${OAUTH2_LINUX_DO_REDIRECT_URI:}
-    google:
-      # 是否启用 Google 登录
-      enabled: ${OAUTH2_GOOGLE_ENABLED:false}
-      # Google OAuth2 客户端 ID
-      client-id: ${OAUTH2_GOOGLE_CLIENT_ID:}
-      # Google OAuth2 客户端密钥
-      client-secret: ${OAUTH2_GOOGLE_CLIENT_SECRET:}
-      # 登录回调地址
-      redirect-uri: ${OAUTH2_GOOGLE_REDIRECT_URI:}
-
-  # ----------------------------------------------------------
   # AI 相关配置
   # ----------------------------------------------------------
   ai:

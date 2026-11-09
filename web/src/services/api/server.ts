@@ -317,6 +317,32 @@ export type ServerChannelModelList = {
     models: string[];
 };
 
+/** 平台 OAuth 渠道配置，配置由管理后台维护，替代 .env 中的固定配置。 */
+export type OAuthProviderInfo = {
+    /** 渠道标识，例如 google、linuxDo。 */
+    provider: string;
+    /** 渠道展示名称。 */
+    displayName: string;
+    /** 是否启用该渠道登录。 */
+    enabled: boolean;
+    /** OAuth 客户端 ID。 */
+    clientId: string;
+    /** OAuth 客户端密钥，保存后由服务端按需返回。 */
+    clientSecret: string;
+    /** OAuth 回调地址，需要与第三方平台登记地址一致。 */
+    redirectUri: string;
+    /** 服务端回调路径，用于按当前域名拼出默认回调地址。 */
+    callbackPath: string;
+};
+
+/** OAuth 渠道列表响应。 */
+export type OAuthProviderListResponse = {
+    providers: OAuthProviderInfo[];
+};
+
+/** 更新 OAuth 渠道配置的请求体。 */
+export type OAuthProviderUpdateInput = Pick<OAuthProviderInfo, "provider" | "enabled" | "clientId" | "clientSecret" | "redirectUri">;
+
 export type ServerModelConfig = {
     id: string;
     channelId: string;
@@ -1217,6 +1243,14 @@ export function listChannels() {
 
 export function listObjectStorages() {
     return serverGet<ServerObjectStorageList>("/config/objectStorage/listObjectStorages");
+}
+
+export function listOAuthProviders() {
+    return serverGet<OAuthProviderListResponse>("/config/oauth/listOAuthProviders");
+}
+
+export function updateOAuthProvider(input: OAuthProviderUpdateInput) {
+    return serverPost<OAuthProviderInfo>("/config/oauth/updateOAuthProvider", input);
 }
 
 export function createChannel(channel: ServerChannel) {

@@ -1,6 +1,7 @@
 package com.novanovastudio.security.oauth2;
 
 import java.util.List;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -18,6 +19,16 @@ public class ThirdPartyOAuth2ProviderRegistry {
     private final List<ThirdPartyOAuth2Provider> providers;
 
     /**
+     * 按渠道标识查询认证渠道实现。
+     *
+     * @param providerId String 渠道唯一标识
+     * @return Optional<ThirdPartyOAuth2Provider> 认证渠道实现，不存在时为空
+     */
+    public Optional<ThirdPartyOAuth2Provider> find(String providerId) {
+        return providers.stream().filter(provider -> provider.providerId().equals(providerId)).findFirst();
+    }
+
+    /**
      * 查询指定且已启用的认证渠道。
      *
      * @param providerId String 渠道唯一标识
@@ -25,9 +36,8 @@ public class ThirdPartyOAuth2ProviderRegistry {
      * @throws OAuth2LoginException 渠道不存在或未启用时抛出
      */
     public ThirdPartyOAuth2Provider requireEnabled(String providerId) {
-        return providers.stream()
-                .filter(provider -> provider.enabled() && provider.providerId().equals(providerId))
-                .findFirst()
+        return find(providerId)
+                .filter(ThirdPartyOAuth2Provider::enabled)
                 .orElseThrow(() -> new OAuth2LoginException("providerUnavailable", "第三方登录渠道未启用"));
     }
 

@@ -1,5 +1,22 @@
 # 后端数据库说明（已实现）
 
+## 平台 OAuth2 登录渠道配置（企业版 V83 / 社区版 V84）
+
+OAuth2 第三方登录（Google、linux.do）的启用状态与凭据从 `.env` 迁移到数据库，管理后台「系统管理 · 身份认证 · OAuth 集成」可直接维护。渠道标识、展示名称和回调路径属于代码固定值（`OAuth2ProviderCatalog`），表中只保存可运营的配置项。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `provider` | `VARCHAR(32)` | 主键，内置渠道标识：`google`、`linuxDo` |
+| `enabled` | `BOOLEAN` | 是否启用该登录渠道，默认 `false` |
+| `client_id` | `VARCHAR(255)` | 第三方应用客户端 ID |
+| `client_secret_encrypted` | `VARCHAR(1024)` | 应用密钥的 AES-GCM 密文，空字符串表示未配置 |
+| `redirect_uri` | `VARCHAR(512)` | 完整回调地址，必须是绝对 HTTP(S) 地址且路径等于该渠道固定回调路径 |
+| `updated_at` | `TIMESTAMPTZ` | 配置最后更新时间 |
+
+首次部署写入 `google`、`linuxDo` 两行空配置。密钥使用 `SensitiveDataCrypto`（`APP_SECRET_KEY`）加密，管理接口只对管理员返回明文用于回填；保存时密钥留空表示保持原值。保存成功后立即刷新内存缓存，登录流程按 `registrationId` 实时构建 Spring Security 客户端注册信息，不需要重启服务。
+
+管理接口为 `/api/v1/config/oauth/listOAuthProviders`、`updateOAuthProvider`；登录入口仍为 `/api/v1/auth/oauth/listProviders`、`/api/v1/auth/oauth/authorize/{registrationId}`。原 `.env` 的 `OAUTH2_*`、`application.yml` 的 `oauth2` 与 `NovanovaProperties.OAuth2` 已删除。
+
 ## 生成结果分享（企业版 V81 / 社区版 V82）
 
 分享业务使用独立表，不在管理员精选内容表中保存投稿状态。所有媒体均复制为私有对象，通过现有容量预占、对象台账与异步删除队列计量；源记录、源对象后续变化不会改变分享快照。

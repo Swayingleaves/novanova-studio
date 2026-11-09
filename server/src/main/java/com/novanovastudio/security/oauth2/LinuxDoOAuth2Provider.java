@@ -1,6 +1,6 @@
 package com.novanovastudio.security.oauth2;
 
-import com.novanovastudio.config.NovanovaProperties;
+import com.novanovastudio.service.OAuthProviderConfigService;
 import java.net.URI;
 import java.util.Locale;
 import lombok.RequiredArgsConstructor;
@@ -41,7 +41,7 @@ public class LinuxDoOAuth2Provider implements ThirdPartyOAuth2Provider {
     private static final String ISSUER_URI = "https://connect.linux.do/";
 
     /** OAuth2回调路径 */
-    private static final String CALLBACK_PATH = "/api/v1/auth/oauth/callback/linuxDo";
+    private static final String CALLBACK_PATH = OAuth2ProviderCatalog.LINUX_DO.callbackPath();
 
     /** 基础邮箱格式 */
     private static final String EMAIL_PATTERN = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
@@ -58,8 +58,8 @@ public class LinuxDoOAuth2Provider implements ThirdPartyOAuth2Provider {
     /** 头像地址最大长度 */
     private static final int MAX_AVATAR_LENGTH = 255;
 
-    /** 服务配置 */
-    private final NovanovaProperties properties;
+    /** OAuth2登录渠道配置服务 */
+    private final OAuthProviderConfigService providerConfigService;
 
     /**
      * 获取渠道唯一标识。
@@ -78,7 +78,7 @@ public class LinuxDoOAuth2Provider implements ThirdPartyOAuth2Provider {
      */
     @Override
     public String displayName() {
-        return "LINUX DO";
+        return OAuth2ProviderCatalog.LINUX_DO.displayName();
     }
 
     /**
@@ -88,7 +88,7 @@ public class LinuxDoOAuth2Provider implements ThirdPartyOAuth2Provider {
      */
     @Override
     public boolean enabled() {
-        return properties.getOauth2().getLinuxDo().isEnabled();
+        return providerConfigService.find(PROVIDER_ID).map(ThirdPartyOAuth2Configuration::enabled).orElse(false);
     }
 
     /**
@@ -99,14 +99,15 @@ public class LinuxDoOAuth2Provider implements ThirdPartyOAuth2Provider {
      */
     @Override
     public ClientRegistration clientRegistration() {
-        NovanovaProperties.OAuth2.LinuxDo configuration = properties.getOauth2().getLinuxDo();
-        requireConfiguration(configuration.getClientId(), "OAUTH2_LINUX_DO_CLIENT_ID");
-        requireConfiguration(configuration.getClientSecret(), "OAUTH2_LINUX_DO_CLIENT_SECRET");
-        requireConfiguration(configuration.getRedirectUri(), "OAUTH2_LINUX_DO_REDIRECT_URI");
-        String redirectUri = validatedRedirectUri(configuration.getRedirectUri());
+        ThirdPartyOAuth2Configuration configuration = providerConfigService.find(PROVIDER_ID)
+                .orElseThrow(() -> new IllegalStateException("linux.do登录未在管理后台完成配置"));
+        requireConfiguration(configuration.clientId(), "Client ID");
+        requireConfiguration(configuration.clientSecret(), "Client Secret");
+        requireConfiguration(configuration.redirectUri(), "回调地址");
+        String redirectUri = validatedRedirectUri(configuration.redirectUri());
         return ClientRegistration.withRegistrationId(PROVIDER_ID)
-                .clientId(configuration.getClientId().trim())
-                .clientSecret(configuration.getClientSecret().trim())
+                .clientId(configuration.clientId().trim())
+                .clientSecret(configuration.clientSecret().trim())
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .redirectUri(redirectUri)
@@ -151,12 +152,12 @@ public class LinuxDoOAuth2Provider implements ThirdPartyOAuth2Provider {
      * 校验必要配置。
      *
      * @param value String 配置值
-     * @param environmentName String 环境变量名称
+     * @param fieldName String 配置项名称
      * @throws IllegalStateException 配置为空时抛出
      */
-    private void requireConfiguration(String value, String environmentName) {
+    private void requireConfiguration(String value, String fieldName) {
         if (!StringUtils.hasText(value)) {
-            throw new IllegalStateException("已启用linux.do登录，但未配置" + environmentName);
+            throw new IllegalStateException("linux.do登录已启用，但管理后台未配置" + fieldName);
         }
     }
 
@@ -172,12 +173,12 @@ public class LinuxDoOAuth2Provider implements ThirdPartyOAuth2Provider {
         try {
             redirectUri = URI.create(value.trim());
         } catch (IllegalArgumentException exception) {
-            throw new IllegalStateException("OAUTH2_LINUX_DO_REDIRECT_URI不是合法地址", exception);
+            throw new IllegalStateException("linux.do登录回调地址不是合法地址", exception);
         }
         boolean supportedScheme = "https".equalsIgnoreCase(redirectUri.getScheme()) || "http".equalsIgnoreCase(redirectUri.getScheme());
         if (!supportedScheme || !StringUtils.hasText(redirectUri.getHost()) || !CALLBACK_PATH.equals(redirectUri.getPath())
                 || redirectUri.getQuery() != null || redirectUri.getFragment() != null) {
-            throw new IllegalStateException("OAUTH2_LINUX_DO_REDIRECT_URI必须是绝对HTTP地址且路径为" + CALLBACK_PATH);
+            throw new IllegalStateException("linux.do登录回调地址必须是绝对HTTP地址且路径为" + CALLBACK_PATH);
         }
         return redirectUri.toString();
     }

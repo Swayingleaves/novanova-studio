@@ -17,7 +17,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Checkbox, DatePicker, Drawer, Empty, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Activity, Bell, BookText, ChevronDown, ClipboardCheck, Coins, Edit, HardDrive, Image as ImageIcon, LayoutTemplate, Mail, Menu as MenuIcon, Palette, Plus, Power, Search, Send, Settings2, Sparkles, Tags, Ticket, Trash2, Upload, UserRound, UsersRound, Video } from "lucide-react";
+import { Activity, Bell, BookText, ChevronDown, ClipboardCheck, Coins, Edit, HardDrive, Image as ImageIcon, LayoutTemplate, Mail, Menu as MenuIcon, Palette, Plus, Power, Search, Send, Settings2, ShieldCheck, Sparkles, Tags, Ticket, Trash2, Upload, UserRound, UsersRound, Video } from "lucide-react";
 
 import {
     adjustServerUserCredits,
@@ -70,6 +70,7 @@ import { adminCreditFilterKey, adminCreditUserLabel } from "./admin-credit-utils
 import { TeamContentScope } from "./components/team-content-scope";
 import { TeamManagement, CurrentTeamManagement } from "./components/team-management";
 import { SystemConfiguration, type ConfigurationTabKey } from "./components/system-configuration";
+import { OAuthIntegrationManagement } from "./components/oauth-integration-management";
 import { ResetAccountPasswordModal } from "./components/reset-account-password-modal";
 import { StorageBillingManagement } from "./components/storage-billing-management";
 import { CreditCardManagement } from "./components/credit-card-management";
@@ -149,6 +150,7 @@ export default function AdminSystemPage() {
                 { key: "configuration:community", label: translate("administration.communityConfig"), tab: "configuration", sub: "community" },
             ],
         },
+        ...(!team ? [{ key: "identityAuth", label: translate("administration.identityAuthentication"), icon: <ShieldCheck className="size-4" />, leaves: [{ key: "identityAuth:oauth", label: translate("administration.oauthIntegration"), tab: "identityAuth" }] }] : []),
         { key: "team", label: "团队管理", icon: <UsersRound className="size-4" />, tab: team ? "team" : "teams" },
         ...(!team ? [{ key: "users", label: translate("administration.userManagement"), icon: <UserRound className="size-4" />, tab: "users" }] : []),
         ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), icon: <Coins className="size-4" />, tab: "credits" }] : []),
@@ -178,6 +180,7 @@ export default function AdminSystemPage() {
     // 内容区仍交给 antd Tabs 管理，保留首次访问才挂载、切回不丢表单草稿的行为，左侧菜单只负责切换。
     const tabItems = [
         { key: "configuration", label: translate("appShell.configurationPreferences"), children: <SystemConfiguration activeTab={configurationTabKey} onTabChange={setConfigurationTabKey} /> },
+        ...(!team ? [{ key: "identityAuth", label: translate("administration.identityAuthentication"), children: <OAuthIntegrationManagement /> }] : []),
         ...(team ? [{ key: "team", label: "团队管理", children: <CurrentTeamManagement /> }] : [{ key: "teams", label: "团队管理", children: <TeamManagement /> }]),
         ...(!team ? [{ key: "users", label: translate("administration.userManagement"), children: <UserManagement /> }] : []),
         ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), children: <CreditConsumptionManagement /> }] : []),
@@ -207,7 +210,7 @@ export default function AdminSystemPage() {
         ...(!team ? [{ key: "apiLogs", label: translate("administration.aPIRecords"), children: <ApiLogsManagement /> }] : []),
     ];
     const currentTabKey = tabItems.some((item) => item.key === activeTabKey) ? activeTabKey : tabItems[0].key;
-    const activeMenuLeafKey = currentTabKey === "configuration" ? `configuration:${configurationTabKey}` : currentTabKey === "scriptPricing" ? `scriptPricing:${pricingTabKey}` : currentTabKey;
+    const activeMenuLeafKey = currentTabKey === "configuration" ? `configuration:${configurationTabKey}` : currentTabKey === "scriptPricing" ? `scriptPricing:${pricingTabKey}` : currentTabKey === "identityAuth" ? "identityAuth:oauth" : currentTabKey;
 
     const selectMenu = (tab: string, sub?: string) => {
         setActiveTabKey(tab);
