@@ -174,6 +174,7 @@ export function StageAssets() {
 
     const assets = useMemo(() => workspace?.assets || [], [workspace]);
     const mediaList = useMemo(() => workspace?.media || [], [workspace]);
+    const shots = workspace?.shots;
     const scriptProject = workspace?.scriptProject;
     const workspaceId = workspace?.projectId;
 
@@ -200,13 +201,35 @@ export function StageAssets() {
         };
     }, [workspaceId, assets, message]);
 
+    // 同一镜头引用同一资产的多个版本只计一次，与卡片上的「引用 N 镜头」一致
+    const shotReferenceCounts = useMemo(() => {
+        const assetIdByVersionId = new Map<string, string>();
+        for (const [assetId, versions] of Object.entries(versionsByAsset)) {
+            for (const version of versions) assetIdByVersionId.set(version.id, assetId);
+        }
+        const counts = new Map<string, number>();
+        for (const shot of shots ?? []) {
+            const referencedAssetIds = new Set<string>();
+            for (const versionId of shot.assetVersionIds) {
+                const assetId = assetIdByVersionId.get(versionId);
+                if (assetId) referencedAssetIds.add(assetId);
+            }
+            for (const assetId of referencedAssetIds) {
+                counts.set(assetId, (counts.get(assetId) ?? 0) + 1);
+            }
+        }
+        return counts;
+    }, [versionsByAsset, shots]);
+
     const filteredAssets = useMemo(() => {
-        return assets.filter((asset) => {
-            const matchesType = typeFilter === "all" || asset.assetType === typeFilter;
-            const matchesSearch = !searchKeyword.trim() || asset.name.toLowerCase().includes(searchKeyword.toLowerCase()) || asset.description.toLowerCase().includes(searchKeyword.toLowerCase());
-            return matchesType && matchesSearch;
-        });
-    }, [assets, typeFilter, searchKeyword]);
+        return assets
+            .filter((asset) => {
+                const matchesType = typeFilter === "all" || asset.assetType === typeFilter;
+                const matchesSearch = !searchKeyword.trim() || asset.name.toLowerCase().includes(searchKeyword.toLowerCase()) || asset.description.toLowerCase().includes(searchKeyword.toLowerCase());
+                return matchesType && matchesSearch;
+            })
+            .sort((left, right) => (shotReferenceCounts.get(right.id) ?? 0) - (shotReferenceCounts.get(left.id) ?? 0));
+    }, [assets, typeFilter, searchKeyword, shotReferenceCounts]);
 
     if (!workspace) return null;
 
@@ -600,10 +623,7 @@ export function StageAssets() {
                         const assetImageUrl = resolveAssetImageUrl(versions, mediaList);
                         // 该资产任一版本正在生成时按钮保持 loading，任务结束后才能再次发起
                         const imageGenerating = assetHasRunningImage(versions, mediaList);
-                        // Find how many shots reference this asset's versions
-                        const shotCount = workspace.shots.filter((shot) =>
-                            shot.assetVersionIds.some((vId) => versions.some((version) => version.id === vId))
-                        ).length;
+                        const shotCount = shotReferenceCounts.get(asset.id) ?? 0;
 
                         return (
                             <div
