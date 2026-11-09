@@ -22,7 +22,20 @@ public final class OAuth2ProviderCatalog {
     /** 全部内置登录渠道，顺序与后台配置页展示顺序一致 */
     public static final List<ProviderDefinition> ALL = List.of(GOOGLE, LINUX_DO);
 
+    /** OAuth2回调路径前缀，标准 OAuth2 自定义渠道按渠道标识拼接 */
+    public static final String CALLBACK_PATH_PREFIX = "/api/v1/auth/oauth/callback/";
+
     private OAuth2ProviderCatalog() {
+    }
+
+    /**
+     * 拼接指定渠道的回调路径。
+     *
+     * @param providerId String 渠道标识
+     * @return String 回调路径
+     */
+    public static String callbackPath(String providerId) {
+        return CALLBACK_PATH_PREFIX + providerId;
     }
 
     /**

@@ -8,7 +8,7 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.oidc.IdTokenClaimNames;
-import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -124,13 +124,13 @@ public class GoogleOAuth2Provider implements ThirdPartyOAuth2Provider {
     /**
      * 校验Google账号资料并转换为标准身份。
      *
-     * @param user OidcUser Google OpenID Connect用户声明
+     * @param user OAuth2User Google用户声明
      * @return ThirdPartyUserIdentity 标准化第三方用户身份
      * @throws OAuth2LoginException 用户标识、已验证邮箱或资料不满足要求时抛出
      */
     @Override
-    public ThirdPartyUserIdentity resolveIdentity(OidcUser user) {
-        if (!Boolean.TRUE.equals(user.getClaims().get("email_verified"))) {
+    public ThirdPartyUserIdentity resolveIdentity(OAuth2User user) {
+        if (!Boolean.TRUE.equals(user.getAttributes().get("email_verified"))) {
             throw new OAuth2LoginException("emailUnverified", "Google账号邮箱尚未验证");
         }
         String providerUserId = requiredClaim(user, IdTokenClaimNames.SUB, "providerIdentityUnavailable", "Google用户标识缺失");
@@ -184,14 +184,14 @@ public class GoogleOAuth2Provider implements ThirdPartyOAuth2Provider {
     /**
      * 读取必填用户声明。
      *
-     * @param user OidcUser OpenID Connect用户
+     * @param user OAuth2User 第三方用户
      * @param claimName String 声明名称
      * @param errorCode String 固定错误码
      * @param errorMessage String 中文错误信息
      * @return String 去除首尾空白后的声明值
      * @throws OAuth2LoginException 声明缺失时抛出
      */
-    private String requiredClaim(OidcUser user, String claimName, String errorCode, String errorMessage) {
+    private String requiredClaim(OAuth2User user, String claimName, String errorCode, String errorMessage) {
         String value = claim(user, claimName);
         if (!StringUtils.hasText(value)) {
             throw new OAuth2LoginException(errorCode, errorMessage);
@@ -202,12 +202,12 @@ public class GoogleOAuth2Provider implements ThirdPartyOAuth2Provider {
     /**
      * 读取字符串用户声明。
      *
-     * @param user OidcUser OpenID Connect用户
+     * @param user OAuth2User 第三方用户
      * @param claimName String 声明名称
      * @return String 字符串声明，不存在时返回空字符串
      */
-    private String claim(OidcUser user, String claimName) {
-        Object value = user.getClaims().get(claimName);
+    private String claim(OAuth2User user, String claimName) {
+        Object value = user.getAttributes().get(claimName);
         return value instanceof String stringValue ? stringValue.trim() : "";
     }
 

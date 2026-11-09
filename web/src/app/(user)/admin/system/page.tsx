@@ -71,6 +71,7 @@ import { TeamContentScope } from "./components/team-content-scope";
 import { TeamManagement, CurrentTeamManagement } from "./components/team-management";
 import { SystemConfiguration, type ConfigurationTabKey } from "./components/system-configuration";
 import { OAuthIntegrationManagement } from "./components/oauth-integration-management";
+import { StandardOAuth2Management } from "./components/standard-oauth2-management";
 import { ResetAccountPasswordModal } from "./components/reset-account-password-modal";
 import { StorageBillingManagement } from "./components/storage-billing-management";
 import { CreditCardManagement } from "./components/credit-card-management";
@@ -102,6 +103,8 @@ const UserTrendChart = dynamic(() => import("./components/user-trend-chart").the
 
 type GenerationTypeFilter = "all" | "image" | "video";
 type TrendUnit = "day" | "month";
+/** 身份认证页签内部的标准渠道页签。 */
+type IdentityAuthTabKey = "oauth" | "standardOAuth2";
 
 /** 管理后台左侧菜单的二级菜单项：tab 为所属内容页签，sub 为页签内部的子页签。 */
 type AdminMenuLeaf = { key: string; label: string; tab: string; sub?: string };
@@ -114,6 +117,7 @@ export default function AdminSystemPage() {
     const [activeTabKey, setActiveTabKey] = useState("configuration");
     const [configurationTabKey, setConfigurationTabKey] = useState<ConfigurationTabKey>("channels");
     const [pricingTabKey, setPricingTabKey] = useState("storyBible");
+    const [identityAuthTabKey, setIdentityAuthTabKey] = useState<IdentityAuthTabKey>("oauth");
     const [expandedMenuKeys, setExpandedMenuKeys] = useState<string[]>(["configuration"]);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const pageRef = useRef<HTMLElement>(null);
@@ -150,7 +154,10 @@ export default function AdminSystemPage() {
                 { key: "configuration:community", label: translate("administration.communityConfig"), tab: "configuration", sub: "community" },
             ],
         },
-        ...(!team ? [{ key: "identityAuth", label: translate("administration.identityAuthentication"), icon: <ShieldCheck className="size-4" />, leaves: [{ key: "identityAuth:oauth", label: translate("administration.oauthIntegration"), tab: "identityAuth" }] }] : []),
+        ...(!team ? [{ key: "identityAuth", label: translate("administration.identityAuthentication"), icon: <ShieldCheck className="size-4" />, leaves: [
+            { key: "identityAuth:oauth", label: translate("administration.oauthIntegration"), tab: "identityAuth", sub: "oauth" },
+            { key: "identityAuth:standardOAuth2", label: translate("administration.standardOAuth2"), tab: "identityAuth", sub: "standardOAuth2" },
+        ] }] : []),
         { key: "team", label: "团队管理", icon: <UsersRound className="size-4" />, tab: team ? "team" : "teams" },
         ...(!team ? [{ key: "users", label: translate("administration.userManagement"), icon: <UserRound className="size-4" />, tab: "users" }] : []),
         ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), icon: <Coins className="size-4" />, tab: "credits" }] : []),
@@ -180,7 +187,16 @@ export default function AdminSystemPage() {
     // 内容区仍交给 antd Tabs 管理，保留首次访问才挂载、切回不丢表单草稿的行为，左侧菜单只负责切换。
     const tabItems = [
         { key: "configuration", label: translate("appShell.configurationPreferences"), children: <SystemConfiguration activeTab={configurationTabKey} onTabChange={setConfigurationTabKey} /> },
-        ...(!team ? [{ key: "identityAuth", label: translate("administration.identityAuthentication"), children: <OAuthIntegrationManagement /> }] : []),
+        ...(!team ? [{ key: "identityAuth", label: translate("administration.identityAuthentication"), children: <Tabs
+            activeKey={identityAuthTabKey}
+            onChange={(tabKey) => setIdentityAuthTabKey(tabKey as IdentityAuthTabKey)}
+            destroyOnHidden={false}
+            className="[&>.ant-tabs-nav]:hidden!"
+            items={[
+                { key: "oauth", label: translate("administration.oauthIntegration"), children: <OAuthIntegrationManagement /> },
+                { key: "standardOAuth2", label: translate("administration.standardOAuth2"), children: <StandardOAuth2Management /> },
+            ]}
+        /> }] : []),
         ...(team ? [{ key: "team", label: "团队管理", children: <CurrentTeamManagement /> }] : [{ key: "teams", label: "团队管理", children: <TeamManagement /> }]),
         ...(!team ? [{ key: "users", label: translate("administration.userManagement"), children: <UserManagement /> }] : []),
         ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), children: <CreditConsumptionManagement /> }] : []),
@@ -210,12 +226,13 @@ export default function AdminSystemPage() {
         ...(!team ? [{ key: "apiLogs", label: translate("administration.aPIRecords"), children: <ApiLogsManagement /> }] : []),
     ];
     const currentTabKey = tabItems.some((item) => item.key === activeTabKey) ? activeTabKey : tabItems[0].key;
-    const activeMenuLeafKey = currentTabKey === "configuration" ? `configuration:${configurationTabKey}` : currentTabKey === "scriptPricing" ? `scriptPricing:${pricingTabKey}` : currentTabKey === "identityAuth" ? "identityAuth:oauth" : currentTabKey;
+    const activeMenuLeafKey = currentTabKey === "configuration" ? `configuration:${configurationTabKey}` : currentTabKey === "scriptPricing" ? `scriptPricing:${pricingTabKey}` : currentTabKey === "identityAuth" ? `identityAuth:${identityAuthTabKey}` : currentTabKey;
 
     const selectMenu = (tab: string, sub?: string) => {
         setActiveTabKey(tab);
         if (tab === "configuration" && sub) setConfigurationTabKey(sub as ConfigurationTabKey);
         if (tab === "scriptPricing" && sub) setPricingTabKey(sub);
+        if (tab === "identityAuth" && sub) setIdentityAuthTabKey(sub as IdentityAuthTabKey);
         setMobileMenuOpen(false);
         pageRef.current?.scrollTo({ top: 0 });
     };

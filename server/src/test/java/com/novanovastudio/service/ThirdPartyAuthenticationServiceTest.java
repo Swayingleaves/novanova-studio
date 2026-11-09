@@ -20,7 +20,7 @@ import com.novanovastudio.security.oauth2.ThirdPartyOAuth2ProviderRegistry;
 import com.novanovastudio.security.oauth2.ThirdPartyUserIdentity;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -49,7 +49,7 @@ class ThirdPartyAuthenticationServiceTest {
         when(context.identityRepository.updateBindingProfile(6L, context.identity)).thenReturn(Mono.empty());
         when(context.userRepository.findById(8L)).thenReturn(Mono.just(user));
 
-        StepVerifier.create(context.service.authenticate("linuxDo", context.oidcUser)).expectNext(user).verifyComplete();
+        StepVerifier.create(context.service.authenticate("linuxDo", context.oauth2User)).expectNext(user).verifyComplete();
 
         verify(context.identityRepository).updateBindingProfile(6L, context.identity);
     }
@@ -68,7 +68,7 @@ class ThirdPartyAuthenticationServiceTest {
         when(context.creditService.initializeAccount(8L)).thenReturn(Mono.empty());
         when(context.transactionalOperator.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        StepVerifier.create(context.service.authenticate("linuxDo", context.oidcUser)).expectNext(user).verifyComplete();
+        StepVerifier.create(context.service.authenticate("linuxDo", context.oauth2User)).expectNext(user).verifyComplete();
 
         verify(context.identityRepository).upsertBinding(8L, context.identity);
     }
@@ -89,7 +89,7 @@ class ThirdPartyAuthenticationServiceTest {
         when(context.creditService.grantInvitationReward(5L, 8L)).thenReturn(Mono.empty());
         when(context.transactionalOperator.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        StepVerifier.create(context.service.authenticate("linuxDo", context.oidcUser, 5L)).expectNext(user).verifyComplete();
+        StepVerifier.create(context.service.authenticate("linuxDo", context.oauth2User, 5L)).expectNext(user).verifyComplete();
 
         verify(context.creditService).grantInvitationReward(5L, 8L);
     }
@@ -108,7 +108,7 @@ class ThirdPartyAuthenticationServiceTest {
         when(context.identityRepository.upsertBinding(8L, context.identity)).thenReturn(Mono.just(8L));
         when(context.transactionalOperator.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        StepVerifier.create(context.service.authenticate("linuxDo", context.oidcUser, 5L)).expectNext(user).verifyComplete();
+        StepVerifier.create(context.service.authenticate("linuxDo", context.oauth2User, 5L)).expectNext(user).verifyComplete();
 
         verify(context.creditService, never()).initializeAccount(8L);
         verify(context.creditService, never()).grantInvitationReward(5L, 8L);
@@ -127,11 +127,11 @@ class ThirdPartyAuthenticationServiceTest {
         ThirdPartyOAuth2Provider provider = mock(ThirdPartyOAuth2Provider.class);
         ThirdPartyUserIdentity identity = new ThirdPartyUserIdentity(providerId, "12345", "a56fv43@vn-v55.com", "新用户", "");
         when(context.registry.requireEnabled(providerId)).thenReturn(provider);
-        when(provider.resolveIdentity(context.oidcUser)).thenReturn(identity);
+        when(provider.resolveIdentity(context.oauth2User)).thenReturn(identity);
         when(context.identityRepository.findBinding(providerId, "12345")).thenReturn(Mono.empty());
         when(context.userRepository.findByEmail(identity.email())).thenReturn(Mono.empty());
 
-        StepVerifier.create(context.service.authenticate(providerId, context.oidcUser, 5L))
+        StepVerifier.create(context.service.authenticate(providerId, context.oauth2User, 5L))
                 .expectErrorMatches(error -> error instanceof OAuth2LoginException exception
                         && "emailSuffixNotAllowed".equals(exception.getErrorCode()))
                 .verify();
@@ -154,17 +154,17 @@ class ThirdPartyAuthenticationServiceTest {
         CreditService creditService = mock(CreditService.class);
         InvitationService invitationService = mock(InvitationService.class);
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
-        OidcUser oidcUser = mock(OidcUser.class);
+        OAuth2User oauth2User = mock(OAuth2User.class);
         ThirdPartyUserIdentity identity = new ThirdPartyUserIdentity("linuxDo", "12345", "user@example.com", "tester", "");
         NovanovaProperties properties = new NovanovaProperties();
         properties.getEmail().setAllowedSuffixes("@example.com");
         when(registry.requireEnabled("linuxDo")).thenReturn(provider);
-        when(provider.resolveIdentity(oidcUser)).thenReturn(identity);
+        when(provider.resolveIdentity(oauth2User)).thenReturn(identity);
         when(invitationService.generateInvitationCode()).thenReturn("INVITATIONCODE01");
         when(userRepository.findByEmail(identity.email())).thenReturn(Mono.empty());
         when(transactionalOperator.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
         ThirdPartyAuthenticationService service = new ThirdPartyAuthenticationService(registry, identityRepository, userRepository, new EmailRegistrationPolicy(properties), creditService, invitationService, transactionalOperator);
-        return new TestContext(service, identityRepository, userRepository, creditService, transactionalOperator, oidcUser, identity, properties, registry);
+        return new TestContext(service, identityRepository, userRepository, creditService, transactionalOperator, oauth2User, identity, properties, registry);
     }
 
     /**
@@ -187,7 +187,7 @@ class ThirdPartyAuthenticationServiceTest {
      * @param identityRepository 第三方身份仓储
      * @param userRepository 用户仓储
      * @param transactionalOperator 响应式事务操作器
-     * @param oidcUser OpenID Connect用户
+     * @param oauth2User 第三方用户
      * @param identity 标准化第三方身份
      */
     private record TestContext(ThirdPartyAuthenticationService service,
@@ -195,7 +195,7 @@ class ThirdPartyAuthenticationServiceTest {
                                UserRepository userRepository,
                                CreditService creditService,
                                TransactionalOperator transactionalOperator,
-                               OidcUser oidcUser,
+                               OAuth2User oauth2User,
                                ThirdPartyUserIdentity identity,
                                NovanovaProperties properties,
                                ThirdPartyOAuth2ProviderRegistry registry) {

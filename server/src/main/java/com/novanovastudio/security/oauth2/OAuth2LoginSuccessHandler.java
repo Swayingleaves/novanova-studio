@@ -7,7 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
-import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.server.WebFilterExchange;
 import org.springframework.security.web.server.authentication.ServerAuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
@@ -46,13 +46,13 @@ public class OAuth2LoginSuccessHandler implements ServerAuthenticationSuccessHan
     @Override
     public Mono<Void> onAuthenticationSuccess(WebFilterExchange webFilterExchange, Authentication authentication) {
         if (!(authentication instanceof OAuth2AuthenticationToken oauth2Authentication)
-                || !(oauth2Authentication.getPrincipal() instanceof OidcUser oidcUser)) {
+                || !(oauth2Authentication.getPrincipal() instanceof OAuth2User oauth2User)) {
             return redirector.redirectFailure(webFilterExchange, "providerIdentityUnavailable");
         }
         String providerId = oauth2Authentication.getAuthorizedClientRegistrationId();
         return webFilterExchange.getExchange().getSession()
                 .flatMap(session -> invitationContextService.consume(providerId, session))
-                .flatMap(inviterUserId -> authenticationService.authenticate(providerId, oidcUser, inviterUserId.orElse(null)))
+                .flatMap(inviterUserId -> authenticationService.authenticate(providerId, oauth2User, inviterUserId.orElse(null)))
                 .flatMap(user -> loginCodeService.create(user.getId()))
                 .flatMap(loginCode -> redirector.redirectSuccess(webFilterExchange, loginCode))
                 .onErrorResume(OAuth2LoginException.class, exception -> {

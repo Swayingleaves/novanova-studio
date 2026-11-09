@@ -343,6 +343,50 @@ export type OAuthProviderListResponse = {
 /** 更新 OAuth 渠道配置的请求体。 */
 export type OAuthProviderUpdateInput = Pick<OAuthProviderInfo, "provider" | "enabled" | "clientId" | "clientSecret" | "redirectUri">;
 
+/** 平台标准 OAuth2 登录渠道配置，由管理后台维护并支持多渠道路由。 */
+export type StandardOAuthProviderInfo = {
+    /** 渠道标识，由管理后台创建时生成，创建后不可修改。 */
+    provider: string;
+    /** 渠道展示名称，展示在管理后台与登录页。 */
+    displayName: string;
+    /** 是否启用该登录渠道。 */
+    enabled: boolean;
+    /** OAuth2 客户端 ID。 */
+    clientId: string;
+    /** OAuth2 客户端密钥明文，仅管理员接口返回。 */
+    clientSecret: string;
+    /** 完整回调地址，路径必须是该渠道的回调路径。 */
+    redirectUri: string;
+    /** 服务端回调路径，由渠道标识拼接，只读展示。 */
+    callbackPath: string;
+    /** OAuth2 授权端点。 */
+    authorizationUri: string;
+    /** OAuth2 令牌端点。 */
+    tokenUri: string;
+    /** OAuth2 用户信息端点。 */
+    userInfoUri: string;
+    /** 授权范围，空格分隔，不支持 openid。 */
+    scopes: string;
+    /** 令牌端点的客户端认证方式。 */
+    clientAuthenticationMethod: "client_secret_basic" | "client_secret_post";
+    /** 用户信息接口中的用户标识字段名。 */
+    userNameAttribute: string;
+    /** 用户信息接口中的邮箱字段名。 */
+    emailAttribute: string;
+    /** 用户信息接口中的昵称字段名。 */
+    nicknameAttribute: string;
+    /** 用户信息接口中的头像字段名。 */
+    avatarAttribute: string;
+};
+
+/** 新增或更新标准 OAuth2 渠道的请求体，callbackPath 由服务端生成。 */
+export type StandardOAuthProviderInput = Omit<StandardOAuthProviderInfo, "callbackPath">;
+
+/** 标准 OAuth2 渠道列表响应。 */
+export type StandardOAuthProviderListResponse = {
+    providers: StandardOAuthProviderInfo[];
+};
+
 export type ServerModelConfig = {
     id: string;
     channelId: string;
@@ -1251,6 +1295,22 @@ export function listOAuthProviders() {
 
 export function updateOAuthProvider(input: OAuthProviderUpdateInput) {
     return serverPost<OAuthProviderInfo>("/config/oauth/updateOAuthProvider", input);
+}
+
+export function listStandardOAuthProviders() {
+    return serverGet<StandardOAuthProviderListResponse>("/config/oauth/listStandardOAuthProviders");
+}
+
+export function createStandardOAuthProvider(input: StandardOAuthProviderInput) {
+    return serverPost<StandardOAuthProviderInfo>("/config/oauth/createStandardOAuthProvider", input);
+}
+
+export function updateStandardOAuthProvider(input: StandardOAuthProviderInput) {
+    return serverPost<StandardOAuthProviderInfo>("/config/oauth/updateStandardOAuthProvider", input);
+}
+
+export function deleteStandardOAuthProvider(provider: string) {
+    return serverPost("/config/oauth/deleteStandardOAuthProvider", { provider });
 }
 
 export function createChannel(channel: ServerChannel) {

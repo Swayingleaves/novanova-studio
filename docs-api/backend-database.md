@@ -13,9 +13,37 @@ OAuth2 第三方登录（Google、linux.do）的启用状态与凭据从 `.env` 
 | `redirect_uri` | `VARCHAR(512)` | 完整回调地址，必须是绝对 HTTP(S) 地址且路径等于该渠道固定回调路径 |
 | `updated_at` | `TIMESTAMPTZ` | 配置最后更新时间 |
 
-首次部署写入 `google`、`linuxDo` 两行空配置。密钥使用 `SensitiveDataCrypto`（`APP_SECRET_KEY`）加密，管理接口只对管理员返回明文用于回填；保存时密钥留空表示保持原值。保存成功后立即刷新内存缓存，登录流程按 `registrationId` 实时构建 Spring Security 客户端注册信息，不需要重启服务。
+首次部署写入 `google`、`linuxDo` 两行空配置。密钥使用 `SensitiveDataCrypto`（`APP_SECRET_KEY`）加密，管理接口只对管理员返回明文用于回填；保存时密钥留空表示清空已保存的密钥。保存成功后立即刷新内存缓存，登录流程按 `registrationId` 实时构建 Spring Security 客户端注册信息，不需要重启服务。
 
 管理接口为 `/api/v1/config/oauth/listOAuthProviders`、`updateOAuthProvider`；登录入口仍为 `/api/v1/auth/oauth/listProviders`、`/api/v1/auth/oauth/authorize/{registrationId}`。原 `.env` 的 `OAUTH2_*`、`application.yml` 的 `oauth2` 与 `NovanovaProperties.OAuth2` 已删除。
+
+## 平台标准 OAuth2 自定义登录渠道（企业版 V84 / 社区版 V85）
+
+管理后台「系统管理 · 身份认证 · 标准 OAuth2」支持维护多个自定义标准 OAuth2 登录渠道，使用授权码流程并通过 UserInfo 接口读取账号资料，不支持 OIDC 的 `openid` 作用域、id_token、issuer 与 JWK。渠道标识由前端创建时生成（`c` + 20 位小写十六进制，创建后不可修改），回调路径固定为 `/api/v1/auth/oauth/callback/{provider}`；登录页会自动展示所有已启用渠道。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `provider` | `VARCHAR(30)` | 主键，渠道标识，格式为 `c` 加 10 到 29 位小写字母或数字 |
+| `display_name` | `VARCHAR(50)` | 渠道名称，展示在管理后台与登录页 |
+| `enabled` | `BOOLEAN` | 是否启用该登录渠道，默认 `false` |
+| `client_id` | `VARCHAR(255)` | OAuth2 客户端 ID |
+| `client_secret_encrypted` | `VARCHAR(1024)` | 客户端密钥的 AES-GCM 密文，空字符串表示未配置 |
+| `redirect_uri` | `VARCHAR(512)` | 完整回调地址，必须是绝对 HTTP(S) 地址且路径等于渠道回调路径 |
+| `authorization_uri` | `VARCHAR(512)` | 授权端点，必须是绝对 HTTP(S) 地址 |
+| `token_uri` | `VARCHAR(512)` | 令牌端点，必须是绝对 HTTP(S) 地址 |
+| `user_info_uri` | `VARCHAR(512)` | 用户信息端点，必须是绝对 HTTP(S) 地址 |
+| `scopes` | `VARCHAR(255)` | 授权范围，空格分隔，默认 `profile email`，不允许包含 `openid` |
+| `client_authentication_method` | `VARCHAR(32)` | 令牌端点客户端认证方式：`client_secret_basic` 或 `client_secret_post` |
+| `user_name_attribute` | `VARCHAR(64)` | 用户信息 JSON 中的用户标识字段名，默认 `sub` |
+| `email_attribute` | `VARCHAR(64)` | 用户信息 JSON 中的邮箱字段名，默认 `email` |
+| `nickname_attribute` | `VARCHAR(64)` | 用户信息 JSON 中的昵称字段名，默认 `name` |
+| `avatar_attribute` | `VARCHAR(64)` | 用户信息 JSON 中的头像字段名，默认 `picture` |
+| `created_at` | `TIMESTAMPTZ` | 创建时间 |
+| `updated_at` | `TIMESTAMPTZ` | 配置最后更新时间 |
+
+保存时始终校验渠道标识格式、名称、端点 URI、回调路径、作用域和字段名；启用时还要求 Client ID、Client Secret、回调地址、三个端点、作用域、用户标识字段和邮箱字段全部填写。密钥使用 `SensitiveDataCrypto`（`APP_SECRET_KEY`）加密，管理接口只对管理员返回明文用于回填，保存时密钥留空表示清空。已存在 `user_identity_bindings` 绑定的渠道不允许删除，应改为停用；渠道返回的邮箱会被当作可信邮箱用于创建或绑定本地账号，管理员需要确认该渠道会校验邮箱归属。UserInfo 仅支持顶层 JSON 字段。
+
+管理接口为 `/api/v1/config/oauth/listStandardOAuthProviders`、`createStandardOAuthProvider`、`updateStandardOAuthProvider`、`deleteStandardOAuthProvider`；登录入口复用 `/api/v1/auth/oauth/listProviders`、`/api/v1/auth/oauth/authorize/{registrationId}`。
 
 ## 生成结果分享（企业版 V81 / 社区版 V82）
 
