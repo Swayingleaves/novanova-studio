@@ -776,9 +776,10 @@ export default function VideoPage() {
         : { requiredCredits: creditCost, availableCredits: creditBalance };
     const balanceInsufficient = useInsufficientCreditsPrompt({ requiredCredits: creditRequirement.requiredCredits, availableCredits: creditRequirement.availableCredits });
     const workflowBalanceInsufficient = Boolean(selectedSkill?.workflowType) && balanceInsufficient;
-    const draftSettingsSummary = videoDraftSettingsModified ? buildVideoSettingsSummary(config, effectiveConfig, model) : "";
+    // 新对话没有可回显的历史轮次时，直接展示进入页面后已载入的默认配置，样式与改过「更多设置」后一致。
+    const pageSettingsSummary = buildVideoSettingsSummary(config, effectiveConfig, model);
     const historySettingsSummary = !videoDraftSettingsModified && activeId && latestRound?.config ? buildVideoSettingsSummary(latestRound.config, effectiveConfig, latestRound.config.videoModel || latestRound.config.model || "") : "";
-    const settingsSummary = draftSettingsSummary || historySettingsSummary;
+    const settingsSummary = historySettingsSummary || pageSettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingVideoConversation(activeConversation) : false;
     // 声明视频工作流的技能，其首轮及后续引导消息属于免费对话，不应被视频报价阻断；
     // 工作流进入确认生成阶段后，activeQuote 与积分余额仍会继续控制提交状态。

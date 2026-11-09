@@ -492,9 +492,10 @@ export default function ImagePage() {
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
     const latestRound = activeConversation?.rounds.at(-1);
     const historyModel = !imageDraftSettingsModified && activeId && latestRound?.config ? latestRound.config.imageModel || latestRound.config.model || "" : "";
-    const draftSettingsSummary = imageDraftSettingsModified ? buildImageSettingsSummary(config, effectiveConfig, model) : "";
+    // 新对话没有可回显的历史轮次时，直接展示进入页面后已载入的默认配置，样式与改过「更多设置」后一致。
+    const pageSettingsSummary = buildImageSettingsSummary(config, effectiveConfig, model);
     const historySettingsSummary = !imageDraftSettingsModified && activeId && latestRound?.config ? buildImageSettingsSummary(latestRound.config, effectiveConfig, historyModel) : "";
-    const settingsSummary = draftSettingsSummary || historySettingsSummary;
+    const settingsSummary = historySettingsSummary || pageSettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingImageConversation(activeConversation) : false;
     const canGenerate = Boolean(prompt.trim()) && !balanceInsufficient && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
