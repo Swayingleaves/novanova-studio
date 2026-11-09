@@ -181,4 +181,23 @@ class HttpLoggingWebFilterTest {
         assertFalse(sanitizedBody.contains("secret-password"));
         assertTrue(sanitizedBody.contains("内容已省略"));
     }
+
+    /** 令牌接口的表单密钥和授权码不能进入应用日志或接口记录。 */
+    @Test
+    @DisplayName("表单中的客户端密钥和授权码会被打码")
+    void shouldMaskOauthTokenFormSecrets() {
+        String body = "grant_type=authorization_code&code=one-time-code&client_id=nvabc&client_secret=super-secret&redirect_uri=https://example.com/oauth/app";
+        var applicationFilter = new HttpLoggingWebFilter();
+        var accessFilter = new ApiAccessLogWebFilter(org.mockito.Mockito.mock(com.novanovastudio.repository.ApiAccessLogRepository.class),
+                new com.novanovastudio.security.CurrentUserProvider(), org.mockito.Mockito.mock(com.novanovastudio.security.ClientAddressResolver.class));
+        String applicationLog = applicationFilter.sanitizeBody(body, MediaType.APPLICATION_FORM_URLENCODED);
+        String accessLog = org.springframework.test.util.ReflectionTestUtils.invokeMethod(accessFilter, "sanitizeBody", body, MediaType.APPLICATION_FORM_URLENCODED);
+        for (String sanitized : java.util.List.of(applicationLog, accessLog)) {
+            assertFalse(sanitized.contains("one-time-code"));
+            assertFalse(sanitized.contains("super-secret"));
+            assertTrue(sanitized.contains("client_id=nvabc"));
+            assertTrue(sanitized.contains("grant_type=authorization_code"));
+            assertTrue(sanitized.contains("https://example.com/oauth/app"));
+        }
+    }
 }

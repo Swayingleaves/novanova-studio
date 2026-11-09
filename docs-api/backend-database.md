@@ -45,6 +45,24 @@ OAuth2 第三方登录（Google、linux.do）的启用状态与凭据从 `.env` 
 
 管理接口为 `/api/v1/config/oauth/listStandardOAuthProviders`、`createStandardOAuthProvider`、`updateStandardOAuthProvider`、`deleteStandardOAuthProvider`；登录入口复用 `/api/v1/auth/oauth/listProviders`、`/api/v1/auth/oauth/authorize/{registrationId}`。
 
+## 对外 OAuth2 授权客户端（企业版 V87 / 社区版 V88）
+
+本站作为 OAuth2 授权方，让 NewAPI 等外部系统用授权码登录本站账号。管理后台「系统管理 · 身份认证 · 对外授权」可维护多个客户端。不签发 `id_token`，也不提供 OIDC Discovery。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `client_id` | `VARCHAR(64)` | 主键，服务端生成，格式为 `nv` 加 32 位小写十六进制，创建后不可修改 |
+| `display_name` | `VARCHAR(50)` | 应用名称，展示在授权确认页 |
+| `enabled` | `BOOLEAN` | 是否允许该客户端发起授权，默认 `false` |
+| `client_secret_encrypted` | `VARCHAR(1024)` | 客户端密钥的 AES-GCM 密文 |
+| `redirect_uris` | `TEXT` | 回调地址 JSON 数组，每项必须是绝对 HTTP(S) 地址，授权与换令牌时全字匹配 |
+| `created_at` | `TIMESTAMPTZ` | 创建时间 |
+| `updated_at` | `TIMESTAMPTZ` | 配置最后更新时间 |
+
+密钥使用 `SensitiveDataCrypto`（`APP_SECRET_KEY`）加密。管理接口对管理员返回明文，便于复制到外部系统；重新生成密钥会立即替换旧密钥。授权码和访问令牌只放在 Redis，不落库。授权码一次性、约 60 秒；访问令牌约 10 分钟，且不能当作本站登录令牌。
+
+管理接口为 `/api/v1/config/oauth/listOAuthClients`、`createOAuthClient`、`updateOAuthClient`、`resetOAuthClientSecret`、`deleteOAuthClient`。授权协议接口为 `GET /api/v1/oauth/authorize`、`POST /api/v1/oauth/token`、`GET /api/v1/oauth/userinfo`。令牌和用户信息响应是 OAuth 原文，不是 `{ code, data, msg }`。
+
 ## 生成结果分享（企业版 V81 / 社区版 V82）
 
 分享业务使用独立表，不在管理员精选内容表中保存投稿状态。所有媒体均复制为私有对象，通过现有容量预占、对象台账与异步删除队列计量；源记录、源对象后续变化不会改变分享快照。
@@ -351,6 +369,7 @@ flowchart TB
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `model_config_id` | `VARCHAR(64)` | 创建任务使用的全站模型配置业务 ID，用于任务恢复时进入正确的模型队列。 |
+| `provider_request_sent` | `BOOLEAN` | 图片或视频生成请求是否已经发往供应商。发出后用户取消不退积分，默认 `false`。企业版 V86 / 社区版 V87。 |
 | `error_message_key` | `VARCHAR(180)` | 与语言无关的系统消息键，空值表示无系统提示。 |
 | `error_message_arguments` | `JSONB` | 消息插值参数数组；原始诊断保留在 `error_message` 中。 |
 

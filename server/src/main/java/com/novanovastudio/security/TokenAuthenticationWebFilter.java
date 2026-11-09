@@ -53,6 +53,9 @@ public class TokenAuthenticationWebFilter implements WebFilter {
             PathPatternParser.defaultInstance.parse("/api/v1/auth/requestPasswordReset"),
             PathPatternParser.defaultInstance.parse("/api/v1/auth/resetPassword"),
             PathPatternParser.defaultInstance.parse("/api/v1/auth/oauth/**"),
+            PathPatternParser.defaultInstance.parse("/api/v1/oauth/authorize"),
+            PathPatternParser.defaultInstance.parse("/api/v1/oauth/token"),
+            PathPatternParser.defaultInstance.parse("/api/v1/oauth/getAuthorizationRequest"),
             PathPatternParser.defaultInstance.parse("/api/v1/ai/model/listModels"),
             PathPatternParser.defaultInstance.parse("/api/v1/config/getRuntimeConfig"),
             PathPatternParser.defaultInstance.parse("/api/v1/homepage/listShowcases"),
@@ -65,6 +68,9 @@ public class TokenAuthenticationWebFilter implements WebFilter {
             PathPatternParser.defaultInstance.parse("/api/v1/payment/wechat/notify"),
             PathPatternParser.defaultInstance.parse("/api/v1/payment/alipay/return")
     );
+
+    /** 对外用户信息接口使用独立访问令牌，不能按本站登录令牌解析 */
+    private static final PathPattern OAUTH_USER_INFO_PATTERN = PathPatternParser.defaultInstance.parse("/api/v1/oauth/userinfo");
 
     /** Token服务 */
     private final TokenService tokenService;
@@ -81,6 +87,10 @@ public class TokenAuthenticationWebFilter implements WebFilter {
      */
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+        String path = exchange.getRequest().getPath().value();
+        if (OAUTH_USER_INFO_PATTERN.matches(PathContainer.parsePath(path))) {
+            return chain.filter(exchange);
+        }
         // 优先从Authorization头读取Bearer Token，SSE场景兼容query token。
         String token = tokenService.bearerToken(exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION));
         if (!StringUtils.hasText(token)) {
@@ -92,7 +102,6 @@ public class TokenAuthenticationWebFilter implements WebFilter {
                 return chain.filter(exchange);
             }
             // 非 API 路径（静态资源等）不需要登录
-            String path = exchange.getRequest().getPath().value();
             if (path.startsWith("/api/") && !isPublicPath(path)) {
                 return writeUnauthenticatedError(exchange);
             }

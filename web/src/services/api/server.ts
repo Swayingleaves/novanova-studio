@@ -60,6 +60,14 @@ export type ServerMediaInfo = {
     height?: number;
     durationMs?: number;
     objectStorage?: ObjectStorageFile;
+    /** 私有存储桶预签名地址的到期时间，公开地址或远程链接为空 */
+    expiresAt?: string;
+};
+
+export type ServerMediaAccessItem = {
+    storageKey: string;
+    url: string;
+    expiresAt?: string;
 };
 
 export type ServerAiTaskType = "image" | "video" | "text";
@@ -94,6 +102,7 @@ export type ServerAiTask = {
     provider: string;
     status: ServerAiTaskStatus;
     progress: number;
+    providerRequestSent?: boolean;
     requestData: unknown;
     resultData?: unknown;
     errorMessage?: string;
@@ -385,6 +394,42 @@ export type StandardOAuthProviderInput = Omit<StandardOAuthProviderInfo, "callba
 /** 标准 OAuth2 渠道列表响应。 */
 export type StandardOAuthProviderListResponse = {
     providers: StandardOAuthProviderInfo[];
+};
+
+/** 对外 OAuth2 授权客户端，供其他系统使用本站账号登录。 */
+export type OAuthClientInfo = {
+    /** 服务端生成的客户端标识。 */
+    clientId: string;
+    /** 应用名称。 */
+    displayName: string;
+    /** 是否允许该客户端发起授权。 */
+    enabled: boolean;
+    /** 客户端密钥明文，仅管理员接口返回。 */
+    clientSecret: string;
+    /** 允许的回调地址。 */
+    redirectUris: string[];
+};
+
+/** 对外授权客户端列表响应。 */
+export type OAuthClientListResponse = {
+    clients: OAuthClientInfo[];
+};
+
+/** 新增对外授权客户端的请求体。 */
+export type OAuthClientCreateInput = Pick<OAuthClientInfo, "displayName" | "enabled" | "redirectUris">;
+
+/** 更新对外授权客户端的请求体。 */
+export type OAuthClientUpdateInput = Pick<OAuthClientInfo, "clientId" | "displayName" | "enabled" | "redirectUris">;
+
+/** 授权确认页展示的应用信息。 */
+export type OAuthAuthorizationRequestView = {
+    displayName: string;
+    scope: string;
+};
+
+/** 同意或拒绝授权后的外部回调地址。 */
+export type OAuthAuthorizationDecision = {
+    redirectUrl: string;
 };
 
 export type ServerModelConfig = {
@@ -1170,6 +1215,11 @@ export function getServerMediaInfo(storageKey: string) {
     return serverPost<ServerMediaInfo>("/media/getMediaInfo", { storageKey });
 }
 
+/** 批量换取媒体临时读地址，避免画布和列表逐个请求。 */
+export function batchGetServerMediaAccess(storageKeys: string[]) {
+    return serverPost<{ items: ServerMediaAccessItem[] }>("/media/batchAccess", { storageKeys });
+}
+
 export async function downloadServerMedia(storageKey: string) {
     const response = await requestServer("/media/downloadMedia", {
         method: "POST",
@@ -1273,8 +1323,26 @@ export async function getAiTaskPollingIntervalMilliseconds(): Promise<number> {
     return seconds * 1000;
 }
 
-export function cancelAiTask(taskId: string) {
-    return serverPost<ServerAiTask>("/ai/task/cancelTask", { taskId });
+const generationCancelForfeitTaskIds = new Set<string>();
+
+/** 记录用户已确认放弃退款的任务，供等待中的中止路径沿用。 */
+export function markGenerationCancelForfeit(taskIds: string[]) {
+    taskIds.forEach((taskId) => generationCancelForfeitTaskIds.add(taskId));
+}
+
+export function cancelAiTask(taskId: string, options: { forfeitRefund?: boolean } = {}) {
+    return serverPost<ServerAiTask>("/ai/task/cancelTask", { taskId, forfeitRefund: options.forfeitRefund === true });
+}
+
+/** 生成请求已经发往供应商，普通取消会被服务端拒绝。 */
+export function isProviderRequestAlreadySentError(error: unknown) {
+    return error instanceof ServerApiError && error.messageKey === "business.providerRequestAlreadySentCannotCancel";
+}
+
+function cancelAiTaskForWait(taskId: string) {
+    const forfeitRefund = generationCancelForfeitTaskIds.has(taskId);
+    generationCancelForfeitTaskIds.delete(taskId);
+    return cancelAiTask(taskId, { forfeitRefund });
 }
 
 export function listServerAiModels() {
@@ -1311,6 +1379,38 @@ export function updateStandardOAuthProvider(input: StandardOAuthProviderInput) {
 
 export function deleteStandardOAuthProvider(provider: string) {
     return serverPost("/config/oauth/deleteStandardOAuthProvider", { provider });
+}
+
+export function listOAuthClients() {
+    return serverGet<OAuthClientListResponse>("/config/oauth/listOAuthClients");
+}
+
+export function createOAuthClient(input: OAuthClientCreateInput) {
+    return serverPost<OAuthClientInfo>("/config/oauth/createOAuthClient", input);
+}
+
+export function updateOAuthClient(input: OAuthClientUpdateInput) {
+    return serverPost<OAuthClientInfo>("/config/oauth/updateOAuthClient", input);
+}
+
+export function resetOAuthClientSecret(clientId: string) {
+    return serverPost<OAuthClientInfo>("/config/oauth/resetOAuthClientSecret", { clientId });
+}
+
+export function deleteOAuthClient(clientId: string) {
+    return serverPost("/config/oauth/deleteOAuthClient", { clientId });
+}
+
+export function getOAuthAuthorizationRequest(requestId: string) {
+    return serverGet<OAuthAuthorizationRequestView>(`/oauth/getAuthorizationRequest?requestId=${encodeURIComponent(requestId)}`, { auth: false, scope: "platform" });
+}
+
+export function approveOAuthAuthorization(requestId: string) {
+    return serverPost<OAuthAuthorizationDecision>("/oauth/approveAuthorization", { requestId }, { scope: "platform" });
+}
+
+export function denyOAuthAuthorization(requestId: string) {
+    return serverPost<OAuthAuthorizationDecision>("/oauth/denyAuthorization", { requestId }, { scope: "platform" });
 }
 
 export function createChannel(channel: ServerChannel) {
@@ -1587,12 +1687,12 @@ export function setDefaultObjectStorage(storageId: string) {
 export async function waitAiTask(taskId: string, options: { signal?: AbortSignal; onProgress?: (task: ServerAiTask) => void } = {}) {
     const creditPromptScope = useInsufficientCreditsStore.getState().scope;
     if (options.signal?.aborted) {
-        void cancelAiTask(taskId).catch(() => {});
+        void cancelAiTaskForWait(taskId).catch(() => {});
         throw new DOMException("Aborted", "AbortError");
     }
     const initial = await getAiTaskInfo(taskId);
     if (options.signal?.aborted) {
-        void cancelAiTask(taskId).catch(() => {});
+        void cancelAiTaskForWait(taskId).catch(() => {});
         throw new DOMException("Aborted", "AbortError");
     }
     if (isFinalAiTaskStatus(initial.status)) return completedAiTask(initial, creditPromptScope);
@@ -1629,7 +1729,7 @@ export async function waitAiTask(taskId: string, options: { signal?: AbortSignal
         cleanupFns.push(() => window.clearInterval(pollTimer));
         if (options.signal) {
             const onAbort = () => {
-                void cancelAiTask(taskId).catch(() => {});
+                void cancelAiTaskForWait(taskId).catch(() => {});
                 finish(() => reject(new DOMException("Aborted", "AbortError")));
             };
             if (options.signal.aborted) {

@@ -70,6 +70,7 @@ import { adminCreditFilterKey, adminCreditUserLabel } from "./admin-credit-utils
 import { TeamContentScope } from "./components/team-content-scope";
 import { TeamManagement, CurrentTeamManagement } from "./components/team-management";
 import { SystemConfiguration, type ConfigurationTabKey } from "./components/system-configuration";
+import { OAuthClientManagement } from "./components/oauth-client-management";
 import { OAuthIntegrationManagement } from "./components/oauth-integration-management";
 import { StandardOAuth2Management } from "./components/standard-oauth2-management";
 import { ResetAccountPasswordModal } from "./components/reset-account-password-modal";
@@ -104,7 +105,7 @@ const UserTrendChart = dynamic(() => import("./components/user-trend-chart").the
 type GenerationTypeFilter = "all" | "image" | "video";
 type TrendUnit = "day" | "month";
 /** 身份认证页签内部的标准渠道页签。 */
-type IdentityAuthTabKey = "oauth" | "standardOAuth2";
+type IdentityAuthTabKey = "oauth" | "standardOAuth2" | "oauthClients";
 
 /** 管理后台左侧菜单的二级菜单项：tab 为所属内容页签，sub 为页签内部的子页签。 */
 type AdminMenuLeaf = { key: string; label: string; tab: string; sub?: string };
@@ -157,6 +158,7 @@ export default function AdminSystemPage() {
         ...(!team ? [{ key: "identityAuth", label: translate("administration.identityAuthentication"), icon: <ShieldCheck className="size-4" />, leaves: [
             { key: "identityAuth:oauth", label: translate("administration.oauthIntegration"), tab: "identityAuth", sub: "oauth" },
             { key: "identityAuth:standardOAuth2", label: translate("administration.standardOAuth2"), tab: "identityAuth", sub: "standardOAuth2" },
+            { key: "identityAuth:oauthClients", label: translate("administration.oauthClients"), tab: "identityAuth", sub: "oauthClients" },
         ] }] : []),
         { key: "team", label: "团队管理", icon: <UsersRound className="size-4" />, tab: team ? "team" : "teams" },
         ...(!team ? [{ key: "users", label: translate("administration.userManagement"), icon: <UserRound className="size-4" />, tab: "users" }] : []),
@@ -195,6 +197,7 @@ export default function AdminSystemPage() {
             items={[
                 { key: "oauth", label: translate("administration.oauthIntegration"), children: <OAuthIntegrationManagement /> },
                 { key: "standardOAuth2", label: translate("administration.standardOAuth2"), children: <StandardOAuth2Management /> },
+                { key: "oauthClients", label: translate("administration.oauthClients"), children: <OAuthClientManagement /> },
             ]}
         /> }] : []),
         ...(team ? [{ key: "team", label: "团队管理", children: <CurrentTeamManagement /> }] : [{ key: "teams", label: "团队管理", children: <TeamManagement /> }]),

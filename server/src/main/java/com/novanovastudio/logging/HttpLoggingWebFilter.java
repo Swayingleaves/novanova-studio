@@ -298,6 +298,9 @@ public class HttpLoggingWebFilter implements WebFilter {
      * @return String 脱敏后的请求正文
      */
     String sanitizeBody(String body, MediaType contentType) {
+        if (contentType != null && MediaType.APPLICATION_FORM_URLENCODED.includes(contentType)) {
+            return FormLogSanitizer.sanitize(body, SENSITIVE_BODY_FIELDS, MASKED_VALUE);
+        }
         if (contentType == null || !contentType.toString().toLowerCase().contains("json")) {
             return body;
         }
