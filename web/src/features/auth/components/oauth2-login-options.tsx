@@ -9,6 +9,7 @@ import { App, Button, Divider, Skeleton } from "antd";
 import { LogIn } from "lucide-react";
 
 import { storeOAuth2Redirect } from "@/features/auth/lib/oauth2-login";
+import { oauth2ProviderIconPath } from "@/features/auth/lib/oauth2-provider-icons";
 import { listOAuth2Providers, prepareOAuth2Authorization, type OAuth2ProviderInfo } from "@/services/api/server";
 
 type OAuth2LoginOptionsProps = {
@@ -16,11 +17,6 @@ type OAuth2LoginOptionsProps = {
     redirectPath?: string;
     /** 首次第三方登录时使用的邀请码 */
     invitationCode?: string;
-};
-
-const PROVIDER_ICON_PATHS: Record<string, string> = {
-    google: "/icons/google.svg",
-    linuxDo: "/icons/linuxdo.svg",
 };
 
 const PROVIDER_DISPLAY_ORDER: Record<string, number> = {
@@ -104,7 +100,7 @@ function OAuth2LoginSection({ children }: { children: ReactNode }) {
 }
 
 function providerIcon(provider: OAuth2ProviderInfo) {
-    const iconPath = PROVIDER_ICON_PATHS[provider.providerId];
+    const iconPath = oauth2ProviderIconPath(provider.providerId);
     return iconPath
         ? <img src={iconPath} alt="" aria-hidden="true" className="size-5 shrink-0" />
         : <LogIn className="size-4" aria-hidden="true" />;
