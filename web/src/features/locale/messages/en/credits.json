@@ -165,6 +165,8 @@
     "taskType": "Task type",
     "consumedCredits": "Credits used",
     "taskStatus": "Status",
+    "elapsed": "Elapsed",
+    "elapsedMinutes": "{value0}m {value1}s",
     "taskDetail": "Task details",
     "model": "Model",
     "resolution": "Resolution",

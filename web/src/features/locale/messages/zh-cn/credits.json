@@ -165,6 +165,8 @@
     "taskType": "任务类型",
     "consumedCredits": "消耗积分",
     "taskStatus": "任务状态",
+    "elapsed": "耗时",
+    "elapsedMinutes": "{value0}分{value1}s",
     "taskDetail": "任务详情",
     "model": "模型",
     "resolution": "分辨率",

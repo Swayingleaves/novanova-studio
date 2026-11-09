@@ -10,7 +10,7 @@ import { Image as ImageIcon, Play, Search, Video } from "lucide-react";
 import { listAdminTaskRecords, listTaskRecords, type ServerAdminTaskRecord, type ServerTaskRecord } from "@/services/api/server";
 
 import { formatCreditTime, generationTypeLabel } from "../credit-page-utils";
-import { formatConsumedCredits, TASK_RECORD_PAGE_SIZE, taskRecordStatusLabel, taskRecordStatusTone, taskRecordUserLabel } from "../task-record-utils";
+import { formatConsumedCredits, formatTaskElapsedTime, TASK_RECORD_PAGE_SIZE, taskRecordStatusLabel, taskRecordStatusTone, taskRecordUserLabel } from "../task-record-utils";
 
 type TaskTypeFilter = "all" | "image" | "video";
 type MediaPreview = { url: string; taskType: "image" | "video" };
@@ -75,6 +75,12 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
             width: 168,
             render: (createdAt: string) => <span className="tabular-nums text-[var(--studio-muted)]">{formatCreditTime(createdAt)}</span>,
         },
+        ...(admin ? [{
+            title: translate("credits.elapsed"),
+            key: "elapsed",
+            width: 100,
+            render: (_: unknown, record: TaskRecordView) => <span className="tabular-nums text-[var(--studio-muted)]">{formatTaskElapsedTime(record.createdAt, record.completedAt)}</span>,
+        }] : []),
         {
             title: translate("credits.taskType"),
             dataIndex: "taskType",
@@ -169,7 +175,7 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
                     dataSource={records}
                     loading={recordsQuery.isLoading}
                     pagination={false}
-                    scroll={{ x: admin ? 1_084 : 884 }}
+                    scroll={{ x: admin ? 1_184 : 884 }}
                     locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("credits.noTaskRecordsInThisPeriod")} /> }}
                 />
             </div>
@@ -187,6 +193,7 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
                             <div className="mt-1 flex items-center gap-2 text-xs text-[var(--studio-muted)]">
                                 <Tag color={taskRecordStatusTone(record.status)} className="mr-0">{taskRecordStatusLabel(record.status)}</Tag>
                                 <span className="tabular-nums">{formatCreditTime(record.createdAt)}</span>
+                                {admin ? <span className="tabular-nums">{formatTaskElapsedTime(record.createdAt, record.completedAt)}</span> : null}
                             </div>
                             {admin ? <p className="mt-1 truncate text-xs text-[var(--studio-muted)]">{translate("administration.user")} · {taskRecordUserLabel(record)}{record.email ? ` · ${record.email}` : ""}</p> : null}
                             <p className="mt-1 truncate text-xs text-[var(--studio-muted)]" title={record.model}>{record.model || "—"}</p>
