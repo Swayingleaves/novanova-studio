@@ -390,10 +390,7 @@ export default function CreditPurchasePage() {
                             )}
                         >
                             <img src="/payment/alipay.png" alt="支付宝" className="size-9 rounded-md object-contain" />
-                            <span className="min-w-0 flex-1">
-                                <span className="block font-medium text-[var(--studio-ink)]">{translate("credits.alipay")}</span>
-                                <span className="mt-1 block text-xs text-[var(--studio-muted)]">{translate("credits.alipayAvailable")}</span>
-                            </span>
+                            <span className="min-w-0 flex-1 font-medium text-[var(--studio-ink)]">{translate("credits.alipay")}</span>
                             {paymentMethod === "alipay" ? <CheckCircle2 className="size-5 text-[var(--studio-action)]" /> : null}
                         </button>
                         <button
@@ -406,10 +403,7 @@ export default function CreditPurchasePage() {
                             )}
                         >
                             <WechatPaymentIcon className="size-9 shrink-0" />
-                            <span className="min-w-0 flex-1">
-                                <span className="block font-medium text-[var(--studio-ink)]">{translate("credits.wechat")}</span>
-                                <span className="mt-1 block text-xs text-[var(--studio-muted)]">{translate("credits.wechatAvailable")}</span>
-                            </span>
+                            <span className="min-w-0 flex-1 font-medium text-[var(--studio-ink)]">{translate("credits.wechat")}</span>
                             {paymentMethod === "wechat" ? <CheckCircle2 className="size-5 text-[var(--studio-action)]" /> : null}
                         </button>
                     </div>
