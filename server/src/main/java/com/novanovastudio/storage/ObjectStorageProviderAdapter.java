@@ -66,24 +66,32 @@ public interface ObjectStorageProviderAdapter {
      */
     default boolean verifyPrivateBucket(PersistenceDtos.ObjectStorageConfig config) {
         String key = "private-probe/" + java.util.UUID.randomUUID();
-        Path probe = null;
         boolean uploaded = false;
         try {
-            probe = java.nio.file.Files.createTempFile("novanova-private-probe-", ".txt");
-            java.nio.file.Files.writeString(probe, "private-probe");
-            putPrivateObject(config, key, probe);
+            byte[] marker = "private-probe".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            // 探针必须继承桶权限，不能单独设置私有 ACL，否则公有读桶也会返回 403。
+            String publicUrl = putObject(config, key, new java.io.ByteArrayInputStream(marker), marker.length, "text/plain");
             uploaded = true;
-            String signed = createReadUrl(config, key, "private-probe.txt", "text/plain", false, java.time.Instant.now().plusSeconds(60));
-            java.net.URI unsigned = java.net.URI.create(signed.split("\\?", 2)[0]);
-            var request = java.net.http.HttpRequest.newBuilder(unsigned).timeout(java.time.Duration.ofSeconds(10))
+            var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(publicUrl.split("\\?", 2)[0]))
+                    .timeout(java.time.Duration.ofSeconds(10))
                     .method("HEAD", java.net.http.HttpRequest.BodyPublishers.noBody()).build();
-            return java.net.http.HttpClient.newHttpClient().send(request, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode() == 403;
+            int anonymousStatus = java.net.http.HttpClient.newHttpClient().send(request, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode();
+            if (anonymousStatus != 403) {
+                return false;
+            }
+            String signed = createReadUrl(config, key, "private-probe.txt", "text/plain", false, java.time.Instant.now().plusSeconds(60));
+            var signedRequest = java.net.http.HttpRequest.newBuilder(java.net.URI.create(signed))
+                    .timeout(java.time.Duration.ofSeconds(10)).GET().build();
+            int signedStatus = java.net.http.HttpClient.newHttpClient().send(signedRequest, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode();
+            return signedStatus == 200;
         } catch (Exception exception) {
             org.slf4j.LoggerFactory.getLogger(ObjectStorageProviderAdapter.class).error("验证私有对象访问失败：provider={}", provider(), exception);
             throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "无法验证私有对象访问，请检查对象存储权限及访问域名");
         } finally {
-            try { if (uploaded) deletePrivateObject(config, key); }
-            finally { if (probe != null) try { java.nio.file.Files.deleteIfExists(probe); } catch (java.io.IOException exception) { org.slf4j.LoggerFactory.getLogger(ObjectStorageProviderAdapter.class).error("清理私有探针临时文件失败", exception); } }
+            if (uploaded) {
+                try { deletePrivateObject(config, key); }
+                catch (RuntimeException exception) { org.slf4j.LoggerFactory.getLogger(ObjectStorageProviderAdapter.class).error("清理私有探针对象失败", exception); }
+            }
         }
     }
 

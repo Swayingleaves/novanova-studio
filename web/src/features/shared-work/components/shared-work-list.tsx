@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Empty, Input, Modal, Pagination, Select, Spin, Tag } from "antd";
 import { Copy, Eye, RefreshCw } from "lucide-react";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
@@ -23,12 +23,22 @@ export function SharedWorkList({ review = false }: { review?: boolean }) {
     const [busy, setBusy] = useState("");
     const [decision, setDecision] = useState<{ work: SharedWork; action: "reject" | "takeDown" } | null>(null);
     const [reason, setReason] = useState("");
+    const lastLoadedAt = useRef(0);
     useEffect(() => {
         const controller = new AbortController();
         setLoading(true); setError("");
+        lastLoadedAt.current = Date.now();
         void listSharedWorks(review, page, status, controller.signal).then((result) => { if (!controller.signal.aborted) setData(result); }).catch((failure) => { if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "查询分享失败"); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
         return () => controller.abort();
     }, [review, page, status, revision, team?.id]);
+    // 预览图是临时地址，回到前台且距上次加载超过十五分钟时补一次刷新，其余逻辑不变。
+    useEffect(() => {
+        const refreshIfStale = () => {
+            if (document.visibilityState === "visible" && Date.now() - lastLoadedAt.current > 15 * 60_000) setRevision((value) => value + 1);
+        };
+        document.addEventListener("visibilitychange", refreshIfStale);
+        return () => document.removeEventListener("visibilitychange", refreshIfStale);
+    }, []);
     const act = async (work: SharedWork, action: "approve" | "reject" | "takeDown" | "withdraw", explanation = "") => {
         setBusy(work.shareCode);
         try {

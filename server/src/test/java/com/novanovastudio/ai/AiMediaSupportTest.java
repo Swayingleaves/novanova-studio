@@ -231,7 +231,7 @@ class AiMediaSupportTest {
     /** 存储媒体查询为空时，参考解析应返回明确资源错误。 */
     @Test
     void shouldRejectMissingStoredReference() {
-        when(persistenceService.getMediaInfoForUser(eq(1L), eq("image:missing"))).thenReturn(Mono.empty());
+        when(persistenceService.getMediaInfoForUser(eq(1L), eq("image:missing"), any())).thenReturn(Mono.empty());
         AiTaskDtos.AiTaskMediaReference reference = new AiTaskDtos.AiTaskMediaReference(
                 "reference-1", "参考", "image/png", "image:missing", null);
 

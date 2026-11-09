@@ -77,7 +77,8 @@ class ScriptServiceTest {
         // 概览保存会读项目详情，详情里包含原文类型：这些用例不关心原文，统一当作未导入。
         lenient().when(scriptSourceRepository.findSourceTypeByProject(anyLong(), anyString())).thenReturn(Mono.just(""));
         service = new ScriptService(repository, currentUserProvider, transactionalOperator, validator,
-                comicDramaImpactService, novelAdaptationRepository, scriptSourceRepository);
+                comicDramaImpactService, novelAdaptationRepository, scriptSourceRepository,
+                com.novanovastudio.MediaAccessTestSupport.echo());
     }
 
     /**

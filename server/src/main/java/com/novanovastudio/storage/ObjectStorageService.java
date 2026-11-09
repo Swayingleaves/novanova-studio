@@ -4,12 +4,17 @@ import com.novanovastudio.common.SystemMessage;
 
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.PersistenceDtos;
 import java.io.InputStream;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
@@ -22,8 +27,17 @@ import org.springframework.util.CollectionUtils;
 @Service
 public class ObjectStorageService {
 
+    /** 私有桶探测结果缓存时间，避免每次上传分享副本或原文都重新上传探针。 */
+    private static final Duration PRIVACY_CHECK_TTL = Duration.ofMinutes(5);
+
+    /** 私有桶探测结果缓存，按存储配置区分。 */
+    private final Map<String, PrivacyCheck> privacyChecks = new ConcurrentHashMap<>();
+
     /** 服务商适配器映射。 */
     private final Map<String, ObjectStorageProviderAdapter> providerAdapters;
+
+    /** 应用配置，测试环境允许为空。 */
+    private final NovanovaProperties properties;
 
     /**
      * 创建对象存储服务。
@@ -31,10 +45,22 @@ public class ObjectStorageService {
      * @param providerAdapters List<ObjectStorageProviderAdapter> 服务商适配器列表
      */
     public ObjectStorageService(List<ObjectStorageProviderAdapter> providerAdapters) {
+        this(providerAdapters, null);
+    }
+
+    /**
+     * 创建对象存储服务。
+     *
+     * @param providerAdapters List<ObjectStorageProviderAdapter> 服务商适配器列表
+     * @param properties NovanovaProperties 应用配置
+     */
+    @Autowired
+    public ObjectStorageService(List<ObjectStorageProviderAdapter> providerAdapters, NovanovaProperties properties) {
         if (CollectionUtils.isEmpty(providerAdapters)) {
             throw new IllegalStateException("对象存储服务商适配器不能为空");
         }
         this.providerAdapters = providerAdapters.stream().collect(java.util.stream.Collectors.toUnmodifiableMap(ObjectStorageProviderAdapter::provider, Function.identity()));
+        this.properties = properties;
     }
 
     /**
@@ -54,12 +80,33 @@ public class ObjectStorageService {
 
     /**
      * 确认默认存储桶拒绝匿名读取。
+     * <p>
+     * 探测结果短时缓存，配置变更后由管理入口清空缓存重新验证。
      *
      * @param config ObjectStorageConfig 对象存储配置
      * @return boolean 是否已确认匿名读取被拒绝
      */
     public boolean verifyPrivateBucket(PersistenceDtos.ObjectStorageConfig config) {
-        return providerAdapter(config).verifyPrivateBucket(config);
+        String cacheKey = config.id() == null || config.id().isBlank() ? config.provider() + "|" + config.bucket() : config.id();
+        PrivacyCheck cached = privacyChecks.get(cacheKey);
+        if (cached != null && cached.checkedAt().plus(PRIVACY_CHECK_TTL).isAfter(Instant.now())) {
+            return cached.privateRead();
+        }
+        boolean privateRead = providerAdapter(config).verifyPrivateBucket(config);
+        privacyChecks.put(cacheKey, new PrivacyCheck(privateRead, Instant.now()));
+        if (!privateRead && (properties == null || !properties.getObjectStorage().isRequirePrivateBucket())) {
+            org.slf4j.LoggerFactory.getLogger(ObjectStorageService.class).warn(
+                    "存储桶仍允许匿名读取，私有内容保护已降级为告警模式；切换为私有读写后请设置 STORAGE_REQUIRE_PRIVATE_BUCKET=true");
+            return true;
+        }
+        return privateRead;
+    }
+
+    /**
+     * 清空私有桶探测缓存，配置新增、修改、删除或切换默认时调用。
+     */
+    public void invalidatePrivacyChecks() {
+        privacyChecks.clear();
     }
 
     /**
@@ -144,5 +191,14 @@ public class ObjectStorageService {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedObjectStorageProvider"));
         }
         return adapter;
+    }
+
+    /**
+     * 私有桶探测结果。
+     *
+     * @param privateRead boolean 是否拒绝匿名读取
+     * @param checkedAt Instant 探测时间
+     */
+    private record PrivacyCheck(boolean privateRead, Instant checkedAt) {
     }
 }

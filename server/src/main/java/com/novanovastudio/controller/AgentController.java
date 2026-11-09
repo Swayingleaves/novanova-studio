@@ -114,7 +114,7 @@ public class AgentController {
     public Mono<ApiResponse<Void>> cancelChat(@Valid @RequestBody AgentCancelRequest request) {
         log.info("停止 Agent 对话请求: sessionId={}, requestId={}", request.sessionId(), request.requestId());
         return currentUserProvider.currentUserId()
-                .flatMap(userId -> creationAgentOrchestrator.cancelChat(userId, request.requestId()))
+                .flatMap(userId -> creationAgentOrchestrator.cancelChat(userId, request.requestId(), Boolean.TRUE.equals(request.forfeitSubmittedGeneration())))
                 .thenReturn(ApiResponse.ok(null));
     }
 

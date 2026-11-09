@@ -9,11 +9,10 @@ import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.dto.SharedWorkDtos;
 import com.novanovastudio.repository.PersistenceRepository;
 import com.novanovastudio.repository.SharedWorkRepository;
-import com.novanovastudio.security.TeamScope;
+import com.novanovastudio.storage.MediaAccessService;
 import com.novanovastudio.storage.ObjectStorageService;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.Base64;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -43,6 +42,8 @@ public class SharedWorkMediaService {
     private final AiHttpClient httpClient;
     /** 沿用现有媒体输入大小限制。 */
     private final NovanovaProperties properties;
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
 
     /**
      * 校验本次选定的存储能够保存私有媒体，不允许降级为公有对象。
@@ -93,30 +94,28 @@ public class SharedWorkMediaService {
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "原素材不属于当前用户或已删除，请重新保存素材后分享")))
                 .flatMap(record -> {
                     if (record.getObjectStorageConfigId() != null && record.getObjectStorageKey() != null) {
+                        // 模型厂商拉取参考素材使用两小时签名地址，复制与预览共用同一读取出口。
                         return storageBillingService.requireObjectAvailable(userId, record.getObjectStorageConfigId(), record.getObjectStorageKey())
-                                .then(persistenceService.getObjectStorageForCleanup(record.getObjectStorageConfigId())
-                                        .contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true)))
-                                .flatMap(config -> Mono.fromCallable(() -> objectStorageService.createReadUrl(config, record.getObjectStorageKey(),
-                                        source.fileName(), source.mimeType(), false, Instant.now().plusSeconds(300))).subscribeOn(Schedulers.boundedElastic()));
+                                .then(mediaAccessService.signObject(record.getObjectStorageConfigId(), record.getObjectStorageKey(),
+                                        source.fileName(), source.mimeType(), MediaAccessService.Purpose.THIRD_PARTY, false))
+                                .map(MediaAccessService.Access::url)
+                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "原素材没有可读取地址")));
                     }
                     String url = record.getObjectStorageUrl() == null || record.getObjectStorageUrl().isBlank() ? record.getSourceUrl() : record.getObjectStorageUrl();
                     if (url == null || url.isBlank()) return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "原素材没有可读取地址"));
-                    return Mono.just(url);
+                    return mediaAccessService.signUrl(url, MediaAccessService.Purpose.THIRD_PARTY);
                 });
     }
 
     /**
-     * 为已经校验作品状态的媒体签发五分钟读取授权。
+     * 为已经校验作品状态的媒体签发公开页读取授权。
      * @param asset 内部媒体记录
      * @return 临时地址与到期时间
      */
     public Mono<SharedWorkDtos.MediaAccess> access(JSONObject asset) {
-        Instant expiresAt = Instant.now().plusSeconds(300);
-        return persistenceService.getObjectStorageForCleanup(asset.getString("storageId"))
-                .contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true))
-                .flatMap(config -> Mono.fromCallable(() -> objectStorageService.createReadUrl(config, asset.getString("objectKey"),
-                        asset.getString("fileName"), asset.getString("mimeType"), false, expiresAt)).subscribeOn(Schedulers.boundedElastic()))
-                .map(url -> new SharedWorkDtos.MediaAccess(url, expiresAt.toString()));
+        return mediaAccessService.signObject(asset.getString("storageId"), asset.getString("objectKey"),
+                        asset.getString("fileName"), asset.getString("mimeType"), MediaAccessService.Purpose.PUBLIC_PAGE, false)
+                .map(access -> new SharedWorkDtos.MediaAccess(access.url(), access.expiresAt()));
     }
 
     /**

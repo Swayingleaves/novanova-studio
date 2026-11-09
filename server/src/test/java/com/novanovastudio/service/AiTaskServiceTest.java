@@ -29,6 +29,7 @@ import com.novanovastudio.dto.VideoGenerationConstraints;
 import com.novanovastudio.entity.AiGenerationTask;
 import com.novanovastudio.repository.AiTaskRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.storage.MediaAccessService;
 import com.novanovastudio.task.AiTaskEventPublisher;
 import com.novanovastudio.task.AiTaskQueue;
 import com.novanovastudio.task.ModelTaskExecutionDispatcher;
@@ -71,6 +72,10 @@ class AiTaskServiceTest {
     /** 业务持久化服务 */
     @Mock
     private PersistenceService persistenceService;
+
+    /** 媒体读地址签发 */
+    @Mock
+    private MediaAccessService mediaAccessService;
 
     /** 任务事件发布器 */
     @Mock
@@ -120,7 +125,8 @@ class AiTaskServiceTest {
     void setUp() {
         executionOrder = new ArrayList<>();
         when(persistenceService.requireStorageWritable(org.mockito.ArgumentMatchers.anyLong())).thenReturn(Mono.empty());
-        service = new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), repository, currentUserProvider, properties, persistenceService, eventPublisher, taskQueue, modelTaskExecutionDispatcher, orchestrator, adapterRegistry, customProviderAdapter, creditService, transactionalOperator);
+        service = new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), repository, currentUserProvider, properties, persistenceService, mediaAccessService, eventPublisher, taskQueue, modelTaskExecutionDispatcher, orchestrator, adapterRegistry, customProviderAdapter, creditService, transactionalOperator);
+        org.mockito.Mockito.lenient().when(mediaAccessService.signJson(any(), any())).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
 
         AiTaskDtos.AiChannelConfig channel = new AiTaskDtos.AiChannelConfig(
                 "channel-1", "图片渠道", "https://example.com", "key", "openai", List.of("model-1"));
@@ -585,6 +591,43 @@ class AiTaskServiceTest {
         Assertions.assertTrue(quote.reason().contains("2"));
         verify(repository, never()).createTask(any());
         org.mockito.Mockito.verifyNoInteractions(customProviderAdapter);
+    }
+
+    /** 图片请求尚未发出时取消，应退回积分。 */
+    @Test
+    void shouldRefundWhenProviderRequestHasNotBeenSent() {
+        when(repository.cancelActiveTask(eq("task-open"), org.mockito.ArgumentMatchers.anyMap(), eq(false))).thenReturn(Mono.just(false));
+        when(eventPublisher.markCancelRequested("task-open")).thenReturn(Mono.empty());
+        service.cancelTask("task-open", false).block();
+        verify(creditService).refundTask(7L, "task-open", AiTaskTypes.IMAGE);
+    }
+
+    /** 图片请求已经发出且用户未确认时，不能取消，也不能退款。 */
+    @Test
+    void shouldRejectCancelAfterProviderRequestWithoutRefund() {
+        AiGenerationTask sent = task("task-sent");
+        sent.setStatus("running");
+        sent.setProviderRequestSent(true);
+        when(repository.getTask(7L, "task-sent")).thenReturn(Mono.just(sent));
+        when(repository.cancelActiveTask(eq("task-sent"), org.mockito.ArgumentMatchers.anyMap(), eq(false))).thenReturn(Mono.empty());
+        BusinessException error = Assertions.assertThrows(BusinessException.class, () -> service.cancelTask("task-sent", false).block());
+        Assertions.assertEquals("business.providerRequestAlreadySentCannotCancel", error.getSystemMessage().key());
+        verify(creditService, never()).refundTask(anyLong(), anyString(), anyString());
+    }
+
+    /** 用户确认取消已发送的视频请求时，任务取消且不退款。 */
+    @Test
+    void shouldCancelSentVideoRequestWithoutRefundAfterConfirmation() {
+        AiGenerationTask sent = task("task-video");
+        sent.setTaskType(AiTaskTypes.VIDEO);
+        sent.setStatus("running");
+        sent.setProviderRequestSent(true);
+        when(repository.getTask(7L, "task-video")).thenReturn(Mono.just(sent));
+        when(repository.cancelActiveTask(eq("task-video"), org.mockito.ArgumentMatchers.anyMap(), eq(true))).thenReturn(Mono.just(true));
+        when(eventPublisher.markCancelRequested("task-video")).thenReturn(Mono.empty());
+        service.cancelTask("task-video", true).block();
+        verify(creditService, never()).refundTask(anyLong(), anyString(), anyString());
+        verify(eventPublisher).markCancelRequested("task-video");
     }
 
     /**

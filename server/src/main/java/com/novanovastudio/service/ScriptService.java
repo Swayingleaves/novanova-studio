@@ -12,6 +12,7 @@ import com.novanovastudio.repository.ScriptRepository;
 import com.novanovastudio.repository.NovelAdaptationRepository;
 import com.novanovastudio.repository.ScriptSourceRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.storage.MediaAccessService;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import java.time.OffsetDateTime;
@@ -68,6 +69,9 @@ public class ScriptService {
     /** 原文导入记录，用于在项目详情中回传原文类型。 */
     private final ScriptSourceRepository scriptSourceRepository;
 
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
+
     /** 概览与世界观基调这类单对象追溯目标使用的固定标识，与前端停点界面的勾选项一致。 */
     private static final String OVERVIEW_TARGET_ID = "overview";
     private static final String WORLD_SETTING_TARGET_ID = "worldSetting";
@@ -102,7 +106,7 @@ public class ScriptService {
         int normalizedPageSize = Math.min(100, Math.max(1, pageSize));
         return currentUserProvider.currentUserId().flatMap(userId -> Mono.zip(
                 repository.listProjects(userId, text(keyword), text(stage), text(contentType),
-                        (normalizedPage - 1) * normalizedPageSize, normalizedPageSize).collectList(),
+                        (normalizedPage - 1) * normalizedPageSize, normalizedPageSize).concatMap(this::signedProjectSummary).collectList(),
                 repository.countProjects(userId, text(keyword), text(stage), text(contentType)),
                 (projects, total) -> new ScriptDtos.ProjectListResponse(projects, total, normalizedPage, normalizedPageSize)));
     }
@@ -166,7 +170,8 @@ public class ScriptService {
         return currentUserProvider.currentUserId().flatMap(userId -> repository.updateCover(userId, request.projectId(), coverUrl)
                         .filter(Boolean::booleanValue)
                         .switchIfEmpty(notFound("剧本项目不存在"))
-                        .thenReturn(new ScriptDtos.ProjectCover(request.projectId(), coverUrl)))
+                        .then(mediaAccessService.signUrl(coverUrl, MediaAccessService.Purpose.PREVIEW))
+                        .map(signed -> new ScriptDtos.ProjectCover(request.projectId(), signed)))
                 .doOnSuccess(cover -> log.info("剧本封面已更新: projectId={}", cover.projectId()));
     }
 
@@ -1621,6 +1626,19 @@ public class ScriptService {
     }
 
     /**
+     * 项目摘要封面按预览用途现签，避免私有桶公开地址失效。
+     *
+     * @param project 项目摘要
+     * @return 封面已签发的项目摘要
+     */
+    private Mono<ScriptDtos.ProjectSummary> signedProjectSummary(ScriptDtos.ProjectSummary project) {
+        return mediaAccessService.signUrl(text(project.coverUrl()), MediaAccessService.Purpose.PREVIEW)
+                .map(coverUrl -> new ScriptDtos.ProjectSummary(project.id(), project.title(), project.contentType(), project.genre(),
+                        project.logline(), coverUrl, project.stage(), project.completionRate(), project.episodeCount(),
+                        project.targetEpisodeCount(), project.productionStarted(), project.revision(), project.updatedAt()));
+    }
+
+    /**
      * 加载已完成所有权校验的项目基础详情。
      *
      * @param userId 当前用户标识
@@ -1640,14 +1658,16 @@ public class ScriptService {
         // 空串表示该项目不是由导入原文创建的，前端据此直接显示空状态而不再请求原文接口。
         Mono<String> sourceType = scriptSourceRepository.findSourceTypeByProject(userId, projectId).defaultIfEmpty("");
         return Mono.zip(project, Mono.zip(outlines, events, characters, relations), Mono.zip(world, worldItems, locations, episodes), sourceType)
-                .map(tuple -> {
+                .flatMap(tuple -> {
                     ScriptRepository.ProjectRecord record = tuple.getT1();
                     var story = tuple.getT2();
                     var setting = tuple.getT3();
-                    return new ScriptDtos.ProjectDetail(record.id(), tuple.getT4(), record.overview(), story.getT1(), story.getT2(),
-                            story.getT3(), story.getT4(), setting.getT1(), setting.getT2(), setting.getT3(), setting.getT4(),
-                            record.stage(), record.completionRate(), record.productionStartedAt() != null, record.revision(),
-                            record.createdAt(), record.updatedAt(), text(record.coverUrl()));
+                    // 封面在响应前现签，数据库仍保留创建时写入的原始地址。
+                    return mediaAccessService.signUrl(text(record.coverUrl()), MediaAccessService.Purpose.PREVIEW)
+                            .map(coverUrl -> new ScriptDtos.ProjectDetail(record.id(), tuple.getT4(), record.overview(), story.getT1(), story.getT2(),
+                                    story.getT3(), story.getT4(), setting.getT1(), setting.getT2(), setting.getT3(), setting.getT4(),
+                                    record.stage(), record.completionRate(), record.productionStartedAt() != null, record.revision(),
+                                    record.createdAt(), record.updatedAt(), coverUrl));
                 });
     }
 

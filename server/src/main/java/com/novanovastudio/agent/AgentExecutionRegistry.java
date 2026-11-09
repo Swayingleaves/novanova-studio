@@ -185,6 +185,22 @@ public class AgentExecutionRegistry {
     }
 
     /**
+     * 读取会话当前已登记的生成任务，不写入取消标记。
+     *
+     * @param sessionId String Agent 会话ID
+     * @return List<String> 任务ID
+     */
+    public List<String> activeTaskIds(String sessionId) {
+        ExecutionState state = executions.get(sessionId);
+        if (state == null) {
+            return List.of();
+        }
+        synchronized (state) {
+            return state.tasks.values().stream().map(AgentTaskRegistration::taskId).toList();
+        }
+    }
+
+    /**
      * 请求取消指定用户的活跃 Agent 会话。
      *
      * @param userId Long 当前用户ID

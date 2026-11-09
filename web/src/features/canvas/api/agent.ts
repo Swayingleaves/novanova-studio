@@ -124,8 +124,8 @@ export function agentChat(params: AgentChatParams) {
 }
 
 /** 停止当前空间中的请求及其关联任务。 */
-export async function cancelAgentChat(sessionId: string, requestId: string): Promise<void> {
-    await serverPost("/ai/agent/cancelChat", { sessionId, requestId });
+export async function cancelAgentChat(sessionId: string, requestId: string, forfeitSubmittedGeneration = false): Promise<void> {
+    await serverPost("/ai/agent/cancelChat", { sessionId, requestId, forfeitSubmittedGeneration });
 }
 
 /** 查询当前空间中的主Agent请求状态。 */

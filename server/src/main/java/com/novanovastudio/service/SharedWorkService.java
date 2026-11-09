@@ -14,6 +14,7 @@ import com.novanovastudio.security.AdminGuard;
 import com.novanovastudio.security.CurrentUser;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.TeamScope;
+import com.novanovastudio.storage.MediaAccessService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HashMap;
@@ -70,6 +71,8 @@ public class SharedWorkService {
     private final StorageBillingService storageBillingService;
     /** 仍在后台复制媒体的投稿，避免接口返回后无法确认准备是否结束。 */
     private final Set<String> activePreparations = ConcurrentHashMap.newKeySet();
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
 
     /**
      * 预览服务端实际将公开的内容，返回版本以防预览后内容被修改。
@@ -350,7 +353,15 @@ public class SharedWorkService {
 
     /** @param row 内部合并查询行 @return 统一首页卡片 */
     private Mono<SharedWorkDtos.FantasticItem> fantasticItem(JSONObject row) {
-        if ("official".equals(row.getString("source"))) return Mono.just(card(row, row.getString("mediaUrl"), row.getString("thumbnailUrl")));
+        if ("official".equals(row.getString("source"))) {
+            // 官方作品直接使用精选表里的媒体地址，私有桶下必须按公开页用途重签。
+            String mediaUrl = row.getString("mediaUrl") == null ? "" : row.getString("mediaUrl");
+            String thumbnailUrl = row.getString("thumbnailUrl") == null ? "" : row.getString("thumbnailUrl");
+            return Mono.zip(
+                            mediaAccessService.signUrl(mediaUrl, MediaAccessService.Purpose.PUBLIC_PAGE),
+                            mediaAccessService.signUrl(thumbnailUrl, MediaAccessService.Purpose.PUBLIC_PAGE))
+                    .map(urls -> card(row, urls.getT1(), urls.getT2()));
+        }
         return repository.media(row.getString("shareCode")).filter(asset -> "canvas".equals(row.getString("workType"))
                         ? asset.getString("mimeType").startsWith("image/") : asset.getString("mimeType").startsWith(row.getString("workType") + "/"))
                 .next().flatMap(mediaService::access).map(access -> card(row, access.url(), ""))

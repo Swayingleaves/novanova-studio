@@ -7,6 +7,8 @@ export const RECENT_REFERENCE_ASSET_LIMIT = 20;
 export type RecentReferenceAsset = {
     /** 媒体地址，回填参考素材时直接使用。 */
     url: string;
+    /** 媒体存储标识，用于换取当前可用的临时地址；旧记录只有 url。 */
+    storageKey?: string;
     /** 素材类型，决定缩略图渲染方式和回填到哪一组参考素材。 */
     kind: "image" | "video";
     /** 原始文件名，回填时作为展示名。 */
@@ -68,11 +70,12 @@ function normalizeRecentReferenceAsset(value: unknown): RecentReferenceAsset | n
     // 旧版列表只存 URL 字符串，一律按图片处理。
     const record = typeof value === "string" ? { url: value, kind: "image" } : value;
     if (!record || typeof record !== "object") return null;
-    const { url, kind, name, durationMs } = record as Record<string, unknown>;
+    const { url, storageKey, kind, name, durationMs } = record as Record<string, unknown>;
     const normalizedUrl = normalizeReferenceAssetUrl(url);
     if (!normalizedUrl) return null;
     return {
         url: normalizedUrl,
+        ...(typeof storageKey === "string" && storageKey.trim() ? { storageKey: storageKey.trim() } : {}),
         kind: kind === "video" ? "video" : "image",
         ...(typeof name === "string" && name.trim() ? { name: name.trim() } : {}),
         ...(typeof durationMs === "number" && Number.isFinite(durationMs) ? { durationMs } : {}),

@@ -315,7 +315,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                         String name = StringUtils.hasText(attachment.name()) ? attachment.name() : "reference";
                             return Mono.just(new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, "", referenceUrl, attachment.role()));
                     }
-                    return persistenceService.getMediaInfoForUser(userId, attachment.storageKey())
+                    return persistenceService.getMediaInfoForUser(userId, attachment.storageKey(), com.novanovastudio.storage.MediaAccessService.Purpose.THIRD_PARTY)
                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.referenceNotFoundOrOwnedByAnotherUser"))))
                             .map(media -> {
                                 String mimeType = StringUtils.hasText(media.mimeType()) ? media.mimeType() : attachment.type();

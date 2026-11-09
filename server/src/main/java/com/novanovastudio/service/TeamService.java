@@ -15,6 +15,7 @@ import com.novanovastudio.repository.TeamRepository;
 import com.novanovastudio.repository.UserRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.TeamScope;
+import com.novanovastudio.storage.MediaAccessService;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -58,12 +59,16 @@ public class TeamService {
     private final TeamInvitationMailService teamInvitationMailService;
     /** 事务操作器。 */
     private final TransactionalOperator transactionalOperator;
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
 
     /**
      * 列出所有团队，仅超级管理员控制器调用。
      * @return 团队列表
      */
-    public Mono<List<JSONObject>> listTeams() { return repository.listTeams().collectList(); }
+    public Mono<List<JSONObject>> listTeams() {
+        return repository.listTeams().concatMap(team -> mediaAccessService.signJson(team, MediaAccessService.Purpose.PREVIEW)).collectList();
+    }
 
     /**
      * 查询公开团队品牌。
@@ -71,12 +76,14 @@ public class TeamService {
      * @return 公开品牌信息
      */
     public Mono<JSONObject> getPublicTeam(String slug) {
-        return repository.findPublicTeam(slug).switchIfEmpty(Mono.error(missing("团队不存在")));
+        return repository.findPublicTeam(slug).switchIfEmpty(Mono.error(missing("团队不存在")))
+                .flatMap(team -> mediaAccessService.signJson(team, MediaAccessService.Purpose.PUBLIC_PAGE));
     }
 
     /** @return 当前用户可切换的团队 */
     public Mono<List<JSONObject>> listMyTeams() {
-        return currentUserProvider.currentUserId().flatMap(userId -> repository.listUserTeams(userId).collectList());
+        return currentUserProvider.currentUserId().flatMap(userId -> repository.listUserTeams(userId)
+                .concatMap(team -> mediaAccessService.signJson(team, MediaAccessService.Purpose.PREVIEW)).collectList());
     }
 
     /** @return 当前用户待接受邀请 */
@@ -107,6 +114,7 @@ public class TeamService {
                 })))
                 .as(transactionalOperator::transactional)
                 .contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true))
+                .flatMap(team -> mediaAccessService.signJson(team, MediaAccessService.Purpose.PREVIEW))
                 .doOnSuccess(team -> log.info("团队创建完成：teamId={}", team.getLong("id")));
     }
 
@@ -125,7 +133,8 @@ public class TeamService {
 
     /** @return 当前团队管理概况 */
     public Mono<JSONObject> getTeam() {
-        return TeamScope.requireAdministrator().flatMap(scope -> repository.findTeam(scope.teamId()));
+        return TeamScope.requireAdministrator().flatMap(scope -> repository.findTeam(scope.teamId()))
+                .flatMap(team -> mediaAccessService.signJson(team, MediaAccessService.Purpose.PREVIEW));
     }
 
     /**
@@ -279,7 +288,8 @@ public class TeamService {
                             });
                         }))))
                 .as(transactionalOperator::transactional)
-                .contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
+                .contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true))
+                .flatMap(team -> mediaAccessService.signJson(team, MediaAccessService.Purpose.PREVIEW));
     }
 
     /**

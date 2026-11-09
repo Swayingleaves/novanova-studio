@@ -95,8 +95,12 @@ class SharedWorkIntegrationTest {
             return new AiHttpClient.RemoteMediaFile((long) bytes.length, call.getArgument(1));
         }));
         var properties = new NovanovaProperties();
-        var media = new SharedWorkMediaService(persistence, persistenceService, repository, storage, billing, http, properties);
-        works = new SharedWorkService(repository, persistence, persistenceService, new SharedWorkSnapshotFactory(), media, users, new UserRepository(client), teams, new AdminGuard(users), transaction, billing);
+        var mediaAccess = com.novanovastudio.MediaAccessTestSupport.echo();
+        lenient().when(mediaAccess.signObject(any(), any(), any(), any(), any(), anyBoolean()))
+                .thenAnswer(call -> Mono.just(new com.novanovastudio.storage.MediaAccessService.Access(
+                        "https://private.example/" + call.getArgument(1), "2099-01-01T00:00:00Z")));
+        var media = new SharedWorkMediaService(persistence, persistenceService, repository, storage, billing, http, properties, mediaAccess);
+        works = new SharedWorkService(repository, persistence, persistenceService, new SharedWorkSnapshotFactory(), media, users, new UserRepository(client), teams, new AdminGuard(users), transaction, billing, mediaAccess);
         copies = new SharedWorkCopyService(works, repository, persistence, persistenceService, billing, media, storage, http, properties, users, transaction);
     }
 

@@ -17,6 +17,7 @@ import com.novanovastudio.repository.UserRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.PasswordLoginLockService;
 import com.novanovastudio.security.TokenService;
+import com.novanovastudio.storage.MediaAccessService;
 import com.novanovastudio.task.AiTaskEventPublisher;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
@@ -51,6 +52,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.UriComponentsBuilder;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
@@ -124,6 +126,9 @@ public class UserService {
 
     /** 当前用户提供器 */
     private final CurrentUserProvider currentUserProvider;
+
+    /** 私有存储桶读地址签发 */
+    private final MediaAccessService mediaAccessService;
 
     /** 密码登录锁定服务 */
     private final PasswordLoginLockService passwordLoginLockService;
@@ -263,7 +268,7 @@ public class UserService {
                                                                 .then(inviterUserId.map(inviterId -> creditService.grantInvitationReward(inviterId, userId)).orElseGet(Mono::empty))
                                                                 .then(userRepository.findById(userId)))
                                                         .as(transactionalOperator::transactional)
-                                                        .map(this::buildAuthResponse);
+                                                        .flatMap(this::buildAuthResponse);
                                             });
                                 }))));
     }
@@ -359,7 +364,7 @@ public class UserService {
         return currentUserProvider.currentUserId()
                 .flatMap(userRepository::findById)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.userNotFound"))))
-                .map(this::userProfile);
+                .flatMap(this::userProfile);
     }
 
     /**
@@ -384,7 +389,7 @@ public class UserService {
                             }
                             return userRepository.findById(userId)
                                     .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.userNotFound"))))
-                                    .map(this::userProfile);
+                                    .flatMap(this::userProfile);
                         })
                         .doOnSuccess(profile -> log.info("用户资料已更新: userId={}", userId)))
                 .onErrorMap(DataIntegrityViolationException.class, exception -> new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.usernameAlreadyTaken")));
@@ -473,9 +478,9 @@ public class UserService {
         return userRepository.listUsers(normalizedPage, normalizedPageSize, keyword, userId, role, status, createdAfter, createdBefore)
                 .collectList()
                 .flatMap(users -> passwordLoginLockService.lockedUntilByUserIds(users.stream().map(User::getId).toList())
-                        .map(passwordLockedUntilByUserId -> users.stream()
-                                .map(user -> userProfile(user, passwordLockedUntilByUserId.get(user.getId()), user.getEmail() == null))
-                                .toList()))
+                        .flatMap(passwordLockedUntilByUserId -> Flux.fromIterable(users)
+                                .concatMap(user -> userProfile(user, passwordLockedUntilByUserId.get(user.getId()), user.getEmail() == null))
+                                .collectList()))
                 .zipWith(userRepository.countUsers(keyword, userId, role, status, createdAfter, createdBefore))
                 .map(tuple -> new UserDtos.UserListResponse(tuple.getT1(), tuple.getT2()));
     }
@@ -693,12 +698,13 @@ public class UserService {
      * 构建登录响应
      *
      * @param user User 用户信息
-     * @return AuthResponse 登录响应
+     * @return Mono<AuthResponse> 登录响应
      */
-    private UserDtos.AuthResponse buildAuthResponse(User user) {
+    private Mono<UserDtos.AuthResponse> buildAuthResponse(User user) {
         // 使用当前用户ID和角色签发令牌，再拼装前端依赖的登录响应结构。
         TokenService.SignedToken signedToken = tokenService.sign(user.getId(), user.getRole(), user.getTokenVersion());
-        return new UserDtos.AuthResponse(signedToken.token(), TOKEN_TYPE_BEARER, formatTime(signedToken.expiresAt()), userProfile(user));
+        return userProfile(user)
+                .map(profile -> new UserDtos.AuthResponse(signedToken.token(), TOKEN_TYPE_BEARER, formatTime(signedToken.expiresAt()), profile));
     }
 
     /**
@@ -712,7 +718,7 @@ public class UserService {
             return Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.accountDisabled")));
         }
         OffsetDateTime loginTime = OffsetDateTime.now(ZoneOffset.UTC);
-        return userRepository.updateLastLoginAt(user.getId()).then(Mono.fromSupplier(() -> {
+        return userRepository.updateLastLoginAt(user.getId()).then(Mono.defer(() -> {
             user.setLastLoginAt(loginTime);
             return buildAuthResponse(user);
         }));
@@ -722,9 +728,9 @@ public class UserService {
      * 转换用户公开资料
      *
      * @param user User 用户信息
-     * @return UserProfile 用户公开资料
+     * @return Mono<UserProfile> 用户公开资料
      */
-    private UserDtos.UserProfile userProfile(User user) {
+    private Mono<UserDtos.UserProfile> userProfile(User user) {
         return userProfile(user, null, false);
     }
 
@@ -734,27 +740,28 @@ public class UserService {
      * @param user User 用户信息
      * @param passwordLockedUntil OffsetDateTime 密码锁定截止时间
      * @param canResetPassword 是否可由当前管理入口重置密码
-     * @return UserProfile 用户公开资料
+     * @return Mono<UserProfile> 用户公开资料
      */
-    private UserDtos.UserProfile userProfile(User user, OffsetDateTime passwordLockedUntil, boolean canResetPassword) {
-        // 只返回前端需要的公开字段，密码哈希等敏感字段不进入响应。
-        return new UserDtos.UserProfile(
-                user.getId(),
-                nullToEmpty(user.getEmail()),
-                nullToEmpty(user.getUsername()),
-                firstNonEmpty(user.getNickname(), user.getUsername()),
-                nullToEmpty(user.getAvatar()),
-                nullToEmpty(user.getRole()),
-                user.getStatus(),
-                user.getCreditBalance(),
-                formatTime(user.getCreatedAt()),
-                formatTime(user.getLastLoginAt()),
-                user.getWelcomeReadAt() != null,
-                user.getOnboardingVersion() == null ? 0 : user.getOnboardingVersion(),
-                user.getCreationTourVersion() == null ? 0 : user.getCreationTourVersion(),
-                passwordLockedUntil == null ? null : formatTime(passwordLockedUntil),
-                canResetPassword
-        );
+    private Mono<UserDtos.UserProfile> userProfile(User user, OffsetDateTime passwordLockedUntil, boolean canResetPassword) {
+        // 只返回前端需要的公开字段，密码哈希等敏感字段不进入响应；头像在响应前按预览用途现签，数据库保留原始地址。
+        return mediaAccessService.signUrl(nullToEmpty(user.getAvatar()), MediaAccessService.Purpose.PREVIEW)
+                .map(avatar -> new UserDtos.UserProfile(
+                        user.getId(),
+                        nullToEmpty(user.getEmail()),
+                        nullToEmpty(user.getUsername()),
+                        firstNonEmpty(user.getNickname(), user.getUsername()),
+                        avatar,
+                        nullToEmpty(user.getRole()),
+                        user.getStatus(),
+                        user.getCreditBalance(),
+                        formatTime(user.getCreatedAt()),
+                        formatTime(user.getLastLoginAt()),
+                        user.getWelcomeReadAt() != null,
+                        user.getOnboardingVersion() == null ? 0 : user.getOnboardingVersion(),
+                        user.getCreationTourVersion() == null ? 0 : user.getCreationTourVersion(),
+                        passwordLockedUntil == null ? null : formatTime(passwordLockedUntil),
+                        canResetPassword
+                ));
     }
 
     /**

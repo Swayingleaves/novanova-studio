@@ -35,6 +35,7 @@ import { chatAttachmentsToMentionReferences, PromptMentionText } from "@/feature
 import { ChoiceHistoryBar } from "@/features/generation/components/creation-message-thread";
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, mergePlanTaskActivityMessage, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
+import { cancelAiTasksWithRefundPolicy, runCancelWithProviderRequestPolicy } from "@/features/generation/lib/cancel-provider-generation";
 import { findLatestPendingConversation, hasPendingImageConversation } from "@/features/generation/lib/generation-conversation-recovery";
 import { useGenerationConversations } from "@/features/generation/hooks/use-generation-conversations";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
@@ -65,6 +66,7 @@ import { useHomepageCreationDraft } from "@/features/homepage/hooks/use-homepage
 import { consumeHomepageCreationHandoff, peekHomepageCreationHandoff } from "@/features/homepage/lib/homepage-creation-handoff";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
+import { useMediaUrl } from "@/shared/hooks/use-media-url";
 import { deleteGenerationLogs, getAgentSessionHistory, getAiTaskPollingIntervalMilliseconds, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
 
 type GeneratedImage = {
@@ -82,6 +84,7 @@ type GeneratedImage = {
 type GenerationResult = {
     id: string;
     status: "pending" | "success" | "failed" | "canceled";
+    taskId?: string;
     image?: GeneratedImage;
     error?: string;
 };
@@ -102,6 +105,7 @@ type Round = {
     references: ReferenceImage[];
     config: RoundConfig;
     results: GenerationResult[];
+    taskId?: string;
     createdAt: number;
     assistantText?: string;
     activities?: AgentActivityState[];
@@ -138,6 +142,7 @@ export default function ImagePage() {
     const isPromptOptimizing = optimizingOperationId === "image-page";
 
     const [activeId, setActiveId] = useState<string | null>(null);
+    const [pendingStopping, setPendingStopping] = useState(false);
     const activeIdRef = useRef(activeId);
     const { conversations, setConversations, conversationsRef, refreshConversations, loadMoreConversations, conversationsLoading, hasMoreConversations, conversationsError, retryConversations } = useGenerationConversations("image", userId, activeIdRef, normalizeConversation);
     useGenerationShareSources(conversations, "image");
@@ -497,6 +502,29 @@ export default function ImagePage() {
     const historySettingsSummary = !imageDraftSettingsModified && activeId && latestRound?.config ? buildImageSettingsSummary(latestRound.config, effectiveConfig, historyModel) : "";
     const settingsSummary = historySettingsSummary || pageSettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingImageConversation(activeConversation) : false;
+    const stopPendingGeneration = async () => {
+        const conversation = conversationsRef.current.find((item) => item.id === activeIdRef.current);
+        const taskIds = [...new Set((conversation?.rounds ?? []).flatMap((round) => [
+            ...(round.taskId && round.results.some((result) => result.status === "pending") ? [round.taskId] : []),
+            ...round.results.flatMap((result) => result.status === "pending" && result.taskId ? [result.taskId] : []),
+        ]))];
+        if (!taskIds.length) {
+            message.warning(translate("generation.noActiveGenerationToStop"));
+            return;
+        }
+        setPendingStopping(true);
+        try {
+            const outcome = await cancelAiTasksWithRefundPolicy(taskIds, modal);
+            if (outcome === "declined") return;
+            if (outcome === "refunded") message.success(translate("generation.generationStoppedCreditsRefunded"));
+            if (outcome === "forfeited") message.success(translate("generation.generationStoppedWithoutRefund"));
+            await refreshConversations();
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("chat.failedToStopGeneration"));
+        } finally {
+            setPendingStopping(false);
+        }
+    };
     const canGenerate = Boolean(prompt.trim()) && !balanceInsufficient && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
 
@@ -558,7 +586,7 @@ export default function ImagePage() {
                 try {
                     const file = imageFiles[index];
                     const image = await uploadImage(file);
-                    recordRecentReferenceAsset({ kind: "image", url: image.objectStorage?.url || image.url, name: file.name });
+                    recordRecentReferenceAsset({ kind: "image", url: image.objectStorage?.url || image.url, storageKey: image.storageKey, name: file.name });
                     const uploadedReference: ReferenceImage = {
                         ...placeholder,
                         name: file.name,
@@ -930,15 +958,7 @@ export default function ImagePage() {
             label: uploading ? translate("image.uploading", { value0: imageReferenceLabel(index) }) : imageReferenceLabel(index),
             preview: (
                 <div className="relative size-11">
-                    <Image
-                        src={reference.dataUrl}
-                        alt={reference.name}
-                        width={44}
-                        height={44}
-                        style={{ objectFit: "cover" }}
-                        className="rounded-xl"
-                        preview={uploading ? false : { mask: translate("image.preview") }}
-                    />
+                    <ReferenceChipImage reference={reference} previewDisabled={uploading} />
                     {uploading ? (
                         <span className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/35 text-white">
                             <LoaderCircle className="size-4 animate-spin" />
@@ -953,7 +973,7 @@ export default function ImagePage() {
     const addRecentReference = (asset: RecentReferenceAsset) => {
         setReferences((current) => {
             if (current.some((reference) => reference.dataUrl === asset.url)) return current;
-            return [...current, { id: nanoid(), name: asset.name || translate("image.recentReferenceImages"), type: "image/*", dataUrl: asset.url }];
+            return [...current, { id: nanoid(), name: asset.name || translate("image.recentReferenceImages"), type: "image/*", dataUrl: asset.url, storageKey: asset.storageKey }];
         });
     };
     const composerActions: CreationComposerAction[] = [
@@ -1182,7 +1202,7 @@ export default function ImagePage() {
                     running: isStreaming || activeConversationPending,
                     queued: isQueued,
                     canSubmit: canGenerate,
-                    stopping: isStopping,
+                    stopping: isStopping || pendingStopping,
                     focusWhenValueSet: focusInitialPrompt,
                     creditCost,
                     onChange: setPrompt,
@@ -1192,7 +1212,9 @@ export default function ImagePage() {
                     onSkillRemove: () => setSelectedSkill(null),
                     onPasteImages: (files) => void addReferences(files),
                     onSubmit: () => void generate(),
-                    onStop: isStreaming || isQueued ? () => void cancelMessage() : undefined,
+                    onStop: isStreaming || isQueued
+                        ? () => void runCancelWithProviderRequestPolicy(modal, (forfeit) => cancelMessage(forfeit)).catch((error) => message.error(error instanceof Error ? error.message : translate("chat.failedToStopGeneration")))
+                        : activeConversationPending ? () => void stopPendingGeneration() : undefined,
                 }}
                 settings={{
                     open: settingsOpen,
@@ -1444,12 +1466,35 @@ function buildImageThreadSections(
     }));
 }
 
+/** 参考图芯片：有存储键时续签临时地址，加载失败自动续签一次。 */
+function ReferenceChipImage({ reference, previewDisabled }: { reference: ReferenceImage; previewDisabled?: boolean }) {
+    const media = useMediaUrl({ storageKey: reference.storageKey, url: reference.dataUrl, objectStorage: reference.objectStorage, kind: "image" });
+    return (
+        <Image
+            src={media.url || reference.dataUrl}
+            alt={reference.name}
+            width={44}
+            height={44}
+            style={{ objectFit: "cover" }}
+            className="rounded-xl"
+            preview={previewDisabled ? false : { mask: translate("image.preview") }}
+            onError={media.onError}
+        />
+    );
+}
+
+/** 历史参考图缩略图：有存储键时续签临时地址，地址失效自动重试一次。 */
+function ReferenceThumbnail({ reference, title }: { reference: ReferenceImage; title: string }) {
+    const media = useMediaUrl({ storageKey: reference.storageKey, url: reference.dataUrl, objectStorage: reference.objectStorage, kind: "image" });
+    return <img src={media.url || reference.dataUrl} alt={reference.name} title={title} className="size-14 rounded-xl object-cover ring-1 ring-[var(--studio-line)]" onError={media.onError} />;
+}
+
 function renderImageRoundReferences(round: Round) {
     const visibleReferences = round.references.filter((reference) => Boolean(reference.dataUrl?.trim()));
     return (
         <div className="flex flex-wrap gap-2">
             {visibleReferences.map((reference, index) => (
-                <img key={reference.id} src={reference.dataUrl} alt={reference.name} className="size-14 rounded-xl object-cover ring-1 ring-[var(--studio-line)]" title={imageReferenceLabel(index)} />
+                <ReferenceThumbnail key={reference.id} reference={reference} title={imageReferenceLabel(index)} />
             ))}
         </div>
     );
@@ -1561,7 +1606,15 @@ function ResultCard({
     const translate = useTranslation();
     const [loadedMeta, setLoadedMeta] = useState<{ width: number; height: number; bytes: number }>({ width: image.width, height: image.height, bytes: image.bytes });
     const [isDownloading, setIsDownloading] = useState(false);
-    const preview = useMediaFallback(image.dataUrl);
+    // 有存储键时通过接口换取当前临时地址，缩略图加载失败会再续签一次。
+    const media = useMediaUrl({ storageKey: image.storageKey, url: image.dataUrl, objectStorage: image.objectStorage, kind: "image" });
+    const displaySrc = media.url || image.dataUrl;
+    const preview = useMediaFallback(displaySrc);
+    /** 地址失效时先续签一次，续签后仍未恢复则展示占位图。 */
+    const handlePreviewError = () => {
+        media.onError();
+        preview.onError();
+    };
     const displayWidth = image.width > 0 ? image.width : loadedMeta.width;
     const displayHeight = image.height > 0 ? image.height : loadedMeta.height;
     const displayBytes = image.bytes > 0 ? image.bytes : loadedMeta.bytes;
@@ -1581,10 +1634,10 @@ function ResultCard({
                 height: picture.naturalHeight || current.height,
             }));
         };
-        picture.src = image.dataUrl;
+        picture.src = displaySrc;
 
-        if (image.bytes <= 0 && /^https?:\/\//i.test(image.dataUrl)) {
-            void readImageContentLength(image.dataUrl).then((bytes) => {
+        if (image.bytes <= 0 && /^https?:\/\//i.test(displaySrc)) {
+            void readImageContentLength(displaySrc).then((bytes) => {
                 if (!cancelled && bytes > 0) {
                     setLoadedMeta((current) => ({ ...current, bytes }));
                 }
@@ -1594,7 +1647,7 @@ function ResultCard({
         return () => {
             cancelled = true;
         };
-    }, [image.dataUrl, image.bytes]);
+    }, [displaySrc, image.bytes]);
 
     const downloadResult = async () => {
         if (isDownloading) return;
@@ -1613,9 +1666,9 @@ function ResultCard({
         >
             <div className="relative overflow-hidden bg-[var(--studio-media)]" style={{ aspectRatio: previewAspectRatio }}>
                 {onOpenDetail ? (
-                    <img src={preview.displaySrc} alt={translate("image.result", { value0: index + 1 })} className="block size-full cursor-zoom-in object-contain" onClick={() => onOpenDetail(image, index)} onError={preview.onError} />
+                    <img src={preview.displaySrc} alt={translate("image.result", { value0: index + 1 })} className="block size-full cursor-zoom-in object-contain" onClick={() => onOpenDetail(image, index)} onError={handlePreviewError} />
                 ) : (
-                    <Image src={image.dataUrl} fallback={MEDIA_FALLBACK_IMAGE} alt={translate("image.result", { value0: index + 1 })} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
+                    <Image src={displaySrc} fallback={MEDIA_FALLBACK_IMAGE} alt={translate("image.result", { value0: index + 1 })} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} onError={media.onError} />
                 )}
                 <div className="absolute left-2 top-2 rounded-full bg-black/60 px-2.5 py-0.5 text-xs font-medium text-white">#{index + 1}</div>
             </div>

@@ -9,6 +9,7 @@ import type { CanvasVideoNode } from "../types";
 import { useNodeActions } from "./node-action-context";
 import { CanvasConnectionHandles, CanvasNodeTitle, NodeError, NodeHoverSurface, NodeLoading, NodeMediaUnavailable } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
+import { useMediaUrl } from "@/shared/hooks/use-media-url";
 
 export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<Node<CanvasVideoNode>>) {
     const translate = useTranslation();
@@ -20,7 +21,10 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
     const [hovered, setHovered] = useState(false);
     // 记录加载失败的媒体地址，地址变化（重新生成/替换）后自动恢复显示。
     const [failedSource, setFailedSource] = useState<string | null>(null);
-    const isMediaUnavailable = hasContent && failedSource === data.content.source;
+    // 有存储键时通过接口换取当前临时地址，地址过期后由渲染错误触发续签。
+    const media = useMediaUrl({ storageKey: data.content.storageKey, url: data.content.source, objectStorage: data.content.objectStorage, kind: "media" });
+    const displaySource = media.url || data.content.source;
+    const isMediaUnavailable = hasContent && (failedSource === data.content.source || (Boolean(data.content.storageKey) && media.failed));
     const borderColor = selected ? theme.node.activeStroke : isError ? "#ef4444" : theme.node.stroke;
 
     return (
@@ -58,7 +62,7 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
                     <NodeMediaUnavailable kind="video" />
                 ) : hasContent ? (
                     <div className="relative h-full min-h-0 w-full min-w-0 overflow-hidden rounded-[inherit]">
-                        <video src={data.content.source} className="pointer-events-none block h-full w-full object-contain" data-canvas-no-zoom muted preload="metadata" onError={() => setFailedSource(data.content.source)} />
+                        <video src={displaySource} className="pointer-events-none block h-full w-full object-contain" data-canvas-no-zoom muted preload="metadata" onError={() => { if (data.content.storageKey) media.onError(); else setFailedSource(data.content.source); }} />
                         {hovered ? (
                             <div className="pointer-events-auto absolute inset-0 flex items-center justify-center" style={{ background: "rgba(2,6,23,0.22)" }}>
                                 <button

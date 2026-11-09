@@ -74,9 +74,13 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
             var request = new com.qcloud.cos.model.GeneratePresignedUrlRequest(config.bucket(), key, com.qcloud.cos.http.HttpMethodName.GET);
             request.setExpiration(java.util.Date.from(expiresAt));
             var headers = new com.qcloud.cos.model.ResponseHeaderOverrides();
-            headers.setContentDisposition(org.springframework.http.ContentDisposition.builder(download ? "attachment" : "inline")
-                    .filename(fileName, java.nio.charset.StandardCharsets.UTF_8).build().toString());
-            headers.setContentType(mimeType);
+            if (StringUtils.hasText(fileName)) {
+                headers.setContentDisposition(org.springframework.http.ContentDisposition.builder(download ? "attachment" : "inline")
+                        .filename(fileName, java.nio.charset.StandardCharsets.UTF_8).build().toString());
+            }
+            if (StringUtils.hasText(mimeType)) {
+                headers.setContentType(mimeType);
+            }
             request.setResponseHeaders(headers);
             return client.generatePresignedUrl(request).toString();
         } finally { client.shutdown(); }
@@ -134,10 +138,12 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
     }
 
     /**
-     * 使用无敏感内容的探针确认存储桶拒绝匿名读取。
+     * 使用继承桶权限的探针确认存储桶拒绝匿名读取，并验证预签名地址可读。
+     * <p>
+     * 探针对象不能再单独设置私有 ACL，否则公有读桶也会返回 403，无法证明桶级权限。
      *
      * @param config ObjectStorageConfig 对象存储配置
-     * @return boolean 是否确认匿名读取被拒绝
+     * @return boolean 是否确认匿名读取被拒绝且签名读取可用
      */
     @Override
     public boolean verifyPrivateBucket(PersistenceDtos.ObjectStorageConfig config) {
@@ -145,17 +151,24 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
         String key = "script-source/private-probe/" + UUID.randomUUID();
         COSClient client = createClient(config);
         try {
+            var acl = client.getBucketAcl(config.bucket().trim());
+            if (acl.getCannedAccessControl() != null && acl.getCannedAccessControl() != CannedAccessControlList.Private) {
+                return false;
+            }
             byte[] marker = "private-probe".getBytes(java.nio.charset.StandardCharsets.UTF_8);
             ObjectMetadata metadata = new ObjectMetadata();
             metadata.setContentLength(marker.length);
-            var upload = new com.qcloud.cos.model.PutObjectRequest(config.bucket().trim(), key, new ByteArrayInputStream(marker), metadata);
-            upload.setCannedAcl(CannedAccessControlList.Private);
-            client.putObject(upload);
-            String base = StringUtils.hasText(config.publicBaseUrl()) ? config.publicBaseUrl().replaceAll("/+$", "")
-                    : "https://" + config.bucket().trim() + ".cos." + config.region().trim() + ".myqcloud.com";
-            HttpRequest request = HttpRequest.newBuilder(URI.create(base + "/" + key)).timeout(Duration.ofSeconds(10)).method("HEAD", HttpRequest.BodyPublishers.noBody()).build();
-            int status = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
-            return status == 403;
+            client.putObject(config.bucket().trim(), key, new ByteArrayInputStream(marker), metadata);
+            String bucketBase = "https://" + config.bucket().trim() + ".cos." + config.region().trim() + ".myqcloud.com";
+            HttpRequest request = HttpRequest.newBuilder(URI.create(bucketBase + "/" + key)).timeout(Duration.ofSeconds(10)).method("HEAD", HttpRequest.BodyPublishers.noBody()).build();
+            int anonymousStatus = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
+            if (anonymousStatus != 403) {
+                return false;
+            }
+            String signed = createReadUrl(config, key, "private-probe.txt", "text/plain", false, java.time.Instant.now().plusSeconds(60));
+            HttpRequest signedRequest = HttpRequest.newBuilder(URI.create(signed)).timeout(Duration.ofSeconds(10)).GET().build();
+            int signedStatus = HttpClient.newHttpClient().send(signedRequest, HttpResponse.BodyHandlers.discarding()).statusCode();
+            return signedStatus == 200;
         } catch (Exception exception) {
             log.error("验证原文存储桶私有访问失败: bucket={}", config.bucket(), exception);
             throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "无法验证存储桶私有访问，请检查对象存储配置");

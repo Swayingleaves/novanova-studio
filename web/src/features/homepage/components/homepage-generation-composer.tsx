@@ -235,7 +235,7 @@ export function HomepageGenerationComposer({ prompt, onPromptChange, target, onT
             try {
                 const file = imageFiles[index];
                 const image = await uploadImage(file);
-                recordRecentReferenceAsset({ kind: "image", url: image.objectStorage?.url || image.url, name: file.name });
+                recordRecentReferenceAsset({ kind: "image", url: image.objectStorage?.url || image.url, storageKey: image.storageKey, name: file.name });
                 setImages((current) => current.map((item) => item.id === placeholder.id ? { ...placeholder, name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, objectStorage: image.objectStorage } : item));
             } catch (error) {
                 setImages((current) => current.filter((item) => item.id !== placeholder.id));
@@ -268,7 +268,7 @@ export function HomepageGenerationComposer({ prompt, onPromptChange, target, onT
                 try {
                     const file = imageFiles[index];
                     const image = await uploadImage(file);
-                    recordRecentReferenceAsset({ kind: "image", url: image.objectStorage?.url || image.url, name: file.name });
+                    recordRecentReferenceAsset({ kind: "image", url: image.objectStorage?.url || image.url, storageKey: image.storageKey, name: file.name });
                     setImages((current) => current.map((item) => item.id === placeholder.id ? { ...placeholder, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, objectStorage: image.objectStorage } : item));
                 } catch (error) {
                     setImages((current) => current.filter((item) => item.id !== placeholder.id));
@@ -282,7 +282,7 @@ export function HomepageGenerationComposer({ prompt, onPromptChange, target, onT
                 try {
                     const file = videoFiles[index];
                     const video = await uploadMediaFile(file, "video-reference");
-                    recordRecentReferenceAsset({ kind: "video", url: video.objectStorage?.url || video.url, name: file.name, durationMs: video.durationMs });
+                    recordRecentReferenceAsset({ kind: "video", url: video.objectStorage?.url || video.url, storageKey: video.storageKey, name: file.name, durationMs: video.durationMs });
                     setVideos((current) => current.map((item) => item.id === placeholder.id ? { ...placeholder, type: video.mimeType, url: video.url, storageKey: video.storageKey, bytes: video.bytes, width: video.width, height: video.height, durationMs: video.durationMs, objectStorage: video.objectStorage } : item));
                 } catch (error) {
                     setVideos((current) => current.filter((item) => item.id !== placeholder.id));

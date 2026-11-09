@@ -389,6 +389,17 @@ public class PersistenceController {
     }
 
     /**
+     * 批量换取媒体临时读地址。
+     *
+     * @param request MediaAccessRequest 媒体存储键列表
+     * @return Mono<ApiResponse<MediaAccessResponse>> 读地址明细
+     */
+    @PostMapping("/media/batchAccess")
+    public Mono<ApiResponse<PersistenceDtos.MediaAccessResponse>> batchAccess(@Valid @RequestBody PersistenceDtos.MediaAccessRequest request) {
+        return persistenceService.batchMediaAccess(request.storageKeys()).map(ApiResponse::ok);
+    }
+
+    /**
      * 下载当前用户的媒体文件。
      *
      * @param request MediaInfoRequest 媒体存储键请求

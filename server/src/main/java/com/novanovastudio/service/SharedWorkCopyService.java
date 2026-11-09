@@ -124,7 +124,8 @@ public class SharedWorkCopyService {
                     record.setMetadata("{\"sharedWorkCopy\":true}");
                     return Mono.fromCallable(() -> storage.createReadUrl(config, key, asset.getString("fileName"), record.getMimeType(), false, Instant.now().plusSeconds(300)))
                             .subscribeOn(Schedulers.boundedElastic()).flatMap(url -> {
-                                record.setObjectStorageUrl(url);
+                                // 签名地址只作为新画布场景占位，打开时按对象键重签；数据库不保存会过期的地址。
+                                record.setObjectStorageUrl(null);
                                 return persistenceRepository.saveMedia(record).then(repository.copyStatus(id, "preparing"))
                                         .thenReturn(JSONObject.of("assetId", asset.getString("assetId"), "storageKey", record.getStorageKey(), "url", url));
                             });

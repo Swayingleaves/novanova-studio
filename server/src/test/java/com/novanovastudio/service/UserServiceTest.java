@@ -736,7 +736,9 @@ class UserServiceTest {
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        UserService service = new UserService(userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, properties, new EmailRegistrationPolicy(properties), mailSender, creditService, invitationService, eventPublisher, transactionalOperator);
+        UserService service = new UserService(userRepository, passwordEncoder, tokenService, currentUserProvider,
+                com.novanovastudio.MediaAccessTestSupport.echo(), passwordLoginLockService, properties, new EmailRegistrationPolicy(properties),
+                mailSender, creditService, invitationService, eventPublisher, transactionalOperator);
         return new TestContext(service, userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, properties, mailSender, creditService, invitationService, eventPublisher);
     }
 

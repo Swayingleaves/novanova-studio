@@ -51,6 +51,7 @@ import { useHomepageCreationDraft } from "@/features/homepage/hooks/use-homepage
 import { consumeHomepageCreationHandoff, peekHomepageCreationHandoff } from "@/features/homepage/lib/homepage-creation-handoff";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
+import { useMediaUrl } from "@/shared/hooks/use-media-url";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-configuration-guard";
@@ -84,8 +85,8 @@ import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUse
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { availableVideoModelsForMode, quoteVideoGeneration, videoGenerationReferenceIssue } from "@/features/generation/lib/video-billing";
 import { requestCreditCost } from "@/features/generation/constants/credits";
+import { cancelAiTasksWithRefundPolicy, runCancelWithProviderRequestPolicy } from "@/features/generation/lib/cancel-provider-generation";
 import {
-    cancelAiTask,
     deleteGenerationLogs,
     getAiTaskPollingIntervalMilliseconds,
     listGenerationStyles,
@@ -809,8 +810,13 @@ export default function VideoPage() {
         }
         setPendingStopping(true);
         try {
-            await Promise.all(taskIds.map((taskId) => cancelAiTask(taskId).catch((error) => console.error("停止生成任务失败", error))));
+            const outcome = await cancelAiTasksWithRefundPolicy(taskIds, modal);
+            if (outcome === "declined") return;
+            if (outcome === "refunded") message.success(translate("generation.generationStoppedCreditsRefunded"));
+            if (outcome === "forfeited") message.success(translate("generation.generationStoppedWithoutRefund"));
             await refreshConversations();
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("chat.failedToStopGeneration"));
         } finally {
             setPendingStopping(false);
         }
@@ -911,7 +917,7 @@ export default function VideoPage() {
                     const file = imageFiles[index];
                     try {
                         const image = await uploadImage(file);
-                        recordRecentReferenceAsset({ kind: "image", url: image.objectStorage?.url || image.url, name: file.name });
+                        recordRecentReferenceAsset({ kind: "image", url: image.objectStorage?.url || image.url, storageKey: image.storageKey, name: file.name });
                         const uploadedReference: ReferenceImage = {
                             ...placeholder,
                             type: image.mimeType,
@@ -933,7 +939,7 @@ export default function VideoPage() {
                     const file = videoFiles[index];
                     try {
                         const video = await uploadMediaFile(file, "video-reference");
-                        recordRecentReferenceAsset({ kind: "video", url: video.objectStorage?.url || video.url, name: file.name, durationMs: video.durationMs });
+                        recordRecentReferenceAsset({ kind: "video", url: video.objectStorage?.url || video.url, storageKey: video.storageKey, name: file.name, durationMs: video.durationMs });
                         const uploadedReference: ReferenceVideo = {
                             ...placeholder,
                             type: video.mimeType,
@@ -1488,7 +1494,7 @@ export default function VideoPage() {
     };
 
     const conversationItems = buildVideoConversationItems(conversations, activeId, selectedIds, isSessionBusy);
-    const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+    const [videoPreview, setVideoPreview] = useState<ReferenceVideo | null>(null);
     const referenceChips: CreationReferenceChip[] = [
         ...references.map((reference, index) => {
             const uploading = uploadingReferenceIds.includes(reference.id);
@@ -1497,7 +1503,7 @@ export default function VideoPage() {
                 label: uploading ? translate("video.uploading", { value0: seedanceReferenceLabel("image", index) }) : seedanceReferenceLabel("image", index),
                 preview: (
                     <div className="relative size-11">
-                        <Image src={reference.dataUrl} alt={reference.name} width={44} height={44} style={{ objectFit: "cover" }} className="rounded-xl" preview={uploading ? false : { mask: translate("video.preview") }} />
+                        <ReferenceImagePreview reference={reference} size={44} mask={uploading ? undefined : translate("video.preview")} />
                         {uploading ? (
                             <span className="absolute inset-0 grid place-items-center rounded-xl bg-black/35 text-white">
                                 <LoaderCircle className="size-4 animate-spin" />
@@ -1519,10 +1525,10 @@ export default function VideoPage() {
                         <div
                             className={`group relative size-11 ${uploading ? "" : "cursor-pointer"}`}
                             onClick={() => {
-                                if (!uploading) setVideoPreviewUrl(reference.url);
+                                if (!uploading) setVideoPreview(reference);
                             }}
                         >
-                            <video src={reference.url} className="size-11 rounded-xl object-cover" muted />
+                            <StoredVideo storageKey={reference.storageKey} url={reference.url} objectStorage={reference.objectStorage} className="size-11 rounded-xl object-cover" />
                             {uploading ? null : (
                                 <span className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/0 text-white opacity-0 transition-opacity group-hover:bg-black/35 group-hover:opacity-100">
                                     <VideoIcon className="size-5" />
@@ -1546,7 +1552,7 @@ export default function VideoPage() {
             if (videoReferences.some((reference) => reference.url === asset.url) || !canAddReferences(0, 1, mode)) return;
             setVideoReferences((current) => {
                 if (current.some((reference) => reference.url === asset.url)) return current;
-                return [...current, { id: nanoid(), name: asset.name || translate("generation.referenceVideo_6ae00d"), type: "video/*", url: asset.url, durationMs: asset.durationMs }];
+                return [...current, { id: nanoid(), name: asset.name || translate("generation.referenceVideo_6ae00d"), type: "video/*", url: asset.url, storageKey: asset.storageKey, durationMs: asset.durationMs }];
             });
             applyModeForReferences(mode);
             return;
@@ -1554,7 +1560,7 @@ export default function VideoPage() {
         if (references.some((reference) => reference.dataUrl === asset.url) || !canAddReferences(1, 0, mode)) return;
         setReferences((current) => {
             if (current.some((reference) => reference.dataUrl === asset.url)) return current;
-            return [...current, { id: nanoid(), name: asset.name || translate("video.recentReferenceImages"), type: "image/*", dataUrl: asset.url }];
+            return [...current, { id: nanoid(), name: asset.name || translate("video.recentReferenceImages"), type: "image/*", dataUrl: asset.url, storageKey: asset.storageKey }];
         });
         applyModeForReferences(mode);
     };
@@ -1868,7 +1874,9 @@ export default function VideoPage() {
                     onSkillRemove: () => setSelectedSkill(null),
                     onPasteImages: (files) => void addReferences(files),
                     onSubmit: () => void generate(),
-                    onStop: isStreaming || isQueued ? () => void cancelMessage() : activeConversationPending ? () => void stopPendingGeneration() : undefined,
+                    onStop: isStreaming || isQueued
+                        ? () => void runCancelWithProviderRequestPolicy(modal, (forfeit) => cancelMessage(forfeit)).catch((error) => message.error(error instanceof Error ? error.message : translate("chat.failedToStopGeneration")))
+                        : activeConversationPending ? () => void stopPendingGeneration() : undefined,
                 }}
                 settings={{
                     open: settingsOpen,
@@ -1941,8 +1949,8 @@ export default function VideoPage() {
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title={translate("video.deleteConversation")} open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelected} okText={translate("video.delete")} okButtonProps={{ danger: true }} cancelText={translate("video.cancel")}>
                 {translate("video.deleteSelected")}{selectedIds.length} {translate("video.conversations")}</Modal>
-            <Modal open={Boolean(videoPreviewUrl)} title={translate("video.referenceVideoPreview")} footer={null} onCancel={() => setVideoPreviewUrl(null)} width={720} centered destroyOnHidden>
-                {videoPreviewUrl ? <video src={videoPreviewUrl} controls autoPlay className="max-h-[70vh] w-full rounded-xl bg-black" /> : null}
+            <Modal open={Boolean(videoPreview)} title={translate("video.referenceVideoPreview")} footer={null} onCancel={() => setVideoPreview(null)} width={720} centered destroyOnHidden>
+                {videoPreview ? <StoredVideoPlayer video={videoPreview} /> : null}
             </Modal>
             <ResultDetailDialog detail={resultDetail} onClose={() => setResultDetail(null)} />
         </>
@@ -2038,6 +2046,7 @@ function renderLiveWorkflowImages(data: Record<string, unknown>, call: ToolCallS
                 <FrameImagePreview
                     key={(typeof item.id === "string" ? item.id : "") || (typeof item.storageKey === "string" ? item.storageKey : "") || `workflow-image-${index}`}
                     url={url}
+                    storageKey={readVideoStorageKey(item) || undefined}
                     role={readFrameRole(call, item)}
                 />
             ))}
@@ -2057,15 +2066,23 @@ function frameRoleLabel(role?: string): string | undefined {
     return undefined;
 }
 
-function FrameImagePreview({ url, role }: { url: string; role?: string }) {
+function FrameImagePreview({ url, storageKey, role }: { url: string; storageKey?: string; role?: string }) {
     const translate = useTranslation();
+    // 有存储键时续签临时地址，地址过期后由渲染错误自动续签一次。
+    const media = useMediaUrl({ storageKey, url, kind: "image" });
     const label = frameRoleLabel(role);
     return (
         <div className="relative w-48 shrink-0 overflow-hidden rounded-xl border border-[var(--studio-line)] sm:w-56">
             {label ? <span className="absolute left-2 top-2 z-10 rounded-md bg-black/65 px-2 py-1 text-xs font-semibold text-white backdrop-blur-sm">{label}</span> : null}
-            <Image src={url} fallback={MEDIA_FALLBACK_IMAGE} alt={label || translate("video.workflowImages")} className="w-full object-cover" preview={{ mask: translate("video.viewFullSize") }} />
+            <Image src={media.url || url} fallback={MEDIA_FALLBACK_IMAGE} alt={label || translate("video.workflowImages")} className="w-full object-cover" preview={{ mask: translate("video.viewFullSize") }} onError={media.onError} />
         </div>
     );
+}
+
+/** 工作流阶段结果图：有存储键时续签临时地址，加载失败自动续签一次。 */
+function WorkflowImagePreview({ url, storageKey, alt }: { url: string; storageKey?: string; alt: string }) {
+    const media = useMediaUrl({ storageKey, url, kind: "image" });
+    return <Image src={media.url || url} alt={alt} className="w-full rounded-xl border border-[var(--studio-line)] object-cover" preview={{ mask: translate("video.viewFullSize") }} onError={media.onError} />;
 }
 
 function renderResultVideos(
@@ -2254,16 +2271,46 @@ function buildVideoThreadSections(
     }));
 }
 
+/** 参考图预览：有存储键时续签临时地址，加载失败自动续签一次。 */
+function ReferenceImagePreview({ reference, size, fit = "cover", title, mask }: { reference: ReferenceImage; size: number; fit?: "cover" | "contain"; title?: string; mask?: string }) {
+    const media = useMediaUrl({ storageKey: reference.storageKey, url: reference.dataUrl, objectStorage: reference.objectStorage, kind: "image" });
+    return (
+        <Image
+            src={media.url || reference.dataUrl}
+            alt={reference.name}
+            title={title}
+            width={size}
+            height={size}
+            style={{ objectFit: fit }}
+            className="rounded-xl"
+            preview={mask ? { mask } : false}
+            onError={media.onError}
+        />
+    );
+}
+
+/** 参考视频缩略图：有存储键时续签临时地址，加载失败自动续签一次。 */
+function StoredVideo({ storageKey, url, objectStorage, className, title }: { storageKey?: string; url: string; objectStorage?: ObjectStorageFile; className?: string; title?: string }) {
+    const media = useMediaUrl({ storageKey, url, objectStorage, kind: "media" });
+    return <video src={media.url || url} className={className} title={title} muted playsInline onError={media.onError} />;
+}
+
+/** 参考视频预览：有存储键时使用续签后的临时地址。 */
+function StoredVideoPlayer({ video }: { video: ReferenceVideo }) {
+    const media = useMediaUrl({ storageKey: video.storageKey, url: video.url, objectStorage: video.objectStorage, kind: "media" });
+    return <video src={media.url || video.url} controls autoPlay playsInline className="max-h-[70vh] w-full rounded-xl bg-black" onError={media.onError} />;
+}
+
 function renderVideoRoundReferences(round: Round) {
     const visibleImageReferences = round.references.filter((reference) => Boolean(reference.dataUrl?.trim()));
     const visibleVideoReferences = round.videoReferences.filter((reference) => Boolean(reference.url?.trim()));
     return (
         <div className="flex flex-wrap gap-2">
             {visibleImageReferences.map((reference, index) => (
-                <Image key={reference.id} src={reference.dataUrl} alt={reference.name} title={seedanceReferenceLabel("image", index)} width={112} height={112} style={{ objectFit: "contain" }} className="rounded-xl" preview={{ mask: translate("video.viewFullSize") }} />
+                <ReferenceImagePreview key={reference.id} reference={reference} size={112} fit="contain" title={seedanceReferenceLabel("image", index)} mask={translate("video.viewFullSize")} />
             ))}
             {visibleVideoReferences.map((reference, index) => (
-                <video key={reference.id} src={reference.url} className="size-16 rounded-xl object-cover ring-1 ring-[var(--studio-line)]" muted title={seedanceReferenceLabel("video", index)} />
+                <StoredVideo key={reference.id} storageKey={reference.storageKey} url={reference.url} objectStorage={reference.objectStorage} className="size-16 rounded-xl object-cover ring-1 ring-[var(--studio-line)]" title={seedanceReferenceLabel("video", index)} />
             ))}
         </div>
     );
@@ -2316,7 +2363,7 @@ function renderWorkflowStages(
                             <div className={compactFramePreview ? "flex flex-wrap gap-3" : "grid gap-3 sm:grid-cols-2"}>
                                 {images.map((image, index) =>
                                     image.url ? (
-                                        compactFramePreview ? <FrameImagePreview key={image.id || image.storageKey || index} url={image.url} role={stage.role} /> : <Image key={image.id || image.storageKey || index} src={image.url} alt={stage.displayName} className="w-full rounded-xl border border-[var(--studio-line)] object-cover" preview={{ mask: translate("video.viewFullSize") }} />
+                                        compactFramePreview ? <FrameImagePreview key={image.id || image.storageKey || index} url={image.url} storageKey={image.storageKey} role={stage.role} /> : <WorkflowImagePreview key={image.id || image.storageKey || index} url={image.url} storageKey={image.storageKey} alt={stage.displayName} />
                                     ) : null,
                                 )}
                             </div>
@@ -2469,7 +2516,15 @@ function ResultCard({
     const translate = useTranslation();
     const [isDownloading, setIsDownloading] = useState(false);
     const copyText = useCopyText();
-    const preview = useMediaFallback(video.url);
+    // 有存储键时通过接口换取当前临时地址，视频加载失败会再续签一次。
+    const media = useMediaUrl({ storageKey: video.storageKey, url: video.url, objectStorage: video.objectStorage, kind: "media" });
+    const displaySrc = media.url || video.url;
+    const preview = useMediaFallback(displaySrc);
+    /** 地址失效时先续签一次，续签后仍未恢复则展示占位图。 */
+    const handlePreviewError = () => {
+        media.onError();
+        preview.onError();
+    };
     if (!hasPlayableVideoUrl(video.url)) {
         return <FailedCard error={translate("video.videoURLIsEmpty")} />;
     }
@@ -2499,7 +2554,7 @@ function ResultCard({
                 {preview.missing ? (
                     <img src={preview.displaySrc} alt={translate("video.generatedVideoCannotBeLoaded")} className="max-h-96 w-full object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} />
                 ) : (
-                    <video src={video.url} muted preload="metadata" playsInline className="pointer-events-none max-h-96 w-full object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} onError={preview.onError} />
+                    <video src={displaySrc} muted preload="metadata" playsInline className="pointer-events-none max-h-96 w-full object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} onError={handlePreviewError} />
                 )}
                 {preview.missing ? null : (
                     <div className="absolute inset-0 grid place-items-center">

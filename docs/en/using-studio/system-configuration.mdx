@@ -114,6 +114,21 @@ A single field, **每名新用户奖励积分**. There is no switch; set it to 0
 
 Object storage holds uploads, avatars, and generated results. You can configure several entries, but one must be the default: saving without a default reports "请设置默认对象存储", and the first storage created on a site becomes the default automatically.
 
+Storage is now used in **private-read/private-write** mode: the app stores object keys and the server signs short-lived read URLs before returning media. The bucket itself must be private; if it is still public-read, anyone with a URL can bypass the signature.
+
+### Signing TTLs
+
+Signed read URLs are grouped by purpose and configured with environment variables (seconds):
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `STORAGE_SIGN_PREVIEW_SECONDS` | Page previews, image/video/audio playback | 3600 |
+| `STORAGE_SIGN_DOWNLOAD_SECONDS` | File downloads | 300 |
+| `STORAGE_SIGN_THIRD_PARTY_SECONDS` | References fetched by third-party model providers | 7200 |
+| `STORAGE_SIGN_PUBLIC_PAGE_SECONDS` | Public share pages | 1800 |
+
+Shorter TTLs are safer, but too short breaks long videos, large downloads, and long-running tasks with 403s. Restart the server after changing these variables; under Docker, recreate the server container since a plain restart does not re-inject environment variables.
+
 ### Shared fields
 
 | Field | Notes |
@@ -123,21 +138,31 @@ Object storage holds uploads, avatars, and generated results. You can configure 
 | Storage directory | Prefix for upload keys, default `novanova-studio`; keys follow "目录/images 或 videos/日期/文件名" |
 | Bucket | The bucket name |
 | Region | The region |
-| Public base URL | Public prefix used to serve media |
+| Signed / access domain | Optional. Leave it empty to use the provider default; formerly labelled "公开访问地址" (API field `publicBaseUrl`) |
 
 ### Provider differences
 
 | Provider | Credentials | Extra requirements |
 | --- | --- | --- |
-| 腾讯云COS | SecretId / SecretKey | An empty public base URL falls back to `https://{bucket}.cos.{region}.myqcloud.com/{key}` |
-| 阿里云OSS | AccessKey ID / AccessKey Secret | **Endpoint is required** (with `http://` or `https://`) along with a region id such as `cn-hangzhou`; an empty public base URL is derived from the bucket and endpoint |
+| 腾讯云COS | SecretId / SecretKey | The bucket must be **private**. Leave the domain empty to use `https://{bucket}.cos.{region}.myqcloud.com/{key}`. |
+| 阿里云OSS | AccessKey ID / AccessKey Secret | **Endpoint is required** (with `http://` or `https://`) along with a region id such as `cn-hangzhou`; an empty signed/access domain is derived from the bucket and endpoint |
 | 七牛云Kodo | AccessKey / SecretKey | Region comes from a dropdown (华东-浙江 z0, 华东-浙江2 cn-east-2, 华北-河北 z1, 华南-广东 z2, 北美-洛杉矶 na0, 亚太-新加坡 as0); **a CDN or custom domain bound to the bucket is required** |
 
-Switching provider clears the credentials, bucket, region, endpoint, and public base URL you had entered.
+Switching provider clears the credentials, bucket, region, endpoint, and signed/access domain you had entered.
+
+### Private bucket notes
+
+- **Bucket ACL** must be private. Object ACL overrides the bucket ACL: objects explicitly set to `public-read` stay anonymously readable after the bucket goes private. Audit and reset them; the step-by-step runbook is in `docs-api/对象存储私有读写切换与验证.md` (Chinese).
+- **CDN**: a CDN domain requires CDN service authorization and origin authentication (回源鉴权); otherwise the CDN cannot fetch from a private bucket. COS presigned URLs are bound to the COS host and cannot simply be rewritten to the CDN domain.
+- **Default domain**: buckets created after 2024-01-01 are not previewable over the default domain (responses force `Content-Disposition: attachment`); bind a custom origin domain for previews.
+- **Expiry**: a 403 after a long idle or video playback usually means the signature expired; refresh or reopen the page, and raise the matching `STORAGE_SIGN_*` value if it recurs.
+- **Credential boundary**: a signed URL is itself a temporary credential. Never write it back to the database or canvas JSON, paste it into tickets/logs, or ship permanent keys to the browser.
+- **Strict mode**: `STORAGE_REQUIRE_PRIVATE_BUCKET` defaults to `false`, which only logs a warning when the bucket is still anonymously readable. Set it to `true` after switching to private read; private content (novel source imports, share copies) is then rejected on public buckets.
 
 ### Testing and defaults
 
-- **Test upload**: fill in the required fields and click "测试上传". If you have not saved yet it reports "请先保存对象存储配置，再执行测试上传" — save first, then test. Success writes a small text file and reports "对象存储测试上传成功，请点击保存记录测试时间" with an "打开测试文件" link; failures show the provider message directly, for example "腾讯云COS SecretId不能为空", "阿里云OSS Endpoint必须是HTTP或HTTPS地址", or "七牛云Kodo区域ID不受支持".
+- **Test upload**: fill in the required fields and click "测试上传". If you have not saved yet it reports "请先保存对象存储配置，再执行测试上传" — save first, then test. Success writes a small text file and reports "对象存储测试上传成功，请点击保存记录测试时间" with an "打开测试文件" link (a presigned URL that expires within minutes); failures show the provider message directly, for example "腾讯云COS SecretId不能为空", "阿里云OSS Endpoint必须是HTTP或HTTPS地址", or "七牛云Kodo区域ID不受支持".
+- **Read probe**: the test uploads a test object, tries to sign a GET URL and records its status, checks anonymously with HEAD for 403, then deletes the test object. Probe failures only log warnings and never block saving; `对象存储已拒绝匿名读取` in the server log means private read works, while `对象存储仍允许匿名读取` means the bucket or an object is still publicly readable.
 - **Set as default**: an inline "设为默认" button, disabled when the entry already is the default. The title gains a "默认 · " prefix and shows "上次测试 …" or "尚未测试".
 - **Delete**: the default entry cannot be deleted ("默认对象存储不能删除，请先设置其他默认项"), and the last remaining entry reports "至少保留一个对象存储". Non-default entries are deleted physically with no "still referenced" protection, so make sure no assets depend on them first.
 - An incomplete configuration blocks saving with messages such as "请完整填写访问密钥、密钥、Bucket 和 Region", "请填写阿里云OSS Endpoint", or "请填写七牛云Kodo公开访问地址".

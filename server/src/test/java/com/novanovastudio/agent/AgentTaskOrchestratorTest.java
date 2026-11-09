@@ -692,7 +692,7 @@ class AgentTaskOrchestratorTest {
          * @param channels List<AiChannelConfig> 全站渠道列表
          */
         private StubPersistenceService(List<AiTaskDtos.AiChannelConfig> channels) {
-            super(null, null, com.novanovastudio.TeamTestSupport.teamRepository(), com.novanovastudio.TeamTestSupport.storageBilling(), null, null, null, null, null, null, null);
+            super(null, null, com.novanovastudio.TeamTestSupport.teamRepository(), com.novanovastudio.TeamTestSupport.storageBilling(), null, null, null, com.novanovastudio.MediaAccessTestSupport.echo(), null, null, null, null);
             this.channels = channels;
         }
 

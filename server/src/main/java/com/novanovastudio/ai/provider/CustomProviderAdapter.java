@@ -10,6 +10,7 @@ import com.novanovastudio.ai.AiImageSizeSupport;
 import com.novanovastudio.ai.AiJsonUtils;
 import com.novanovastudio.ai.AiMediaSupport;
 import com.novanovastudio.ai.AiProviderAdapter;
+import com.novanovastudio.ai.AiProviderRequestTracking;
 import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.AiTaskParameterReader;
 import com.novanovastudio.ai.AiTaskPollingSupport;
@@ -192,7 +193,14 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         return bodyMono.flatMap(body -> {
                     log.info("自定义模型提交请求: taskId={}, taskType={}, mode={}, method={}, url={}, body={}", context.task().getId(), taskKind,
                             mode, method, url, abbreviate(body == null ? "" : body.toJSONString()));
-                    return aiHttpClient.sendBearerJsonUrlRequest(context.channel(), method, url, body);
+                    Mono<JSONObject> request = Mono.defer(() -> aiHttpClient.sendBearerJsonUrlRequest(context.channel(), method, url, body));
+                    if ("POST".equals(method)) {
+                        return request;
+                    }
+                    // GET 提交不会走统一的 POST 标记，这里在真正发出前单独记录。
+                    return AiProviderRequestTracking.markIfPresent().flatMap(accepted -> Boolean.TRUE.equals(accepted)
+                            ? request
+                            : Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCanceled"))));
                 })
                 .flatMap(response -> {
                     log.info("自定义模型提交响应: taskId={}, mode={}, response={}", context.task().getId(), mode,

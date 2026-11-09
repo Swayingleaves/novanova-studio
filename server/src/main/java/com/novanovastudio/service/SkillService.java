@@ -8,6 +8,7 @@ import com.novanovastudio.dto.SkillDtos;
 import com.novanovastudio.entity.SkillRecords;
 import com.novanovastudio.agent.workflow.VideoWorkflowRegistry;
 import com.novanovastudio.repository.SkillRepository;
+import com.novanovastudio.storage.MediaAccessService;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -37,6 +38,8 @@ public class SkillService {
     private final SkillRepository repository;
     /** 视频工作流注册表。 */
     private final VideoWorkflowRegistry videoWorkflowRegistry;
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
 
     /**
      * 查询用户侧启用技能。
@@ -48,7 +51,7 @@ public class SkillService {
         String type = normalizeTargetType(targetType);
         SkillDtos.SkillListRequest request = new SkillDtos.SkillListRequest("", type, null, 1, MAX_PAGE_SIZE);
         return repository.listSkills(request, true)
-                .map(this::toOption)
+                .concatMap(this::toOption)
                 .collectList()
                 .map(SkillDtos.SkillOptionListResponse::new);
     }
@@ -61,7 +64,7 @@ public class SkillService {
      */
     public Mono<SkillDtos.SkillListResponse> listAdminSkills(SkillDtos.SkillListRequest request) {
         SkillDtos.SkillListRequest normalized = normalizeListRequest(request);
-        return Mono.zip(repository.listSkills(normalized, false).map(this::toItem).collectList(), repository.countSkills(normalized, false))
+        return Mono.zip(repository.listSkills(normalized, false).concatMap(this::toItem).collectList(), repository.countSkills(normalized, false))
                 .map(tuple -> new SkillDtos.SkillListResponse(tuple.getT1(), tuple.getT2()));
     }
 
@@ -214,19 +217,21 @@ public class SkillService {
                 status, Math.max(1, source.page()), Math.min(MAX_PAGE_SIZE, Math.max(1, source.pageSize())));
     }
 
-    /** 技能记录转用户选项。 */
-    private SkillDtos.SkillOption toOption(SkillRecords.SkillRecord record) {
+    /** 技能记录转用户选项，封面按预览用途现签。 */
+    private Mono<SkillDtos.SkillOption> toOption(SkillRecords.SkillRecord record) {
         String workflowType = "video".equals(record.getTargetType())
                 ? videoWorkflowRegistry.resolveWorkflowType(record.getSystemPrompt()).orElse(null) : null;
         String systemPrompt = SkillRecords.TYPE_CANVAS_SETTING_GRAPH.equals(record.getTargetType()) ? record.getSystemPrompt() : null;
-        return new SkillDtos.SkillOption(record.getId(), record.getName(), record.getDescription(), record.getTargetType(),
-                record.getCoverUrl(), workflowType, systemPrompt, record.getAspectRatio());
+        return mediaAccessService.signUrl(record.getCoverUrl() == null ? "" : record.getCoverUrl(), MediaAccessService.Purpose.PREVIEW)
+                .map(url -> new SkillDtos.SkillOption(record.getId(), record.getName(), record.getDescription(), record.getTargetType(),
+                        url, workflowType, systemPrompt, record.getAspectRatio()));
     }
 
-    /** 技能记录转管理端条目。 */
-    private SkillDtos.SkillItem toItem(SkillRecords.SkillRecord record) {
-        return new SkillDtos.SkillItem(record.getId(), record.getName(), record.getDescription(), record.getTargetType(), record.getSystemPrompt(), record.getCoverUrl(),
-                record.getAspectRatio(), record.getStatus(), record.getSortOrder(), formatTime(record.getCreatedAt()), formatTime(record.getUpdatedAt()));
+    /** 技能记录转管理端条目，封面按预览用途现签。 */
+    private Mono<SkillDtos.SkillItem> toItem(SkillRecords.SkillRecord record) {
+        return mediaAccessService.signUrl(record.getCoverUrl() == null ? "" : record.getCoverUrl(), MediaAccessService.Purpose.PREVIEW)
+                .map(url -> new SkillDtos.SkillItem(record.getId(), record.getName(), record.getDescription(), record.getTargetType(), record.getSystemPrompt(), url,
+                        record.getAspectRatio(), record.getStatus(), record.getSortOrder(), formatTime(record.getCreatedAt()), formatTime(record.getUpdatedAt())));
     }
 
     /** 必填文本。 */

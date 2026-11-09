@@ -571,9 +571,52 @@ public class NovanovaProperties {
      */
     public static class ObjectStorage {
 
+        /** 预签名读地址有效期配置 */
+        @Valid
+        private SignTtl signTtl = new SignTtl();
+
+        /** 是否强制要求存储桶私有，未开启时只记录告警并继续写入私有内容 */
+        private boolean requirePrivateBucket = false;
+
+        /**
+         * 获取是否强制要求存储桶私有。
+         *
+         * @return boolean 是否强制要求存储桶私有
+         */
+        public boolean isRequirePrivateBucket() {
+            return requirePrivateBucket;
+        }
+
+        /**
+         * 设置是否强制要求存储桶私有。
+         *
+         * @param requirePrivateBucket boolean 是否强制要求存储桶私有
+         */
+        public void setRequirePrivateBucket(boolean requirePrivateBucket) {
+            this.requirePrivateBucket = requirePrivateBucket;
+        }
+
         /** 腾讯云COS配置 */
         @Valid
         private TencentCos tencentCos = new TencentCos();
+
+        /**
+         * 获取预签名读地址有效期配置。
+         *
+         * @return SignTtl 预签名读地址有效期配置
+         */
+        public SignTtl getSignTtl() {
+            return signTtl;
+        }
+
+        /**
+         * 设置预签名读地址有效期配置。
+         *
+         * @param signTtl SignTtl 预签名读地址有效期配置
+         */
+        public void setSignTtl(SignTtl signTtl) {
+            this.signTtl = signTtl;
+        }
 
         /**
          * 获取腾讯云COS配置。
@@ -582,6 +625,100 @@ public class NovanovaProperties {
          */
         public TencentCos getTencentCos() {
             return tencentCos;
+        }
+
+        /**
+         * 预签名读地址有效期，按用途分档，单位秒。
+         */
+        public static class SignTtl {
+
+            /** 页面预览、图片/视频播放地址有效期 */
+            @Min(value = 1, message = "预览签名有效期必须大于0")
+            private int previewSeconds = 3600;
+
+            /** 文件下载地址有效期 */
+            @Min(value = 1, message = "下载签名有效期必须大于0")
+            private int downloadSeconds = 300;
+
+            /** 第三方模型拉取参考素材的地址有效期 */
+            @Min(value = 1, message = "第三方拉取签名有效期必须大于0")
+            private int thirdPartySeconds = 7200;
+
+            /** 公开分享页展示地址有效期 */
+            @Min(value = 1, message = "公开页签名有效期必须大于0")
+            private int publicPageSeconds = 1800;
+
+            /**
+             * 获取预览签名有效期。
+             *
+             * @return int 预览签名有效期，单位秒
+             */
+            public int getPreviewSeconds() {
+                return previewSeconds;
+            }
+
+            /**
+             * 设置预览签名有效期。
+             *
+             * @param previewSeconds int 预览签名有效期，单位秒
+             */
+            public void setPreviewSeconds(int previewSeconds) {
+                this.previewSeconds = previewSeconds;
+            }
+
+            /**
+             * 获取下载签名有效期。
+             *
+             * @return int 下载签名有效期，单位秒
+             */
+            public int getDownloadSeconds() {
+                return downloadSeconds;
+            }
+
+            /**
+             * 设置下载签名有效期。
+             *
+             * @param downloadSeconds int 下载签名有效期，单位秒
+             */
+            public void setDownloadSeconds(int downloadSeconds) {
+                this.downloadSeconds = downloadSeconds;
+            }
+
+            /**
+             * 获取第三方拉取签名有效期。
+             *
+             * @return int 第三方拉取签名有效期，单位秒
+             */
+            public int getThirdPartySeconds() {
+                return thirdPartySeconds;
+            }
+
+            /**
+             * 设置第三方拉取签名有效期。
+             *
+             * @param thirdPartySeconds int 第三方拉取签名有效期，单位秒
+             */
+            public void setThirdPartySeconds(int thirdPartySeconds) {
+                this.thirdPartySeconds = thirdPartySeconds;
+            }
+
+            /**
+             * 获取公开页签名有效期。
+             *
+             * @return int 公开页签名有效期，单位秒
+             */
+            public int getPublicPageSeconds() {
+                return publicPageSeconds;
+            }
+
+            /**
+             * 设置公开页签名有效期。
+             *
+             * @param publicPageSeconds int 公开页签名有效期，单位秒
+             */
+            public void setPublicPageSeconds(int publicPageSeconds) {
+                this.publicPageSeconds = publicPageSeconds;
+            }
         }
 
         /**

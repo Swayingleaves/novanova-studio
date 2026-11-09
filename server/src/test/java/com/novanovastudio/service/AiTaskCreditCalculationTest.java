@@ -35,7 +35,7 @@ class AiTaskCreditCalculationTest {
         method.setAccessible(true);
 
         List<VideoWorkflowDefinition.VideoWorkflowQuoteStage> imageStages =
-                (List<VideoWorkflowDefinition.VideoWorkflowQuoteStage>) method.invoke(new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), null, null, null, null, null, null, null, null, null, null, null, null), plan, "image");
+                (List<VideoWorkflowDefinition.VideoWorkflowQuoteStage>) method.invoke(new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), null, null, null, null, null, null, null, null, null, null, null, null, null), plan, "image");
 
         Assertions.assertEquals(List.of("first_frame"), imageStages.stream().map(VideoWorkflowDefinition.VideoWorkflowQuoteStage::role).toList());
     }
@@ -166,7 +166,7 @@ class AiTaskCreditCalculationTest {
                     false, Map.of(), false, null, imageBillingConfiguration);
             Method method = AiTaskService.class.getDeclaredMethod("calculateTaskCredits", AiTaskDtos.CreateAiTaskRequest.class, resolvedModelType);
             method.setAccessible(true);
-            return (java.math.BigDecimal) method.invoke(new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), null, null, null, null, null, null, null, null, null, null, null, null), request, resolvedModel);
+            return (java.math.BigDecimal) method.invoke(new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), null, null, null, null, null, null, null, null, null, null, null, null, null), request, resolvedModel);
         } catch (InvocationTargetException exception) {
             if (exception.getCause() instanceof RuntimeException runtimeException) throw runtimeException;
             throw new IllegalStateException(exception.getCause());

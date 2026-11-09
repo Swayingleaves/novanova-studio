@@ -52,7 +52,7 @@ class ComicDramaTimelineServiceTest {
         transactionalOperator = mock(TransactionalOperator.class);
         service = new ComicDramaService(currentUserProvider, repository, mock(ScriptService.class),
                 mock(StoryboardAgentService.class), mock(ComicDramaFinalPromptPricingService.class), mock(AiTaskService.class), mock(PersistenceService.class),
-                transactionalOperator, new NovanovaProperties());
+                transactionalOperator, new NovanovaProperties(), com.novanovastudio.MediaAccessTestSupport.echo());
     }
 
     /**

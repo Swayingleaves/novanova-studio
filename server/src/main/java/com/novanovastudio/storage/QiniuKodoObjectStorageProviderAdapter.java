@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 /**
  * 七牛云Kodo对象存储适配器。
@@ -54,8 +55,27 @@ public class QiniuKodoObjectStorageProviderAdapter implements ObjectStorageProvi
     public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
         validate(config);
         String url = ObjectStorageUrlBuilder.buildPublicUrl(config.publicBaseUrl(), key);
-        if (download) url += "?attname=" + java.net.URLEncoder.encode(fileName, java.nio.charset.StandardCharsets.UTF_8);
+        if (download && StringUtils.hasText(fileName)) url += "?attname=" + java.net.URLEncoder.encode(fileName, java.nio.charset.StandardCharsets.UTF_8);
         return Auth.create(config.accessKey(), config.secretKey()).privateDownloadUrlWithDeadline(url, expiresAt.getEpochSecond());
+    }
+
+    /**
+     * 读取空间信息确认七牛云空间为私有。
+     *
+     * @param config ObjectStorageConfig 对象存储配置
+     * @return boolean 是否已确认空间私有
+     */
+    @Override
+    public boolean verifyPrivateBucket(PersistenceDtos.ObjectStorageConfig config) {
+        validate(config);
+        try {
+            Auth auth = Auth.create(config.accessKey().trim(), config.secretKey().trim());
+            Configuration configuration = Configuration.create(Region.createWithRegionId(config.region().trim()));
+            return new com.qiniu.storage.BucketManager(auth, configuration).getBucketInfo(config.bucket()).getPrivate() == 1;
+        } catch (QiniuException exception) {
+            log.error("验证七牛云Kodo私有空间失败: bucket={}", config.bucket(), exception);
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "无法验证七牛云Kodo私有访问，请检查存储配置");
+        }
     }
 
     /**

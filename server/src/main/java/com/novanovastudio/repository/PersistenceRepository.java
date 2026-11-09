@@ -1035,6 +1035,24 @@ public class PersistenceRepository {
     }
 
     /**
+     * 批量查询当前用户的媒体元数据。
+     *
+     * @param userId Long 用户ID
+     * @param storageKeys List<String> 媒体存储键列表
+     * @return Flux<MediaFileRecord> 媒体记录流
+     */
+    public Flux<PersistenceRecords.MediaFileRecord> getMediaBatch(Long userId, List<String> storageKeys) {
+        if (storageKeys == null || storageKeys.isEmpty()) {
+            return Flux.empty();
+        }
+        // 批量读取与单条读取同样限定用户、存储键和未删除状态。
+        String sql = "SELECT storage_key, user_id, kind, source_url, object_storage_config_id, object_storage_provider, object_storage_url, object_storage_key, bucket, region, mime_type, bytes, width, height, duration_ms, metadata::text AS metadata, status, created_at, updated_at FROM media_files WHERE user_id = :userId AND status = 1 AND storage_key IN (" + R2dbcBindings.namedPlaceholders("storageKey", storageKeys.size()) + ")";
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(sql).bind("userId", userId);
+        spec = R2dbcBindings.bindList(spec, "storageKey", storageKeys);
+        return spec.map((row, metadata) -> RowMappers.media(row)).all();
+    }
+
+    /**
      * 删除媒体元数据
      *
      * @param userId Long 用户ID

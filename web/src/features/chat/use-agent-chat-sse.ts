@@ -8,7 +8,7 @@ import { useLocale } from "next-intl";
 import type { AgentAction, AgentAttachment, AgentEvent, CreationSettings } from "@/features/canvas/api/agent";
 import { agentChat, agentRequestStatus, agentSubscribeEvents, cancelAgentChat } from "@/features/canvas/api/agent";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
-import { getAiTaskPollingIntervalMilliseconds } from "@/services/api/server";
+import { getAiTaskPollingIntervalMilliseconds, isProviderRequestAlreadySentError } from "@/services/api/server";
 import { isTerminalAgentRequestStatus, matchesAgentRequest, shouldApplyAgentQueueStatus, type AgentQueueStatus } from "./agent-event-match";
 import type { ToolCallState } from "./types";
 
@@ -46,7 +46,7 @@ type AgentChatSSEReturn = {
   isQueued: boolean;
   isStopping: boolean;
   sendMessage: (message: string, attachments?: AgentAttachment[], creationSettings?: CreationSettings, skillIdOverride?: string) => Promise<void>;
-  cancelMessage: () => Promise<void>;
+  cancelMessage: (forfeitSubmittedGeneration?: boolean) => Promise<void>;
   /** 指定会话是否仍有未结束的本页请求。 */
   isSessionBusy: (sessionId?: string | null) => boolean;
   /** 当前页面是否还有任一未结束请求。 */
@@ -65,6 +65,7 @@ type InflightRequest = {
   settled: boolean;
   queueStatus: AgentQueueStatus | null;
   cancelWaiters: Array<() => void>;
+  cancelError?: unknown;
 };
 
 let draftSequence = 0;
@@ -201,12 +202,12 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
     setSessionId(nextSessionId);
   }, [presentFocus]);
 
-  const cancelInflight = useCallback(async (item: InflightRequest) => {
+  const cancelInflight = useCallback(async (item: InflightRequest, forfeitSubmittedGeneration = false) => {
     if (!item.sessionId || !item.requestId || item.settled) return;
     const sessionToCancel = item.sessionId;
     const requestToCancel = item.requestId;
     try {
-      await cancelAgentChat(sessionToCancel, requestToCancel);
+      await cancelAgentChat(sessionToCancel, requestToCancel, forfeitSubmittedGeneration);
       const live = showLive(item);
       if (!beginSettle(item)) return;
       notifyActivity(item.sessionId);
@@ -214,7 +215,9 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
     } catch (error) {
       item.cancelRequested = false;
       item.stopping = false;
+      item.cancelError = error;
       if (focusKeyRef.current === item.key) setIsStopping(false);
+      if (isProviderRequestAlreadySentError(error)) throw error;
       if (showLive(item)) callbacksRef.current.onError?.(error instanceof Error ? error.message : translate("chat.failedToStopGeneration"));
     } finally {
       item.stopping = false;
@@ -419,7 +422,13 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
         if (!item.settled && beginSettle(item)) notifyActivity(sid);
         return;
       }
-      if (item.cancelRequested) await cancelInflight(item);
+      if (item.cancelRequested) {
+        try {
+          await cancelInflight(item);
+        } catch (error) {
+          if (!isProviderRequestAlreadySentError(error)) throw error;
+        }
+      }
     } catch (err) {
       if (![...inflightRef.current.values()].some((candidate) => candidate !== item && candidate.phase === "sending" && !candidate.requestId)) {
         pendingEventsRef.current = [];
@@ -452,14 +461,15 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
     return true;
   }, [focusOn]);
 
-  const cancelMessage = useCallback(async () => {
+  const cancelMessage = useCallback(async (forfeitSubmittedGeneration = false) => {
     const item = focusKeyRef.current ? inflightRef.current.get(focusKeyRef.current) : undefined;
-    if (!item || item.settled || item.cancelRequested) return;
+    if (!item || item.settled || (item.cancelRequested && !forfeitSubmittedGeneration)) return;
     item.cancelRequested = true;
+    item.cancelError = undefined;
     item.stopping = true;
     if (focusKeyRef.current === item.key) setIsStopping(true);
     if (item.sessionId && item.requestId) {
-      await cancelInflight(item);
+      await cancelInflight(item, forfeitSubmittedGeneration);
       return;
     }
     if (item.phase !== "sending") {
@@ -469,6 +479,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
       return;
     }
     await new Promise<void>((resolve) => item.cancelWaiters.push(resolve));
+    if (isProviderRequestAlreadySentError(item.cancelError)) throw item.cancelError;
   }, [cancelInflight]);
 
   const token = useUserStore((s) => s.token);

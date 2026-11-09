@@ -29,6 +29,7 @@ import com.novanovastudio.repository.PersistenceRepository;
 import com.novanovastudio.repository.TeamRepository;
 import com.novanovastudio.security.TeamScope;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.storage.MediaAccessService;
 import com.novanovastudio.storage.ObjectStorageService;
 import com.novanovastudio.task.ModelTaskExecutionDispatcher;
 import java.io.InputStream;
@@ -128,6 +129,9 @@ public class PersistenceService {
 
     /** 外部媒体下载客户端 */
     private final AiHttpClient aiHttpClient;
+
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
 
     /** 当前用户提供器 */
     private final CurrentUserProvider currentUserProvider;
@@ -852,7 +856,8 @@ public class PersistenceService {
                             record.setDefaultStorage(!hasDefaultStorage);
                             return repository.createPlatformObjectStorage(record).then(decryptObjectStorage(record));
                         })
-                        .map(value -> JSON.parseObject(JSON.toJSONString(value))));
+                        .map(value -> JSON.parseObject(JSON.toJSONString(value))))
+                .doOnSuccess(ignored -> invalidateStorageCaches());
     }
 
     /** 修改全站对象存储。 */
@@ -863,7 +868,7 @@ public class PersistenceService {
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.objectStorageNotFound"))))
                 .flatMap(existing -> buildObjectStorageRecord(config, existing))
                 .flatMap(record -> repository.updatePlatformObjectStorage(record).then(decryptObjectStorage(record)))
-                .map(value -> JSON.parseObject(JSON.toJSONString(value)))));
+                .map(value -> JSON.parseObject(JSON.toJSONString(value))))).doOnSuccess(ignored -> invalidateStorageCaches());
     }
 
     /** 删除全站对象存储。 */
@@ -872,7 +877,7 @@ public class PersistenceService {
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.objectStorageNotFound"))))
                 .flatMap(record -> Boolean.TRUE.equals(record.getDefaultStorage())
                         ? Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.chooseAnotherDefaultBeforeDeletingThisStorage")))
-                        : repository.deletePlatformObjectStorage(storageId).then())));
+                        : repository.deletePlatformObjectStorage(storageId).then()))).doOnSuccess(ignored -> invalidateStorageCaches());
     }
 
     /** 设置全站默认对象存储。 */
@@ -883,7 +888,7 @@ public class PersistenceService {
         return repository.getPlatformObjectStorage(storageId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.objectStorageNotFound"))))
                 .then(repository.setDefaultPlatformObjectStorage(storageId));
-        });
+        }).doOnSuccess(ignored -> invalidateStorageCaches());
     }
 
     /** 构建对象存储记录。 */
@@ -932,7 +937,8 @@ public class PersistenceService {
         // 只读取当前用户自己的画布项目，并将数据库JSON字符串还原为节点。
         return currentUserProvider.currentUserId()
                 .flatMapMany(userId -> repository.listProjects(userId)
-                        .concatMap(record -> sharedCopyMediaAccessService.document(userId, parseJson(record.getData()))))
+                        .concatMap(record -> sharedCopyMediaAccessService.document(userId, parseJson(record.getData()))
+                                .flatMap(document -> mediaAccessService.signJson(document, MediaAccessService.Purpose.PREVIEW))))
                 .collectList();
     }
 
@@ -946,7 +952,8 @@ public class PersistenceService {
         // 查询时同时限定用户ID和项目ID，避免跨用户读取。
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> repository.getProject(userId, id)
-                        .flatMap(record -> sharedCopyMediaAccessService.document(userId, parseJson(record.getData()))))
+                        .flatMap(record -> sharedCopyMediaAccessService.document(userId, parseJson(record.getData())))
+                        .flatMap(document -> mediaAccessService.signJson(document, MediaAccessService.Purpose.PREVIEW)))
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.canvasNotFound"))));
     }
 
@@ -1001,7 +1008,7 @@ public class PersistenceService {
         // 读取当前用户素材快照并转换为前端原始JSON结构。
         return currentUserProvider.currentUserId()
                 .flatMapMany(repository::listAssets)
-                .map(record -> parseJson(record.getData()))
+                .concatMap(record -> mediaAccessService.signJson(parseJson(record.getData()), MediaAccessService.Purpose.PREVIEW))
                 .collectList();
     }
 
@@ -1055,12 +1062,12 @@ public class PersistenceService {
         // 多查询一条判断下一页，避免为每次滚动执行全量计数。
         return currentUserProvider.currentUserId()
                 .flatMapMany(userId -> repository.listGenerationLogs(userId, logType, (page - 1L) * GENERATION_LOG_PAGE_SIZE, GENERATION_LOG_PAGE_SIZE + 1))
-                .map(record -> {
+                .concatMap(record -> {
                     JSONObject generationLog = parseJson(record.getData());
                     generationLog.put("generationStatus", record.getGenerationStatus());
                     generationLog.put("generationCompletedAt", formatNullableTime(record.getGenerationCompletedAt()));
                     generationLog.put("generationViewedAt", formatNullableTime(record.getGenerationViewedAt()));
-                    return generationLog;
+                    return mediaAccessService.signJson(generationLog, MediaAccessService.Purpose.PREVIEW);
                 })
                 .collectList()
                 .map(logs -> new PersistenceDtos.GenerationLogListResponse(
@@ -1417,7 +1424,7 @@ public class PersistenceService {
     /**
      * 测试当前请求提供的对象存储配置。
      * <p>
-     * 测试上传不依赖已保存的默认对象存储，也不会创建媒体记录。
+     * 测试上传不依赖已保存的默认对象存储，也不会创建媒体记录；同时检查预签名读取可用并提示匿名读取状态。
      *
      * @param config ObjectStorageConfig 当前待测试的对象存储配置
      * @return Mono<ObjectStorageFile> 测试文件的对象存储信息
@@ -1428,16 +1435,59 @@ public class PersistenceService {
         byte[] data = ("Novanova Studio 对象存储测试 " + testedAt).getBytes(StandardCharsets.UTF_8);
         String key = buildObjectKey(config, "file", "object-storage-test.txt", mimeType);
         return Mono.fromCallable(() -> {
-                    String url = objectStorageService.putObject(config, key, new java.io.ByteArrayInputStream(data), data.length, mimeType);
-                    // 连通性测试对象随即删除，避免未保存的配置留下无人计量的测试文件。
-                    objectStorageService.deletePrivateObject(config, key);
-                    return url;
+                    String publicUrl = objectStorageService.putObject(config, key, new java.io.ByteArrayInputStream(data), data.length, mimeType);
+                    String signedUrl = null;
+                    try {
+                        signedUrl = objectStorageService.createReadUrl(config, key, "object-storage-test.txt", mimeType, false,
+                                java.time.Instant.now().plusSeconds(300));
+                    } catch (RuntimeException exception) {
+                        log.warn("对象存储测试上传成功但预签名失败: provider={}, bucket={}", config.provider(), config.bucket(), exception);
+                    }
+                    try {
+                        if (StringUtils.hasText(signedUrl)) {
+                            int signedStatus = httpStatus(signedUrl, "GET");
+                            if (signedStatus != 200) {
+                                log.warn("对象存储预签名地址暂不可用: provider={}, bucket={}, status={}", config.provider(), config.bucket(), signedStatus);
+                            }
+                            String anonymousUrl = StringUtils.hasText(config.publicBaseUrl())
+                                    ? config.publicBaseUrl().replaceAll("/+$", "") + "/" + key
+                                    : "https://" + config.bucket().trim() + ".cos." + config.region().trim() + ".myqcloud.com/" + key;
+                            int anonymousStatus = httpStatus(anonymousUrl, "HEAD");
+                            if (anonymousStatus != 403) {
+                                log.warn("对象存储仍允许匿名读取: provider={}, bucket={}, status={}", config.provider(), config.bucket(), anonymousStatus);
+                            } else {
+                                log.info("对象存储已拒绝匿名读取: provider={}, bucket={}", config.provider(), config.bucket());
+                            }
+                        }
+                    } catch (RuntimeException | java.io.IOException exception) {
+                        // 测试上传只做尽力而为的读取探测，部署环境无法回连自有域名时不阻断保存配置。
+                        log.warn("对象存储读取探测跳过: provider={}, bucket={}", config.provider(), config.bucket(), exception);
+                    } finally {
+                        // 连通性测试对象随即删除，避免未保存的配置留下无人计量的测试文件。
+                        objectStorageService.deletePrivateObject(config, key);
+                    }
+                    return StringUtils.hasText(signedUrl) ? signedUrl : publicUrl;
                 }).subscribeOn(Schedulers.boundedElastic())
                 .map(url -> {
                     log.info("对象存储测试上传成功: provider={}, bucket={}, region={}, key={}", config.provider(), config.bucket(), config.region(), key);
                     return new PersistenceDtos.ObjectStorageFile(config.provider(), url, key, config.bucket(), config.region(), (long) data.length, mimeType, formatTime(testedAt));
                 })
                 .doOnError(error -> log.error("对象存储测试上传失败: provider={}, bucket={}, region={}", config.provider(), config.bucket(), config.region(), error));
+    }
+
+    /**
+     * 发起一次无凭据的 HTTP 探测，读取响应状态码。
+     *
+     * @param url String 探测地址
+     * @param method String 请求方法
+     * @return int 响应状态码
+     */
+    private int httpStatus(String url, String method) throws java.io.IOException, InterruptedException {
+        var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url))
+                .timeout(java.time.Duration.ofSeconds(10))
+                .method(method, java.net.http.HttpRequest.BodyPublishers.noBody())
+                .build();
+        return java.net.http.HttpClient.newHttpClient().send(request, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode();
     }
 
     /**
@@ -1490,7 +1540,7 @@ public class PersistenceService {
             String storageKey = firstNonEmpty(input.storageKey(), kind + ":" + newId());
             JSONObject metadata = input.metadata() == null ? new JSONObject() : JSON.parseObject(toJson(input.metadata()));
             PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, kind, input.sourceUrl().trim(), null, null, null, firstNonEmpty(input.mimeType(), "application/octet-stream"), input.bytes() == null ? 0L : input.bytes(), input.width(), input.height(), input.durationMs(), metadata);
-            return repository.saveMedia(record).thenReturn(mediaResponse(record));
+            return repository.saveMedia(record).then(mediaResponse(record));
         });
     }
 
@@ -1641,6 +1691,49 @@ public class PersistenceService {
     }
 
     /**
+     * 解析媒体可读取地址，私有对象现签，远程媒体回退来源地址。
+     *
+     * @param record MediaFileRecord 媒体记录
+     * @param purpose MediaAccessService.Purpose 用途
+     * @return Mono<String> 可读取地址
+     */
+    private Mono<String> readableUrl(PersistenceRecords.MediaFileRecord record, MediaAccessService.Purpose purpose) {
+        return mediaAccessService.sign(record, purpose).map(MediaAccessService.Access::url).filter(StringUtils::hasText);
+    }
+
+    /**
+     * 批量换取当前用户媒体的临时读地址。
+     *
+     * @param storageKeys List<String> 媒体存储键
+     * @return Mono<MediaAccessResponse> 读地址明细
+     */
+    public Mono<PersistenceDtos.MediaAccessResponse> batchMediaAccess(List<String> storageKeys) {
+        List<String> normalized = storageKeys == null ? List.of() : storageKeys.stream()
+                .filter(StringUtils::hasText).map(String::trim).distinct().toList();
+        if (normalized.isEmpty()) {
+            return Mono.just(new PersistenceDtos.MediaAccessResponse(List.of()));
+        }
+        if (normalized.size() > 200) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "单次最多换取200个媒体地址"));
+        }
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> repository.getMediaBatch(userId, normalized).collectList()
+                        .flatMap(records -> mediaAccessService.signAll(records, MediaAccessService.Purpose.PREVIEW))
+                        .map(accesses -> new PersistenceDtos.MediaAccessResponse(normalized.stream().map(key -> {
+                            MediaAccessService.Access access = accesses.get(key);
+                            return new PersistenceDtos.MediaAccessItem(key, access == null ? "" : access.url(), access == null ? null : access.expiresAt());
+                        }).toList())));
+    }
+
+    /**
+     * 清理存储配置与读地址缓存，配置变更后调用。
+     */
+    private void invalidateStorageCaches() {
+        objectStorageService.invalidatePrivacyChecks();
+        mediaAccessService.invalidate();
+    }
+
+    /**
      * 查询媒体信息
      *
      * @param storageKey String 媒体存储键
@@ -1660,8 +1753,21 @@ public class PersistenceService {
      */
     public Mono<PersistenceDtos.UploadedMediaResponse> getMediaInfoForUser(Long userId, String storageKey) {
         // 媒体查询同时限定用户ID和媒体存储键。
+        return getMediaInfoForUser(userId, storageKey, MediaAccessService.Purpose.PREVIEW);
+    }
+
+    /**
+     * 查询指定用户媒体信息，并按用途签发读地址。
+     *
+     * @param userId Long 用户ID
+     * @param storageKey String 媒体存储键
+     * @param purpose MediaAccessService.Purpose 读地址用途
+     * @return Mono<UploadedMediaResponse> 媒体信息
+     */
+    public Mono<PersistenceDtos.UploadedMediaResponse> getMediaInfoForUser(Long userId, String storageKey, MediaAccessService.Purpose purpose) {
+        // 媒体查询同时限定用户ID和媒体存储键。
         return repository.getMedia(userId, storageKey).flatMap(sharedCopyMediaAccessService::resolve)
-                .map(this::mediaResponse)
+                .flatMap(record -> mediaResponse(record, purpose))
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.mediaNotFound"))));
     }
 
@@ -1684,15 +1790,13 @@ public class PersistenceService {
                     if (!"video".equals(normalizeMediaKind(record.getKind()))) {
                         return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.compositionInputsMustBeVideos")));
                     }
-                    String sourceUrl = firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl());
-                    if (!StringUtils.hasText(sourceUrl)) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoHasNoDownloadURL")));
-                    }
                     String mimeType = firstNonEmpty(record.getMimeType(), "video/mp4");
                     long maximumBytes = Math.max(1L, properties.getAi().getVideoComposition().getMaximumInputBytes());
                     log.info("下载视频合成源媒体: userId={}, storageKey={}", userId, normalizedStorageKey);
-                    return aiHttpClient.downloadRemoteMediaToFile(sourceUrl, mimeType, target, maximumBytes)
-                            .map(downloaded -> new DownloadedMediaFile(normalizedStorageKey, target, downloaded.mimeType(), downloaded.bytes()));
+                    return readableUrl(record, MediaAccessService.Purpose.DOWNLOAD)
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoHasNoDownloadURL"))))
+                            .flatMap(sourceUrl -> aiHttpClient.downloadRemoteMediaToFile(sourceUrl, mimeType, target, maximumBytes)
+                                    .map(downloaded -> new DownloadedMediaFile(normalizedStorageKey, target, downloaded.mimeType(), downloaded.bytes())));
                 });
     }
 
@@ -1710,13 +1814,11 @@ public class PersistenceService {
                     if (!"audio".equals(normalizeMediaKind(record.getKind()))) {
                         return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "分镜音轨必须使用音频媒体"));
                     }
-                    String sourceUrl = firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl());
-                    if (!StringUtils.hasText(sourceUrl)) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.audioMediaHasNoDownloadURL")));
-                    }
-                    return aiHttpClient.downloadRemoteMediaToFile(sourceUrl, firstNonEmpty(record.getMimeType(), "audio/mpeg"),
-                                    target, Math.max(1L, properties.getAi().getVideoComposition().getMaximumInputBytes()))
-                            .map(downloaded -> new DownloadedMediaFile(storageKey, target, downloaded.mimeType(), downloaded.bytes()));
+                    return readableUrl(record, MediaAccessService.Purpose.DOWNLOAD)
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.audioMediaHasNoDownloadURL"))))
+                            .flatMap(sourceUrl -> aiHttpClient.downloadRemoteMediaToFile(sourceUrl, firstNonEmpty(record.getMimeType(), "audio/mpeg"),
+                                            target, Math.max(1L, properties.getAi().getVideoComposition().getMaximumInputBytes()))
+                                    .map(downloaded -> new DownloadedMediaFile(storageKey, target, downloaded.mimeType(), downloaded.bytes())));
                 });
     }
 
@@ -1738,10 +1840,9 @@ public class PersistenceService {
                     if (!"video".equals(normalizeMediaKind(record.getKind()))) {
                         return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.compositionInputsMustBeVideos")));
                     }
-                    if (!StringUtils.hasText(firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl()))) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoHasNoDownloadURL")));
-                    }
-                    return Mono.empty();
+                    return readableUrl(record, MediaAccessService.Purpose.DOWNLOAD)
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoHasNoDownloadURL"))))
+                            .then();
                 });
     }
 
@@ -1761,20 +1862,18 @@ public class PersistenceService {
         return currentUserProvider.currentUserId().flatMap(userId -> repository.getMedia(userId, normalizedStorageKey).flatMap(sharedCopyMediaAccessService::resolve)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.mediaNotFound"))))
                 .flatMap(record -> {
-                    String sourceUrl = firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl());
-                    if (!StringUtils.hasText(sourceUrl)) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.mediaHasNoDownloadURL")));
-                    }
                     String defaultMimeType = firstNonEmpty(record.getMimeType(), "application/octet-stream");
                     log.info("开始下载媒体: userId={}, storageKey={}", userId, normalizedStorageKey);
-                    return aiHttpClient.downloadRemoteBinary(sourceUrl, defaultMimeType)
-                            .map(binary -> {
-                                String mimeType = firstNonEmpty(binary.mimeType(), defaultMimeType);
-                                return new PersistenceDtos.DownloadedMedia(
-                                        binary.data(),
-                                        mimeType,
-                                        "generated-" + normalizeMediaKind(record.getKind()) + mediaFileExtension(mimeType));
-                            });
+                    return readableUrl(record, MediaAccessService.Purpose.DOWNLOAD)
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.mediaHasNoDownloadURL"))))
+                            .flatMap(sourceUrl -> aiHttpClient.downloadRemoteBinary(sourceUrl, defaultMimeType)
+                                    .map(binary -> {
+                                        String mimeType = firstNonEmpty(binary.mimeType(), defaultMimeType);
+                                        return new PersistenceDtos.DownloadedMedia(
+                                                binary.data(),
+                                                mimeType,
+                                                "generated-" + normalizeMediaKind(record.getKind()) + mediaFileExtension(mimeType));
+                                    }));
                 }));
     }
 
@@ -1786,15 +1885,13 @@ public class PersistenceService {
     public Mono<Flux<DataBuffer>> streamVideoMediaForCurrentUser(String storageKey) {
         return currentUserProvider.currentUserId().flatMap(userId -> repository.getMedia(userId, storageKey).flatMap(sharedCopyMediaAccessService::resolve)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "导出视频媒体不存在")))
-                .map(record -> {
+                .flatMap(record -> {
                     if (!"video".equals(normalizeMediaKind(record.getKind()))) {
-                        throw new BusinessException(ErrorCode.PARAM_INVALID, "导出媒体不是视频");
+                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "导出媒体不是视频"));
                     }
-                    String sourceUrl = firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl());
-                    if (!StringUtils.hasText(sourceUrl)) {
-                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "导出视频媒体没有可下载地址");
-                    }
-                    return aiHttpClient.streamRemoteMedia(sourceUrl);
+                    return readableUrl(record, MediaAccessService.Purpose.DOWNLOAD)
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "导出视频媒体没有可下载地址")))
+                            .map(aiHttpClient::streamRemoteMedia);
                 }));
     }
 
@@ -1813,8 +1910,8 @@ public class PersistenceService {
         return currentUserProvider.currentUserId().flatMap(userId -> repository.getMedia(userId, normalizedStorageKey).flatMap(sharedCopyMediaAccessService::resolve)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.mediaNotFound"))))
                 .flatMap(record -> {
-                    if (StringUtils.hasText(record.getObjectStorageUrl())) {
-                        return Mono.just(mediaResponse(record));
+                    if (StringUtils.hasText(record.getObjectStorageKey()) || StringUtils.hasText(record.getObjectStorageUrl())) {
+                        return mediaResponse(record);
                     }
                     if (!StringUtils.hasText(record.getSourceUrl())) {
                         return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.mediaHasNoRemoteURLToStore")));
@@ -1963,7 +2060,7 @@ public class PersistenceService {
      * @return 保存后的媒体响应
      */
     private Mono<PersistenceDtos.UploadedMediaResponse> saveUploadedMedia(PersistenceRecords.MediaFileRecord record) {
-        return Mono.usingWhen(Mono.just(record), value -> repository.saveMedia(value).thenReturn(mediaResponse(value)),
+        return Mono.usingWhen(Mono.just(record), value -> repository.saveMedia(value).then(mediaResponse(value)),
                 value -> Mono.empty(),
                 (value, error) -> storageBillingService.requestObjectDeletion(value.getObjectStorageConfigId(), value.getObjectStorageKey()),
                 value -> storageBillingService.requestObjectDeletion(value.getObjectStorageConfigId(), value.getObjectStorageKey()));
@@ -2082,15 +2179,29 @@ public class PersistenceService {
      * 转换媒体响应
      *
      * @param record MediaFileRecord 媒体记录
-     * @return UploadedMediaResponse 媒体响应
+     * @return Mono<UploadedMediaResponse> 媒体响应，私有存储桶返回预签名地址
      */
-    private PersistenceDtos.UploadedMediaResponse mediaResponse(PersistenceRecords.MediaFileRecord record) {
+    private Mono<PersistenceDtos.UploadedMediaResponse> mediaResponse(PersistenceRecords.MediaFileRecord record) {
+        return mediaResponse(record, MediaAccessService.Purpose.PREVIEW);
+    }
+
+    /**
+     * 按用途转换媒体响应。
+     *
+     * @param record MediaFileRecord 媒体记录
+     * @param purpose MediaAccessService.Purpose 读地址用途
+     * @return Mono<UploadedMediaResponse> 媒体响应
+     */
+    private Mono<PersistenceDtos.UploadedMediaResponse> mediaResponse(PersistenceRecords.MediaFileRecord record, MediaAccessService.Purpose purpose) {
         // 已转存媒体额外返回对象存储详情，远程媒体只返回来源URL；sourceUrl始终保留上游原始链接。
-        PersistenceDtos.ObjectStorageFile objectStorage = null;
-        if (StringUtils.hasText(record.getObjectStorageUrl())) {
-            objectStorage = new PersistenceDtos.ObjectStorageFile(record.getObjectStorageProvider(), record.getObjectStorageUrl(), record.getObjectStorageKey(), record.getBucket(), record.getRegion(), record.getBytes(), record.getMimeType(), formatTime(record.getUpdatedAt()));
-        }
-        return new PersistenceDtos.UploadedMediaResponse(record.getStorageKey(), firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl()), record.getBytes(), record.getMimeType(), record.getWidth(), record.getHeight(), record.getDurationMs(), objectStorage, record.getSourceUrl());
+        return mediaAccessService.sign(record, purpose).map(access -> {
+            String url = firstNonEmpty(access.url(), record.getObjectStorageUrl(), record.getSourceUrl());
+            PersistenceDtos.ObjectStorageFile objectStorage = null;
+            if (StringUtils.hasText(record.getObjectStorageKey())) {
+                objectStorage = new PersistenceDtos.ObjectStorageFile(record.getObjectStorageProvider(), url, record.getObjectStorageKey(), record.getBucket(), record.getRegion(), record.getBytes(), record.getMimeType(), formatTime(record.getUpdatedAt()));
+            }
+            return new PersistenceDtos.UploadedMediaResponse(record.getStorageKey(), url, record.getBytes(), record.getMimeType(), record.getWidth(), record.getHeight(), record.getDurationMs(), objectStorage, record.getSourceUrl(), access.expiresAt());
+        });
     }
 
     /**
@@ -2291,6 +2402,15 @@ public class PersistenceService {
         // 访问密钥和SecretKey分别解密后还原为业务配置。
         return Mono.zip(decryptSecret(record.getAccessKeyEncrypted()), decryptSecret(record.getSecretKeyEncrypted()))
                 .map(tuple -> new PersistenceDtos.ObjectStorageConfig(record.getProvider(), tuple.getT1(), tuple.getT2(), record.getBucket(), record.getRegion(), record.getEndpoint(), record.getDirectory(), record.getPublicBaseUrl(), record.getStorageId(), record.getName(), record.getLastTestedAt(), record.getDefaultStorage()));
+    }
+
+    /**
+     * 读取用于签发读地址的全部对象存储配置，包含其他团队的配置，仅供服务端内部签名使用。
+     *
+     * @return Mono<List<ObjectStorageConfig>> 对象存储配置列表
+     */
+    public Mono<List<PersistenceDtos.ObjectStorageConfig>> listSigningObjectStorageConfigs() {
+        return repository.listPlatformObjectStorages().concatMap(this::decryptObjectStorage).collectList();
     }
 
     /**

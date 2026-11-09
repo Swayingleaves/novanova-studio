@@ -1,6 +1,7 @@
 package com.novanovastudio.service;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.common.BusinessException;
@@ -14,6 +15,7 @@ import com.novanovastudio.dto.ScriptDtos;
 import com.novanovastudio.dto.StoryboardDtos;
 import com.novanovastudio.repository.ComicDramaRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.storage.MediaAccessService;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
@@ -72,6 +74,9 @@ public class ComicDramaService {
     /** 应用配置，用于读取提示词合成并发度。 */
     private final NovanovaProperties properties;
 
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
+
     /**
      * 分页查询当前用户漫剧项目。
      *
@@ -84,7 +89,8 @@ public class ComicDramaService {
         int normalizedPage = Math.max(page, 1);
         int normalizedPageSize = Math.min(Math.max(pageSize, 1), 100);
         return currentUserProvider.currentUserId().flatMap(userId -> Mono.zip(
-                repository.listProjects(userId, text(keyword), (normalizedPage - 1) * normalizedPageSize, normalizedPageSize).collectList(),
+                repository.listProjects(userId, text(keyword), (normalizedPage - 1) * normalizedPageSize, normalizedPageSize)
+                        .concatMap(this::signedProjectSummary).collectList(),
                 repository.countProjects(userId, text(keyword)),
                 (projects, total) -> new ComicDramaDtos.ProjectListResponse(projects, total, normalizedPage, normalizedPageSize)));
     }
@@ -211,13 +217,15 @@ public class ComicDramaService {
      * @return 资产版本列表
      */
     public Mono<List<ComicDramaDtos.AssetVersion>> listAssetVersions(ComicDramaDtos.ListAssetVersionsRequest request) {
-        return withProject(request.projectId(), () -> repository.listAssetVersions(request.projectId(), request.assetId()).collectList());
+        return withProject(request.projectId(), () -> repository.listAssetVersions(request.projectId(), request.assetId()).collectList())
+                .flatMap(versions -> Flux.fromIterable(versions).concatMap(this::signedAssetVersion).collectList());
     }
 
     /** 按版本标识批量查询当前项目内的资产版本。 */
     public Mono<List<ComicDramaDtos.AssetVersion>> listAssetVersionsByIds(ComicDramaDtos.ListAssetVersionsByIdsRequest request) {
         List<String> versionIds = request.versionIds().stream().distinct().toList();
-        return withProject(request.projectId(), () -> repository.listAssetVersionsByIds(request.projectId(), versionIds).collectList());
+        return withProject(request.projectId(), () -> repository.listAssetVersionsByIds(request.projectId(), versionIds).collectList())
+                .flatMap(versions -> Flux.fromIterable(versions).concatMap(this::signedAssetVersion).collectList());
     }
 
     /**
@@ -233,7 +241,7 @@ public class ComicDramaService {
                         .then(repository.saveAssetVersion(request.version()).switchIfEmpty(conflict()))
                         .then(repository.markUpstreamChanges(request.projectId(), "assetVersion", List.of(request.version().id()), "视觉资产版本发生变化"))
                         .then(advance(userId, request.projectId(), request.expectedRevision()))
-                        .then(repository.getAssetVersion(request.projectId(), request.version().id()))));
+                        .then(repository.getAssetVersion(request.projectId(), request.version().id()))).flatMap(this::signedAssetVersion));
     }
 
     /**
@@ -723,7 +731,8 @@ public class ComicDramaService {
                         .thenMany(Flux.fromIterable(plans)
                                 .concatMap(plan -> executeSingleGeneration(request, plan, mediaType)))
                         .collectList()
-                        .map(results -> new ComicDramaDtos.GenerationTaskResult(results, results.size())))));
+                        .flatMap(results -> Flux.fromIterable(results).concatMap(this::signedMediaResult).collectList()
+                                .map(items -> new ComicDramaDtos.GenerationTaskResult(items, items.size()))))));
     }
 
     /** 查询项目媒体任务与结果。 */
@@ -746,7 +755,7 @@ public class ComicDramaService {
         return repository.listMedia(projectId, shotId, assetId).collectList()
                 .flatMapMany(Flux::fromIterable)
                 .concatMap(media -> syncOneMediaStatus(userId, projectId, media))
-                .thenMany(repository.listMedia(projectId, shotId, assetId))
+                .thenMany(repository.listMedia(projectId, shotId, assetId).concatMap(this::signedMediaResult))
                 .collectList();
     }
 
@@ -765,6 +774,43 @@ public class ComicDramaService {
                     .then(repository.refreshBatchTaskProgress(projectId))
                     .then(repository.refreshProjectProductionStatus(projectId)).thenReturn(media);
         });
+    }
+
+    /** 媒体结果中的输入快照和结果快照按预览用途重新签名。 */
+    private Mono<ComicDramaDtos.MediaResult> signedMediaResult(ComicDramaDtos.MediaResult media) {
+        return Mono.zip(
+                        signedJson(media.inputSnapshot()).map(Optional::of).defaultIfEmpty(Optional.empty()),
+                        signedJson(media.resultData()).map(Optional::of).defaultIfEmpty(Optional.empty()))
+                .map(snapshots -> new ComicDramaDtos.MediaResult(media.id(), media.targetType(), media.targetId(), media.mediaType(),
+                        media.taskId(), snapshots.getT1().orElse(null), snapshots.getT2().orElse(null), media.status(), media.adopted(),
+                        media.failureReason(), media.createdAt(), media.updatedAt()));
+    }
+
+    /** 视觉资产版本中的参考媒体数组按预览用途重新签名。 */
+    private Mono<ComicDramaDtos.AssetVersion> signedAssetVersion(ComicDramaDtos.AssetVersion version) {
+        JSONArray references = new JSONArray(version.referenceMedia() == null ? List.of() : version.referenceMedia());
+        return mediaAccessService.signJsonArray(references, MediaAccessService.Purpose.PREVIEW)
+                .defaultIfEmpty(references)
+                .map(media -> new ComicDramaDtos.AssetVersion(version.id(), version.assetId(), version.versionName(),
+                        version.variantType(), version.appearanceDescription(), media.toJavaList(JSONObject.class),
+                        version.attributes(), version.status(), version.revision(), version.createdAt(), version.updatedAt()));
+    }
+
+    /** 漫剧项目列表封面按预览用途现签。 */
+    private Mono<ComicDramaDtos.ProjectSummary> signedProjectSummary(ComicDramaDtos.ProjectSummary project) {
+        return mediaAccessService.signUrl(project.coverUrl() == null ? "" : project.coverUrl(), MediaAccessService.Purpose.PREVIEW)
+                .map(coverUrl -> new ComicDramaDtos.ProjectSummary(project.projectId(), project.scriptProjectId(), project.title(),
+                        project.projectType(), project.stage(), project.completionRate(), project.assetCount(), project.shotCount(),
+                        project.completedShotCount(), project.pendingUpdateCount(), project.runningTaskCount(), project.readiness(),
+                        project.revision(), project.updatedAt(), coverUrl));
+    }
+
+    /** 现有快照中的本系统媒体地址按预览用途现签，null 保持为空信号。 */
+    private Mono<JSONObject> signedJson(JSONObject json) {
+        if (json == null) {
+            return Mono.empty();
+        }
+        return mediaAccessService.signJson(json, MediaAccessService.Purpose.PREVIEW).switchIfEmpty(Mono.just(json));
     }
 
     /** 采用一个生成媒体版本。 */

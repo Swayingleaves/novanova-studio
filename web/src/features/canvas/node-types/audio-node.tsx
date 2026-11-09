@@ -12,6 +12,7 @@ import { useNodeActions } from "./node-action-context";
 import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface } from "./shared";
 import { formatAudioTime } from "@/features/storage/utils/audio-waveform";
 import { audioNodeTrimRange } from "../utils/audio-trim";
+import { useMediaUrl } from "@/shared/hooks/use-media-url";
 
 import { activateCanvasAudio, releaseCanvasAudio } from "../services/canvas-audio-playback";
 
@@ -33,6 +34,9 @@ export const AudioNode = memo(function AudioNode({ data, selected }: NodeProps<N
     const [playing, setPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [failed, setFailed] = useState(false);
+    // 有存储键时通过接口换取当前临时地址，地址过期后由加载错误触发续签。
+    const media = useMediaUrl({ storageKey: data.content.storageKey, url: data.content.source, objectStorage: data.content.objectStorage, kind: "media" });
+    const audioSource = media.url || data.content.source;
     const trim = audioNodeTrimRange(data.content);
     const trimStart = trim.startMs / 1000;
     const trimEnd = trim.endMs / 1000;
@@ -88,7 +92,7 @@ export const AudioNode = memo(function AudioNode({ data, selected }: NodeProps<N
     useEffect(() => {
         const audio = audioRef.current;
         if (audio) {
-            audio.src = data.content.source;
+            audio.src = audioSource;
         }
         setPlaying(false);
         setCurrentTime(trimStart);
@@ -102,7 +106,7 @@ export const AudioNode = memo(function AudioNode({ data, selected }: NodeProps<N
             audio.removeAttribute("src");
             audio.load();
         };
-    }, [data.content.source, trimStart, trimEnd]);
+    }, [audioSource, trimStart, trimEnd]);
 
     /** 点击后才允许播放，播放失败保留替换和重试入口。 */
     const togglePlayback = async () => {
@@ -132,7 +136,7 @@ export const AudioNode = memo(function AudioNode({ data, selected }: NodeProps<N
         <NodeHoverSurface nodeId={data.id} className="relative flex h-full w-full select-none flex-col rounded-lg border p-3" style={{ background: theme.node.fill, borderColor: selected ? theme.node.activeStroke : theme.node.stroke, color: theme.node.text }}>
             <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.audio")} onTitleChange={actions.onTitleChange} />
             {data.content.source ? <div className="nopan nowheel flex min-h-0 flex-1 flex-col gap-2" data-canvas-no-zoom onDoubleClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (AUDIO_SEEK_KEYS.includes(event.key)) event.stopPropagation(); }}>
-                <audio ref={audioRef} src={data.content.source} preload="metadata" onLoadedMetadata={(event) => { event.currentTarget.currentTime = trimStart; setCurrentTime(trimStart); }} onPlay={(event) => { if (!playbackRequestRef.current) { event.currentTarget.pause(); return; } playbackRequestRef.current = false; activateCanvasAudio(event.currentTarget); setPlaying(true); }} onPause={() => { playbackRequestRef.current = false; setPlaying(false); }} onEnded={() => { playbackRequestRef.current = false; setPlaying(false); setCurrentTime(trimEnd); }} onError={() => setFailed(true)} onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; if (time >= trimEnd) { event.currentTarget.pause(); event.currentTarget.currentTime = trimEnd; } setCurrentTime(Math.min(trimEnd, Math.max(trimStart, time))); }} />
+                <audio ref={audioRef} src={audioSource} preload="metadata" onLoadedMetadata={(event) => { event.currentTarget.currentTime = trimStart; setCurrentTime(trimStart); }} onPlay={(event) => { if (!playbackRequestRef.current) { event.currentTarget.pause(); return; } playbackRequestRef.current = false; activateCanvasAudio(event.currentTarget); setPlaying(true); }} onPause={() => { playbackRequestRef.current = false; setPlaying(false); }} onEnded={() => { playbackRequestRef.current = false; setPlaying(false); setCurrentTime(trimEnd); }} onError={() => { setFailed(true); media.onError(); }} onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; if (time >= trimEnd) { event.currentTarget.pause(); event.currentTarget.currentTime = trimEnd; } setCurrentTime(Math.min(trimEnd, Math.max(trimStart, time))); }} />
                 <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg focus-within:outline focus-within:outline-2 focus-within:outline-offset-2" style={{ background: theme.node.panel }}>
                     <svg className="absolute inset-0 h-full w-full p-4" viewBox="0 0 512 100" preserveAspectRatio="none" aria-hidden="true">
                         {data.content.waveformPeaks.map((peak, index) => <line key={index} x1={index * 4 + 2} x2={index * 4 + 2} y1={50 - Math.max(1, peak * 44)} y2={50 + Math.max(1, peak * 44)} stroke={index / 128 <= progress ? theme.node.text : theme.node.muted} strokeWidth={2} strokeLinecap="round" />)}

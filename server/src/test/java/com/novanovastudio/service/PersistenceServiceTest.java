@@ -100,13 +100,22 @@ class PersistenceServiceTest {
         return access;
     }
 
+    /** 创建不访问数据库的测试签名服务。 */
+    private com.novanovastudio.storage.MediaAccessService mediaAccess() {
+        @SuppressWarnings("unchecked")
+        org.springframework.beans.factory.ObjectProvider<PersistenceService> provider = org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+        org.mockito.Mockito.lenient().when(provider.getObject()).thenAnswer(call -> service);
+        return new com.novanovastudio.storage.MediaAccessService(provider, objectStorageService, new NovanovaProperties());
+    }
+
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(agentActivityService.activitiesForRound(
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(JSONObject.class)))
                 .thenReturn(new JSONArray());
+        org.mockito.Mockito.lenient().when(repository.listPlatformObjectStorages()).thenReturn(Flux.empty());
         teamRepository = com.novanovastudio.TeamTestSupport.teamRepository();
-        service = new PersistenceService(repository, sharedMediaAccess(), teamRepository, com.novanovastudio.TeamTestSupport.storageBilling(), aiTaskRepository, agentActivityService, aiHttpClient, currentUserProvider, properties, objectStorageService, modelTaskExecutionDispatcher);
+        service = new PersistenceService(repository, sharedMediaAccess(), teamRepository, com.novanovastudio.TeamTestSupport.storageBilling(), aiTaskRepository, agentActivityService, aiHttpClient, mediaAccess(), currentUserProvider, properties, objectStorageService, modelTaskExecutionDispatcher);
         org.mockito.Mockito.lenient().when(modelTaskExecutionDispatcher.refresh(org.mockito.ArgumentMatchers.anyString())).thenReturn(Mono.empty());
     }
 

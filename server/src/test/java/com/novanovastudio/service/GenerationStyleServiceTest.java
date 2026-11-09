@@ -40,7 +40,7 @@ class GenerationStyleServiceTest {
     /** 初始化服务。 */
     @BeforeEach
     void setUp() {
-        service = new GenerationStyleService(repository);
+        service = new GenerationStyleService(repository, com.novanovastudio.MediaAccessTestSupport.echo());
     }
 
     /** 普通生成应解析用户选择的启用风格。 */

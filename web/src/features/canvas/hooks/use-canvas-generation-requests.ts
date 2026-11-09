@@ -17,9 +17,11 @@ export function useCanvasGenerationRequests() {
         return registryRef.current.stopByRunningId(runningNodeId);
     }, []);
 
+    const listTargetNodeIds = useCallback((runningNodeId: string) => registryRef.current.listTargetNodeIds(runningNodeId), []);
+
     const isRunning = useCallback((runningNodeId: string) => registryRef.current.isRunning(runningNodeId), []);
 
     useEffect(() => () => registryRef.current.stopAll(), []);
 
-    return { start, finish, stopByRunningId, isRunning };
+    return { start, finish, stopByRunningId, listTargetNodeIds, isRunning };
 }

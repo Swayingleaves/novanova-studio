@@ -23,6 +23,7 @@ export function FantasticShow() {
     const [error, setError] = useState("");
     const [revision, setRevision] = useState(0);
     const [liking, setLiking] = useState<string[]>([]);
+    const lastLoadedAt = useRef(0);
     useEffect(() => {
         const timer = setTimeout(() => {
             setSearch(keyword.trim());
@@ -34,6 +35,7 @@ export function FantasticShow() {
         const controller = new AbortController();
         setLoading(true);
         setError("");
+        lastLoadedAt.current = Date.now();
         void listFantasticWorks(type, category, search, page, controller.signal)
             .then((result) => {
                 if (!controller.signal.aborted) {
@@ -49,6 +51,18 @@ export function FantasticShow() {
             });
         return () => controller.abort();
     }, [type, category, search, page, revision]);
+    // 作品墙的媒体是临时地址，长时间停留或回到前台时低频重新拉取一次。
+    useEffect(() => {
+        const refreshIfStale = () => {
+            if (document.visibilityState === "visible" && Date.now() - lastLoadedAt.current > 15 * 60_000) setRevision((value) => value + 1);
+        };
+        const timer = window.setInterval(refreshIfStale, 20 * 60_000);
+        document.addEventListener("visibilitychange", refreshIfStale);
+        return () => {
+            window.clearInterval(timer);
+            document.removeEventListener("visibilitychange", refreshIfStale);
+        };
+    }, []);
     const toggleLike = (item: FantasticWork) => {
         const store = useUserStore.getState();
         if (!store.token) {

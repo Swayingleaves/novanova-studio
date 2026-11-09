@@ -69,7 +69,8 @@ class ComicDramaPromptServiceTest {
         when(repository.refreshProjectProductionStatus("project")).thenReturn(Mono.empty());
         when(transaction.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
         service = new ComicDramaService(currentUserProvider, repository, mock(ScriptService.class),
-                storyboardAgentService, pricingService, aiTaskService, mock(PersistenceService.class), transaction, new NovanovaProperties());
+                storyboardAgentService, pricingService, aiTaskService, mock(PersistenceService.class), transaction, new NovanovaProperties(),
+                com.novanovastudio.MediaAccessTestSupport.echo());
     }
 
     /** 单条合成和批量合成必须生成完全相同的正文、说明和映射。 */

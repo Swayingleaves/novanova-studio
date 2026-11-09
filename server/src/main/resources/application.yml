@@ -240,6 +240,18 @@ novanova:
   # 对象存储配置
   # ----------------------------------------------------------
   object-storage:
+    # 是否强制要求存储桶为私有读写；切换完成后建议设为 true，未开启时只记录告警
+    require-private-bucket: ${STORAGE_REQUIRE_PRIVATE_BUCKET:false}
+    # 私有读存储桶的预签名读地址有效期，按用途分档，单位秒
+    sign-ttl:
+      # 图片、视频、音频预览与播放地址
+      preview-seconds: ${STORAGE_SIGN_PREVIEW_SECONDS:3600}
+      # 文件下载地址
+      download-seconds: ${STORAGE_SIGN_DOWNLOAD_SECONDS:300}
+      # 第三方模型拉取参考素材的地址
+      third-party-seconds: ${STORAGE_SIGN_THIRD_PARTY_SECONDS:7200}
+      # 公开分享页展示地址
+      public-page-seconds: ${STORAGE_SIGN_PUBLIC_PAGE_SECONDS:1800}
     tencent-cos:
       # 单个请求失败后的最大额外重试次数，SDK总尝试次数为该值加1
       max-error-retry: ${TENCENT_COS_MAX_ERROR_RETRY:3}

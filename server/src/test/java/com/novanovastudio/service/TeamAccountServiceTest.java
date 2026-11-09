@@ -63,7 +63,8 @@ class TeamAccountServiceTest {
         TeamInvitationMailService invitationMail = mock(TeamInvitationMailService.class);
         TransactionalOperator transactions = mock(TransactionalOperator.class);
         when(transactions.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        service = new TeamService(teams, accounts, credits, currentUser, passwords, locks, invitationService, invitationMail, transactions);
+        service = new TeamService(teams, accounts, credits, currentUser, passwords, locks, invitationService, invitationMail, transactions,
+                com.novanovastudio.MediaAccessTestSupport.echo());
         when(currentUser.currentUserId()).thenReturn(Mono.just(1L));
         when(currentUser.currentUser()).thenReturn(Mono.just(new CurrentUser(1L, "admin@example.com", "user", 1)));
         team = JSONObject.of("id", 101L, "enabled", true, "memberLimit", 2);

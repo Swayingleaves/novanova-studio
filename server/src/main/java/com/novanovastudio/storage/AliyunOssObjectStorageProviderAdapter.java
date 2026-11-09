@@ -7,6 +7,7 @@ import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.common.auth.DefaultCredentialProvider;
 import com.aliyun.oss.common.comm.SignVersion;
+import com.aliyun.oss.model.CannedAccessControlList;
 import com.aliyun.oss.model.ObjectMetadata;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -60,12 +61,39 @@ public class AliyunOssObjectStorageProviderAdapter implements ObjectStorageProvi
             var request = new com.aliyun.oss.model.GeneratePresignedUrlRequest(config.bucket(), key, com.aliyun.oss.HttpMethod.GET);
             request.setExpiration(java.util.Date.from(expiresAt));
             var headers = new com.aliyun.oss.model.ResponseHeaderOverrides();
-            headers.setContentDisposition(org.springframework.http.ContentDisposition.builder(download ? "attachment" : "inline")
-                    .filename(fileName, java.nio.charset.StandardCharsets.UTF_8).build().toString());
-            headers.setContentType(mimeType);
+            if (org.springframework.util.StringUtils.hasText(fileName)) {
+                headers.setContentDisposition(org.springframework.http.ContentDisposition.builder(download ? "attachment" : "inline")
+                        .filename(fileName, java.nio.charset.StandardCharsets.UTF_8).build().toString());
+            }
+            if (org.springframework.util.StringUtils.hasText(mimeType)) {
+                headers.setContentType(mimeType);
+            }
             request.setResponseHeaders(headers);
             return client.generatePresignedUrl(request).toString();
         } finally { client.shutdown(); }
+    }
+
+    /**
+     * 读取存储空间 ACL 确认匿名读取已关闭。
+     *
+     * @param config ObjectStorageConfig 对象存储配置
+     * @return boolean 是否已确认空间私有
+     */
+    @Override
+    public boolean verifyPrivateBucket(PersistenceDtos.ObjectStorageConfig config) {
+        validate(config);
+        ClientBuilderConfiguration clientConfiguration = new ClientBuilderConfiguration();
+        clientConfiguration.setSignatureVersion(SignVersion.V4);
+        OSS client = OSSClientBuilder.create().credentialsProvider(new DefaultCredentialProvider(config.accessKey(), config.secretKey()))
+                .clientConfiguration(clientConfiguration).region(config.region()).endpoint(config.endpoint()).build();
+        try {
+            return client.getBucketAcl(config.bucket()).getCannedACL() == CannedAccessControlList.Private;
+        } catch (RuntimeException exception) {
+            log.error("验证阿里云OSS私有空间失败: bucket={}", config.bucket(), exception);
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "无法验证阿里云OSS私有访问，请检查对象存储配置");
+        } finally {
+            client.shutdown();
+        }
     }
 
     /**

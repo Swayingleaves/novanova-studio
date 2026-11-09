@@ -23,7 +23,8 @@ import { saveAs } from "file-saver";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/features/generation/api/image";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/features/generation/api/video";
 import { composeStoryboardPrompts, createStoryboardAssetImageTask, generateStoryboard, readStoryboardAssetImage } from "@/services/api/storyboard";
-import { cancelAiTask, createAiTask, getAiTaskInfo, readAiTaskError, subscribeAiTaskDeltas, waitAiTask, type AiTaskErrorDetails, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
+import { cancelAiTasksWithRefundPolicy, isSubmittedMediaTask, runCancelWithProviderRequestPolicy } from "@/features/generation/lib/cancel-provider-generation";
+import { cancelAiTask, createAiTask, getAiTaskInfo, markGenerationCancelForfeit, readAiTaskError, subscribeAiTaskDeltas, waitAiTask, type AiTaskErrorDetails, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
 import { cancelCompositionTask, composeVideo, waitVideoCompositionTask, type VideoCompositionTask } from "@/services/api/video-composition";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { normalizeImageGenerationCount } from "@/features/generation/components/image-settings-panel";
@@ -496,7 +497,7 @@ function CanvasWorkspacePage() {
         setNavigationPanelTab("nodes");
         setPreviewAsset(null);
     }, [projectId]);
-    const { start: startGenerationRequest, finish: finishGenerationRequest, stopByRunningId: stopRegisteredGenerationRequests, isRunning: isGenerationRunning } = useCanvasGenerationRequests();
+    const { start: startGenerationRequest, finish: finishGenerationRequest, stopByRunningId: stopRegisteredGenerationRequests, listTargetNodeIds: listGenerationTargetNodeIds, isRunning: isGenerationRunning } = useCanvasGenerationRequests();
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
@@ -584,16 +585,35 @@ function CanvasWorkspacePage() {
 
     const confirmStopGeneration = useCallback(
         (nodeId: string) => {
-            modal.confirm({
-                title: translate("canvas.stopGeneration_9f2951"),
-                content: translate("canvas.theCurrentGenerationRequestWillStopCompletedContentWill"),
-                okText: translate("canvas.stop"),
-                cancelText: translate("canvas.continueGenerating"),
-                okButtonProps: { danger: true },
-                onOk: () => stopGenerationByRunningId(nodeId),
-            });
+            void (async () => {
+                const targetIds = listGenerationTargetNodeIds(nodeId);
+                const nodesById = new Map(nodesRef.current.map((node) => [node.id, node]));
+                const taskIds = [...new Set(targetIds.flatMap((id) => {
+                    const taskId = nodesById.get(id)?.execution.taskId;
+                    return taskId ? [taskId] : [];
+                }))];
+                const tasks = await Promise.all(taskIds.map((taskId) => getAiTaskInfo(taskId).catch(() => null)));
+                const sent = tasks.some((task) => task && isSubmittedMediaTask(task));
+                modal.confirm({
+                    title: sent ? translate("generation.cancelWithoutRefund") : translate("canvas.stopGeneration_9f2951"),
+                    content: sent ? translate("generation.requestAlreadySentCancelKeepsTheCharge") : translate("canvas.theCurrentGenerationRequestWillStopCompletedContentWill"),
+                    okText: sent ? translate("generation.cancelWithoutRefundConfirm") : translate("canvas.stop"),
+                    cancelText: translate("canvas.continueGenerating"),
+                    okButtonProps: { danger: true },
+                    onOk: async () => {
+                        if (sent) {
+                            markGenerationCancelForfeit(taskIds);
+                            await Promise.all(taskIds.map((taskId) => cancelAiTask(taskId, { forfeitRefund: true })));
+                        } else {
+                            const outcome = await cancelAiTasksWithRefundPolicy(taskIds, modal);
+                            if (outcome === "declined") return;
+                        }
+                        stopGenerationByRunningId(nodeId);
+                    },
+                });
+            })().catch((error) => message.error(error instanceof Error ? error.message : translate("canvas.failedToStop")));
         },
-        [modal, stopGenerationByRunningId],
+        [listGenerationTargetNodeIds, message, modal, stopGenerationByRunningId],
     );
 
     const confirmUploadReferenceImages = useCallback(
@@ -5536,7 +5556,7 @@ function CanvasWorkspacePage() {
                     completedThinkings={completedThinkings}
                     activeThinking={activeThinking}
                     onNewSession={handleCreateAgentSession}
-                    onStop={() => void cancelAgentMessage().catch((error) => message.error(error instanceof Error ? error.message : translate("canvas.failedToStop")))}
+                    onStop={() => void runCancelWithProviderRequestPolicy(modal, (forfeit) => cancelAgentMessage(forfeit)).catch((error) => message.error(error instanceof Error ? error.message : translate("canvas.failedToStop")))}
                     initialPrompt={initialPrompt}
                     sessionId={activeChatId}
                     onSend={async (text, references = [], generationStyleIds = [], generationStyles = [], agentText = text) => {

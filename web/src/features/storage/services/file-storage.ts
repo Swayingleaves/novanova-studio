@@ -8,7 +8,24 @@ import { mergeMediaStorageInfo } from "./media-storage-info";
 
 export type UploadedFile = { url: string; sourceUrl?: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number; objectStorage?: ObjectStorageFile };
 
-const resolvedUrls = new Map<string, string>();
+const resolvedUrls = new Map<string, { url: string; expiresAt?: number }>();
+
+/** 预签名地址提前一分钟视为过期，避免页面拿到即将失效的地址。 */
+const URL_REUSE_MARGIN_MS = 60_000;
+
+function readCachedUrl(storageKey: string) {
+    const cached = resolvedUrls.get(storageKey);
+    if (!cached) return "";
+    if (cached.expiresAt && cached.expiresAt - URL_REUSE_MARGIN_MS <= Date.now()) {
+        resolvedUrls.delete(storageKey);
+        return "";
+    }
+    return cached.url;
+}
+
+function writeCachedUrl(storageKey: string, url: string, expiresAt?: string) {
+    resolvedUrls.set(storageKey, { url, expiresAt: expiresAt ? Date.parse(expiresAt) : undefined });
+}
 
 export async function uploadMediaFile(input: string | Blob, prefix = "file", options: { mimeType?: string; durationMs?: number } = {}): Promise<UploadedFile> {
     if (typeof input === "string" && /^https?:\/\//i.test(input)) {
@@ -31,18 +48,20 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file", opt
         },
         input instanceof File ? input.name : `${prefix}.bin`,
     );
-    resolvedUrls.set(media.storageKey, media.url);
+    writeCachedUrl(media.storageKey, media.url, media.expiresAt);
     return { url: media.url, sourceUrl: media.sourceUrl, storageKey: media.storageKey, bytes: media.bytes || blob.size, mimeType: media.mimeType || options.mimeType || blob.type || "application/octet-stream", width: media.width || meta.width, height: media.height || meta.height, durationMs: media.durationMs || options.durationMs || meta.durationMs, objectStorage: media.objectStorage };
 }
 
-export async function resolveMediaUrl(storageKey?: string, fallback = "") {
+export async function resolveMediaUrl(storageKey?: string, fallback = "", forceRefresh = false) {
     if (!storageKey) return fallback;
-    const cached = resolvedUrls.get(storageKey);
-    if (cached) return cached;
+    if (!forceRefresh) {
+        const cached = readCachedUrl(storageKey);
+        if (cached) return cached;
+    }
     try {
         const media = await getServerMediaInfo(storageKey);
         if (!media.url) return fallback;
-        resolvedUrls.set(storageKey, media.url);
+        writeCachedUrl(storageKey, media.url, media.expiresAt);
         return media.url;
     } catch {
         return fallback;
@@ -53,7 +72,7 @@ export async function resolveMediaStorageInfo(storageKey?: string, fallbackUrl =
     if (!storageKey) return mergeMediaStorageInfo(fallbackUrl, fallbackObjectStorage);
     try {
         const media = await getServerMediaInfo(storageKey);
-        if (media.url) resolvedUrls.set(storageKey, media.url);
+        if (media.url) writeCachedUrl(storageKey, media.url, media.expiresAt);
         return mergeMediaStorageInfo(fallbackUrl, fallbackObjectStorage, media);
     } catch {
         return mergeMediaStorageInfo(fallbackUrl, fallbackObjectStorage);
@@ -71,7 +90,7 @@ export async function setMediaBlob(storageKey: string, blob: Blob) {
     const meta = audioMeta ? { durationMs: audioMeta.durationMs } : blob.type.startsWith("video/") ? await readVideoMeta(localUrl) : {};
     URL.revokeObjectURL(localUrl);
     const media = await uploadServerMedia(blob, { kind: storageKey.split(":", 1)[0] || "file", storageKey, mimeType: blob.type || "application/octet-stream", ...meta }, "media.bin");
-    resolvedUrls.set(storageKey, media.url);
+    writeCachedUrl(storageKey, media.url, media.expiresAt);
     return media.url;
 }
 

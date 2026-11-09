@@ -6,8 +6,7 @@ import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.StorageFileDtos;
 import com.novanovastudio.repository.StorageFileRepository;
 import com.novanovastudio.security.CurrentUserProvider;
-import com.novanovastudio.security.TeamScope;
-import com.novanovastudio.storage.ObjectStorageService;
+import com.novanovastudio.storage.MediaAccessService;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Set;
@@ -39,8 +38,8 @@ public class StorageFileService {
     private final CurrentUserProvider currentUserProvider;
     /** 只在验证对象所有权后加载原存储配置。 */
     private final ObjectProvider<PersistenceService> persistenceServiceProvider;
-    /** 沿用对象存储提供方适配器。 */
-    private final ObjectStorageService objectStorageService;
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
     /** 协调访问授权与删除的短事务。 */
     private final TransactionalOperator transactionalOperator;
 
@@ -81,14 +80,13 @@ public class StorageFileService {
                     || !object.getString("mimeType").matches("^(image|video|audio)/.*"))) {
                 return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "该文件不支持在线预览，请下载后查看"));
             }
-            Instant expiresAt = Instant.now().plusSeconds(300);
+            boolean download = purpose.equals("download");
             // 所有权校验先于提升配置读取权限，停用或切换默认配置不影响本人已有文件。
-            return persistenceServiceProvider.getObject().getObjectStorageForCleanup(object.getString("storageId"))
-                    .contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true))
-                    .flatMap(config -> Mono.fromCallable(() -> objectStorageService.createReadUrl(config,
-                                    object.getString("objectKey"), object.getString("fileName"), object.getString("mimeType"), purpose.equals("download"), expiresAt))
-                            .subscribeOn(Schedulers.boundedElastic()))
-                    .map(url -> JSONObject.of("url", url, "expiresAt", expiresAt.toString()));
+            return mediaAccessService.signObject(object.getString("storageId"), object.getString("objectKey"),
+                            object.getString("fileName"), object.getString("mimeType"),
+                            download ? MediaAccessService.Purpose.DOWNLOAD : MediaAccessService.Purpose.PREVIEW, download)
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "文件存储配置已不存在")))
+                    .map(access -> JSONObject.of("url", access.url(), "expiresAt", access.expiresAt()));
         })).as(transactionalOperator::transactional);
     }
 

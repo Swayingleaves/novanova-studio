@@ -85,7 +85,7 @@ public class AudioClipService {
         String storageKey = derivedStorageKey(media.storageKey(), startMs, endMs);
         log.info("准备解析音频派生媒体: userId={}, derivedStorageKey={}, startMs={}, endMs={}",
                 userId, storageKey, startMs, endMs);
-        return persistenceService.getMediaInfoForUser(userId, storageKey)
+        return persistenceService.getMediaInfoForUser(userId, storageKey, com.novanovastudio.storage.MediaAccessService.Purpose.THIRD_PARTY)
                 .flatMap(existing -> {
                     if (!StringUtils.hasText(existing.url()) || !isHttpUrl(existing.url())) {
                         log.info("已存在的音频派生媒体地址无效，重新生成: userId={}, storageKey={}", userId, storageKey);

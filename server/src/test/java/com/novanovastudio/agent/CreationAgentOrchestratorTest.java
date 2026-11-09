@@ -366,7 +366,8 @@ class CreationAgentOrchestratorTest {
         when(requestQueue.markCancelRequested("request-running")).thenReturn(Mono.empty());
         when(requestRepository.taskIds(running)).thenReturn(List.of("task-1"));
         when(planRepository.cancelPlan("plan-1")).thenReturn(Mono.empty());
-        when(aiTaskService.cancelTaskForUser(1L, "task-1")).thenReturn(Mono.empty());
+        when(aiTaskService.hasSubmittedMediaTask(List.of("task-1"))).thenReturn(Mono.just(false));
+        when(aiTaskService.cancelTaskForUser(1L, "task-1", false)).thenReturn(Mono.empty());
         CreationAgentOrchestrator orchestrator = queuedOrchestrator(mock(AgentSessionService.class), mock(AgentEventEmitter.class),
                 planRepository, aiTaskService, requestRepository, requestDispatcher, requestQueue);
 
@@ -375,7 +376,7 @@ class CreationAgentOrchestratorTest {
         verify(requestRepository).cancelRunningIfRunning(1L, "request-running", "已停止生成");
         verify(requestQueue).markCancelRequested("request-running");
         verify(planRepository).cancelPlan("plan-1");
-        verify(aiTaskService).cancelTaskForUser(1L, "task-1");
+        verify(aiTaskService).cancelTaskForUser(1L, "task-1", false);
         verify(requestQueue, never()).removeQueuedRequest(anyLong(), anyString(), anyString());
         verify(requestDispatcher, never()).dispatchAvailable(anyLong(), anyString());
     }

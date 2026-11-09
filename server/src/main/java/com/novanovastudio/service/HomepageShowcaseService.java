@@ -8,6 +8,7 @@ import com.novanovastudio.dto.HomepageShowcaseDtos;
 import com.novanovastudio.entity.HomepageShowcaseRecords;
 import com.novanovastudio.repository.HomepageShowcaseRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.storage.MediaAccessService;
 import java.net.URI;
 import java.util.Map;
 import java.util.List;
@@ -43,16 +44,20 @@ public class HomepageShowcaseService {
     private final HomepageShowcaseRepository repository;
     private final CurrentUserProvider currentUserProvider;
 
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
+
     /** 查询首页公开精选内容。 */
     public Mono<HomepageShowcaseDtos.ShowcaseListResponse> listPublic(Integer limit) {
         int normalizedLimit = Math.max(1, Math.min(MAX_PUBLIC_LIMIT, limit == null ? 12 : limit));
-        return repository.listPublic(normalizedLimit).map(this::toItem).collectList()
+        return repository.listPublic(normalizedLimit)
+                .concatMap(record -> toItem(record, MediaAccessService.Purpose.PUBLIC_PAGE)).collectList()
                 .map(items -> new HomepageShowcaseDtos.ShowcaseListResponse(items, items.size()));
     }
 
     /** 查询管理端精选内容。 */
     public Mono<HomepageShowcaseDtos.ShowcaseListResponse> listAdmin() {
-        return repository.listAdmin().map(this::toItem).collectList()
+        return repository.listAdmin().concatMap(record -> toItem(record, MediaAccessService.Purpose.PREVIEW)).collectList()
                 .map(items -> new HomepageShowcaseDtos.ShowcaseListResponse(items, items.size()));
     }
 
@@ -150,7 +155,11 @@ public class HomepageShowcaseService {
         return value == null ? "" : value.trim();
     }
 
-    private HomepageShowcaseDtos.ShowcaseItem toItem(HomepageShowcaseRecords.ShowcaseRecord record) {
-        return new HomepageShowcaseDtos.ShowcaseItem(record.getId(), record.getTitle(), record.getDescription(), record.getCategory(), record.getCreatorName(), record.getMediaType(), record.getMediaUrl(), record.getThumbnailUrl(), record.getTargetType(), record.getTargetPath(), record.getPromptContent(), record.getSortOrder(), record.getStatus(), record.getCreatedAt() == null ? null : record.getCreatedAt().toString(), record.getUpdatedAt() == null ? null : record.getUpdatedAt().toString());
+    /** 转换精选条目，媒体地址按用途现签，避免私有桶地址失效。 */
+    private Mono<HomepageShowcaseDtos.ShowcaseItem> toItem(HomepageShowcaseRecords.ShowcaseRecord record, MediaAccessService.Purpose purpose) {
+        return Mono.zip(
+                        mediaAccessService.signUrl(normalizeText(record.getMediaUrl()), purpose),
+                        mediaAccessService.signUrl(normalizeText(record.getThumbnailUrl()), purpose))
+                .map(urls -> new HomepageShowcaseDtos.ShowcaseItem(record.getId(), record.getTitle(), record.getDescription(), record.getCategory(), record.getCreatorName(), record.getMediaType(), urls.getT1(), urls.getT2(), record.getTargetType(), record.getTargetPath(), record.getPromptContent(), record.getSortOrder(), record.getStatus(), record.getCreatedAt() == null ? null : record.getCreatedAt().toString(), record.getUpdatedAt() == null ? null : record.getUpdatedAt().toString()));
     }
 }

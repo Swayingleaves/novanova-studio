@@ -412,16 +412,19 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
     return true;
   }, []);
 
-  const cancelMessage = useCallback(async () => {
-    activeToolControllersRef.current.forEach((controller) => controller.abort());
-    activeToolControllersRef.current.clear();
-    cancelRequestedRef.current = true;
+  const cancelMessage = useCallback(async (forfeitSubmittedGeneration = false) => {
     if (!sessionIdRef.current || !requestIdRef.current) {
+      activeToolControllersRef.current.forEach((controller) => controller.abort());
+      activeToolControllersRef.current.clear();
+      cancelRequestedRef.current = true;
       if (!sendingRef.current) cancelRequestedRef.current = false;
       return;
     }
     try {
-      await cancelAgentChat(sessionIdRef.current, requestIdRef.current);
+      await cancelAgentChat(sessionIdRef.current, requestIdRef.current, forfeitSubmittedGeneration);
+      activeToolControllersRef.current.forEach((controller) => controller.abort());
+      activeToolControllersRef.current.clear();
+      cancelRequestedRef.current = true;
       finishCanceledRequest(requestIdRef.current, translate("canvas.generationStopped"));
     } catch (error) {
       if (!sendingRef.current) cancelRequestedRef.current = false;
