@@ -30,6 +30,16 @@ public final class PlatformOAuthClientRecords {
         private String clientSecretEncrypted;
         /** 允许的回调地址 JSON 数组 */
         private String redirectUris;
+        /** 应用图标的媒体存储键，为空表示未配置 */
+        private String logoStorageKey;
+        /** 应用图标所在的对象存储配置标识 */
+        private String logoStorageId;
+        /** 应用图标的对象键 */
+        private String logoObjectKey;
+        /** 应用图标的媒体类型 */
+        private String logoMimeType;
+        /** 授权确认页展示的说明文字 */
+        private String displayContent;
         /** 创建时间 */
         private OffsetDateTime createdAt;
         /** 最后更新时间 */

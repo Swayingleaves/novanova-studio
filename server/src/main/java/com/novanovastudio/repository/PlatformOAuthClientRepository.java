@@ -20,7 +20,8 @@ public class PlatformOAuthClientRepository {
 
     /** 配置列清单 */
     private static final String COLUMNS = """
-            client_id, display_name, enabled, client_secret_encrypted, redirect_uris, created_at, updated_at
+            client_id, display_name, enabled, client_secret_encrypted, redirect_uris,
+            logo_storage_key, logo_storage_id, logo_object_key, logo_mime_type, display_content, created_at, updated_at
             """;
 
     /** 数据库客户端 */
@@ -57,43 +58,68 @@ public class PlatformOAuthClientRepository {
      * @return Mono<Long> 受影响行数
      */
     public Mono<Long> insert(PlatformOAuthClientRecords.OAuthClientRecord record) {
-        return databaseClient.sql("""
+        DatabaseClient.GenericExecuteSpec specification = databaseClient.sql("""
                 INSERT INTO platform_oauth_clients(
-                    client_id, display_name, enabled, client_secret_encrypted, redirect_uris
+                    client_id, display_name, enabled, client_secret_encrypted, redirect_uris,
+                    logo_storage_key, logo_storage_id, logo_object_key, logo_mime_type, display_content
                 ) VALUES (
-                    :clientId, :displayName, :enabled, :clientSecretEncrypted, :redirectUris
+                    :clientId, :displayName, :enabled, :clientSecretEncrypted, :redirectUris,
+                    :logoStorageKey, :logoStorageId, :logoObjectKey, :logoMimeType, :displayContent
                 )
                 """)
                 .bind("clientId", record.getClientId())
                 .bind("displayName", record.getDisplayName())
                 .bind("enabled", record.getEnabled())
                 .bind("clientSecretEncrypted", record.getClientSecretEncrypted())
-                .bind("redirectUris", record.getRedirectUris())
+                .bind("redirectUris", record.getRedirectUris());
+        return bindPresentation(specification, record)
                 .fetch()
                 .rowsUpdated();
     }
 
     /**
-     * 更新名称、启用状态和回调地址，不改动密钥。
+     * 更新名称、启用状态、回调地址和授权页展示，不改动密钥。
      *
      * @param record OAuthClientRecord 授权客户端
      * @return Mono<Long> 受影响行数
      */
     public Mono<Long> update(PlatformOAuthClientRecords.OAuthClientRecord record) {
-        return databaseClient.sql("""
+        DatabaseClient.GenericExecuteSpec specification = databaseClient.sql("""
                 UPDATE platform_oauth_clients
                 SET display_name = :displayName,
                     enabled = :enabled,
                     redirect_uris = :redirectUris,
+                    logo_storage_key = :logoStorageKey,
+                    logo_storage_id = :logoStorageId,
+                    logo_object_key = :logoObjectKey,
+                    logo_mime_type = :logoMimeType,
+                    display_content = :displayContent,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE client_id = :clientId
                 """)
                 .bind("clientId", record.getClientId())
                 .bind("displayName", record.getDisplayName())
                 .bind("enabled", record.getEnabled())
-                .bind("redirectUris", record.getRedirectUris())
+                .bind("redirectUris", record.getRedirectUris());
+        return bindPresentation(specification, record)
                 .fetch()
                 .rowsUpdated();
+    }
+
+    /**
+     * 绑定可为空的授权页展示字段。
+     *
+     * @param specification GenericExecuteSpec 已绑定基础字段的语句
+     * @param record OAuthClientRecord 授权客户端
+     * @return GenericExecuteSpec 可执行语句
+     */
+    private DatabaseClient.GenericExecuteSpec bindPresentation(DatabaseClient.GenericExecuteSpec specification,
+                                                               PlatformOAuthClientRecords.OAuthClientRecord record) {
+        specification = R2dbcBindings.bindNullable(specification, "logoStorageKey", record.getLogoStorageKey(), String.class);
+        specification = R2dbcBindings.bindNullable(specification, "logoStorageId", record.getLogoStorageId(), String.class);
+        specification = R2dbcBindings.bindNullable(specification, "logoObjectKey", record.getLogoObjectKey(), String.class);
+        specification = R2dbcBindings.bindNullable(specification, "logoMimeType", record.getLogoMimeType(), String.class);
+        return R2dbcBindings.bindNullable(specification, "displayContent", record.getDisplayContent(), String.class);
     }
 
     /**
@@ -142,6 +168,11 @@ public class PlatformOAuthClientRepository {
         record.setEnabled(Boolean.TRUE.equals(row.get("enabled", Boolean.class)));
         record.setClientSecretEncrypted(row.get("client_secret_encrypted", String.class));
         record.setRedirectUris(row.get("redirect_uris", String.class));
+        record.setLogoStorageKey(row.get("logo_storage_key", String.class));
+        record.setLogoStorageId(row.get("logo_storage_id", String.class));
+        record.setLogoObjectKey(row.get("logo_object_key", String.class));
+        record.setLogoMimeType(row.get("logo_mime_type", String.class));
+        record.setDisplayContent(row.get("display_content", String.class));
         record.setCreatedAt(row.get("created_at", OffsetDateTime.class));
         record.setUpdatedAt(row.get("updated_at", OffsetDateTime.class));
         return record;

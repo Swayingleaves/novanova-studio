@@ -23,8 +23,10 @@ public final class OAuthServerDtos {
      *
      * @param displayName 应用名称
      * @param scope 已接受的授权范围
+     * @param logoUrl 应用图标读地址，未配置时为空
+     * @param displayContent 授权页展示文字，未配置时为空
      */
-    public record AuthorizationRequestView(String displayName, String scope) {
+    public record AuthorizationRequestView(String displayName, String scope, String logoUrl, String displayContent) {
     }
 
     /**

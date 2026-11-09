@@ -4,10 +4,11 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { Alert, App, Button, Drawer, Empty, Form, Input, Switch, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Copy, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Copy, ImagePlus, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import { uploadImage } from "@/features/storage/services/image-storage";
 import {
     createOAuthClient,
     deleteOAuthClient,
@@ -23,7 +24,12 @@ type OAuthClientFormValues = {
     displayName: string;
     enabled: boolean;
     redirectUris: string;
+    displayContent: string;
 };
+
+/** 应用图标只接受这几种图片，并限制在 2 MB 以内。 */
+const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"]);
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
 
 /** 把多行文本整理成回调地址列表。 */
 const redirectUriList = (value: string) => value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -58,19 +64,48 @@ export function OAuthClientManagement() {
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [editing, setEditing] = useState<OAuthClientInfo | null>(null);
     const [saving, setSaving] = useState(false);
+    const [logoStorageKey, setLogoStorageKey] = useState("");
+    const [logoUrl, setLogoUrl] = useState("");
+    const [logoUploading, setLogoUploading] = useState(false);
+    const logoInputRef = useRef<HTMLInputElement>(null);
     const clientsQuery = useQuery({ queryKey: ["platform-oauth-clients"], queryFn: listOAuthClients });
     const clients = clientsQuery.data?.clients ?? [];
 
     const openCreate = () => {
         setEditing(null);
-        form.setFieldsValue({ displayName: "", enabled: false, redirectUris: "" });
+        setLogoStorageKey("");
+        setLogoUrl("");
+        form.setFieldsValue({ displayName: "", enabled: false, redirectUris: "", displayContent: "" });
         setDrawerOpen(true);
     };
 
     const openEdit = (client: OAuthClientInfo) => {
         setEditing(client);
-        form.setFieldsValue({ displayName: client.displayName, enabled: client.enabled, redirectUris: client.redirectUris.join("\n") });
+        setLogoStorageKey(client.logoStorageKey ?? "");
+        setLogoUrl(client.logoUrl ?? "");
+        form.setFieldsValue({ displayName: client.displayName, enabled: client.enabled, redirectUris: client.redirectUris.join("\n"), displayContent: client.displayContent ?? "" });
         setDrawerOpen(true);
+    };
+
+    const uploadLogo = async (file: File) => {
+        if (!LOGO_TYPES.has(file.type)) {
+            message.warning(translate("administration.oauthClientsLogoInvalid"));
+            return;
+        }
+        if (file.size > LOGO_MAX_BYTES) {
+            message.warning(translate("administration.oauthClientsLogoTooLarge"));
+            return;
+        }
+        setLogoUploading(true);
+        try {
+            const uploaded = await uploadImage(file);
+            setLogoStorageKey(uploaded.storageKey);
+            setLogoUrl(uploaded.url);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("administration.oauthClientsLogoUploadFailed"));
+        } finally {
+            setLogoUploading(false);
+        }
     };
 
     const save = async () => {
@@ -82,12 +117,15 @@ export function OAuthClientManagement() {
         }
         setSaving(true);
         try {
+            const payload = { displayName: values.displayName.trim(), enabled: values.enabled, redirectUris, logoStorageKey, displayContent: values.displayContent?.trim() ?? "" };
             const saved = editing
-                ? await updateOAuthClient({ clientId: editing.clientId, displayName: values.displayName.trim(), enabled: values.enabled, redirectUris })
-                : await createOAuthClient({ displayName: values.displayName.trim(), enabled: values.enabled, redirectUris });
+                ? await updateOAuthClient({ clientId: editing.clientId, ...payload })
+                : await createOAuthClient(payload);
             message.success(translate(editing ? "administration.oauthClientsUpdated" : "administration.oauthClientsCreated"));
             setEditing(saved);
-            form.setFieldsValue({ displayName: saved.displayName, enabled: saved.enabled, redirectUris: saved.redirectUris.join("\n") });
+            setLogoStorageKey(saved.logoStorageKey);
+            setLogoUrl(saved.logoUrl);
+            form.setFieldsValue({ displayName: saved.displayName, enabled: saved.enabled, redirectUris: saved.redirectUris.join("\n"), displayContent: saved.displayContent });
             await clientsQuery.refetch();
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate(editing ? "administration.oauthClientsUpdateFailed" : "administration.oauthClientsCreateFailed"));
@@ -137,12 +175,20 @@ export function OAuthClientManagement() {
             dataIndex: "displayName",
             width: 240,
             render: (_, client) => (
-                <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 font-medium text-[var(--studio-ink)]">
-                        <span className="wrap-anywhere">{client.displayName}</span>
-                        <Tag color={client.enabled ? "success" : "default"}>{translate(client.enabled ? "administration.oauthEnabled" : "administration.oauthDisabled")}</Tag>
+                <div className="flex min-w-0 items-center gap-3">
+                    {client.logoUrl ? (
+                        <img src={client.logoUrl} alt="" className="size-10 shrink-0 rounded-lg object-cover" />
+                    ) : (
+                        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--studio-surface-soft)] text-sm font-semibold text-[var(--studio-ink)]">{client.displayName.slice(0, 1)}</div>
+                    )}
+                    <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 font-medium text-[var(--studio-ink)]">
+                            <span className="wrap-anywhere">{client.displayName}</span>
+                            <Tag color={client.enabled ? "success" : "default"}>{translate(client.enabled ? "administration.oauthEnabled" : "administration.oauthDisabled")}</Tag>
+                        </div>
+                        <div className="mt-1 truncate font-mono text-xs text-[var(--studio-muted)]">{client.clientId}</div>
+                        {client.displayContent ? <div className="mt-1 truncate text-xs text-[var(--studio-muted)]">{client.displayContent}</div> : null}
                     </div>
-                    <div className="mt-1 truncate font-mono text-xs text-[var(--studio-muted)]">{client.clientId}</div>
                 </div>
             ),
         },
@@ -216,11 +262,40 @@ export function OAuthClientManagement() {
                 size={560}
                 destroyOnHidden
                 onClose={() => setDrawerOpen(false)}
-                extra={<Button type="primary" loading={saving} onClick={() => void save()}>{translate("administration.oauthSave")}</Button>}
+                extra={<Button type="primary" loading={saving || logoUploading} disabled={logoUploading} onClick={() => void save()}>{translate("administration.oauthSave")}</Button>}
             >
                 <Form form={form} layout="vertical" requiredMark={false}>
                     <Form.Item name="displayName" label={<span className="block">{translate("administration.oauthClientsDisplayName")}</span>} rules={[{ required: true, whitespace: true, message: translate("administration.oauthClientsDisplayNameRequired") }]}>
                         <Input maxLength={50} />
+                    </Form.Item>
+                    <Form.Item label={<span className="block">{translate("administration.oauthClientsLogo")}</span>} extra={translate("administration.oauthClientsLogoHint")}>
+                        <div className="flex items-center gap-3">
+                            {logoUrl ? (
+                                <img src={logoUrl} alt="" className="size-14 shrink-0 rounded-xl object-cover" />
+                            ) : (
+                                <div className="flex size-14 shrink-0 items-center justify-center rounded-xl border border-dashed border-[var(--studio-line)] text-[var(--studio-muted)]">
+                                    <ImagePlus className="size-5" />
+                                </div>
+                            )}
+                            <input
+                                ref={logoInputRef}
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp,image/gif"
+                                className="hidden"
+                                onChange={(event) => {
+                                    const file = event.target.files?.[0];
+                                    event.target.value = "";
+                                    if (file) void uploadLogo(file);
+                                }}
+                            />
+                            <Button icon={<ImagePlus className="size-4" />} loading={logoUploading} onClick={() => logoInputRef.current?.click()}>{translate("administration.oauthClientsUploadLogo")}</Button>
+                            {logoStorageKey ? (
+                                <Button onClick={() => { setLogoStorageKey(""); setLogoUrl(""); }}>{translate("administration.oauthClientsRemoveLogo")}</Button>
+                            ) : null}
+                        </div>
+                    </Form.Item>
+                    <Form.Item name="displayContent" label={<span className="block">{translate("administration.oauthClientsDisplayContent")}</span>} extra={translate("administration.oauthClientsDisplayContentHint")}>
+                        <Input.TextArea rows={4} maxLength={500} showCount />
                     </Form.Item>
                     <Form.Item name="enabled" label={<span className="block">{translate("administration.oauthClientsEnabled")}</span>} valuePropName="checked">
                         <Switch />

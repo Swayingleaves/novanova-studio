@@ -27,8 +27,12 @@ public final class OAuthClientConfigDtos {
      * @param enabled 是否启用
      * @param clientSecret 客户端密钥明文，仅管理员接口返回
      * @param redirectUris 允许的回调地址
+     * @param logoUrl 应用图标读地址，未配置时为空
+     * @param logoStorageKey 应用图标的媒体存储键，未配置时为空
+     * @param displayContent 授权页展示文字，未配置时为空
      */
-    public record ClientInfo(String clientId, String displayName, boolean enabled, String clientSecret, List<String> redirectUris) {
+    public record ClientInfo(String clientId, String displayName, boolean enabled, String clientSecret, List<String> redirectUris,
+                             String logoUrl, String logoStorageKey, String displayContent) {
     }
 
     /**
@@ -45,13 +49,17 @@ public final class OAuthClientConfigDtos {
      * @param displayName 应用名称
      * @param enabled 是否启用
      * @param redirectUris 允许的回调地址
+     * @param logoStorageKey 应用图标的媒体存储键，不上传时为空
+     * @param displayContent 授权页展示文字，不填写时为空
      */
     public record CreateClientRequest(@NotBlank(message = "business.oauthClientDisplayNameIsRequired")
                                       @Size(max = 50, message = "business.oauthClientDisplayNameIsTooLong") String displayName,
                                       boolean enabled,
                                       @NotEmpty(message = "business.oauthClientRedirectUriIsRequired")
                                       @Size(max = 10, message = "business.oauthClientTooManyRedirectUris")
-                                      List<@NotBlank(message = "business.oauthClientRedirectUriIsRequired") @Size(max = 512, message = "business.oauthClientRedirectUriIsTooLong") String> redirectUris) {
+                                      List<@NotBlank(message = "business.oauthClientRedirectUriIsRequired") @Size(max = 512, message = "business.oauthClientRedirectUriIsTooLong") String> redirectUris,
+                                      @Size(max = 128, message = "business.oauthClientLogoIsInvalid") String logoStorageKey,
+                                      @Size(max = 500, message = "business.oauthClientDisplayContentIsTooLong") String displayContent) {
     }
 
     /**
@@ -61,6 +69,8 @@ public final class OAuthClientConfigDtos {
      * @param displayName 应用名称
      * @param enabled 是否启用
      * @param redirectUris 允许的回调地址
+     * @param logoStorageKey 应用图标的媒体存储键，留空表示移除图标
+     * @param displayContent 授权页展示文字，留空表示不展示额外说明
      */
     public record UpdateClientRequest(@NotBlank(message = "business.oauthClientIdIsInvalid")
                                       @Size(max = 64, message = "business.oauthClientIdIsInvalid") String clientId,
@@ -69,7 +79,9 @@ public final class OAuthClientConfigDtos {
                                       boolean enabled,
                                       @NotEmpty(message = "business.oauthClientRedirectUriIsRequired")
                                       @Size(max = 10, message = "business.oauthClientTooManyRedirectUris")
-                                      List<@NotBlank(message = "business.oauthClientRedirectUriIsRequired") @Size(max = 512, message = "business.oauthClientRedirectUriIsTooLong") String> redirectUris) {
+                                      List<@NotBlank(message = "business.oauthClientRedirectUriIsRequired") @Size(max = 512, message = "business.oauthClientRedirectUriIsTooLong") String> redirectUris,
+                                      @Size(max = 128, message = "business.oauthClientLogoIsInvalid") String logoStorageKey,
+                                      @Size(max = 500, message = "business.oauthClientDisplayContentIsTooLong") String displayContent) {
     }
 
     /**

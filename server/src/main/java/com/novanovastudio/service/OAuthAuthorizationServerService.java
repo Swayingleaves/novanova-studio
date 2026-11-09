@@ -45,6 +45,9 @@ public class OAuthAuthorizationServerService {
     /** 授权客户端仓储 */
     private final PlatformOAuthClientRepository clientRepository;
 
+    /** 授权客户端配置，用于签发授权页图标 */
+    private final OAuthClientConfigService clientConfigService;
+
     /** 用户仓储 */
     private final UserRepository userRepository;
 
@@ -106,7 +109,7 @@ public class OAuthAuthorizationServerService {
     }
 
     /**
-     * 查询确认页要展示的应用名称。
+     * 查询确认页要展示的应用名称、图标和说明。
      *
      * @param requestId String 授权请求标识
      * @return Mono<AuthorizationRequestView> 应用信息
@@ -114,7 +117,14 @@ public class OAuthAuthorizationServerService {
     public Mono<OAuthServerDtos.AuthorizationRequestView> authorizationRequest(String requestId) {
         return credentials.peekRequest(requestId)
                 .switchIfEmpty(Mono.error(requestExpired()))
-                .map(request -> new OAuthServerDtos.AuthorizationRequestView(request.displayName(), request.scope()));
+                .flatMap(request -> clientRepository.findByClientId(request.clientId())
+                        .flatMap(client -> clientConfigService.signedLogoUrl(client)
+                                .map(logoUrl -> new OAuthServerDtos.AuthorizationRequestView(
+                                        client.getDisplayName(),
+                                        request.scope(),
+                                        logoUrl,
+                                        client.getDisplayContent() == null ? "" : client.getDisplayContent())))
+                        .switchIfEmpty(Mono.just(new OAuthServerDtos.AuthorizationRequestView(request.displayName(), request.scope(), "", ""))));
     }
 
     /**

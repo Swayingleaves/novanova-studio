@@ -7,11 +7,16 @@ import com.novanovastudio.common.SensitiveDataCrypto;
 import com.novanovastudio.common.SystemMessage;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.OAuthClientConfigDtos;
+import com.novanovastudio.entity.PersistenceRecords;
 import com.novanovastudio.entity.PlatformOAuthClientRecords;
+import com.novanovastudio.repository.PersistenceRepository;
 import com.novanovastudio.repository.PlatformOAuthClientRepository;
+import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.oauthserver.OAuthServerProtocol;
+import com.novanovastudio.storage.MediaAccessService;
 import java.security.SecureRandom;
 import java.util.List;
+import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -40,6 +45,15 @@ public class OAuthClientConfigService {
     /** 授权客户端仓储 */
     private final PlatformOAuthClientRepository repository;
 
+    /** 媒体记录，用于确认上传的图标属于当前管理员 */
+    private final PersistenceRepository persistenceRepository;
+
+    /** 图标读地址签发 */
+    private final MediaAccessService mediaAccessService;
+
+    /** 当前登录用户 */
+    private final CurrentUserProvider currentUserProvider;
+
     /** 服务配置 */
     private final NovanovaProperties properties;
 
@@ -64,12 +78,15 @@ public class OAuthClientConfigService {
     public Mono<OAuthClientConfigDtos.ClientInfo> createClient(OAuthClientConfigDtos.CreateClientRequest request) {
         List<String> redirectUris = OAuthServerProtocol.normalizeRedirectUris(request.redirectUris());
         String displayName = request.displayName().trim();
-        return insertClient(displayName, request.enabled(), redirectUris, 1)
+        String content = displayContent(request.displayContent());
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> resolveLogo(userId, null, request.logoStorageKey()))
+                .flatMap(logo -> insertClient(displayName, request.enabled(), redirectUris, logo, content, 1))
                 .doOnSuccess(client -> log.info("创建对外授权客户端: clientId={}", client.clientId()));
     }
 
     /**
-     * 更新名称、启用状态和回调地址。
+     * 更新名称、启用状态、回调地址和授权页展示。
      *
      * @param request UpdateClientRequest 更新请求
      * @return Mono<ClientInfo> 更新后的客户端
@@ -77,12 +94,21 @@ public class OAuthClientConfigService {
     public Mono<OAuthClientConfigDtos.ClientInfo> updateClient(OAuthClientConfigDtos.UpdateClientRequest request) {
         OAuthServerProtocol.requireClientId(request.clientId());
         List<String> redirectUris = OAuthServerProtocol.normalizeRedirectUris(request.redirectUris());
-        PlatformOAuthClientRecords.OAuthClientRecord record = new PlatformOAuthClientRecords.OAuthClientRecord();
-        record.setClientId(request.clientId());
-        record.setDisplayName(request.displayName().trim());
-        record.setEnabled(request.enabled());
-        record.setRedirectUris(JSON.toJSONString(redirectUris));
-        return repository.update(record)
+        return repository.findByClientId(request.clientId())
+                .switchIfEmpty(Mono.error(clientNotFound()))
+                .flatMap(existing -> currentUserProvider.currentUserId()
+                        .flatMap(userId -> resolveLogo(userId, existing, request.logoStorageKey()))
+                        .flatMap(logo -> {
+                            existing.setDisplayName(request.displayName().trim());
+                            existing.setEnabled(request.enabled());
+                            existing.setRedirectUris(JSON.toJSONString(redirectUris));
+                            existing.setLogoStorageKey(logo.storageKey());
+                            existing.setLogoStorageId(logo.storageId());
+                            existing.setLogoObjectKey(logo.objectKey());
+                            existing.setLogoMimeType(logo.mimeType());
+                            existing.setDisplayContent(displayContent(request.displayContent()));
+                            return repository.update(existing);
+                        }))
                 .flatMap(rowsUpdated -> rowsUpdated == 0 ? Mono.error(clientNotFound()) : Mono.empty())
                 .then(requireClient(request.clientId()))
                 .doOnSuccess(client -> log.info("更新对外授权客户端: clientId={}", client.clientId()));
@@ -125,10 +151,13 @@ public class OAuthClientConfigService {
      * @param displayName String 应用名称
      * @param enabled boolean 是否启用
      * @param redirectUris List<String> 回调地址
+     * @param logo Logo 应用图标
+     * @param displayContent String 授权页展示文字
      * @param attempt int 当前尝试次数
      * @return Mono<ClientInfo> 创建后的客户端
      */
-    private Mono<OAuthClientConfigDtos.ClientInfo> insertClient(String displayName, boolean enabled, List<String> redirectUris, int attempt) {
+    private Mono<OAuthClientConfigDtos.ClientInfo> insertClient(String displayName, boolean enabled, List<String> redirectUris,
+                                                                Logo logo, String displayContent, int attempt) {
         String clientId = newClientId();
         return encryptSecret(newSecret())
                 .flatMap(encryptedSecret -> {
@@ -138,12 +167,17 @@ public class OAuthClientConfigService {
                     record.setEnabled(enabled);
                     record.setClientSecretEncrypted(encryptedSecret);
                     record.setRedirectUris(JSON.toJSONString(redirectUris));
+                    record.setLogoStorageKey(logo.storageKey());
+                    record.setLogoStorageId(logo.storageId());
+                    record.setLogoObjectKey(logo.objectKey());
+                    record.setLogoMimeType(logo.mimeType());
+                    record.setDisplayContent(displayContent);
                     return repository.insert(record);
                 })
                 .then(requireClient(clientId))
                 .onErrorResume(DuplicateKeyException.class, exception -> attempt >= CLIENT_ID_ATTEMPTS
                         ? Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.oauthCredentialSaveFailed")))
-                        : insertClient(displayName, enabled, redirectUris, attempt + 1));
+                        : insertClient(displayName, enabled, redirectUris, logo, displayContent, attempt + 1));
     }
 
     /**
@@ -166,12 +200,99 @@ public class OAuthClientConfigService {
      */
     private Mono<OAuthClientConfigDtos.ClientInfo> toInfo(PlatformOAuthClientRecords.OAuthClientRecord record) {
         return decryptSecret(record.getClientSecretEncrypted())
-                .map(secret -> new OAuthClientConfigDtos.ClientInfo(
-                        record.getClientId(),
-                        record.getDisplayName(),
-                        Boolean.TRUE.equals(record.getEnabled()),
-                        secret,
-                        readRedirectUris(record.getRedirectUris())));
+                .flatMap(secret -> signedLogoUrl(record)
+                        .map(logoUrl -> new OAuthClientConfigDtos.ClientInfo(
+                                record.getClientId(),
+                                record.getDisplayName(),
+                                Boolean.TRUE.equals(record.getEnabled()),
+                                secret,
+                                readRedirectUris(record.getRedirectUris()),
+                                logoUrl,
+                                text(record.getLogoStorageKey()),
+                                text(record.getDisplayContent()))));
+    }
+
+    /**
+     * 签发应用图标读地址。没有图标或媒体已删除时返回空字符串。
+     *
+     * @param record OAuthClientRecord 授权客户端
+     * @return Mono<String> 图标读地址
+     */
+    public Mono<String> signedLogoUrl(PlatformOAuthClientRecords.OAuthClientRecord record) {
+        if (!StringUtils.hasText(record.getLogoStorageId()) || !StringUtils.hasText(record.getLogoObjectKey())) {
+            return Mono.just("");
+        }
+        String fileName = record.getLogoObjectKey().substring(record.getLogoObjectKey().lastIndexOf('/') + 1);
+        return mediaAccessService.signObject(record.getLogoStorageId(), record.getLogoObjectKey(), fileName, record.getLogoMimeType(), MediaAccessService.Purpose.PREVIEW, false)
+                .map(access -> text(access.url()))
+                .defaultIfEmpty("")
+                .onErrorResume(error -> {
+                    log.error("签发对外授权应用图标失败: clientId={}", record.getClientId(), error);
+                    return Mono.just("");
+                });
+    }
+
+    /**
+     * 确认图标属于当前管理员且是图片。沿用原图标时不要求当前管理员是上传者。
+     *
+     * @param userId Long 当前管理员
+     * @param existing OAuthClientRecord 更新前的客户端，新建时为空
+     * @param storageKey String 媒体存储键
+     * @return Mono<Logo> 要保存的图标
+     */
+    private Mono<Logo> resolveLogo(Long userId, PlatformOAuthClientRecords.OAuthClientRecord existing, String storageKey) {
+        String key = storageKey == null ? "" : storageKey.trim();
+        if (!StringUtils.hasText(key)) {
+            return Mono.just(Logo.empty());
+        }
+        if (existing != null && key.equals(existing.getLogoStorageKey()) && StringUtils.hasText(existing.getLogoObjectKey())) {
+            return Mono.just(new Logo(key, existing.getLogoStorageId(), existing.getLogoObjectKey(), existing.getLogoMimeType()));
+        }
+        return persistenceRepository.getMedia(userId, key)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.oauthClientLogoNotFound"))))
+                .flatMap(this::requireImage)
+                .map(media -> new Logo(key, media.getObjectStorageConfigId(), media.getObjectStorageKey(), media.getMimeType()));
+    }
+
+    /**
+     * 拒绝非图片媒体作为应用图标。
+     *
+     * @param media MediaFileRecord 媒体记录
+     * @return Mono<MediaFileRecord> 图片媒体
+     */
+    private Mono<PersistenceRecords.MediaFileRecord> requireImage(PersistenceRecords.MediaFileRecord media) {
+        boolean image = "image".equals(media.getKind())
+                && (!StringUtils.hasText(media.getMimeType()) || media.getMimeType().toLowerCase(Locale.ROOT).startsWith("image/"));
+        if (!image) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.oauthClientLogoMustBeImage")));
+        }
+        if (!StringUtils.hasText(media.getObjectStorageConfigId()) || !StringUtils.hasText(media.getObjectStorageKey())) {
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.oauthClientLogoNotStored")));
+        }
+        return Mono.just(media);
+    }
+
+    /**
+     * 去掉展示文字两端空白，未填写时保存为空。
+     *
+     * @param value String 原始展示文字
+     * @return String 可保存的展示文字
+     */
+    private String displayContent(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    /**
+     * 把空值转成接口里的空字符串。
+     *
+     * @param value String 原始文本
+     * @return String 非空文本
+     */
+    private String text(String value) {
+        return value == null ? "" : value;
     }
 
     /**
@@ -251,5 +372,25 @@ public class OAuthClientConfigService {
      */
     private BusinessException clientNotFound() {
         return new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.oauthClientNotFound"));
+    }
+
+    /**
+     * 要写入客户端的应用图标。
+     *
+     * @param storageKey 媒体存储键，未配置时为空
+     * @param storageId 对象存储配置标识，未配置时为空
+     * @param objectKey 对象键，未配置时为空
+     * @param mimeType 媒体类型，未配置时为空
+     */
+    private record Logo(String storageKey, String storageId, String objectKey, String mimeType) {
+
+        /**
+         * 未配置图标。
+         *
+         * @return Logo 空图标
+         */
+        private static Logo empty() {
+            return new Logo(null, null, null, null);
+        }
     }
 }

@@ -88,9 +88,19 @@ function OAuthAuthorizeContent() {
     return (
         <main className="studio-shell-bg flex min-h-dvh items-center justify-center px-4">
             <div className="fixed right-4 top-4 z-50"><LanguageMenu /></div>
-            <section className="studio-glass w-full max-w-[420px] rounded-xl p-8">
-                <h1 className="studio-title text-xl font-semibold">{translate("auth.externalAuthorization")}</h1>
-                <p className="studio-subtitle mt-3 text-sm leading-6">{translate("auth.externalAuthorizationDescription", { value0: request.displayName })}</p>
+            <section className="studio-glass w-full max-w-[440px] rounded-xl p-8">
+                <div className="flex items-center gap-4">
+                    {request.logoUrl ? (
+                        <img src={request.logoUrl} alt="" className="size-14 shrink-0 rounded-2xl object-cover" />
+                    ) : (
+                        <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-[var(--studio-surface-soft)] text-lg font-semibold text-[var(--studio-ink)]">{request.displayName.slice(0, 1)}</div>
+                    )}
+                    <div className="min-w-0">
+                        <h1 className="studio-title truncate text-xl font-semibold">{request.displayName}</h1>
+                        <p className="studio-subtitle mt-1 text-sm leading-6">{translate("auth.externalAuthorizationDescription", { value0: request.displayName })}</p>
+                    </div>
+                </div>
+                {request.displayContent ? <p className="studio-subtitle mt-5 whitespace-pre-wrap break-words text-sm leading-6">{request.displayContent}</p> : null}
                 <div className="mt-6 flex flex-col gap-3">
                     <Button type="primary" size="large" block loading={submitting === "allow"} disabled={submitting === "deny"} onClick={() => void finish("allow")}>{translate("auth.externalAuthorizationAllow")}</Button>
                     <Button size="large" block loading={submitting === "deny"} disabled={submitting === "allow"} onClick={() => void finish("deny")}>{translate("auth.externalAuthorizationDeny")}</Button>

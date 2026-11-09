@@ -408,6 +408,12 @@ export type OAuthClientInfo = {
     clientSecret: string;
     /** 允许的回调地址。 */
     redirectUris: string[];
+    /** 应用图标读地址，未配置时为空。 */
+    logoUrl: string;
+    /** 应用图标的媒体存储键，未配置时为空。 */
+    logoStorageKey: string;
+    /** 授权页展示文字，未配置时为空。 */
+    displayContent: string;
 };
 
 /** 对外授权客户端列表响应。 */
@@ -416,15 +422,19 @@ export type OAuthClientListResponse = {
 };
 
 /** 新增对外授权客户端的请求体。 */
-export type OAuthClientCreateInput = Pick<OAuthClientInfo, "displayName" | "enabled" | "redirectUris">;
+export type OAuthClientCreateInput = Pick<OAuthClientInfo, "displayName" | "enabled" | "redirectUris" | "logoStorageKey" | "displayContent">;
 
 /** 更新对外授权客户端的请求体。 */
-export type OAuthClientUpdateInput = Pick<OAuthClientInfo, "clientId" | "displayName" | "enabled" | "redirectUris">;
+export type OAuthClientUpdateInput = Pick<OAuthClientInfo, "clientId" | "displayName" | "enabled" | "redirectUris" | "logoStorageKey" | "displayContent">;
 
 /** 授权确认页展示的应用信息。 */
 export type OAuthAuthorizationRequestView = {
     displayName: string;
     scope: string;
+    /** 应用图标读地址，未配置时为空。 */
+    logoUrl: string;
+    /** 授权页展示文字，未配置时为空。 */
+    displayContent: string;
 };
 
 /** 同意或拒绝授权后的外部回调地址。 */

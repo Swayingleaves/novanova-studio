@@ -45,7 +45,7 @@ OAuth2 第三方登录（Google、linux.do）的启用状态与凭据从 `.env` 
 
 管理接口为 `/api/v1/config/oauth/listStandardOAuthProviders`、`createStandardOAuthProvider`、`updateStandardOAuthProvider`、`deleteStandardOAuthProvider`；登录入口复用 `/api/v1/auth/oauth/listProviders`、`/api/v1/auth/oauth/authorize/{registrationId}`。
 
-## 对外 OAuth2 授权客户端（企业版 V87 / 社区版 V88）
+## 对外 OAuth2 授权客户端（企业版 V87、V88 / 社区版 V88、V89）
 
 本站作为 OAuth2 授权方，让 NewAPI 等外部系统用授权码登录本站账号。管理后台「系统管理 · 身份认证 · 对外授权」可维护多个客户端。不签发 `id_token`，也不提供 OIDC Discovery。
 
@@ -56,10 +56,15 @@ OAuth2 第三方登录（Google、linux.do）的启用状态与凭据从 `.env` 
 | `enabled` | `BOOLEAN` | 是否允许该客户端发起授权，默认 `false` |
 | `client_secret_encrypted` | `VARCHAR(1024)` | 客户端密钥的 AES-GCM 密文 |
 | `redirect_uris` | `TEXT` | 回调地址 JSON 数组，每项必须是绝对 HTTP(S) 地址，授权与换令牌时全字匹配 |
+| `logo_storage_key` | `VARCHAR(128)` | 应用图标的媒体存储键，可空，用来识别管理员上传的图片 |
+| `logo_storage_id` | `VARCHAR(64)` | 应用图标所在的对象存储配置，可空 |
+| `logo_object_key` | `VARCHAR(512)` | 应用图标对象键，可空；授权确认页按此签发读地址，不依赖上传者所在团队 |
+| `logo_mime_type` | `VARCHAR(128)` | 应用图标的媒体类型，可空 |
+| `display_content` | `VARCHAR(500)` | 授权确认页展示的说明文字，可空；为空时只显示默认授权说明 |
 | `created_at` | `TIMESTAMPTZ` | 创建时间 |
 | `updated_at` | `TIMESTAMPTZ` | 配置最后更新时间 |
 
-密钥使用 `SensitiveDataCrypto`（`APP_SECRET_KEY`）加密。管理接口对管理员返回明文，便于复制到外部系统；重新生成密钥会立即替换旧密钥。授权码和访问令牌只放在 Redis，不落库。授权码一次性、约 60 秒；访问令牌约 10 分钟，且不能当作本站登录令牌。
+密钥使用 `SensitiveDataCrypto`（`APP_SECRET_KEY`）加密。管理接口对管理员返回明文，便于复制到外部系统；重新生成密钥会立即替换旧密钥。应用图标沿用现有图片上传。保存时确认图片属于当前管理员，并把对象存储配置和对象键记到客户端上；授权确认页和管理列表按对象键签发读地址，不随访问者的团队变化。展示文字原样显示，不解析 HTML。授权码和访问令牌只放在 Redis，不落库。授权码一次性、约 60 秒；访问令牌约 10 分钟，且不能当作本站登录令牌。
 
 管理接口为 `/api/v1/config/oauth/listOAuthClients`、`createOAuthClient`、`updateOAuthClient`、`resetOAuthClientSecret`、`deleteOAuthClient`。授权协议接口为 `GET /api/v1/oauth/authorize`、`POST /api/v1/oauth/token`、`GET /api/v1/oauth/userinfo`。令牌和用户信息响应是 OAuth 原文，不是 `{ code, data, msg }`。
 
