@@ -13,11 +13,15 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.ResolvableType;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.codec.FormHttpMessageReader;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,6 +43,12 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 @Slf4j
 public class OAuthAuthorizationServerController {
+
+    /** 表单读取器。令牌接口不能用 exchange.getFormData()，见 readForm。 */
+    private static final FormHttpMessageReader FORM_READER = new FormHttpMessageReader();
+
+    /** 表单类型 */
+    private static final ResolvableType FORM_TYPE = ResolvableType.forClassWithGenerics(MultiValueMap.class, String.class, String.class);
 
     /** 对外授权服务 */
     private final OAuthAuthorizationServerService authorizationServerService;
@@ -129,7 +139,11 @@ public class OAuthAuthorizationServerController {
      */
     @PostMapping(value = "/token", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
     public Mono<ResponseEntity<String>> token(ServerWebExchange exchange) {
-        return exchange.getFormData()
+        return readForm(exchange)
+                .doOnNext(form -> log.info("收到对外令牌请求: authorization={}, contentType={}, form={}",
+                        exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION),
+                        exchange.getRequest().getHeaders().getContentType(),
+                        form))
                 .flatMap(form -> authorizationServerService.exchangeToken(
                         exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION),
                         form.getFirst("grant_type"),
@@ -158,6 +172,18 @@ public class OAuthAuthorizationServerController {
                     log.warn("对外授权用户信息请求被拒绝: error={}", exception.oauthError());
                     return Mono.just(protocolError(exception));
                 });
+    }
+
+    /**
+     * 从当前请求读取表单。
+     * 访问日志会先读完原始正文，再换成可重放的请求。exchange.getFormData() 仍绑定最初那份已被读完的正文，读出来是空表单，客户端密钥会被当成缺失。
+     *
+     * @param exchange ServerWebExchange 当前请求
+     * @return Mono<MultiValueMap<String, String>> 表单字段
+     */
+    private Mono<MultiValueMap<String, String>> readForm(ServerWebExchange exchange) {
+        return FORM_READER.readMono(FORM_TYPE, exchange.getRequest(), Map.of())
+                .switchIfEmpty(Mono.fromSupplier(LinkedMultiValueMap::new));
     }
 
     /**
