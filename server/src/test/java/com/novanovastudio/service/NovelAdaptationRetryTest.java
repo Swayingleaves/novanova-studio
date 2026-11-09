@@ -68,7 +68,7 @@ class NovelAdaptationRetryTest {
         ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("项目", "comicDrama", "", "", "", 60, 2, "", "", "", "", "");
         ScriptDtos.ProjectDetail project = new ScriptDtos.ProjectDetail("project-a", "", overview, List.of(), List.of(), List.of(),
                 List.of(), new ScriptDtos.WorldSetting("", "", "", ""), List.of(), List.of(),
-                List.of(episode("first"), episode("second")), "writing", 60, false, 24, null, null);
+                List.of(episode("first"), episode("second")), "writing", 60, false, 24, null, null, "");
         snapshot = new ScriptDtos.ProjectSnapshot(project, List.of());
         when(scriptService.getProject("project-a")).thenReturn(Mono.just(project));
         lenient().when(scriptService.getSnapshotForUser(1L, "project-a", 24)).thenReturn(Mono.just(snapshot));

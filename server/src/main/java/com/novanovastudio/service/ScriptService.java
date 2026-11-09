@@ -44,6 +44,9 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 public class ScriptService {
 
+    /** 允许保存的封面地址：http 或 https，且不能包含空白。 */
+    private static final Pattern COVER_URL = Pattern.compile("https?://\\S+");
+
     /** 剧本关系数据仓储。 */
     private final ScriptRepository repository;
 
@@ -123,6 +126,7 @@ public class ScriptService {
      * @return Mono<ProjectDetail> 新建项目详情
      */
     public Mono<ScriptDtos.ProjectDetail> createProject(ScriptDtos.CreateProjectRequest request) {
+        String coverUrl = normalizeCoverUrl(request.coverUrl());
         return currentUserProvider.currentUserId().flatMap(userId -> {
             String projectId = UUID.randomUUID().toString();
             Mono<ScriptDtos.ScriptTemplate> templateMono = StringUtils.hasText(request.templateKey())
@@ -136,7 +140,7 @@ public class ScriptService {
                                         text(template.genre()), text(request.logline()), "", 0,
                                         template.recommendedEpisodeCount(), "", "", "", "", "");
                                 ScriptRepository.ProjectRecord record = new ScriptRepository.ProjectRecord(projectId, userId, overview,
-                                        "idea", 0, 0, null, null, null);
+                                        "idea", 0, 0, null, null, null, coverUrl);
                                 List<ScriptDtos.OutlineSection> outlines = new ArrayList<>();
                                 for (int index = 0; index < sections.size(); index++) {
                                     ScriptDtos.TemplateSection section = sections.get(index);
@@ -149,6 +153,21 @@ public class ScriptService {
                                         .then(getProjectDetail(userId, projectId));
                             }));
         }).doOnSuccess(project -> log.info("剧本项目创建完成: projectId={}", project.id()));
+    }
+
+    /**
+     * 更新当前用户项目的封面。封面不属于故事概览，不推进修订号，也不标记漫剧下游变更。
+     *
+     * @param request 封面更新请求
+     * @return 已保存的封面
+     */
+    public Mono<ScriptDtos.ProjectCover> updateCover(ScriptDtos.UpdateCoverRequest request) {
+        String coverUrl = normalizeCoverUrl(request.coverUrl());
+        return currentUserProvider.currentUserId().flatMap(userId -> repository.updateCover(userId, request.projectId(), coverUrl)
+                        .filter(Boolean::booleanValue)
+                        .switchIfEmpty(notFound("剧本项目不存在"))
+                        .thenReturn(new ScriptDtos.ProjectCover(request.projectId(), coverUrl)))
+                .doOnSuccess(cover -> log.info("剧本封面已更新: projectId={}", cover.projectId()));
     }
 
     /**
@@ -1628,7 +1647,7 @@ public class ScriptService {
                     return new ScriptDtos.ProjectDetail(record.id(), tuple.getT4(), record.overview(), story.getT1(), story.getT2(),
                             story.getT3(), story.getT4(), setting.getT1(), setting.getT2(), setting.getT3(), setting.getT4(),
                             record.stage(), record.completionRate(), record.productionStartedAt() != null, record.revision(),
-                            record.createdAt(), record.updatedAt());
+                            record.createdAt(), record.updatedAt(), text(record.coverUrl()));
                 });
     }
 
@@ -2171,6 +2190,23 @@ public class ScriptService {
      */
     private String text(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    /**
+     * 规范封面地址。空值表示移除封面，非空时只接受 http 或 https 链接。
+     *
+     * @param coverUrl 原始封面地址
+     * @return 可保存的封面地址
+     */
+    private String normalizeCoverUrl(String coverUrl) {
+        String normalized = text(coverUrl);
+        if (normalized.isEmpty()) {
+            return "";
+        }
+        if (normalized.length() > 2000 || !COVER_URL.matcher(normalized).matches()) {
+            throw invalid("封面地址必须是 http 或 https 链接");
+        }
+        return normalized;
     }
 
     /**

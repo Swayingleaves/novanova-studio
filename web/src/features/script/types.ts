@@ -22,6 +22,7 @@ export type ScriptProjectSummary = {
     contentType: ScriptContentType;
     genre: string;
     logline: string;
+    coverUrl: string;
     stage: ScriptStage;
     completionRate: number;
     episodeCount: number;
@@ -160,6 +161,7 @@ export type ScriptProjectDetail = {
     revision: number;
     createdAt: string;
     updatedAt: string;
+    coverUrl: string;
 };
 
 export type MutationResult = { revision: number; stage: ScriptStage; completionRate: number; updatedAt: string };

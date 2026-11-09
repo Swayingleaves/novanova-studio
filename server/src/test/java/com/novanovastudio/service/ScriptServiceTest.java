@@ -184,7 +184,7 @@ class ScriptServiceTest {
         ScriptDtos.ProjectOverview changed = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "玄幻", "新的一句话创意",
                 "", 0, 1, "", "", "", "", "");
         ScriptRepository.ProjectRecord project = new ScriptRepository.ProjectRecord("project-a", 8L, stored,
-                "writing", 40, 4L, null, OffsetDateTime.now(), OffsetDateTime.now());
+                "writing", 40, 4L, null, OffsetDateTime.now(), OffsetDateTime.now(), "");
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
         when(repository.getProject(8L, "project-a")).thenReturn(Mono.just(project));
         stubEmptyProjectReads();
@@ -199,6 +199,50 @@ class ScriptServiceTest {
     }
 
     /**
+     * 验证封面只接受 http 或 https 地址，且不会把非法地址写进项目。
+     */
+    @Test
+    void shouldRejectCoverUrlThatIsNotHttp() {
+        BusinessException exception = assertThrows(BusinessException.class, () -> service.updateCover(
+                new ScriptDtos.UpdateCoverRequest("project-a", "javascript:alert(1)")).block());
+
+        assertEquals(ErrorCode.PARAM_INVALID, exception.getCode());
+        verifyNoInteractions(repository);
+    }
+
+    /**
+     * 验证保存封面时裁剪地址，并且不把封面变更记成故事上游变化。
+     */
+    @Test
+    void shouldSaveHttpCoverWithoutMarkingUpstreamChanges() {
+        when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
+        when(repository.updateCover(8L, "project-a", "https://cdn.example.com/cover.png")).thenReturn(Mono.just(true));
+
+        ScriptDtos.ProjectCover cover = service.updateCover(
+                new ScriptDtos.UpdateCoverRequest("project-a", " https://cdn.example.com/cover.png ")).block();
+
+        assertEquals("project-a", cover.projectId());
+        assertEquals("https://cdn.example.com/cover.png", cover.coverUrl());
+        verify(repository).updateCover(8L, "project-a", "https://cdn.example.com/cover.png");
+        verifyNoInteractions(comicDramaImpactService);
+    }
+
+    /**
+     * 验证旧版本快照没有封面字段时仍能反序列化，恢复流程不会因为缺封面失败。
+     */
+    @Test
+    void shouldReadLegacySnapshotWithoutCover() {
+        String json = """
+                {"project":{"id":"project-a","sourceType":"","overview":{"title":"剧本","contentType":"comicDrama","genre":"","logline":"","synopsis":"","targetDurationSeconds":0,"targetEpisodeCount":1,"narrativeStyle":"","theme":"","mainPlot":"","mainConflict":"","endingDirection":""},"outlineSections":[],"storyEvents":[],"characters":[],"characterRelations":[],"worldSetting":{"era":"","region":"","socialBackground":"","overallTone":""},"worldItems":[],"locations":[],"episodes":[],"stage":"idea","completionRate":0,"productionStarted":false,"revision":0},"episodeDetails":[]}
+                """;
+
+        ScriptDtos.ProjectSnapshot snapshot = JSON.parseObject(json, ScriptDtos.ProjectSnapshot.class);
+
+        assertEquals("project-a", snapshot.project().id());
+        assertTrue(snapshot.project().coverUrl() == null || snapshot.project().coverUrl().isEmpty());
+    }
+
+    /**
      * 验证删除仍被对白引用的人物时返回具体集场位置。
      */
     @Test
@@ -208,7 +252,7 @@ class ScriptServiceTest {
         ScriptDtos.Character character = new ScriptDtos.Character("person-a", "人物", "", "", "", "", "", "", "", "",
                 "", "", "", "", "", "", "", 0);
         ScriptRepository.ProjectRecord project = new ScriptRepository.ProjectRecord("project-a", 8L, overview,
-                "writing", 40, 4L, null, OffsetDateTime.now(), OffsetDateTime.now());
+                "writing", 40, 4L, null, OffsetDateTime.now(), OffsetDateTime.now(), "");
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
         when(repository.getProject(8L, "project-a")).thenReturn(Mono.just(project));
         when(repository.countIdsOwnedByAnotherProject("project-a", "character", List.of())).thenReturn(Mono.just(0L));
@@ -233,7 +277,7 @@ class ScriptServiceTest {
         ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "",
                 0, 1, "", "", "", "", "");
         ScriptRepository.ProjectRecord project = new ScriptRepository.ProjectRecord("project-a", 8L, overview,
-                "idea", 0, 4L, null, OffsetDateTime.now(), OffsetDateTime.now());
+                "idea", 0, 4L, null, OffsetDateTime.now(), OffsetDateTime.now(), "");
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
         when(repository.getProject(8L, "project-a")).thenReturn(Mono.just(project));
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<ScriptDtos.MutationResult>>any()))
@@ -267,7 +311,7 @@ class ScriptServiceTest {
         ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "",
                 0, 1, "", "", "", "", "");
         ScriptRepository.ProjectRecord project = new ScriptRepository.ProjectRecord("project-a", 8L, overview,
-                "idea", 0, 4L, null, OffsetDateTime.now(), OffsetDateTime.now());
+                "idea", 0, 4L, null, OffsetDateTime.now(), OffsetDateTime.now(), "");
         ScriptDtos.AiDraft draft = new ScriptDtos.AiDraft("draft-a", "project-a", "polish", "overview", null,
                 3L, "", new JSONObject(), new JSONObject(), "text-model", java.math.BigDecimal.valueOf(1), "pending", OffsetDateTime.now());
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
@@ -402,7 +446,7 @@ class ScriptServiceTest {
                 0, 1, "", "", "", "", "");
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
         when(repository.getProject(8L, "project-a")).thenReturn(Mono.just(new ScriptRepository.ProjectRecord(
-                "project-a", 8L, overview, "idea", 0, 4L, null, OffsetDateTime.now(), OffsetDateTime.now())));
+                "project-a", 8L, overview, "idea", 0, 4L, null, OffsetDateTime.now(), OffsetDateTime.now(), "")));
         stubEmptyProjectReads();
         when(repository.listOutlineSections("project-a")).thenReturn(Flux.fromIterable(sections));
         when(repository.listStoryEvents("project-a")).thenReturn(Flux.fromIterable(events));

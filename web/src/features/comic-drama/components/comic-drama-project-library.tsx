@@ -5,11 +5,12 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "@/shared/lib/team-navigation";
-import { Alert, App, Button, Empty, Input, Modal, Pagination, Progress, Select, Skeleton } from "antd";
-import { BookOpenText, CheckCircle2, CircleAlert, Clapperboard, Clock3, FilePlus2, ListChecks, RefreshCw, Search } from "lucide-react";
+import { Alert, App, Button, Checkbox, Empty, Input, Modal, Pagination, Progress, Select, Skeleton } from "antd";
+import { BookOpenText, CheckCircle2, CircleAlert, Clapperboard, Clock3, FilePlus2, ListChecks, RefreshCw, Search, Trash2 } from "lucide-react";
 
-import { initializeComicDramaProject, listComicDramaProjects } from "@/services/api/comic-drama";
+import { deleteComicDramaProjects, initializeComicDramaProject, listComicDramaProjects } from "@/services/api/comic-drama";
 import { createScriptProject, listScriptProjects } from "@/services/api/script";
+import { ProjectCoverField } from "@/features/script/components/project-cover-field";
 import type { ComicDramaProjectSummary, ComicDramaProjectType } from "@/features/comic-drama/types";
 import type { ScriptProjectSummary } from "@/features/script/types";
 
@@ -75,13 +76,14 @@ function readinessInfo(readiness: ComicDramaProjectSummary["readiness"], transla
 export function ComicDramaProjectLibrary() {
     const translate = useTranslation();
     const router = useRouter();
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const projectRequestVersion = useRef(0);
     const scriptRequestVersion = useRef(0);
     const [projects, setProjects] = useState<ComicDramaProjectSummary[]>([]);
     const [projectTotal, setProjectTotal] = useState(0);
     const [projectLoading, setProjectLoading] = useState(true);
     const [projectError, setProjectError] = useState("");
+    const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
     const [page, setPage] = useState(1);
     const [keyword, setKeyword] = useState("");
     const [searchKeyword, setSearchKeyword] = useState("");
@@ -90,6 +92,8 @@ export function ComicDramaProjectLibrary() {
     const [newProjectTitle, setNewProjectTitle] = useState("");
     const [newProjectLogline, setNewProjectLogline] = useState("");
     const [newProjectType, setNewProjectType] = useState<ComicDramaProjectType>("comicDrama");
+    const [coverUrl, setCoverUrl] = useState("");
+    const [coverUploading, setCoverUploading] = useState(false);
     const [createdScriptProjectId, setCreatedScriptProjectId] = useState("");
     const [scriptSelectorOpen, setScriptSelectorOpen] = useState(false);
     const [scriptProjects, setScriptProjects] = useState<ScriptProjectSummary[]>([]);
@@ -141,6 +145,10 @@ export function ComicDramaProjectLibrary() {
     }, [loadProjects]);
 
     useEffect(() => {
+        setSelectedProjectIds((current) => current.filter((projectId) => projects.some((project) => project.projectId === projectId)));
+    }, [projects]);
+
+    useEffect(() => {
         if (scriptSelectorOpen) void loadScriptProjects();
     }, [loadScriptProjects, scriptSelectorOpen]);
 
@@ -152,6 +160,33 @@ export function ComicDramaProjectLibrary() {
         }
         setPage(1);
         setSearchKeyword(nextKeyword);
+    };
+
+    const confirmDeleteProjects = (projectIds: string[]) => {
+        modal.confirm({
+            title: translate("comicDrama.deleteCountComicDramaProjects", { value0: projectIds.length }),
+            content: translate("comicDrama.deletingRemovesComicDramaProductionDataTheSharedScriptIsRetained"),
+            okText: translate("comicDrama.confirmDelete"),
+            okButtonProps: { danger: true },
+            cancelText: translate("comicDrama.cancel"),
+            onOk: async () => {
+                try {
+                    await deleteComicDramaProjects(projectIds.map((projectId) => {
+                        const project = projects.find((item) => item.projectId === projectId);
+                        if (!project) throw new Error(translate("comicDrama.theSelectedProjectListHasChangedRefreshAndSelectAgain"));
+                        return { projectId, expectedRevision: project.revision };
+                    }));
+                    setSelectedProjectIds([]);
+                    // 删完当前页最后一批时回退一页，避免停留在空页。
+                    if (projectIds.length >= projects.length && page > 1) setPage(page - 1);
+                    else await loadProjects();
+                    message.success(translate("comicDrama.comicDramaProjectsDeleted"));
+                } catch (requestError) {
+                    message.error(requestError instanceof Error ? requestError.message : translate("comicDrama.couldNotDeleteTheComicDramaProjectsTryAgain"));
+                    throw requestError;
+                }
+            },
+        });
     };
 
     const openScriptSelector = () => {
@@ -177,6 +212,8 @@ export function ComicDramaProjectLibrary() {
         setNewProjectTitle("");
         setNewProjectLogline("");
         setNewProjectType("comicDrama");
+        setCoverUrl("");
+        setCoverUploading(false);
         setCreatedScriptProjectId("");
     };
 
@@ -201,6 +238,7 @@ export function ComicDramaProjectLibrary() {
                     title: newProjectTitle.trim(),
                     contentType: newProjectType,
                     logline: newProjectLogline.trim(),
+                    coverUrl: coverUrl || undefined,
                 });
                 scriptProjectId = scriptProject.id;
                 scriptProjectCreated = true;
@@ -274,6 +312,7 @@ export function ComicDramaProjectLibrary() {
                     <div className="flex gap-2">
                         <Button onClick={applyProjectSearch}>{translate("comicDrama.search")}</Button>
                         <Button icon={<RefreshCw className="size-4" aria-hidden="true" />} onClick={() => void loadProjects()}>{translate("comicDrama.refresh")}</Button>
+                        {selectedProjectIds.length ? <Button danger icon={<Trash2 className="size-4" aria-hidden="true" />} onClick={() => confirmDeleteProjects(selectedProjectIds)}>{translate("comicDrama.deleteSelectedCount", { value0: selectedProjectIds.length })}</Button> : null}
                     </div>
                 </section>
 
@@ -300,13 +339,20 @@ export function ComicDramaProjectLibrary() {
                         {projects.map((project) => {
                             const readiness = readinessInfo(project.readiness, translate);
                             return (
-                                <article key={project.projectId} className="overflow-hidden rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface)] transition-colors duration-150 hover:border-[var(--studio-primary-line)] hover:bg-[var(--studio-surface-hover)] motion-reduce:transition-none">
+                                <article key={project.projectId} className="relative overflow-hidden rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface)] p-5 transition-colors duration-150 hover:border-[var(--studio-primary-line)] hover:bg-[var(--studio-surface-hover)] motion-reduce:transition-none">
+                                    <Checkbox
+                                        aria-label={translate("comicDrama.selectProjectCount", { value0: project.title })}
+                                        checked={selectedProjectIds.includes(project.projectId)}
+                                        className="absolute right-4 top-4 z-10"
+                                        onChange={(event) => setSelectedProjectIds((current) => event.target.checked ? [...current, project.projectId] : current.filter((id) => id !== project.projectId))}
+                                    />
                                     <button
                                         type="button"
-                                        className="block min-h-64 w-full p-5 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--studio-action)]"
+                                        className="block min-h-64 w-full pr-8 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--studio-action)]"
                                         aria-label={translate("comicDrama.openComicDramaProjectCount", { value0: project.title })}
                                         onClick={() => router.push(`/comic-drama?projectId=${encodeURIComponent(project.projectId)}`)}
                                     >
+                                        {project.coverUrl ? <img src={project.coverUrl} alt="" className="mb-4 aspect-video w-full rounded-lg object-cover" /> : null}
                                         <div className="flex items-start justify-between gap-3">
                                             <div className="min-w-0">
                                                 <div className="flex items-center gap-2">
@@ -373,12 +419,14 @@ export function ComicDramaProjectLibrary() {
                 onCancel={closeCreateModal}
                 onOk={() => void submitNewProject()}
                 confirmLoading={creating}
+                okButtonProps={{ disabled: coverUploading }}
                 okText={createdScriptProjectId ? translate("comicDrama.continueInitialization") : translate("comicDrama.createAndOpen")}
                 cancelText={translate("comicDrama.cancel")}
                 destroyOnHidden
             >
                 <div className="flex flex-col gap-4 pt-2">
                     <p className="text-sm leading-6 text-[var(--studio-muted)]">{translate("comicDrama.createsASharedScriptThenInitializesItsComicDramaProduction")}</p>
+                    <ProjectCoverField namespace="comicDrama" coverUrl={coverUrl} disabled={Boolean(createdScriptProjectId)} onChange={setCoverUrl} onUploadingChange={setCoverUploading} />
                     <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">
                         <span>{translate("comicDrama.projectName")}</span>
                         <Input value={newProjectTitle} maxLength={120} showCount disabled={Boolean(createdScriptProjectId)} onChange={(event) => setNewProjectTitle(event.target.value)} placeholder={translate("comicDrama.exampleEchoesInTheRain")} />
@@ -454,7 +502,8 @@ export function ComicDramaProjectLibrary() {
                                             onClick={() => setSelectedScriptProjectId(project.id)}
                                         >
                                             <div className="flex items-start justify-between gap-3">
-                                                <div className="min-w-0">
+                                                {project.coverUrl ? <img src={project.coverUrl} alt="" className="size-14 shrink-0 rounded-md object-cover" /> : null}
+                                                <div className="min-w-0 flex-1">
                                                     <div className="flex items-center gap-2">
                                                         <BookOpenText className="size-4 shrink-0 text-[var(--studio-action)]" aria-hidden="true" />
                                                         <span className="truncate font-medium text-[var(--studio-ink)]" title={project.title}>{project.title}</span>
@@ -478,7 +527,7 @@ export function ComicDramaProjectLibrary() {
                     {!scriptLoading && !scriptError && !scriptProjects.length ? <Empty description={translate("comicDrama.noScriptsAvailableToLink")} image={Empty.PRESENTED_IMAGE_SIMPLE} /> : null}
 
                     {!scriptLoading && scriptProjectTotal > PAGE_SIZE ? <Pagination className="self-center" current={scriptPage} pageSize={PAGE_SIZE} total={scriptProjectTotal} showSizeChanger={false} onChange={(nextPage) => { setSelectedScriptProjectId(""); setScriptPage(nextPage); }} /> : null}
-                    {selectedScriptProject ? <div className="flex items-center gap-2 rounded-lg border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-3 py-2 text-sm text-[var(--studio-text)]"><ListChecks className="size-4 shrink-0 text-[var(--studio-action)]" aria-hidden="true" />{translate("comicDrama.selected_9c5605")}{selectedScriptProject.title}</div> : null}
+                    {selectedScriptProject ? <div className="flex flex-col gap-1 rounded-lg border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-3 py-2 text-sm text-[var(--studio-text)]"><div className="flex items-center gap-2"><ListChecks className="size-4 shrink-0 text-[var(--studio-action)]" aria-hidden="true" />{translate("comicDrama.selected_9c5605")}{selectedScriptProject.title}</div>{selectedScriptProject.coverUrl ? <p className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.thisScriptCoverWillBeUsed")}</p> : null}</div> : null}
                 </div>
             </Modal>
         </main>

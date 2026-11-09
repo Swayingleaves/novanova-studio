@@ -40,7 +40,7 @@ public final class ScriptDtos {
 
     /** 项目列表摘要。 */
     public record ProjectSummary(String id, String title, String contentType, String genre, String logline,
-                                 String stage, int completionRate, int episodeCount, int targetEpisodeCount,
+                                 String coverUrl, String stage, int completionRate, int episodeCount, int targetEpisodeCount,
                                  boolean productionStarted, long revision, OffsetDateTime updatedAt) {
     }
 
@@ -163,14 +163,14 @@ public final class ScriptDtos {
                                 @NotNull @Size(max = 500) List<@Valid Scene> scenes) {
     }
 
-    /** 项目基础详情，不包含分集正文。sourceType 为空表示该项目不是由导入原文创建的。 */
+    /** 项目基础详情，不包含分集正文。sourceType 为空表示该项目不是由导入原文创建的。coverUrl 为空表示未设置封面。 */
     public record ProjectDetail(String id, String sourceType, ProjectOverview overview, List<OutlineSection> outlineSections,
                                 List<StoryEvent> storyEvents, List<Character> characters,
                                 List<CharacterRelation> characterRelations, WorldSetting worldSetting,
                                 List<WorldItem> worldItems, List<Location> locations,
                                 List<EpisodeSummary> episodes, String stage, int completionRate,
                                 boolean productionStarted, long revision, OffsetDateTime createdAt,
-                                OffsetDateTime updatedAt) {
+                                OffsetDateTime updatedAt, String coverUrl) {
     }
 
     /** 用于版本保存与恢复的完整项目快照。 */
@@ -221,7 +221,20 @@ public final class ScriptDtos {
             @NotBlank(message = "内容形式不能为空")
             @Pattern(regexp = "comicDrama|liveActionShort|animation|advertisement|musicVideo|storyShort",
                     message = "内容形式不受支持") String contentType,
-            @Size(max = 2000, message = "一句话创意不能超过2000字") String logline) {
+            @Size(max = 2000, message = "一句话创意不能超过2000字") String logline,
+            @Size(max = 2000, message = "封面地址不能超过2000字")
+            @Pattern(regexp = "^$|^https?://\\S+$", message = "封面地址必须是 http 或 https 链接") String coverUrl) {
+    }
+
+    /** 更新项目封面。空地址表示移除封面。 */
+    public record UpdateCoverRequest(@NotBlank @Size(max = 64) String projectId,
+                                     @Size(max = 2000, message = "封面地址不能超过2000字")
+                                     @Pattern(regexp = "^$|^https?://\\S+$", message = "封面地址必须是 http 或 https 链接")
+                                     String coverUrl) {
+    }
+
+    /** 已保存的项目封面。 */
+    public record ProjectCover(String projectId, String coverUrl) {
     }
 
     /** 项目标识请求。 */

@@ -169,7 +169,7 @@ OAuth2 第三方登录（Google、linux.do）的启用状态与凭据从 `.env` 
 
 | 表 | 作用 | 关键索引或约束 |
 | --- | --- | --- |
-| `script_projects` | 项目概览、阶段、完成度、软删除与修订号 | `(user_id, status, updated_at DESC, id)`、用户+阶段、用户+内容形式 |
+| `script_projects` | 项目概览、封面、阶段、完成度、软删除与修订号 | `(user_id, status, updated_at DESC, id)`、用户+阶段、用户+内容形式 |
 | `script_templates`、`script_template_sections` | 16 个内置模板及可编辑大纲骨架 | 启用状态+顺序、模板+结构段顺序 |
 | `script_outline_sections`、`script_story_events` | 大纲结构段与关键剧情事件 | 项目+顺序；事件按分集、场次定位 |
 | `script_characters`、`script_character_relations` | 人物文字设定与人物关系 | 项目+顺序；关系起点、终点索引 |
@@ -183,6 +183,8 @@ OAuth2 第三方登录（Google、linux.do）的启用状态与凭据从 `.env` 
 正式实体使用不超过 64 字符的稳定标识。人物和地点仍被场次或对白引用时禁止删除；场次和正文块保存采用稳定标识更新，只有请求中明确缺失的实体才会删除。
 
 V39 移除 `script_projects` 的 `selling_points` 和 `target_audience` 字段，故事概览不再收集核心卖点和目标受众。
+
+企业版 V85 / 社区版 V86 为 `script_projects` 增加 `cover_url`，保存封面图片的公开访问地址，空字符串表示未设置。剧本创作和漫剧创作共用这一字段：漫剧项目与剧本一对一，承接已有剧本时直接读到同一封面；任一侧更换都写回该字段。封面不进入故事概览，保存时不推进 `revision`，版本恢复和漫剧下游变更标记也不会改动它。接口为 `POST /api/v1/script/updateCover`，创建项目时也可以带上 `coverUrl`。
 
 V52 为 `script_blocks` 增加 `origin` 字段（`original` 原著事实 / `adapted` AI 改编创作）。此前提示词要求把「【改编创作】」写在正文 `content` 里，标记会随正文流入分集工作台与后续配音、成片链路，且实测半数以上正文块都被标注而失去区分度；改为结构化字段承载，迁移同时摘除了存量正文里的标记并把来源记为 `adapted`。
 
@@ -703,6 +705,7 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 ### V33 漫剧接口
 
 - 项目与设置：`GET /api/v1/comicDrama/listProjects`、`POST /api/v1/comicDrama/getWorkspace`、`initializeProject`、`updateSettings`、`getReadiness`。
+- 项目删除：`POST /api/v1/comicDrama/deleteProjects` 按项目修订号批量删除漫剧生产数据，级联清理资产、镜头、分镜、媒体等下游记录，共享 `script_projects` 剧本项目保留。
 - 视觉资产：`listAssets`、`saveAsset`、`listAssetVersions`、`saveAssetVersion`。
 - 镜头与提示词：`generateShotDraft`、`confirmShotDraft`、`listShots`、`saveShot`、`reorderShots`、`deleteShot`、`composePrompt`、`savePrompt`。
 - 媒体生产：`estimateGeneration`、`createGenerationTask`、`listMedia`、`adoptMedia`。

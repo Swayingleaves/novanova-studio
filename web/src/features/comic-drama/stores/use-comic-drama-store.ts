@@ -33,6 +33,7 @@ import {
     updateComicDramaShotDraft,
     type ComicDramaComposePromptsResult,
 } from "@/services/api/comic-drama";
+import { updateScriptCover } from "@/services/api/script";
 import type {
     ComicDramaAsset,
     ComicDramaAssetInput,
@@ -87,6 +88,7 @@ type ComicDramaState = {
     clearPendingGeneration: () => void;
 
     updateSettings: (settings: ComicDramaSettings) => Promise<ComicDramaMutationResult>;
+    updateCover: (coverUrl: string) => Promise<void>;
     saveAsset: (asset: ComicDramaAssetInput) => Promise<ComicDramaAsset>;
     saveAssetVersion: (version: ComicDramaAssetVersionInput) => Promise<ComicDramaAssetVersion>;
     generateShotDraft: (input: {
@@ -251,6 +253,16 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
     }),
 
     clearPendingGeneration: () => set({ pendingGeneration: null }),
+
+    updateCover: async (coverUrl) => {
+        const workspace = get().workspace;
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
+        const saved = await updateScriptCover(workspace.scriptProjectId, coverUrl);
+        set((state) => {
+            if (!state.workspace || state.workspace.scriptProjectId !== workspace.scriptProjectId) return {};
+            return { workspace: { ...state.workspace, scriptProject: { ...state.workspace.scriptProject, coverUrl: saved.coverUrl } } };
+        });
+    },
 
     updateSettings: async (settings) => {
         const workspace = get().workspace;

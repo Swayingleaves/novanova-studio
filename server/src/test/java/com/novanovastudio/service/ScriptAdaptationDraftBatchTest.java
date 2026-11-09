@@ -88,7 +88,7 @@ class ScriptAdaptationDraftBatchTest {
         when(repository.getProject(8L, "project-a")).thenReturn(Mono.fromSupplier(() ->
                 new ScriptRepository.ProjectRecord("project-a", 8L,
                         new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "", 0, 1, "", "", "", "", ""),
-                        "idea", 0, revision.get(), null, OffsetDateTime.now(), OffsetDateTime.now())));
+                        "idea", 0, revision.get(), null, OffsetDateTime.now(), OffsetDateTime.now(), "")));
         when(repository.listOutlineSections("project-a")).thenReturn(Flux.empty());
         when(repository.listStoryEvents("project-a")).thenReturn(Flux.empty());
         when(repository.listCharacters("project-a")).thenReturn(Flux.defer(() -> Flux.fromIterable(characters.get())));

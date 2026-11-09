@@ -185,7 +185,7 @@ class ScriptAgentServiceTest {
                 List.of(new ScriptDtos.OutlineSection("outline-a", "act", "开端", "", 0)), project.storyEvents(),
                 project.characters(), project.characterRelations(), project.worldSetting(), project.worldItems(),
                 project.locations(), project.episodes(), project.stage(), project.completionRate(), project.productionStarted(),
-                project.revision(), project.createdAt(), project.updatedAt());
+                project.revision(), project.createdAt(), project.updatedAt(), "");
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
         when(scriptService.getSnapshotForUser(8L, "project-a", 0L))
                 .thenReturn(Mono.just(new ScriptDtos.ProjectSnapshot(withBlankOutline, List.of())));
@@ -396,7 +396,7 @@ class ScriptAgentServiceTest {
                 "", "", "", "", 60, "planning", 0);
         ScriptDtos.ProjectDetail project = new ScriptDtos.ProjectDetail(base.id(), base.sourceType(), base.overview(), base.outlineSections(),
                 base.storyEvents(), characters, List.of(), base.worldSetting(), base.worldItems(), locations,
-                List.of(episode), base.stage(), base.completionRate(), false, base.revision(), null, null);
+                List.of(episode), base.stage(), base.completionRate(), false, base.revision(), null, null, "");
         return new ScriptDtos.ProjectSnapshot(project, List.of(new ScriptDtos.EpisodeDetail(episode, List.of())));
     }
 
@@ -422,7 +422,7 @@ class ScriptAgentServiceTest {
                 0, 1, "", "", "", "", "");
         ScriptDtos.ProjectDetail project = new ScriptDtos.ProjectDetail("project-a", "", overview, List.of(), List.of(), List.of(),
                 List.of(), new ScriptDtos.WorldSetting("", "", "", ""), List.of(), List.of(), List.of(),
-                "idea", 0, false, 0L, null, null);
+                "idea", 0, false, 0L, null, null, "");
         return new ScriptDtos.ProjectSnapshot(project, List.of());
     }
 }

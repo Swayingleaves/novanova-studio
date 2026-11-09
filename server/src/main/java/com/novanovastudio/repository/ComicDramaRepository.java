@@ -52,7 +52,7 @@ public class ComicDramaRepository {
      */
     public Flux<ComicDramaDtos.ProjectSummary> listProjects(Long userId, String keyword, int offset, int limit) {
         return databaseClient.sql("""
-                SELECT c.script_project_id, s.title, st.project_type, c.production_status stage, c.revision, c.updated_at,
+                SELECT c.script_project_id, s.title, s.cover_url, st.project_type, c.production_status stage, c.revision, c.updated_at,
                        assets.asset_count,shots.shot_count,shots.completed_count,impacts.impact_count,media.running_count,
                        CASE WHEN assets.asset_count+shots.shot_count=0 THEN 0 ELSE
                            ((assets.ready_count+shots.completed_count)*100/(assets.asset_count+shots.shot_count))::INTEGER
@@ -86,7 +86,8 @@ public class ComicDramaRepository {
                         value(row, "asset_count", Integer.class, 0), value(row, "shot_count", Integer.class, 0),
                         value(row, "completed_count", Integer.class, 0), value(row, "impact_count", Integer.class, 0),
                         value(row, "running_count", Integer.class, 0), row.get("readiness", String.class),
-                        value(row, "revision", Long.class, 0L), row.get("updated_at", OffsetDateTime.class))).all();
+                        value(row, "revision", Long.class, 0L), row.get("updated_at", OffsetDateTime.class),
+                        text(row.get("cover_url", String.class)))).all();
     }
 
     /**
@@ -148,6 +149,23 @@ public class ComicDramaRepository {
                         row.get("production_status", String.class), value(row, "revision", Long.class, 0L),
                         value(row, "text_track_count", Integer.class, 1),
                         row.get("created_at", OffsetDateTime.class), row.get("updated_at", OffsetDateTime.class))).one();
+    }
+
+    /**
+     * 按项目乐观锁删除漫剧生产数据，共享剧本保持不变。
+     *
+     * @param userId 当前用户ID
+     * @param projectId 项目ID
+     * @param expectedRevision 期望修订号
+     * @return 已删除的项目ID，修订号不一致或项目不存在时为空
+     */
+    public Mono<String> deleteProject(Long userId, String projectId, long expectedRevision) {
+        return databaseClient.sql("""
+                DELETE FROM comic_drama_projects
+                WHERE script_project_id=:projectId AND user_id=:userId AND revision=:expectedRevision
+                RETURNING script_project_id
+                """).bind("projectId", projectId).bind("userId", userId).bind("expectedRevision", expectedRevision)
+                .map((row, metadata) -> row.get("script_project_id", String.class)).one();
     }
 
     /**

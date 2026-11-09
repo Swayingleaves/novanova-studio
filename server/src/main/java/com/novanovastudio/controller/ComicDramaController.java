@@ -124,6 +124,13 @@ public class ComicDramaController {
                 service.listProjects(page, pageSize, keyword));
     }
 
+    /** 批量删除当前用户的漫剧生产项目，共享剧本保留。 */
+    @PostMapping("/deleteProjects")
+    public Mono<ApiResponse<List<String>>> deleteProjects(
+            @Valid @RequestBody ComicDramaDtos.DeleteProjectsRequest request, ServerHttpRequest httpRequest) {
+        return execute("删除漫剧项目", httpRequest, request, service.deleteProjects(request.projects()));
+    }
+
     /** 查询项目生产工作区。 */
     @PostMapping("/getWorkspace")
     public Mono<ApiResponse<ComicDramaDtos.Workspace>> getWorkspace(

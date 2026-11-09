@@ -164,8 +164,12 @@ export function listScriptTemplates() {
     return serverGet<ScriptTemplate[]>(`${SCRIPT_PATH}/listTemplates`);
 }
 
-export function createScriptProject(input: { title: string; templateKey?: string; contentType: string; logline?: string }) {
+export function createScriptProject(input: { title: string; templateKey?: string; contentType: string; logline?: string; coverUrl?: string }) {
     return serverPost<ScriptProjectDetail>(`${SCRIPT_PATH}/createProject`, input);
+}
+
+export function updateScriptCover(projectId: string, coverUrl: string) {
+    return serverPost<{ projectId: string; coverUrl: string }>(`${SCRIPT_PATH}/updateCover`, { projectId, coverUrl });
 }
 
 export function getScriptProject(projectId: string) {

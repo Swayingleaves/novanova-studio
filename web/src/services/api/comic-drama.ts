@@ -42,6 +42,11 @@ export function listComicDramaProjects(params: { page: number; pageSize: number;
     return serverGet<ComicDramaProjectList>(`${COMIC_DRAMA_PATH}/listProjects?${query}`);
 }
 
+/** 批量删除漫剧生产项目，共享剧本保留。 */
+export function deleteComicDramaProjects(projects: Array<{ projectId: string; expectedRevision: number }>) {
+    return serverPost<string[]>(`${COMIC_DRAMA_PATH}/deleteProjects`, { projects });
+}
+
 export function getComicDramaWorkspace(projectId: string) {
     return serverPost<ComicDramaWorkspace>(`${COMIC_DRAMA_PATH}/getWorkspace`, { projectId });
 }

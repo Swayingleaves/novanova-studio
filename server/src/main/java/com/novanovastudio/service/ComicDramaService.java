@@ -90,6 +90,20 @@ public class ComicDramaService {
     }
 
     /**
+     * 批量删除当前用户的漫剧生产项目，共享剧本保留。
+     *
+     * @param projects 待删除项目及期望修订号
+     * @return 已删除的项目ID
+     */
+    public Mono<List<String>> deleteProjects(List<ComicDramaDtos.ProjectDeletion> projects) {
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                        Flux.fromIterable(projects).concatMap(project -> repository.deleteProject(
+                                        userId, project.projectId(), project.expectedRevision())
+                                .switchIfEmpty(conflict())).collectList())
+                .doOnSuccess(deleted -> log.info("漫剧项目删除完成: userId={}, projectCount={}", userId, deleted.size())));
+    }
+
+    /**
      * 查询漫剧项目完整工作区。
      *
      * @param projectId 项目ID

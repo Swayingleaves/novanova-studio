@@ -55,7 +55,7 @@ class NovelAdaptationRunnerTest {
         ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("项目", "comicDrama", "", "", "", 60, 2, "", "", "", "", "");
         ScriptDtos.ProjectDetail project = new ScriptDtos.ProjectDetail("project-a", "", overview, List.of(), List.of(), List.of(),
                 List.of(), new ScriptDtos.WorldSetting("", "", "", ""), List.of(), List.of(),
-                List.of(episode("first"), episode("second")), "writing", 60, false, 24, null, null);
+                List.of(episode("first"), episode("second")), "writing", 60, false, 24, null, null, "");
         when(jobRepository.claim("job-a", NovelAdaptationRunner.LEASE_SECONDS)).thenReturn(Mono.just(true));
         when(jobRepository.find("job-a")).thenReturn(Mono.just(job("running", 0)));
         when(storyBibleRepository.listConfirmedItemTypes("project-a"))

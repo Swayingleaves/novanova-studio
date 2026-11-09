@@ -35,11 +35,19 @@ public final class ComicDramaDtos {
     public record ProjectSummary(String projectId, String scriptProjectId, String title, String projectType,
                                  String stage, int completionRate, int assetCount, int shotCount,
                                  int completedShotCount, int pendingUpdateCount, int runningTaskCount,
-                                 String readiness, long revision, OffsetDateTime updatedAt) {
+                                 String readiness, long revision, OffsetDateTime updatedAt, String coverUrl) {
     }
 
     /** 漫剧项目分页结果。 */
     public record ProjectListResponse(List<ProjectSummary> projects, long total, int page, int pageSize) {
+    }
+
+    /** 单个漫剧项目删除请求，期望修订号防止删除期间项目被其他操作修改。 */
+    public record ProjectDeletion(@NotBlank @Size(max = 64) String projectId, @Min(0) long expectedRevision) {
+    }
+
+    /** 批量删除漫剧生产项目请求，共享剧本不受影响。 */
+    public record DeleteProjectsRequest(@NotEmpty @Size(max = 100) List<@NotNull @Valid ProjectDeletion> projects) {
     }
 
     /** 项目级生产设置。 */
