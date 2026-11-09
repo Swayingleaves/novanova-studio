@@ -15,9 +15,9 @@ import { type Key, type ReactNode, useCallback, useEffect, useMemo, useRef, useS
 import dynamic from "next/dynamic";
 import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, App, Button, Checkbox, DatePicker, Empty, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip } from "antd";
+import { Alert, App, Button, Checkbox, DatePicker, Drawer, Empty, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Edit, Image as ImageIcon, Plus, Power, Search, Send, Sparkles, Trash2, Upload, Video } from "lucide-react";
+import { Activity, Bell, BookText, ChevronDown, ClipboardCheck, Coins, Edit, HardDrive, Image as ImageIcon, LayoutTemplate, Mail, Menu as MenuIcon, Palette, Plus, Power, Search, Send, Settings2, Sparkles, Tags, Ticket, Trash2, Upload, UserRound, UsersRound, Video } from "lucide-react";
 
 import {
     adjustServerUserCredits,
@@ -69,7 +69,7 @@ import { getHomepageTargetPath } from "@/features/homepage/api/homepage-showcase
 import { adminCreditFilterKey, adminCreditUserLabel } from "./admin-credit-utils";
 import { TeamContentScope } from "./components/team-content-scope";
 import { TeamManagement, CurrentTeamManagement } from "./components/team-management";
-import { SystemConfiguration } from "./components/system-configuration";
+import { SystemConfiguration, type ConfigurationTabKey } from "./components/system-configuration";
 import { ResetAccountPasswordModal } from "./components/reset-account-password-modal";
 import { StorageBillingManagement } from "./components/storage-billing-management";
 import { CreditCardManagement } from "./components/credit-card-management";
@@ -84,6 +84,7 @@ import { uploadImage } from "@/features/storage/services/image-storage";
 import { createCreditDirectionOptions, createCreditSourceOptions, CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactionIcon, creditTransactionTypeLabel, formatCreditChange, formatCredits, formatCreditTime, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
 import { TaskRecordPanel } from "@/app/(user)/credits/components/task-record-panel";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
+import { cn } from "@/shared/lib/utils";
 
 const PAGE_SIZE = 20;
 
@@ -101,9 +102,20 @@ const UserTrendChart = dynamic(() => import("./components/user-trend-chart").the
 type GenerationTypeFilter = "all" | "image" | "video";
 type TrendUnit = "day" | "month";
 
+/** 管理后台左侧菜单的二级菜单项：tab 为所属内容页签，sub 为页签内部的子页签。 */
+type AdminMenuLeaf = { key: string; label: string; tab: string; sub?: string };
+/** 管理后台左侧菜单的一级菜单项：带 leaves 时可折叠展开二级菜单，只带 tab 时直接切换内容。 */
+type AdminMenuItem = { key: string; label: string; icon?: ReactNode; tab?: string; leaves?: AdminMenuLeaf[] };
+
 export default function AdminSystemPage() {
     const translate = useTranslation();
     const { message, modal } = App.useApp();
+    const [activeTabKey, setActiveTabKey] = useState("configuration");
+    const [configurationTabKey, setConfigurationTabKey] = useState<ConfigurationTabKey>("channels");
+    const [pricingTabKey, setPricingTabKey] = useState("storyBible");
+    const [expandedMenuKeys, setExpandedMenuKeys] = useState<string[]>(["configuration"]);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const pageRef = useRef<HTMLElement>(null);
     const currentUser = useUserStore((state) => state.user);
     const isAdmin = canManageCurrentSpace();
     const team = useTeamStore((state) => state.team);
@@ -119,44 +131,180 @@ export default function AdminSystemPage() {
         );
     }
 
+    // 左侧菜单：配置与用户偏好、创作定价是一级可折叠菜单，其余为一级菜单项；点击菜单同时切换内容区页签和页签内部的子页签。
+    const menuItems: AdminMenuItem[] = [
+        {
+            key: "configuration",
+            label: translate("appShell.configurationPreferences"),
+            icon: <Settings2 className="size-4" />,
+            leaves: [
+                { key: "configuration:channels", label: translate("appShell.myChannels"), tab: "configuration", sub: "channels" },
+                { key: "configuration:models", label: translate("appShell.myModels"), tab: "configuration", sub: "models" },
+                { key: "configuration:credits", label: translate("appShell.creditSettings"), tab: "configuration", sub: "credits" },
+                { key: "configuration:creditProducts", label: translate("credits.creditProducts"), tab: "configuration", sub: "creditProducts" },
+                { key: "configuration:invitationReward", label: translate("appShell.referralReward"), tab: "configuration", sub: "invitationReward" },
+                { key: "configuration:checkIn", label: translate("appShell.checkInCredits"), tab: "configuration", sub: "checkIn" },
+                { key: "configuration:firstPurchaseBonus", label: translate("appShell.firstPurchaseBonus"), tab: "configuration", sub: "firstPurchaseBonus" },
+                { key: "configuration:objectStorage", label: translate("appShell.objectStorage_2caed1"), tab: "configuration", sub: "objectStorage" },
+                { key: "configuration:community", label: translate("administration.communityConfig"), tab: "configuration", sub: "community" },
+            ],
+        },
+        { key: "team", label: "团队管理", icon: <UsersRound className="size-4" />, tab: team ? "team" : "teams" },
+        ...(!team ? [{ key: "users", label: translate("administration.userManagement"), icon: <UserRound className="size-4" />, tab: "users" }] : []),
+        ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), icon: <Coins className="size-4" />, tab: "credits" }] : []),
+        ...(!team ? [{ key: "creditCards", label: translate("administration.redemptionCodes"), icon: <Ticket className="size-4" />, tab: "creditCards" }] : []),
+        ...(!team ? [{ key: "emailCampaigns", label: "邮件群发", icon: <Mail className="size-4" />, tab: "emailCampaigns" }] : []),
+        { key: "notifications", label: translate("administration.messageManagement"), icon: <Bell className="size-4" />, tab: "notifications" },
+        { key: "prompts", label: translate("administration.promptLibrary"), icon: <BookText className="size-4" />, tab: "prompts" },
+        { key: "styles", label: translate("administration.styleManagement"), icon: <Palette className="size-4" />, tab: "styles" },
+        { key: "skills", label: translate("administration.skillManagement"), icon: <Sparkles className="size-4" />, tab: "skills" },
+        { key: "homepage", label: translate("administration.homepageShowcase"), icon: <LayoutTemplate className="size-4" />, tab: "homepage" },
+        { key: "sharedWorks", label: "投稿审核", icon: <ClipboardCheck className="size-4" />, tab: "sharedWorks" },
+        {
+            key: "scriptPricing",
+            label: translate("administration.creationPricing"),
+            icon: <Tags className="size-4" />,
+            leaves: [
+                { key: "scriptPricing:storyBible", label: translate("administration.scriptStoryBiblePricing"), tab: "scriptPricing", sub: "storyBible" },
+                { key: "scriptPricing:episodeBodies", label: translate("administration.scriptEpisodeBodiesPricing"), tab: "scriptPricing", sub: "episodeBodies" },
+                { key: "scriptPricing:aiActions", label: translate("administration.scriptAiActionPricing"), tab: "scriptPricing", sub: "aiActions" },
+                { key: "scriptPricing:comicDramaFinalPrompt", label: translate("administration.comicDramaFinalPromptPricing"), tab: "scriptPricing", sub: "comicDramaFinalPrompt" },
+            ],
+        },
+        { key: "storageBilling", label: translate("storage.capacityManagement"), icon: <HardDrive className="size-4" />, tab: "storageBilling" },
+        ...(!team ? [{ key: "apiLogs", label: translate("administration.aPIRecords"), icon: <Activity className="size-4" />, tab: "apiLogs" }] : []),
+    ];
+
+    // 内容区仍交给 antd Tabs 管理，保留首次访问才挂载、切回不丢表单草稿的行为，左侧菜单只负责切换。
+    const tabItems = [
+        { key: "configuration", label: translate("appShell.configurationPreferences"), children: <SystemConfiguration activeTab={configurationTabKey} onTabChange={setConfigurationTabKey} /> },
+        ...(team ? [{ key: "team", label: "团队管理", children: <CurrentTeamManagement /> }] : [{ key: "teams", label: "团队管理", children: <TeamManagement /> }]),
+        ...(!team ? [{ key: "users", label: translate("administration.userManagement"), children: <UserManagement /> }] : []),
+        ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), children: <CreditConsumptionManagement /> }] : []),
+        ...(!team ? [{ key: "creditCards", label: translate("administration.redemptionCodes"), children: <CreditCardManagement /> }] : []),
+        ...(!team ? [{ key: "emailCampaigns", label: "邮件群发", children: <EmailCampaignManagement /> }] : []),
+        { key: "notifications", label: translate("administration.messageManagement"), children: <TeamContentScope moduleName="notifications"><NotificationManagement /></TeamContentScope> },
+        { key: "prompts", label: translate("administration.promptLibrary"), children: <TeamContentScope moduleName="prompts"><PromptManagement /></TeamContentScope> },
+        { key: "styles", label: translate("administration.styleManagement"), children: <TeamContentScope moduleName="styles"><GenerationStyleManagement /></TeamContentScope> },
+        { key: "skills", label: translate("administration.skillManagement"), children: <TeamContentScope moduleName="skills"><SkillManagement /></TeamContentScope> },
+        { key: "homepage", label: translate("administration.homepageShowcase"), children: <TeamContentScope moduleName="homepage"><HomepageShowcaseManagement /></TeamContentScope> },
+        { key: "sharedWorks", label: "投稿审核", children: <SharedWorkList review /> },
+        {
+            key: "scriptPricing", label: translate("administration.creationPricing"), children: <Tabs
+                activeKey={pricingTabKey}
+                onChange={setPricingTabKey}
+                destroyOnHidden={false}
+                className="[&>.ant-tabs-nav]:hidden!"
+                items={[
+                    { key: "storyBible", label: translate("administration.scriptStoryBiblePricing"), children: <StoryBiblePricingManagement /> },
+                    { key: "episodeBodies", label: translate("administration.scriptEpisodeBodiesPricing"), children: <EpisodeBodiesPricingManagement /> },
+                    { key: "aiActions", label: translate("administration.scriptAiActionPricing"), children: <ScriptAiActionPricingManagement /> },
+                    { key: "comicDramaFinalPrompt", label: translate("administration.comicDramaFinalPromptPricing"), children: <ComicDramaFinalPromptPricingManagement /> },
+                ]}
+            />,
+        },
+        { key: "storageBilling", label: translate("storage.capacityManagement"), children: <StorageBillingManagement /> },
+        ...(!team ? [{ key: "apiLogs", label: translate("administration.aPIRecords"), children: <ApiLogsManagement /> }] : []),
+    ];
+    const currentTabKey = tabItems.some((item) => item.key === activeTabKey) ? activeTabKey : tabItems[0].key;
+    const activeMenuLeafKey = currentTabKey === "configuration" ? `configuration:${configurationTabKey}` : currentTabKey === "scriptPricing" ? `scriptPricing:${pricingTabKey}` : currentTabKey;
+
+    const selectMenu = (tab: string, sub?: string) => {
+        setActiveTabKey(tab);
+        if (tab === "configuration" && sub) setConfigurationTabKey(sub as ConfigurationTabKey);
+        if (tab === "scriptPricing" && sub) setPricingTabKey(sub);
+        setMobileMenuOpen(false);
+        pageRef.current?.scrollTo({ top: 0 });
+    };
+
+    const toggleMenuGroup = (key: string) => {
+        setExpandedMenuKeys((current) => (current.includes(key) ? current.filter((expandedKey) => expandedKey !== key) : [...current, key]));
+    };
+
+    const menuButtonClass = "w-full rounded-md px-3 text-left text-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]";
+
+    const renderMenu = () => (
+        <div className="flex flex-col gap-0.5">
+            {menuItems.map((item) => {
+                if (!item.leaves) {
+                    const active = item.tab === currentTabKey;
+                    return (
+                        <button
+                            key={item.key}
+                            type="button"
+                            aria-current={active ? "page" : undefined}
+                            className={cn(menuButtonClass, "flex items-center gap-2 py-2", active ? "bg-[var(--studio-sidebar-active)] font-medium text-[var(--studio-ink)]" : "text-[var(--studio-text)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]")}
+                            onClick={() => selectMenu(item.tab ?? item.key)}
+                        >
+                            <span className="shrink-0">{item.icon}</span>
+                            <span className="min-w-0">{item.label}</span>
+                        </button>
+                    );
+                }
+
+                const expanded = expandedMenuKeys.includes(item.key);
+                return (
+                    <div key={item.key}>
+                        <button
+                            type="button"
+                            aria-expanded={expanded}
+                            className={cn(menuButtonClass, "flex items-center justify-between gap-2 py-2 text-[var(--studio-text)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]")}
+                            onClick={() => toggleMenuGroup(item.key)}
+                        >
+                            <span className="flex min-w-0 items-center gap-2">
+                                <span className="shrink-0">{item.icon}</span>
+                                <span className="min-w-0">{item.label}</span>
+                            </span>
+                            <ChevronDown aria-hidden="true" className={cn("size-4 shrink-0 text-[var(--studio-faint)] transition-transform", !expanded && "-rotate-90")} />
+                        </button>
+                        {expanded ? (
+                            <div className="mt-0.5 ml-8 flex flex-col gap-0.5 border-l border-[var(--studio-line)] pl-2">
+                                {item.leaves.map((leaf) => {
+                                    const active = leaf.key === activeMenuLeafKey;
+                                    return (
+                                        <button
+                                            key={leaf.key}
+                                            type="button"
+                                            aria-current={active ? "page" : undefined}
+                                            className={cn(menuButtonClass, "py-1.5", active ? "bg-[var(--studio-sidebar-active)] font-medium text-[var(--studio-ink)]" : "text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]")}
+                                            onClick={() => selectMenu(leaf.tab, leaf.sub)}
+                                        >
+                                            {leaf.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        ) : null}
+                    </div>
+                );
+            })}
+        </div>
+    );
+
     return (
-        <main className="studio-page h-full overflow-auto">
-            <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6">
+        <main ref={pageRef} className="studio-page h-full overflow-auto">
+            <div className="flex w-full max-w-[1920px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
                 <header className="border-b border-[var(--studio-line)] pb-5">
                     <h1 className="studio-title text-2xl font-semibold">{translate("administration.systemManagement")}</h1>
                     <p className="studio-subtitle mt-2 text-sm">{translate("administration.operationsConsoleForUsersAnnouncementsAndPrompts")}</p>
                 </header>
-                <Tabs
-                    key={team?.id ?? 0}
-                    defaultActiveKey="configuration"
-                    destroyOnHidden={false}
-                    items={[
-                        { key: "configuration", label: translate("appShell.configurationPreferences"), children: <SystemConfiguration /> },
-                        ...(team ? [{ key: "team", label: "团队管理", children: <CurrentTeamManagement /> }] : [{ key: "teams", label: "团队管理", children: <TeamManagement /> }]),
-                        ...(!team ? [{ key: "users", label: translate("administration.userManagement"), children: <UserManagement /> }] : []),
-                        ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), children: <CreditConsumptionManagement /> }] : []),
-                        ...(!team ? [{ key: "creditCards", label: translate("administration.redemptionCodes"), children: <CreditCardManagement /> }] : []),
-                        ...(!team ? [{ key: "emailCampaigns", label: "邮件群发", children: <EmailCampaignManagement /> }] : []),
-                        { key: "notifications", label: translate("administration.messageManagement"), children: <TeamContentScope moduleName="notifications"><NotificationManagement /></TeamContentScope> },
-                        { key: "prompts", label: translate("administration.promptLibrary"), children: <TeamContentScope moduleName="prompts"><PromptManagement /></TeamContentScope> },
-                        { key: "styles", label: translate("administration.styleManagement"), children: <TeamContentScope moduleName="styles"><GenerationStyleManagement /></TeamContentScope> },
-                        { key: "skills", label: translate("administration.skillManagement"), children: <TeamContentScope moduleName="skills"><SkillManagement /></TeamContentScope> },
-                        { key: "homepage", label: translate("administration.homepageShowcase"), children: <TeamContentScope moduleName="homepage"><HomepageShowcaseManagement /></TeamContentScope> },
-                        { key: "sharedWorks", label: "投稿审核", children: <SharedWorkList review /> },
-                        {
-                            key: "scriptPricing", label: translate("administration.creationPricing"), children: <Tabs
-                                items={[
-                                    { key: "storyBible", label: translate("administration.scriptStoryBiblePricing"), children: <StoryBiblePricingManagement /> },
-                                    { key: "episodeBodies", label: translate("administration.scriptEpisodeBodiesPricing"), children: <EpisodeBodiesPricingManagement /> },
-                                    { key: "aiActions", label: translate("administration.scriptAiActionPricing"), children: <ScriptAiActionPricingManagement /> },
-                                    { key: "comicDramaFinalPrompt", label: translate("administration.comicDramaFinalPromptPricing"), children: <ComicDramaFinalPromptPricingManagement /> },
-                                ]}
-                            />,
-                        },
-                        { key: "storageBilling", label: translate("storage.capacityManagement"), children: <StorageBillingManagement /> },
-                        ...(!team ? [{ key: "apiLogs", label: translate("administration.aPIRecords"), children: <ApiLogsManagement /> }] : []),
-                    ]}
-                />
+
+                {/* 窄屏下菜单收进抽屉，避免左侧菜单挤压内容区。 */}
+                <div className="lg:hidden">
+                    <Button icon={<MenuIcon className="size-4" />} onClick={() => setMobileMenuOpen(true)}>菜单</Button>
+                </div>
+                <Drawer open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} placement="left" size={288} title={translate("administration.systemManagement")}>
+                    {renderMenu()}
+                </Drawer>
+
+                <div className="flex min-w-0 flex-col gap-6 lg:flex-row lg:items-start">
+                    <nav aria-label={translate("administration.systemManagement")} className="thin-scrollbar hidden lg:sticky lg:top-0 lg:block lg:max-h-[calc(100dvh-2rem)] lg:w-56 lg:shrink-0 lg:overflow-y-auto">
+                        {renderMenu()}
+                    </nav>
+                    <div className="min-w-0 flex-1">
+                        <Tabs key={team?.id ?? 0} activeKey={currentTabKey} destroyOnHidden={false} className="[&>.ant-tabs-nav]:hidden!" items={tabItems} />
+                    </div>
+                </div>
             </div>
         </main>
     );

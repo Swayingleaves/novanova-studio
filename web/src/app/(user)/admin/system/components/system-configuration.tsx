@@ -8,7 +8,7 @@ import { currentLanguageTag } from "@/features/locale/translate";
 import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
-import { Alert, App, Button, Checkbox, Form, Grid, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Tabs } from "antd";
+import { Alert, App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Tabs } from "antd";
 import { nanoid } from "nanoid";
 import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Copy, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -81,7 +81,7 @@ import { communityDraftIssue, communityDraftSignature, createCommunityDrafts, ty
 import { saveCommunityConfigs } from "@/services/api/community";
 import { useCommunityStore } from "@/features/community/stores/use-community-store";
 
-type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "firstPurchaseBonus" | "objectStorage" | "community";
+export type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "firstPurchaseBonus" | "objectStorage" | "community";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -296,18 +296,25 @@ const createObjectStorageProviderFields = (
     },
 });
 
-export function SystemConfiguration() {
+/**
+ * 系统配置面板。
+ *
+ * @param activeTab 受控的当前配置页签，由管理后台左侧菜单驱动
+ * @param onTabChange 页签变化回调，用于把当前页签同步给左侧菜单
+ * @return 配置面板
+ */
+export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChange }: { activeTab?: ConfigurationTabKey; onTabChange?: (tabKey: ConfigurationTabKey) => void }) {
     const translate = useTranslation();
     const { message, modal } = App.useApp();
     const team = useTeamStore((state) => state.team);
-    const screens = Grid.useBreakpoint();
     const config = useConfigStore((state) => state.config);
     const modelConfigs = useConfigStore((state) => state.modelConfigs);
     const objectStorages = useConfigStore((state) => state.objectStorages);
     const refreshChannels = useConfigStore((state) => state.refreshChannels);
     const refreshModelConfiguration = useConfigStore((state) => state.refreshModelConfiguration);
     const refreshObjectStorages = useConfigStore((state) => state.refreshObjectStorages);
-    const [activeTab, setActiveTab] = useState<ConfigurationTabKey>("channels");
+    const [innerActiveTab, setInnerActiveTab] = useState<ConfigurationTabKey>("channels");
+    const activeTab = controlledActiveTab ?? innerActiveTab;
     const [draftsReady, setDraftsReady] = useState(false);
     const [loadError, setLoadError] = useState("");
     const [loadAttempt, setLoadAttempt] = useState(0);
@@ -1018,7 +1025,9 @@ export function SystemConfiguration() {
     };
 
     const changeActiveTab = (tabKey: string) => {
-        setActiveTab(tabKey as ConfigurationTabKey);
+        const nextTab = tabKey as ConfigurationTabKey;
+        setInnerActiveTab(nextTab);
+        onTabChange?.(nextTab);
     };
 
     if (!canManageCurrentSpace()) return null;
@@ -1032,9 +1041,8 @@ export function SystemConfiguration() {
             ) : (
                 <Tabs
                     activeKey={activeTab}
-                    tabPlacement={screens.md ? "start" : "top"}
-                    tabBarStyle={screens.md ? { width: 112 } : undefined}
                     onChange={changeActiveTab}
+                    className="[&>.ant-tabs-nav]:hidden!"
                     items={[
                         {
                             key: "channels",
