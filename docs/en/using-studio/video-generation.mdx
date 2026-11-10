@@ -54,6 +54,6 @@ An administrator can split one generation into three stages with a skill (its pr
 
 - "请联系管理员配置默认生视频模型": no default video model has been configured yet.
 - "所选模型不可用，请联系管理员检查模型配置": the channel or model was disabled, its key expired, or the model name no longer matches.
-- Timeouts: the wait limit for video tasks is 15 minutes by default (`AI_TASK_VIDEO_WAIT_TIMEOUT_SECONDS`); upstream timeouts usually surface as "视频生成超时，请稍后重试".
+- Timeouts: the wait limit for video tasks is 15 minutes by default (an administrator can change this under Configuration → Timeouts); upstream timeouts usually surface as "视频生成超时，请稍后重试".
 - Media validation failures: re-check reference counts, video duration (2–15 seconds each, 15 seconds total), and file formats.
 - More diagnostic steps are in the [FAQ](../troubleshooting/faq).

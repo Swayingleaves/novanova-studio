@@ -1011,3 +1011,20 @@ V61 按空间、用户、原配置和对象键精确关联已有媒体及原文�
 社群配置是平台级单份列表，不归属任何团队，也不保存创建人。公开读取走 `GET /api/v1/community/listCommunityConfigs`，只返回 `name`、`imageUrl`、`sortOrder`，按 `sort_order` 升序；平台管理员整批保存走 `POST /api/v1/admin/community/saveCommunityConfigs`，请求中的数组顺序即展示顺序，服务端重算排序值。
 
 保存时先在事务内用咨询锁 `hashtext('platform-community-configs')` 串行化，再删除旧行并按序重新插入，任何一条校验失败或写入失败都整批回滚，数据库不会留下部分更新。团队作用域一律拒绝写入，只有平台空间的全局管理员可以修改；图片地址不做下载校验，上传复用媒体上传接口，删除配置不会删除已上传的媒体文件。
+
+## 平台超时设置（V89）
+
+新增单行表 `platform_timeout_settings`（`id` 固定为 1）。后台入口为「配置与用户偏好 · 超时设置」，接口为 `GET/POST /api/v1/config/timeout/getTimeoutSettings`、`updateTimeoutSettings`，仅平台空间的全局管理员可读写。服务端启动后读取该行，并每 5 秒刷新；保存后当前实例立即生效。这些时间不再通过环境变量配置。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `ai_request_body_timeout_seconds` | 60 | AI 构造请求体，以及从响应提取媒体地址 |
+| `storyboard_agent_timeout_seconds` | 600 | 分镜 Agent 单次调用 |
+| `script_agent_timeout_seconds` | 600 | 剧本 Agent 单次调用 |
+| `story_bible_agent_timeout_seconds` | 600 | 故事知识库 Agent 单次调用 |
+| `task_wait_timeout_seconds` | 300 | 图片等常规生成任务等待完成 |
+| `video_task_wait_timeout_seconds` | 900 | 视频生成任务等待完成 |
+| `video_composition_execution_timeout_seconds` | 1800 | 视频合成和音频裁剪进程 |
+| `tencent_cos_socket_timeout_milliseconds` | 120000 | 腾讯云 COS 单次读取 |
+
+以秒为单位的字段取值 `1`–`86400`，毫秒字段取值 `1`–`3600000`。进行中的任务仍使用开始时读到的超时。

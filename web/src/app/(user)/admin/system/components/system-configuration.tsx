@@ -50,6 +50,8 @@ import {
     getCheckInRewardSettings,
     getFirstPurchaseBonusSettings,
     getInvitationRewardSettings,
+    getTimeoutSettings,
+    updateTimeoutSettings,
     refreshChannelModels as refreshServerChannelModels,
     setDefaultModel,
     setDefaultObjectStorage as setServerDefaultObjectStorage,
@@ -61,6 +63,7 @@ import {
     updateModelConfig,
     updateObjectStorage as updateServerObjectStorage,
     type ServerModelConfig,
+    type TimeoutSettings,
 } from "@/services/api/server";
 import type { ObjectStorageConfig, ObjectStorageProvider } from "@/shared/types/object-storage";
 import { blockingModelConfigDependencyIssues, createDraftModelConfigs, modelConfigDependencyIssues, reconcileModelConfigDraft, updateModelConfigSelection } from "./model-config-draft";
@@ -81,7 +84,30 @@ import { communityDraftIssue, communityDraftSignature, createCommunityDrafts, ty
 import { saveCommunityConfigs } from "@/services/api/community";
 import { useCommunityStore } from "@/features/community/stores/use-community-store";
 
-export type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "firstPurchaseBonus" | "objectStorage" | "community";
+export type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "firstPurchaseBonus" | "objectStorage" | "timeouts" | "community";
+
+const defaultTimeoutSettings = (): TimeoutSettings => ({
+    aiRequestBodyTimeoutSeconds: 60,
+    storyboardAgentTimeoutSeconds: 600,
+    scriptAgentTimeoutSeconds: 600,
+    storyBibleAgentTimeoutSeconds: 600,
+    taskWaitTimeoutSeconds: 300,
+    videoTaskWaitTimeoutSeconds: 900,
+    videoCompositionExecutionTimeoutSeconds: 1800,
+    tencentCosSocketTimeoutMilliseconds: 120000,
+});
+
+const timeoutSettingsSignature = (settings: TimeoutSettings) =>
+    [
+        settings.aiRequestBodyTimeoutSeconds,
+        settings.storyboardAgentTimeoutSeconds,
+        settings.scriptAgentTimeoutSeconds,
+        settings.storyBibleAgentTimeoutSeconds,
+        settings.taskWaitTimeoutSeconds,
+        settings.videoTaskWaitTimeoutSeconds,
+        settings.videoCompositionExecutionTimeoutSeconds,
+        settings.tencentCosSocketTimeoutMilliseconds,
+    ].join(",");
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -343,6 +369,8 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const [draftFirstPurchaseBonusPercent, setDraftFirstPurchaseBonusPercent] = useState<CreditAmount>(0);
     const [communityBaseline, setCommunityBaseline] = useState<CommunityConfigDraft[]>([]);
     const [draftCommunityConfigs, setDraftCommunityConfigs] = useState<CommunityConfigDraft[]>([]);
+    const [timeoutBaseline, setTimeoutBaseline] = useState<TimeoutSettings>(defaultTimeoutSettings);
+    const [draftTimeoutSettings, setDraftTimeoutSettings] = useState<TimeoutSettings>(defaultTimeoutSettings);
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
     const [modelPicker, setModelPicker] = useState<{ capability: ModelCapability; mode: "options" | "default" } | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
@@ -403,8 +431,9 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             useTeamStore.getState().team ? Promise.resolve({ checkInCredits: "0" }) : getCheckInRewardSettings(),
             useTeamStore.getState().team ? Promise.resolve({ percent: "0" }) : getFirstPurchaseBonusSettings(),
             useTeamStore.getState().team ? Promise.resolve() : useCommunityStore.getState().refresh(),
+            useTeamStore.getState().team ? Promise.resolve(defaultTimeoutSettings()) : getTimeoutSettings(),
         ])
-            .then(([, , creditSettings, invitationRewardSettings, checkInSettings, firstPurchaseBonusSettings]) => {
+            .then(([, , creditSettings, invitationRewardSettings, checkInSettings, firstPurchaseBonusSettings, , timeoutSettings]) => {
                 if (!active) return;
                 resetAllDrafts();
                 setCreditBaseline(creditSettings.initialCredits);
@@ -415,6 +444,8 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                 setDraftCheckInCredits(checkInSettings.checkInCredits);
                 setFirstPurchaseBonusBaseline(firstPurchaseBonusSettings.percent);
                 setDraftFirstPurchaseBonusPercent(firstPurchaseBonusSettings.percent);
+                setTimeoutBaseline(timeoutSettings);
+                setDraftTimeoutSettings(timeoutSettings);
                 setDraftsReady(true);
             })
             .catch((error) => {
@@ -447,9 +478,10 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const checkInDirty = draftCheckInCredits !== checkInBaseline;
     const firstPurchaseBonusDirty = draftFirstPurchaseBonusPercent !== firstPurchaseBonusBaseline;
     const communityDirty = communityDraftSignature(draftCommunityConfigs) !== communityDraftSignature(communityBaseline);
+    const timeoutDirty = timeoutSettingsSignature(draftTimeoutSettings) !== timeoutSettingsSignature(timeoutBaseline);
     const editingModelBaseline = editingModelConfig && draftModelConfigs.find((item) => item.id === editingModelConfig.id);
     const modelEditorDirty = Boolean(editingModelConfig && (!sameValue(editingModelConfig, editingModelBaseline) || editingCustomBodyParameters !== JSON.stringify(editingModelBaseline?.customBodyParameters || {}, null, 2)));
-    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || firstPurchaseBonusDirty || communityDirty || modelEditorDirty;
+    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || firstPurchaseBonusDirty || communityDirty || timeoutDirty || modelEditorDirty;
     const isSaving = Boolean(savingTab);
     useConfigurationLeaveGuard(draftsReady && hasUnsavedChanges);
 
@@ -841,6 +873,20 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             message.success(translate("appShell.firstPurchaseBonusSaved"));
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("appShell.failedToSaveFirstPurchaseBonus"));
+        } finally {
+            setSavingTab("");
+        }
+    };
+
+    const saveTimeoutSettings = async () => {
+        setSavingTab("timeouts");
+        try {
+            const settings = await updateTimeoutSettings(draftTimeoutSettings);
+            setTimeoutBaseline(settings);
+            setDraftTimeoutSettings(settings);
+            message.success(translate("administration.timeoutSettingsSaved"));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("administration.timeoutSettingsSaveFailed"));
         } finally {
             setSavingTab("");
         }
@@ -1508,6 +1554,46 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                             ),
                         },
                         {
+                            key: "timeouts",
+                            label: translate("administration.timeoutSettings"),
+                            children: (
+                                <Form layout="vertical" requiredMark={false} className="max-w-4xl">
+                                    <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                        <div className="text-sm font-semibold">{translate("administration.timeoutSettings")}</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("administration.timeoutSettingsHint")}</div>
+                                        <div className="mt-5 grid gap-x-6 gap-y-4 md:grid-cols-2">
+                                            {([
+                                                ["aiRequestBodyTimeoutSeconds", "administration.timeoutAiRequestBody", "administration.timeoutAiRequestBodyHint", 86400, "administration.timeoutSecondsUnit"],
+                                                ["storyboardAgentTimeoutSeconds", "administration.timeoutStoryboardAgent", "administration.timeoutStoryboardAgentHint", 86400, "administration.timeoutSecondsUnit"],
+                                                ["scriptAgentTimeoutSeconds", "administration.timeoutScriptAgent", "administration.timeoutScriptAgentHint", 86400, "administration.timeoutSecondsUnit"],
+                                                ["storyBibleAgentTimeoutSeconds", "administration.timeoutStoryBibleAgent", "administration.timeoutStoryBibleAgentHint", 86400, "administration.timeoutSecondsUnit"],
+                                                ["taskWaitTimeoutSeconds", "administration.timeoutTaskWait", "administration.timeoutTaskWaitHint", 86400, "administration.timeoutSecondsUnit"],
+                                                ["videoTaskWaitTimeoutSeconds", "administration.timeoutVideoTaskWait", "administration.timeoutVideoTaskWaitHint", 86400, "administration.timeoutSecondsUnit"],
+                                                ["videoCompositionExecutionTimeoutSeconds", "administration.timeoutVideoComposition", "administration.timeoutVideoCompositionHint", 86400, "administration.timeoutSecondsUnit"],
+                                                ["tencentCosSocketTimeoutMilliseconds", "administration.timeoutCosSocket", "administration.timeoutCosSocketHint", 3600000, "administration.timeoutMillisecondsUnit"],
+                                            ] as const).map(([key, labelKey, hintKey, max, unitKey]) => (
+                                                <Form.Item key={key} label={<span className="block">{translate(labelKey)}</span>} extra={translate(hintKey)} className="mb-0">
+                                                    <InputNumber
+                                                        min={1}
+                                                        max={max}
+                                                        precision={0}
+                                                        suffix={translate(unitKey)}
+                                                        value={draftTimeoutSettings[key]}
+                                                        disabled={isSaving}
+                                                        className="w-full!"
+                                                        onChange={(value) => setDraftTimeoutSettings((current) => ({ ...current, [key]: typeof value === "number" ? value : current[key] }))}
+                                                    />
+                                                </Form.Item>
+                                            ))}
+                                        </div>
+                                        <Button type="primary" className="mt-5" disabled={!timeoutDirty || isSaving} loading={savingTab === "timeouts"} onClick={() => void saveTimeoutSettings()}>
+                                            {translate("appShell.save")}
+                                        </Button>
+                                    </div>
+                                </Form>
+                            ),
+                        },
+                        {
                             key: "community",
                             label: translate("administration.communityConfig"),
                             children: (
@@ -1520,7 +1606,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                 />
                             ),
                         },
-                    ].filter((item) => !team || !["credits", "creditProducts", "invitationReward", "checkIn", "firstPurchaseBonus", "community"].includes(item.key))}
+                    ].filter((item) => !team || !["credits", "creditProducts", "invitationReward", "checkIn", "firstPurchaseBonus", "community", "timeouts"].includes(item.key))}
                 />
             )}
             {modelPicker && modelPickerGroup ? (

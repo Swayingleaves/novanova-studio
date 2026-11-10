@@ -178,7 +178,23 @@ public class StoryboardAgentService {
     public Mono<AiTaskDtos.AiGenerationTaskResponse> createAssetImageTask(
             StoryboardDtos.CreateAssetImageTaskRequest request,
             Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
+        return createAssetImageTask(request, List.of(), beforeEnqueue);
+    }
+
+    /**
+     * 为分镜资产创建图片任务。有参考图时走图生图，模型未配置该模式则拒绝。
+     *
+     * @param request 资产图片任务请求
+     * @param references 参考图片，空列表表示文生图
+     * @param beforeEnqueue 入队前持久化回调
+     * @return 已入队的AI任务
+     */
+    public Mono<AiTaskDtos.AiGenerationTaskResponse> createAssetImageTask(
+            StoryboardDtos.CreateAssetImageTaskRequest request,
+            List<AiTaskDtos.AiTaskMediaReference> references,
+            Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
         validateAssetImageRequest(request);
+        List<AiTaskDtos.AiTaskMediaReference> imageReferences = references == null || references.isEmpty() ? List.of() : List.copyOf(references);
         Map<String, Object> parameters = new LinkedHashMap<>();
         parameters.put("count", 1);
         parameters.put("quality", request.settings().quality());
@@ -187,8 +203,10 @@ public class StoryboardAgentService {
         parameters.put("storyboardNodeId", request.nodeId().trim());
         parameters.put("storyboardAssetId", request.asset().id().trim());
         AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(
-                AiTaskTypes.IMAGE, renderAssetImagePrompt(request), request.model().trim(), parameters, null, null, AiTaskSources.STORYBOARD);
-        return aiTaskService.createTask(taskRequest, beforeEnqueue);
+                AiTaskTypes.IMAGE, renderAssetImagePrompt(request), request.model().trim(), parameters,
+                imageReferences.isEmpty() ? null : imageReferences, null, AiTaskSources.STORYBOARD);
+        Mono<Void> supported = imageReferences.isEmpty() ? Mono.empty() : aiTaskService.requireImageToImage(request.model());
+        return supported.then(aiTaskService.createTask(taskRequest, beforeEnqueue));
     }
 
     /**
@@ -358,7 +376,7 @@ public class StoryboardAgentService {
                                     .sessionId("storyboard:" + operationId)
                                     .userId(String.valueOf(userId))
                                     .build())
-                            .timeout(Duration.ofSeconds(properties.getAi().getStoryboardAgent().getTimeoutSeconds()))
+                            .timeout(Duration.ofSeconds(properties.timeoutSettings().storyboardAgentTimeoutSeconds()))
                             .map(message -> message.getStructuredData(resultType))
                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedNoStructuredResult"))))
                             .doFinally(signal -> agent.close());

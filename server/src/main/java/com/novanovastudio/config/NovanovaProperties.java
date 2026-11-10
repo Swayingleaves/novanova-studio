@@ -2,6 +2,7 @@ package com.novanovastudio.config;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
+import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -40,6 +41,9 @@ public class NovanovaProperties {
     /** 微信 Native 扫码支付配置。 */
     private Wechat wechat = new Wechat();
 
+    /** 平台超时设置快照。数据库加载前使用与迁移默认值一致的初始值。 */
+    private final AtomicReference<RuntimeTimeouts> timeoutSettings = new AtomicReference<>(RuntimeTimeouts.defaults());
+
     /**
      * 获取微信支付配置。
      * @return 微信支付配置
@@ -54,6 +58,24 @@ public class NovanovaProperties {
      */
     public void setWechat(Wechat wechat) {
         this.wechat = wechat;
+    }
+
+    /**
+     * 读取当前超时设置。
+     *
+     * @return RuntimeTimeouts 超时快照
+     */
+    public RuntimeTimeouts timeoutSettings() {
+        return timeoutSettings.get();
+    }
+
+    /**
+     * 用平台超时设置覆盖运行时快照。
+     *
+     * @param settings RuntimeTimeouts 超时快照
+     */
+    public void replaceTimeoutSettings(RuntimeTimeouts settings) {
+        timeoutSettings.set(settings == null ? RuntimeTimeouts.defaults() : settings);
     }
 
     /**
@@ -739,10 +761,6 @@ public class NovanovaProperties {
             @Min(value = 0, message = "腾讯云COS最大重试次数不能小于0")
             private int maxErrorRetry = 3;
 
-            /** 单次请求读取超时时间，单位为毫秒 */
-            @Min(value = 1, message = "腾讯云COS读取超时时间必须大于0")
-            private int socketTimeoutMilliseconds = 120_000;
-
             /**
              * 获取单个请求失败后的最大额外重试次数。
              *
@@ -760,24 +778,32 @@ public class NovanovaProperties {
             public void setMaxErrorRetry(int maxErrorRetry) {
                 this.maxErrorRetry = maxErrorRetry;
             }
+        }
+    }
 
-            /**
-             * 获取单次请求读取超时时间。
-             *
-             * @return int 读取超时时间，单位为毫秒
-             */
-            public int getSocketTimeoutMilliseconds() {
-                return socketTimeoutMilliseconds;
-            }
+    /**
+     * 运行时超时快照，数值来自平台超时设置。
+     *
+     * @param aiRequestBodyTimeoutSeconds AI构造请求体和提取媒体地址的超时秒数
+     * @param storyboardAgentTimeoutSeconds 分镜 Agent 单次调用超时秒数
+     * @param scriptAgentTimeoutSeconds 剧本 Agent 单次调用超时秒数
+     * @param storyBibleAgentTimeoutSeconds 故事知识库 Agent 单次调用超时秒数
+     * @param taskWaitTimeoutSeconds 图片等常规生成任务等待超时秒数
+     * @param videoTaskWaitTimeoutSeconds 视频生成任务等待超时秒数
+     * @param videoCompositionExecutionTimeoutSeconds 视频合成和音频裁剪执行超时秒数
+     * @param tencentCosSocketTimeoutMilliseconds 腾讯云 COS 单次读取超时毫秒数
+     */
+    public record RuntimeTimeouts(int aiRequestBodyTimeoutSeconds, int storyboardAgentTimeoutSeconds, int scriptAgentTimeoutSeconds,
+                                  int storyBibleAgentTimeoutSeconds, int taskWaitTimeoutSeconds, int videoTaskWaitTimeoutSeconds,
+                                  int videoCompositionExecutionTimeoutSeconds, int tencentCosSocketTimeoutMilliseconds) {
 
-            /**
-             * 设置单次请求读取超时时间。
-             *
-             * @param socketTimeoutMilliseconds int 读取超时时间，单位为毫秒
-             */
-            public void setSocketTimeoutMilliseconds(int socketTimeoutMilliseconds) {
-                this.socketTimeoutMilliseconds = socketTimeoutMilliseconds;
-            }
+        /**
+         * 与数据库迁移默认值一致的初始快照。
+         *
+         * @return RuntimeTimeouts 默认超时
+         */
+        public static RuntimeTimeouts defaults() {
+            return new RuntimeTimeouts(60, 600, 600, 600, 300, 900, 1800, 120_000);
         }
     }
 
@@ -793,12 +819,6 @@ public class NovanovaProperties {
 
         /** 分镜Agent配置 */
         private StoryboardAgent storyboardAgent = new StoryboardAgent();
-
-        /** 剧本Agent配置 */
-        private ScriptAgent scriptAgent = new ScriptAgent();
-
-        /** 故事知识库分析Agent配置，复用剧本Agent的超时配置结构 */
-        private ScriptAgent storyBibleAgent = new ScriptAgent();
 
         /** 视频合成任务配置 */
         private VideoComposition videoComposition = new VideoComposition();
@@ -858,42 +878,6 @@ public class NovanovaProperties {
         }
 
         /**
-         * 获取剧本Agent配置。
-         *
-         * @return ScriptAgent 剧本Agent配置
-         */
-        public ScriptAgent getScriptAgent() {
-            return scriptAgent;
-        }
-
-        /**
-         * 设置剧本Agent配置。
-         *
-         * @param scriptAgent ScriptAgent 剧本Agent配置
-         */
-        public void setScriptAgent(ScriptAgent scriptAgent) {
-            this.scriptAgent = scriptAgent;
-        }
-
-        /**
-         * 获取故事知识库分析Agent配置。
-         *
-         * @return ScriptAgent 故事知识库分析Agent配置
-         */
-        public ScriptAgent getStoryBibleAgent() {
-            return storyBibleAgent;
-        }
-
-        /**
-         * 设置故事知识库分析Agent配置。
-         *
-         * @param storyBibleAgent ScriptAgent 故事知识库分析Agent配置
-         */
-        public void setStoryBibleAgent(ScriptAgent storyBibleAgent) {
-            this.storyBibleAgent = storyBibleAgent;
-        }
-
-        /**
          * 获取视频合成任务配置。
          *
          * @return VideoComposition 视频合成任务配置
@@ -916,29 +900,8 @@ public class NovanovaProperties {
          */
         public static class StoryboardAgent {
 
-            /** Agent单次调用超时时间（秒）。整集拆分需要覆盖较长的模型思考时间。 */
-            private int timeoutSeconds = 600;
-
             /** 批量合成镜头提示词时同时请求模型的镜头数量 */
             private int composeConcurrency = 4;
-
-            /**
-             * 获取Agent单次调用超时时间（秒）。
-             *
-             * @return int 超时时间秒数
-             */
-            public int getTimeoutSeconds() {
-                return timeoutSeconds;
-            }
-
-            /**
-             * 设置Agent单次调用超时时间（秒）。
-             *
-             * @param timeoutSeconds int 超时时间秒数
-             */
-            public void setTimeoutSeconds(int timeoutSeconds) {
-                this.timeoutSeconds = timeoutSeconds;
-            }
 
             /**
              * 获取批量合成提示词的并发镜头数量。
@@ -960,33 +923,6 @@ public class NovanovaProperties {
         }
 
         /**
-         * 剧本Agent配置。
-         */
-        public static class ScriptAgent {
-
-            /** Agent单次调用超时时间（秒） */
-            private int timeoutSeconds = 120;
-
-            /**
-             * 获取Agent单次调用超时时间（秒）。
-             *
-             * @return int 超时时间秒数
-             */
-            public int getTimeoutSeconds() {
-                return timeoutSeconds;
-            }
-
-            /**
-             * 设置Agent单次调用超时时间（秒）。
-             *
-             * @param timeoutSeconds int 超时时间秒数
-             */
-            public void setTimeoutSeconds(int timeoutSeconds) {
-                this.timeoutSeconds = timeoutSeconds;
-            }
-        }
-
-        /**
          * 视频合成任务配置。
          */
         public static class VideoComposition {
@@ -999,9 +935,6 @@ public class NovanovaProperties {
 
             /** 单次合成允许的源视频总时长秒数 */
             private int maximumTotalDurationSeconds = 600;
-
-            /** FFmpeg进程超时秒数 */
-            private int executionTimeoutSeconds = 1800;
 
             /** Redis活动任务租约秒数 */
             private int activeLeaseSeconds = 180;
@@ -1067,24 +1000,6 @@ public class NovanovaProperties {
              */
             public void setMaximumTotalDurationSeconds(int maximumTotalDurationSeconds) {
                 this.maximumTotalDurationSeconds = maximumTotalDurationSeconds;
-            }
-
-            /**
-             * 获取FFmpeg进程超时秒数。
-             *
-             * @return int 超时秒数
-             */
-            public int getExecutionTimeoutSeconds() {
-                return executionTimeoutSeconds;
-            }
-
-            /**
-             * 设置FFmpeg进程超时秒数。
-             *
-             * @param executionTimeoutSeconds int 超时秒数
-             */
-            public void setExecutionTimeoutSeconds(int executionTimeoutSeconds) {
-                this.executionTimeoutSeconds = executionTimeoutSeconds;
             }
 
             /**
@@ -1182,12 +1097,6 @@ public class NovanovaProperties {
 
             /** 异步AI任务状态轮询间隔秒数，包括供应商、内部等待和视频合成恢复 */
             private int pollingIntervalSeconds = 3;
-
-            /** 生成任务等待超时秒数（图片等常规任务） */
-            private int waitTimeoutSeconds = 300;
-
-            /** 视频生成任务等待超时秒数，需覆盖自定义模型异步轮询上限（约10分钟）并留余量 */
-            private int videoWaitTimeoutSeconds = 900;
 
             /** 任务锁TTL秒数 */
             private int lockTtlSeconds = 300;
@@ -1301,42 +1210,6 @@ public class NovanovaProperties {
              */
             public int getPollingIntervalSeconds() {
                 return pollingIntervalSeconds;
-            }
-
-            /**
-             * 获取生成任务等待超时秒数。
-             *
-             * @return int 生成任务等待超时秒数
-             */
-            public int getWaitTimeoutSeconds() {
-                return waitTimeoutSeconds;
-            }
-
-            /**
-             * 设置生成任务等待超时秒数。
-             *
-             * @param waitTimeoutSeconds int 生成任务等待超时秒数
-             */
-            public void setWaitTimeoutSeconds(int waitTimeoutSeconds) {
-                this.waitTimeoutSeconds = waitTimeoutSeconds;
-            }
-
-            /**
-             * 获取视频生成任务等待超时秒数。
-             *
-             * @return int 视频生成任务等待超时秒数
-             */
-            public int getVideoWaitTimeoutSeconds() {
-                return videoWaitTimeoutSeconds;
-            }
-
-            /**
-             * 设置视频生成任务等待超时秒数。
-             *
-             * @param videoWaitTimeoutSeconds int 视频生成任务等待超时秒数
-             */
-            public void setVideoWaitTimeoutSeconds(int videoWaitTimeoutSeconds) {
-                this.videoWaitTimeoutSeconds = videoWaitTimeoutSeconds;
             }
 
             /**

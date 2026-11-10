@@ -165,7 +165,7 @@ public class AudioClipService {
             Process process = new ProcessBuilder(command).start();
             StringBuilder error = new StringBuilder();
             Thread reader = Thread.ofVirtual().start(() -> readError(process, error));
-            boolean completed = process.waitFor(Math.max(1, composition.getExecutionTimeoutSeconds()), TimeUnit.SECONDS);
+            boolean completed = process.waitFor(Math.max(1, properties.timeoutSettings().videoCompositionExecutionTimeoutSeconds()), TimeUnit.SECONDS);
             if (!completed) {
                 process.destroyForcibly();
                 process.waitFor(5, TimeUnit.SECONDS);

@@ -152,6 +152,7 @@ export default function AdminSystemPage() {
                 { key: "configuration:checkIn", label: translate("appShell.checkInCredits"), tab: "configuration", sub: "checkIn" },
                 { key: "configuration:firstPurchaseBonus", label: translate("appShell.firstPurchaseBonus"), tab: "configuration", sub: "firstPurchaseBonus" },
                 { key: "configuration:objectStorage", label: translate("appShell.objectStorage_2caed1"), tab: "configuration", sub: "objectStorage" },
+                ...(!team ? [{ key: "configuration:timeouts", label: translate("administration.timeoutSettings"), tab: "configuration", sub: "timeouts" }] : []),
                 { key: "configuration:community", label: translate("administration.communityConfig"), tab: "configuration", sub: "community" },
             ],
         },

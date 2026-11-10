@@ -309,6 +309,44 @@ public class ComicDramaRepository {
                 .map((row, metadata) -> mapAssetVersion(row)).all();
     }
 
+    /**
+     * 查询指定资产版本最新一张已完成图片。没有可用图片的版本不会出现在结果里。
+     *
+     * @param projectId 漫剧项目标识
+     * @param versionIds 资产版本标识
+     * @return 可提交给图生图的参考图
+     */
+    public Flux<AiTaskDtos.AiTaskMediaReference> listGeneratedAssetImages(String projectId, List<String> versionIds) {
+        if (versionIds == null || versionIds.isEmpty()) {
+            return Flux.empty();
+        }
+        return databaseClient.sql("""
+                SELECT v.id AS version_id,
+                       a.name || '-' || v.version_name AS name,
+                       m.result_data
+                FROM comic_drama_asset_versions v
+                JOIN comic_drama_assets a ON a.id = v.asset_id
+                JOIN LATERAL (
+                    SELECT mr.result_data
+                    FROM comic_drama_media_results mr
+                    WHERE mr.script_project_id = :projectId
+                      AND mr.target_type = 'assetVersion'
+                      AND mr.target_id = v.id
+                      AND mr.media_type = 'image'
+                      AND mr.status IN ('completed', 'needsUpdate')
+                    ORDER BY mr.adopted DESC, mr.created_at DESC, mr.id
+                    LIMIT 1
+                ) m ON TRUE
+                WHERE a.script_project_id = :projectId
+                  AND v.id IN (:versionIds)
+                """).bind("projectId", projectId).bind("versionIds", versionIds)
+                .map((row, metadata) -> {
+                    AiTaskDtos.AiTaskMediaReference reference = extractMediaReference(
+                            row.get("version_id", String.class), row.get("name", String.class), "subject", object(row, "result_data"), null);
+                    return Optional.ofNullable(reference);
+                }).all().filter(Optional::isPresent).map(Optional::get);
+    }
+
     /** 查询单个资产版本。 */
     public Mono<ComicDramaDtos.AssetVersion> getAssetVersion(String projectId, String versionId) {
         return databaseClient.sql("""

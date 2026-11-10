@@ -392,7 +392,7 @@ public class StoryBibleAnalysisRunner {
                             context.model().agentModel(), context.job().quickConfiguration().maximumOutputTokens()));
                     return agent.call(JSON.toJSONString(input), resultType, RuntimeContext.builder()
                                     .sessionId("story-bible:" + context.job().id()).userId(String.valueOf(context.job().userId())).build())
-                            .timeout(Duration.ofSeconds(properties.getAi().getStoryBibleAgent().getTimeoutSeconds()))
+                            .timeout(Duration.ofSeconds(properties.timeoutSettings().storyBibleAgentTimeoutSeconds()))
                             .map(message -> parseAgentResult(message, resultType, context.job().id()))
                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "故事知识库Agent未返回结构化结果")))
                             .doFinally(signal -> agent.close());

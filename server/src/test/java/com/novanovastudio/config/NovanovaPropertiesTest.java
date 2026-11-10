@@ -55,26 +55,32 @@ class NovanovaPropertiesTest {
         NovanovaProperties.ObjectStorage.TencentCos tencentCos = properties.getObjectStorage().getTencentCos();
 
         Assertions.assertEquals(3, tencentCos.getMaxErrorRetry());
-        Assertions.assertEquals(120_000, tencentCos.getSocketTimeoutMilliseconds());
 
         tencentCos.setMaxErrorRetry(5);
-        tencentCos.setSocketTimeoutMilliseconds(180_000);
 
         Assertions.assertEquals(5, tencentCos.getMaxErrorRetry());
-        Assertions.assertEquals(180_000, tencentCos.getSocketTimeoutMilliseconds());
     }
 
     /**
-     * 测试分镜Agent超时配置默认值和修改能力。
+     * 测试运行时超时快照的默认值，以及被平台设置覆盖后的读取结果。
      */
     @Test
-    void shouldConfigureStoryboardAgentTimeout() {
+    void shouldReplaceRuntimeTimeoutSettings() {
         NovanovaProperties properties = new NovanovaProperties();
+        NovanovaProperties.RuntimeTimeouts defaults = properties.timeoutSettings();
 
-        Assertions.assertEquals(600, properties.getAi().getStoryboardAgent().getTimeoutSeconds());
+        Assertions.assertEquals(60, defaults.aiRequestBodyTimeoutSeconds());
+        Assertions.assertEquals(600, defaults.storyboardAgentTimeoutSeconds());
+        Assertions.assertEquals(600, defaults.scriptAgentTimeoutSeconds());
+        Assertions.assertEquals(600, defaults.storyBibleAgentTimeoutSeconds());
+        Assertions.assertEquals(300, defaults.taskWaitTimeoutSeconds());
+        Assertions.assertEquals(900, defaults.videoTaskWaitTimeoutSeconds());
+        Assertions.assertEquals(1800, defaults.videoCompositionExecutionTimeoutSeconds());
+        Assertions.assertEquals(120_000, defaults.tencentCosSocketTimeoutMilliseconds());
 
-        properties.getAi().getStoryboardAgent().setTimeoutSeconds(180);
+        properties.replaceTimeoutSettings(new NovanovaProperties.RuntimeTimeouts(30, 180, 180, 180, 120, 600, 900, 60_000));
 
-        Assertions.assertEquals(180, properties.getAi().getStoryboardAgent().getTimeoutSeconds());
+        Assertions.assertEquals(30, properties.timeoutSettings().aiRequestBodyTimeoutSeconds());
+        Assertions.assertEquals(60_000, properties.timeoutSettings().tencentCosSocketTimeoutMilliseconds());
     }
 }

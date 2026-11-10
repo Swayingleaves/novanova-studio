@@ -388,6 +388,24 @@ public class AiTaskService {
     }
 
     /**
+     * 确认图片模型已启用图生图。自定义模型还必须有对应的调用配置。
+     *
+     * @param model 渠道与模型编码
+     * @return 校验通过信号
+     */
+    public Mono<Void> requireImageToImage(String model) {
+        return resolveModel(TYPE_IMAGE, model == null ? "" : model.trim()).flatMap(resolved -> {
+            List<String> capabilities = resolved.capabilities() == null ? List.of() : resolved.capabilities();
+            boolean configured = capabilities.contains("image-to-image")
+                    && (!resolved.isCustomModel() || (resolved.customModelConfig() != null && resolved.customModelConfig().containsKey("image-to-image")));
+            if (!configured) {
+                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.imageToImageModeIsNotConfigured")));
+            }
+            return Mono.empty();
+        });
+    }
+
+    /**
      * 旧Agent循环每次派发前复用统一权限和启用模型校验，不改变已经确定的调用参数。
      * @param model 固定的渠道与模型编码
      * @return 派发权限验证完成信号

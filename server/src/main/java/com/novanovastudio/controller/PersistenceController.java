@@ -12,10 +12,12 @@ import com.novanovastudio.dto.CreditDtos;
 import com.novanovastudio.dto.InvitationDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.dto.AiTaskDtos;
+import com.novanovastudio.dto.TimeoutDtos;
 import com.novanovastudio.security.RequireRole;
 import com.novanovastudio.service.CheckInService;
 import com.novanovastudio.service.CreditService;
 import com.novanovastudio.service.PersistenceService;
+import com.novanovastudio.service.TimeoutSettingsService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
@@ -51,6 +53,9 @@ public class PersistenceController {
     /** 签到服务 */
     private final CheckInService checkInService;
 
+    /** 超时设置服务 */
+    private final TimeoutSettingsService timeoutSettingsService;
+
     /**
      * 查询积分设置。
      *
@@ -72,6 +77,29 @@ public class PersistenceController {
     @RequireRole("admin")
     public Mono<ApiResponse<CreditDtos.CreditSettingsResponse>> updateCreditSettings(@Valid @RequestBody CreditDtos.UpdateCreditSettingsRequest request) {
         return creditService.updateSettings(request).map(ApiResponse::ok);
+    }
+
+    /**
+     * 查询全站超时设置。
+     *
+     * @return Mono<ApiResponse<TimeoutSettings>> 超时设置
+     */
+    @GetMapping("/config/timeout/getTimeoutSettings")
+    @RequireRole("admin")
+    public Mono<ApiResponse<TimeoutDtos.TimeoutSettings>> getTimeoutSettings() {
+        return timeoutSettingsService.getSettings().map(ApiResponse::ok);
+    }
+
+    /**
+     * 更新全站超时设置。
+     *
+     * @param request TimeoutSettings 超时设置
+     * @return Mono<ApiResponse<TimeoutSettings>> 保存后的超时设置
+     */
+    @PostMapping("/config/timeout/updateTimeoutSettings")
+    @RequireRole("admin")
+    public Mono<ApiResponse<TimeoutDtos.TimeoutSettings>> updateTimeoutSettings(@Valid @RequestBody TimeoutDtos.TimeoutSettings request) {
+        return timeoutSettingsService.updateSettings(request).map(ApiResponse::ok);
     }
 
     /**

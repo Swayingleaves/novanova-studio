@@ -509,9 +509,9 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                     new TaskProgressSnapshot(initialTask.status(), initialProgress));
             Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
             // 视频生成常超5分钟（自定义模型异步轮询最长约10分钟），按任务类型读取可配置的等待超时
-            Duration timeout = AiTaskTypes.VIDEO.equals(taskType())
-                    ? Duration.ofSeconds(properties.getAi().getTask().getVideoWaitTimeoutSeconds())
-                    : Duration.ofSeconds(properties.getAi().getTask().getWaitTimeoutSeconds());
+            Duration timeout = Duration.ofSeconds(AiTaskTypes.VIDEO.equals(taskType())
+                    ? properties.timeoutSettings().videoTaskWaitTimeoutSeconds()
+                    : properties.timeoutSettings().taskWaitTimeoutSeconds());
             Flux<AiTaskDtos.AiGenerationTaskResponse> polled = Flux.interval(Duration.ZERO, pollingInterval)
                     .take(timeout)
                     .concatMap(i -> aiTaskService.getTaskForUser(userId, taskId));

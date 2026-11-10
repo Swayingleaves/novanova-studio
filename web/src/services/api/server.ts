@@ -473,6 +473,17 @@ export type CreditSettings = {
     initialCredits: CreditAmount;
 };
 
+export type TimeoutSettings = {
+    aiRequestBodyTimeoutSeconds: number;
+    storyboardAgentTimeoutSeconds: number;
+    scriptAgentTimeoutSeconds: number;
+    storyBibleAgentTimeoutSeconds: number;
+    taskWaitTimeoutSeconds: number;
+    videoTaskWaitTimeoutSeconds: number;
+    videoCompositionExecutionTimeoutSeconds: number;
+    tencentCosSocketTimeoutMilliseconds: number;
+};
+
 export type FirstPurchaseBonusSettings = {
     percent: CreditAmount;
 };
@@ -1484,6 +1495,14 @@ export function getCreditSettings() {
 
 export function updateCreditSettings(initialCredits: CreditAmount) {
     return serverPost<CreditSettings>("/config/credit/updateCreditSettings", { initialCredits });
+}
+
+export function getTimeoutSettings() {
+    return serverGet<TimeoutSettings>("/config/timeout/getTimeoutSettings");
+}
+
+export function updateTimeoutSettings(settings: TimeoutSettings) {
+    return serverPost<TimeoutSettings>("/config/timeout/updateTimeoutSettings", settings);
 }
 
 export function getFirstPurchaseBonusSettings() {

@@ -18,6 +18,7 @@ import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.storage.MediaAccessService;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -1126,6 +1127,79 @@ public class ComicDramaService {
                                 .then(repository.refreshProjectProductionStatus(request.projectId())).thenReturn(saved))));
     }
 
+    /** 单次资产图生成最多引用的已有资产图数量。 */
+    static final int MAX_REFERENCE_ASSET_IMAGES = 8;
+
+    /**
+     * 读取生成设置里的参考资产版本，并保持用户选择的顺序。
+     *
+     * @param settings 生成设置
+     * @return 资产版本标识；未选择时为空
+     */
+    static List<String> referenceAssetVersionIds(JSONObject settings) {
+        if (settings == null || !settings.containsKey("referenceAssetVersionIds")) {
+            return List.of();
+        }
+        Object raw = settings.get("referenceAssetVersionIds");
+        if (raw == null) {
+            return List.of();
+        }
+        JSONArray array;
+        if (raw instanceof JSONArray jsonArray) {
+            array = jsonArray;
+        } else if (raw instanceof List<?> list) {
+            array = new JSONArray(list);
+        } else {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "参考资产图格式不正确");
+        }
+        if (array.isEmpty()) {
+            return List.of();
+        }
+        if (array.size() > MAX_REFERENCE_ASSET_IMAGES) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "参考资产图最多 " + MAX_REFERENCE_ASSET_IMAGES + " 张");
+        }
+        List<String> versionIds = new ArrayList<>();
+        for (int index = 0; index < array.size(); index++) {
+            String versionId = array.getString(index);
+            if (versionId == null || !versionId.equals(versionId.trim()) || versionId.isEmpty() || versionId.length() > 64) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "参考资产图标识不合法");
+            }
+            if (versionIds.contains(versionId)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "参考资产图不能重复");
+            }
+            versionIds.add(versionId);
+        }
+        return List.copyOf(versionIds);
+    }
+
+    /**
+     * 按选择顺序解析当前项目内已完成的资产图。
+     *
+     * @param projectId 漫剧项目标识
+     * @param versionIds 用户选择的资产版本
+     * @return 可提交的参考图
+     */
+    private Mono<List<AiTaskDtos.AiTaskMediaReference>> generatedAssetImageReferences(String projectId, List<String> versionIds) {
+        if (versionIds.isEmpty()) {
+            return Mono.just(List.of());
+        }
+        return repository.listGeneratedAssetImages(projectId, versionIds).collectList().map(found -> {
+            Map<String, AiTaskDtos.AiTaskMediaReference> referencesByVersionId = new LinkedHashMap<>();
+            for (AiTaskDtos.AiTaskMediaReference reference : found) {
+                referencesByVersionId.putIfAbsent(reference.id(), reference);
+            }
+            List<AiTaskDtos.AiTaskMediaReference> ordered = new ArrayList<>();
+            for (String versionId : versionIds) {
+                AiTaskDtos.AiTaskMediaReference reference = referencesByVersionId.get(versionId);
+                if (reference == null) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "所选资产图不存在或还没有可用图片");
+                }
+                ordered.add(reference);
+            }
+            return List.copyOf(ordered);
+        });
+    }
+
     /** 在发生计费前校验生成目标并构建可追踪的媒体计划。 */
     private Mono<GenerationPlan> prepareSingleGeneration(ComicDramaDtos.CreateGenerationTaskRequest request,
                                                           String targetId, String mediaType) {
@@ -1156,9 +1230,12 @@ public class ComicDramaService {
                                 videoSeconds);
                     });
         } else if ("assetVersion".equals(request.targetType())) {
+            List<String> referenceVersionIds = "image".equals(mediaType) ? referenceAssetVersionIds(request.settings()) : List.of();
             return repository.getAssetVersion(request.projectId(), targetId).switchIfEmpty(notFound("资产版本不存在"))
-                    .map(version -> generationPlan(request, targetId, mediaType,
-                            version.versionName() + "\n" + text(version.appearanceDescription()), List.of(), new JSONObject(), null));
+                    .flatMap(version -> generatedAssetImageReferences(request.projectId(), referenceVersionIds)
+                            .flatMap(references -> (references.isEmpty() ? Mono.<Void>empty() : aiTaskService.requireImageToImage(request.model()))
+                                    .thenReturn(generationPlan(request, targetId, mediaType,
+                                            version.versionName() + "\n" + text(version.appearanceDescription()), references, new JSONObject(), null))));
         } else {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成目标仅支持shot或assetVersion"));
         }
@@ -1274,7 +1351,7 @@ public class ComicDramaService {
                                             ? request.settings().getString("visualStyle") : tuple.getT2().visualStyle(),
                                     request.model(), new StoryboardDtos.AssetImageSettings(
                                     request.settings().getString("quality"), request.settings().getString("resolution"),
-                                    request.settings().getString("size"))), attachTask)));
+                                    request.settings().getString("size"))), references, attachTask)));
         } else {
             task = aiTaskService.createTask(generationTaskRequest(request, plan, mediaType), attachTask);
         }

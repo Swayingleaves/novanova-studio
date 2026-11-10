@@ -245,7 +245,7 @@ public class VideoCompositionMediaProcessor {
         Thread outputReader = Thread.ofVirtual().start(() -> readProgress(process.getInputStream(), totalDurationMilliseconds, maximumProgress, progressConsumer));
         Thread errorReader = Thread.ofVirtual().start(() -> readProcessError(process.getErrorStream(), errorOutput));
         try {
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(1, properties.getAi().getVideoComposition().getExecutionTimeoutSeconds()));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(1, properties.timeoutSettings().videoCompositionExecutionTimeoutSeconds()));
             while (!process.waitFor(1, TimeUnit.SECONDS)) {
                 if (isCancellationRequested(cancellationRequested)) {
                     terminateProcess(process);

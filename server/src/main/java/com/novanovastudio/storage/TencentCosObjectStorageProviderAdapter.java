@@ -266,10 +266,9 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
      * @return ClientConfig COS客户端配置
      */
     private ClientConfig createClientConfig(String region) {
-        NovanovaProperties.ObjectStorage.TencentCos tencentCos = properties.getObjectStorage().getTencentCos();
         ClientConfig clientConfig = new ClientConfig(new Region(region));
-        clientConfig.setMaxErrorRetry(tencentCos.getMaxErrorRetry());
-        clientConfig.setSocketTimeout(tencentCos.getSocketTimeoutMilliseconds());
+        clientConfig.setMaxErrorRetry(properties.getObjectStorage().getTencentCos().getMaxErrorRetry());
+        clientConfig.setSocketTimeout(properties.timeoutSettings().tencentCosSocketTimeoutMilliseconds());
         return clientConfig;
     }
 }
