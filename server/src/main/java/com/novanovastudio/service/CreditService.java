@@ -13,6 +13,7 @@ import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.repository.CreditRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.TeamScope;
+import com.novanovastudio.storage.MediaAccessService;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
@@ -20,6 +21,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -84,6 +87,9 @@ public class CreditService {
 
     /** 按实际模型选择平台或团队钱包。 */
     private final TeamTaskScopeService teamTaskScopeService;
+
+    /** 私有存储桶读地址签发，任务结果里保存的是生成当时的临时地址。 */
+    private final MediaAccessService mediaAccessService;
 
     /**
      * 指定模型的业务扣费入口，钱包在扣费前由服务端资源归属解析。
@@ -447,12 +453,14 @@ public class CreditService {
                             persistenceService.getPlatformModelConfigs().map(CreditService::displayNameIndex),
                             creditRepository.listTaskRecords(query, page, pageSize).collectList(),
                             creditRepository.countTaskRecords(query))
-                    .map(result -> new CreditDtos.TaskRecordListResponse(result.getT2().stream()
-                            .map(item -> new CreditDtos.TaskRecordItem(item.taskId(), item.taskType(),
-                                    resolveModelDisplayName(result.getT1(), item.taskType(), item.model()), item.status(), item.prompt(),
-                                    item.resolution(), item.size(), item.seconds(), item.consumedCredits(), item.resultUrls(),
-                                    item.errorMessage(), item.createdAt(), item.completedAt()))
-                            .toList(), result.getT3()));
+                    .flatMap(result -> signResultUrls(result.getT2(), CreditDtos.TaskRecordItem::resultUrls)
+                            .map(replacements -> new CreditDtos.TaskRecordListResponse(result.getT2().stream()
+                                    .map(item -> new CreditDtos.TaskRecordItem(item.taskId(), item.taskType(),
+                                            resolveModelDisplayName(result.getT1(), item.taskType(), item.model()), item.status(), item.prompt(),
+                                            item.resolution(), item.size(), item.seconds(), item.consumedCredits(),
+                                            signedResultUrls(item.resultUrls(), replacements),
+                                            item.errorMessage(), item.createdAt(), item.completedAt()))
+                                    .toList(), result.getT3())));
         });
     }
 
@@ -481,13 +489,53 @@ public class CreditService {
                             persistenceService.getPlatformModelConfigs().map(CreditService::displayNameIndex),
                             creditRepository.listAdminTaskRecords(query, page, pageSize).collectList(),
                             creditRepository.countTaskRecords(query))
-                    .map(result -> new CreditDtos.AdminTaskRecordListResponse(result.getT2().stream()
-                            .map(item -> new CreditDtos.AdminTaskRecordItem(item.taskId(), item.taskType(),
-                                    resolveModelDisplayName(result.getT1(), item.taskType(), item.model()), item.status(), item.prompt(),
-                                    item.resolution(), item.size(), item.seconds(), item.consumedCredits(), item.resultUrls(),
-                                    item.errorMessage(), item.createdAt(), item.completedAt(), item.userId(), item.username(), item.nickname(), item.email()))
-                            .toList(), result.getT3()));
+                    .flatMap(result -> signResultUrls(result.getT2(), CreditDtos.AdminTaskRecordItem::resultUrls)
+                            .map(replacements -> new CreditDtos.AdminTaskRecordListResponse(result.getT2().stream()
+                                    .map(item -> new CreditDtos.AdminTaskRecordItem(item.taskId(), item.taskType(),
+                                            resolveModelDisplayName(result.getT1(), item.taskType(), item.model()), item.status(), item.prompt(),
+                                            item.resolution(), item.size(), item.seconds(), item.consumedCredits(),
+                                            signedResultUrls(item.resultUrls(), replacements),
+                                            item.errorMessage(), item.createdAt(), item.completedAt(), item.userId(), item.username(), item.nickname(), item.email()))
+                                    .toList(), result.getT3())));
         }).contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
+    }
+
+    /**
+     * 按当前对象存储配置重新签名任务结果地址。
+     * <p>
+     * 结果 JSON 保存的是生成当时的临时地址，私有桶下过期后不能再直接返回给浏览器。
+     *
+     * @param records 当前页任务记录
+     * @param resultUrls 从记录中读取结果地址
+     * @param <T> 任务记录类型
+     * @return 原地址到新签名地址的映射，没有结果地址时为空映射
+     */
+    private <T> Mono<Map<String, String>> signResultUrls(List<T> records, Function<T, List<String>> resultUrls) {
+        List<String> urls = records.stream()
+                .map(resultUrls)
+                .filter(Objects::nonNull)
+                .flatMap(List::stream)
+                .filter(url -> url != null && !url.isBlank())
+                .distinct()
+                .toList();
+        if (urls.isEmpty()) {
+            return Mono.just(Map.of());
+        }
+        return mediaAccessService.signUrls(urls, MediaAccessService.Purpose.PREVIEW);
+    }
+
+    /**
+     * 用重新签名后的地址替换任务结果地址，非本系统地址保持原值。
+     *
+     * @param urls 原始结果地址
+     * @param replacements 原地址到新签名地址的映射
+     * @return 可继续查看的结果地址
+     */
+    private static List<String> signedResultUrls(List<String> urls, Map<String, String> replacements) {
+        if (urls == null || urls.isEmpty() || replacements.isEmpty()) {
+            return urls == null ? List.of() : urls;
+        }
+        return urls.stream().map(url -> replacements.getOrDefault(url, url)).toList();
     }
 
     /**

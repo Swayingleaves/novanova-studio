@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "@/features/locale/use-translation";
@@ -13,7 +13,7 @@ import { formatCreditTime, generationTypeLabel } from "../credit-page-utils";
 import { formatConsumedCredits, formatTaskElapsedTime, TASK_RECORD_PAGE_SIZE, taskRecordStatusLabel, taskRecordStatusTone, taskRecordUserLabel } from "../task-record-utils";
 
 type TaskTypeFilter = "all" | "image" | "video";
-type MediaPreview = { url: string; taskType: "image" | "video" };
+type MediaPreview = { taskId: string; index: number; taskType: "image" | "video"; url: string };
 type TaskRecordView = ServerTaskRecord & Partial<Pick<ServerAdminTaskRecord, "userId" | "username" | "nickname" | "email">>;
 
 /**
@@ -29,8 +29,10 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
     const [keyword, setKeyword] = useState("");
     const [keywordDraft, setKeywordDraft] = useState("");
     const [page, setPage] = useState(1);
-    const [detail, setDetail] = useState<TaskRecordView | null>(null);
+    const [detailId, setDetailId] = useState<string | null>(null);
+    const [detailSnapshot, setDetailSnapshot] = useState<TaskRecordView | null>(null);
     const [preview, setPreview] = useState<MediaPreview | null>(null);
+    const refreshedTaskIds = useRef(new Set<string>());
 
     const filters = useMemo(() => ({
         startDate: dateRange[0].format("YYYY-MM-DD"),
@@ -47,6 +49,20 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
     });
 
     const records: TaskRecordView[] = recordsQuery.data?.records || [];
+    const freshDetail = records.find((record) => record.taskId === detailId) ?? null;
+    const detail = freshDetail ?? (detailSnapshot?.taskId === detailId ? detailSnapshot : null);
+    const previewUrl = preview
+        ? records.find((record) => record.taskId === preview.taskId)?.resultUrls[preview.index] || preview.url
+        : undefined;
+    useEffect(() => {
+        refreshedTaskIds.current.clear();
+    }, [filters.startDate, filters.endDate, filters.taskType, filters.keyword, page]);
+    /** 结果地址失效后重新拉取当前页。同一条任务只自动续签一次，避免对象不存在时反复请求。 */
+    const refreshExpiredResult = useCallback((taskId: string) => {
+        if (refreshedTaskIds.current.has(taskId)) return;
+        refreshedTaskIds.current.add(taskId);
+        void recordsQuery.refetch();
+    }, [recordsQuery]);
     /** 查询按钮与搜索框回车共用：关键词变化时更新筛选条件，否则只刷新当前结果。 */
     const queryRecords = () => {
         const nextKeyword = keywordDraft.trim();
@@ -55,8 +71,16 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
             setPage(1);
             return;
         }
+        refreshedTaskIds.current.clear();
         void recordsQuery.refetch();
     };
+    const openDetail = useCallback((record: TaskRecordView) => {
+        setDetailId(record.taskId);
+        setDetailSnapshot(record);
+    }, []);
+    useEffect(() => {
+        if (freshDetail) setDetailSnapshot(freshDetail);
+    }, [freshDetail]);
     const columns = useMemo<TableProps<TaskRecordView>["columns"]>(() => [
         ...(admin ? [{
             title: translate("administration.user"),
@@ -116,12 +140,12 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
             width: 200,
             render: (_, record) => (
                 <div className="flex items-center gap-3">
-                    <TaskRecordThumbnails record={record} onPreview={setPreview} />
-                    <Button size="small" onClick={() => setDetail(record)}>{translate("credits.details")}</Button>
+                    <TaskRecordThumbnails record={record} onPreview={setPreview} onExpired={refreshExpiredResult} />
+                    <Button size="small" onClick={() => openDetail(record)}>{translate("credits.details")}</Button>
                 </div>
             ),
         },
-    ], [admin, translate, translate.locale]);
+    ], [admin, openDetail, refreshExpiredResult, translate, translate.locale]);
 
     return (
         <div>
@@ -184,7 +208,7 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
                 {!recordsQuery.isLoading && !records.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("credits.noTaskRecordsInThisPeriod")} /> : null}
                 {records.map((record) => (
                     <article key={record.taskId} className="flex gap-3 border-b border-[var(--studio-line)] py-4">
-                        <div className="shrink-0"><TaskRecordThumbnails record={record} onPreview={setPreview} compact /></div>
+                        <div className="shrink-0"><TaskRecordThumbnails record={record} onPreview={setPreview} onExpired={refreshExpiredResult} compact /></div>
                         <div className="min-w-0 flex-1">
                             <div className="flex items-start justify-between gap-3">
                                 <span className="text-sm font-medium text-[var(--studio-ink)]">{generationTypeLabel(record.taskType)}</span>
@@ -199,7 +223,7 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
                             <p className="mt-1 truncate text-xs text-[var(--studio-muted)]" title={record.model}>{record.model || "—"}</p>
                             <p className="mt-1 line-clamp-2 text-xs text-[var(--studio-muted)]">{record.prompt || translate("credits.noPrompt")}</p>
                             <div className="mt-2">
-                                <Button size="small" onClick={() => setDetail(record)}>{translate("credits.details")}</Button>
+                                <Button size="small" onClick={() => openDetail(record)}>{translate("credits.details")}</Button>
                             </div>
                         </div>
                     </article>
@@ -212,8 +236,8 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
                 </div>
             ) : null}
 
-            <TaskRecordDetail record={detail} onClose={() => setDetail(null)} onPreview={setPreview} />
-            <MediaPreviewDialog preview={preview} onClose={() => setPreview(null)} />
+            <TaskRecordDetail record={detail} onClose={() => setDetailId(null)} onPreview={setPreview} onExpired={refreshExpiredResult} />
+            <MediaPreviewDialog preview={preview} url={previewUrl} onClose={() => setPreview(null)} onExpired={refreshExpiredResult} />
         </div>
     );
 }
@@ -224,7 +248,7 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
  * @param props 任务记录、预览回调与紧凑模式
  * @return 缩略图列表
  */
-function TaskRecordThumbnails({ record, onPreview, compact }: { record: ServerTaskRecord; onPreview: (preview: MediaPreview) => void; compact?: boolean }) {
+function TaskRecordThumbnails({ record, onPreview, onExpired, compact }: { record: ServerTaskRecord; onPreview: (preview: MediaPreview) => void; onExpired: (taskId: string) => void; compact?: boolean }) {
     const translate = useTranslation();
     if (!record.resultUrls.length) {
         const generating = record.status === "pending" || record.status === "running";
@@ -237,23 +261,23 @@ function TaskRecordThumbnails({ record, onPreview, compact }: { record: ServerTa
     const visibleUrls = record.resultUrls.slice(0, compact ? 1 : 2);
     return (
         <div className="flex flex-wrap items-center gap-2">
-            {visibleUrls.map((url) => (
+            {visibleUrls.map((url, index) => (
                 <button
                     key={url}
                     type="button"
                     className="relative size-14 shrink-0 overflow-hidden rounded-md border border-[var(--studio-line)] bg-[var(--studio-media)]"
                     onClick={(event) => {
                         event.stopPropagation();
-                        onPreview({ url, taskType: record.taskType });
+                        onPreview({ taskId: record.taskId, index, taskType: record.taskType, url });
                     }}
                 >
                     {record.taskType === "video" ? (
                         <>
-                            <video src={`${url}#t=0.1`} muted playsInline preload="metadata" className="size-full object-cover" />
+                            <video src={`${url}#t=0.1`} muted playsInline preload="metadata" className="size-full object-cover" onError={() => onExpired(record.taskId)} />
                             <span className="absolute inset-0 grid place-items-center bg-black/25"><Play className="size-4 fill-white text-white" /></span>
                         </>
                     ) : (
-                        <img src={url} alt="" loading="lazy" className="size-full object-cover" onError={(event) => { event.currentTarget.style.visibility = "hidden"; }} />
+                        <img src={url} alt="" loading="lazy" className="size-full object-cover" onError={() => onExpired(record.taskId)} />
                     )}
                 </button>
             ))}
@@ -270,7 +294,7 @@ function TaskRecordThumbnails({ record, onPreview, compact }: { record: ServerTa
  * @param props 任务记录、关闭回调与媒体预览回调
  * @return 任务详情弹窗
  */
-function TaskRecordDetail({ record, onClose, onPreview }: { record: ServerTaskRecord | null; onClose: () => void; onPreview: (preview: MediaPreview) => void }) {
+function TaskRecordDetail({ record, onClose, onPreview, onExpired }: { record: ServerTaskRecord | null; onClose: () => void; onPreview: (preview: MediaPreview) => void; onExpired: (taskId: string) => void }) {
     const translate = useTranslation();
     const details = record ? [
         { label: translate("credits.model"), value: record.model || "—" },
@@ -297,7 +321,7 @@ function TaskRecordDetail({ record, onClose, onPreview }: { record: ServerTaskRe
         >
             {record ? (
                 <div className="flex flex-col gap-5">
-                    <TaskRecordResult record={record} onPreview={onPreview} />
+                    <TaskRecordResult record={record} onPreview={onPreview} onExpired={onExpired} />
                     <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
                         {details.map((item) => (
                             <div key={item.label} className="min-w-0">
@@ -330,7 +354,7 @@ function TaskRecordDetail({ record, onClose, onPreview }: { record: ServerTaskRe
  * @param props 任务记录与媒体预览回调
  * @return 图片网格、视频播放器或空状态
  */
-function TaskRecordResult({ record, onPreview }: { record: ServerTaskRecord; onPreview: (preview: MediaPreview) => void }) {
+function TaskRecordResult({ record, onPreview, onExpired }: { record: ServerTaskRecord; onPreview: (preview: MediaPreview) => void; onExpired: (taskId: string) => void }) {
     const translate = useTranslation();
     if (!record.resultUrls.length) {
         const generating = record.status === "pending" || record.status === "running";
@@ -341,18 +365,18 @@ function TaskRecordResult({ record, onPreview }: { record: ServerTaskRecord; onP
         );
     }
     if (record.taskType === "video") {
-        return <video src={record.resultUrls[0]} controls playsInline className="mx-auto max-h-[420px] w-full rounded-lg bg-black" />;
+        return <video key={record.resultUrls[0]} src={record.resultUrls[0]} controls playsInline className="mx-auto max-h-[420px] w-full rounded-lg bg-black" onError={() => onExpired(record.taskId)} />;
     }
     return (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {record.resultUrls.map((url) => (
+            {record.resultUrls.map((url, index) => (
                 <button
                     key={url}
                     type="button"
                     className="overflow-hidden rounded-lg border border-[var(--studio-line)] bg-[var(--studio-media)]"
-                    onClick={() => onPreview({ url, taskType: "image" })}
+                    onClick={() => onPreview({ taskId: record.taskId, index, taskType: "image", url })}
                 >
-                    <img src={url} alt="" loading="lazy" className="aspect-square w-full object-cover" onError={(event) => { event.currentTarget.style.visibility = "hidden"; }} />
+                    <img src={url} alt="" loading="lazy" className="aspect-square w-full object-cover" onError={() => onExpired(record.taskId)} />
                 </button>
             ))}
         </div>
@@ -365,11 +389,11 @@ function TaskRecordResult({ record, onPreview }: { record: ServerTaskRecord; onP
  * @param props 待预览媒体与关闭回调
  * @return 媒体预览弹窗
  */
-function MediaPreviewDialog({ preview, onClose }: { preview: MediaPreview | null; onClose: () => void }) {
+function MediaPreviewDialog({ preview, url, onClose, onExpired }: { preview: MediaPreview | null; url?: string; onClose: () => void; onExpired: (taskId: string) => void }) {
     const translate = useTranslation();
     return (
         <Modal
-            open={Boolean(preview)}
+            open={Boolean(preview && url)}
             onCancel={onClose}
             footer={null}
             width={preview?.taskType === "video" ? 900 : 760}
@@ -380,9 +404,9 @@ function MediaPreviewDialog({ preview, onClose }: { preview: MediaPreview | null
             styles={{ body: { padding: 0 } }}
         >
             {preview?.taskType === "video" ? (
-                <video src={preview.url} controls autoPlay playsInline className="max-h-[76vh] w-full rounded-lg bg-black" />
-            ) : preview ? (
-                <img src={preview.url} alt={translate("credits.generationResult")} className="max-h-[76vh] w-full object-contain" />
+                <video key={url} src={url} controls autoPlay playsInline className="max-h-[76vh] w-full rounded-lg bg-black" onError={() => preview && onExpired(preview.taskId)} />
+            ) : preview && url ? (
+                <img key={url} src={url} alt={translate("credits.generationResult")} className="max-h-[76vh] w-full object-contain" onError={() => onExpired(preview.taskId)} />
             ) : null}
         </Modal>
     );
