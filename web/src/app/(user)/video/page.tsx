@@ -49,6 +49,8 @@ import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { useHomepageCreationDraft } from "@/features/homepage/hooks/use-homepage-creation-draft";
 import { consumeHomepageCreationHandoff, peekHomepageCreationHandoff } from "@/features/homepage/lib/homepage-creation-handoff";
+import { useSkillCreationHandoff } from "@/features/skill-market/hooks/use-skill-creation-handoff";
+import { consumeSkillCreationHandoff, SKILL_MARKET_KICKOFF } from "@/features/skill-market/lib/skill-creation-handoff";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
@@ -314,6 +316,9 @@ export default function VideoPage() {
     const initialPromptAppliedRef = useRef(false);
     const homepageStartedRef = useRef(false);
     const homepageDraft = useHomepageCreationDraft("video");
+    const skillHandoff = useSkillCreationHandoff("video");
+    const skillHandoffAppliedRef = useRef(false);
+    const skillHandoffStartedRef = useRef(false);
     const [homepageReady, setHomepageReady] = useState(false);
     const [focusInitialPrompt, setFocusInitialPrompt] = useState(false);
 
@@ -338,6 +343,15 @@ export default function VideoPage() {
         setFocusInitialPrompt(true);
         setHomepageReady(true);
     }, [homepageDraft, changeCreationMode]);
+
+    useEffect(() => {
+        if (!skillHandoff || skillHandoffAppliedRef.current) return;
+        skillHandoffAppliedRef.current = true;
+        setSelectedSkill(skillHandoff.skill);
+        changeCreationMode("agent");
+        setPrompt(SKILL_MARKET_KICKOFF);
+        setFocusInitialPrompt(true);
+    }, [skillHandoff, changeCreationMode]);
 
     useEffect(() => {
         let cancelled = false;
@@ -1002,7 +1016,9 @@ export default function VideoPage() {
             videoReferenceCount: allRefs.filter((reference) => reference.type.startsWith("video/")).length,
         });
         // 无技能时每次提交都是真实视频生成；选择技能后仅在即将创建生成任务的确认阶段校验报价与余额。
-        const shouldValidateQuote = !selectedSkill?.workflowType || workflowChargingNext || workflowImageConfirmNext;
+        // 技能市场的开场白只负责开始引导，这一轮还不创建视频任务。
+        const startingSkillGuide = Boolean(selectedSkill) && text === SKILL_MARKET_KICKOFF;
+        const shouldValidateQuote = !startingSkillGuide && (!selectedSkill?.workflowType || workflowChargingNext || workflowImageConfirmNext);
         if (shouldValidateQuote) {
             // 每次确认生成都必须先显式选择图片模型与参数
             if (workflowChargingNext && !workflowImageSelectionComplete) {
@@ -1079,6 +1095,14 @@ export default function VideoPage() {
         consumeHomepageCreationHandoff("video");
         void generate();
     }, [homepageReady, homepageDraft, prompt, references, videoReferences, selectedStyles, selectedSkill, creationMode]);
+
+    useEffect(() => {
+        if (!skillHandoff || skillHandoffStartedRef.current) return;
+        if (creationMode !== "agent" || selectedSkill?.id !== skillHandoff.skill.id || prompt.trim() !== SKILL_MARKET_KICKOFF) return;
+        skillHandoffStartedRef.current = true;
+        consumeSkillCreationHandoff("video");
+        void generate();
+    }, [skillHandoff, creationMode, selectedSkill, prompt]);
 
     const handleActionReply = async (value: string) => {
         if (isStreaming || isQueued) return;

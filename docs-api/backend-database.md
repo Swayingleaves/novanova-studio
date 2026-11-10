@@ -503,6 +503,13 @@ COMMENT ON COLUMN generation_styles.category IS '风格分类';
 | `cover_url` | `TEXT` | 技能封面公开访问地址。 |
 | `status` | `INTEGER` | 状态：`1` 启用，`0` 停用。 |
 | `sort_order` | `INTEGER` | 排序值，越小越靠前。 |
+| `category` | `VARCHAR(32)` | 市场分类：`image` 图片、`video` 视频、`ecommerce` 电商、`portrait` 人像、`viralReplica` 爆款复刻。画布设定图为空，不进市场。 |
+| `subtitle` | `VARCHAR(200)` | 一句话介绍。 |
+| `audience` | `TEXT` | 适合人群。 |
+| `usage_steps` | `TEXT` | 使用步骤 JSON，最多三步，每步包含 `title` 与 `detail`。 |
+| `owner_user_id` | `BIGINT` | 作者用户 ID。空表示官方技能。 |
+| `review_status` | `VARCHAR(20)` | 审核状态：`private` 未发布、`pending` 审核中、`published` 已发布、`rejected` 已驳回。 |
+| `reject_reason` | `TEXT` | 审核驳回原因。 |
 | `created_at` | `TIMESTAMPTZ` | 创建时间。 |
 | `updated_at` | `TIMESTAMPTZ` | 更新时间。 |
 | `deleted_at` | `TIMESTAMPTZ` | 软删除时间。 |
@@ -518,12 +525,21 @@ CREATE TABLE skills (
     cover_url TEXT NOT NULL DEFAULT '',
     status INTEGER NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 1000,
+    category VARCHAR(32),
+    subtitle VARCHAR(200) NOT NULL DEFAULT '',
+    audience TEXT NOT NULL DEFAULT '',
+    usage_steps TEXT NOT NULL DEFAULT '[]',
+    owner_user_id BIGINT REFERENCES users(id),
+    review_status VARCHAR(20) NOT NULL DEFAULT 'published',
+    reject_reason TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMPTZ,
     CONSTRAINT ck_skills_target_type CHECK (target_type IN ('image', 'video', 'canvasSettingGraph')),
     CONSTRAINT ck_skills_status CHECK (status IN (0, 1)),
-    CONSTRAINT ck_skills_aspect_ratio CHECK (aspect_ratio ~ '^[0-9]+:[0-9]+$')
+    CONSTRAINT ck_skills_aspect_ratio CHECK (aspect_ratio ~ '^[0-9]+:[0-9]+$'),
+    CONSTRAINT ck_skills_category CHECK (category IS NULL OR category IN ('image', 'video', 'ecommerce', 'portrait', 'viralReplica')),
+    CONSTRAINT ck_skills_review_status CHECK (review_status IN ('private', 'pending', 'published', 'rejected'))
 );
 
 COMMENT ON TABLE skills IS '图片、视频和画布设定图生成技能表';
@@ -536,6 +552,13 @@ COMMENT ON COLUMN skills.aspect_ratio IS '技能默认生成比例，例如16:9�
 COMMENT ON COLUMN skills.cover_url IS '技能封面公开访问地址';
 COMMENT ON COLUMN skills.status IS '状态：1启用，0停用';
 COMMENT ON COLUMN skills.sort_order IS '排序值，越小越靠前';
+COMMENT ON COLUMN skills.category IS '市场分类：image图片，video视频，ecommerce电商，portrait人像，viralReplica爆款复刻；画布设定图为空';
+COMMENT ON COLUMN skills.subtitle IS '一句话介绍';
+COMMENT ON COLUMN skills.audience IS '适合人群';
+COMMENT ON COLUMN skills.usage_steps IS '使用步骤JSON，最多三步，每步包含title和detail';
+COMMENT ON COLUMN skills.owner_user_id IS '作者用户ID，空表示官方技能';
+COMMENT ON COLUMN skills.review_status IS '审核状态：private未发布，pending审核中，published已发布，rejected已驳回';
+COMMENT ON COLUMN skills.reject_reason IS '审核驳回原因';
 COMMENT ON COLUMN skills.created_at IS '创建时间';
 COMMENT ON COLUMN skills.updated_at IS '更新时间';
 COMMENT ON COLUMN skills.deleted_at IS '软删除时间';
@@ -545,7 +568,25 @@ CREATE INDEX idx_skills_type_status_sort
     WHERE deleted_at IS NULL;
 CREATE INDEX idx_skills_deleted_at
     ON skills(deleted_at);
+CREATE INDEX idx_skills_market
+    ON skills(category, sort_order, id)
+    WHERE deleted_at IS NULL AND status = 1 AND review_status = 'published' AND category IS NOT NULL;
+CREATE INDEX idx_skills_owner
+    ON skills(owner_user_id, updated_at DESC, id)
+    WHERE deleted_at IS NULL AND owner_user_id IS NOT NULL;
 ```
+
+企业版 `V92__Add_Skill_Market.sql`、社区版 `V93__Add_Skill_Market.sql` 增加市场分类、介绍、适合人群、使用步骤、作者和审核状态。已有技能视为官方已发布；名称为「电商商品图片制作」的图片技能补充分类 `ecommerce`。画布设定图 `category` 为空，不出现在市场。用户新建技能默认 `private`，提交后进入 `pending`，管理员通过后才为 `published`。作者修改已发布技能会退回 `pending`。
+
+### `skill_favorites`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `user_id` | `BIGINT` | 收藏用户 ID，与 `skill_id` 组成主键。 |
+| `skill_id` | `BIGINT` | 技能 ID。 |
+| `created_at` | `TIMESTAMPTZ` | 收藏时间。 |
+
+只允许收藏已发布且启用的市场技能。取消收藏直接删除该行。
 
 迁移 `V24__Add_Canvas_Setting_Graph_Skills.sql` 会初始化四条启用的 `canvasSettingGraph` 技能：**角色脸部三视图、角色设定图、角色三视图、场景设定图**。迁移 `V25__Add_Skill_Aspect_Ratio.sql` 为技能增加 `aspect_ratio`，默认值为 `16:9`；节点或图片/视频页面选择技能后，优先使用该比例。迁移 `V26__Update_Character_Three_View_Skill.sql` 同步更新四条画布设定图技能的提示词：**角色三视图**按正面、左侧面、背面生成全身正交三视图，**场景设定图、角色设定图、角色脸部三视图**分别强化场景、角色设计板和脸部三视图要求，并统一保留用户原始描述、上游引用、尺寸询问与现有节点生成约束。每条技能的 `system_prompt` 保存中文多步骤流程、缺项询问规则、提示词组装要求及最终必须调用 `canvas_run_generation` 的约束，节点创建时会将其快照持久化。
 

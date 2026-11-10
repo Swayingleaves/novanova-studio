@@ -1,4 +1,4 @@
-import { BookOpenText, Clapperboard, FileText, Frame, ImageIcon, Images, SendToBack, Users } from "lucide-react";
+import { BookOpenText, Clapperboard, FileText, Frame, ImageIcon, Images, SendToBack, Store, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export type NavigationTool = {
@@ -19,6 +19,7 @@ export const navigationTools = [
     { slug: "comic-drama", labelKey: "common.comicDramaCreation", icon: Frame,       group: "create",    adminOnly: undefined, isNew: true },
     { slug: "assets",  labelKey: "common.myAssets",   icon: Images,       group: "resources", adminOnly: undefined, isNew: undefined },
     { slug: "prompts", labelKey: "common.promptLibrary",   icon: FileText,     group: "resources", adminOnly: undefined, isNew: undefined },
+    { slug: "skill-market", labelKey: "common.skillMarket", icon: Store,      group: "resources", adminOnly: undefined, isNew: undefined },
     { slug: "admin/system", labelKey: "common.administration", icon: Users,    group: "settings",  adminOnly: true,      isNew: undefined },
 ] as const satisfies readonly NavigationTool[];
 

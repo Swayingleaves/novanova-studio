@@ -64,6 +64,8 @@ import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { useHomepageCreationDraft } from "@/features/homepage/hooks/use-homepage-creation-draft";
 import { consumeHomepageCreationHandoff, peekHomepageCreationHandoff } from "@/features/homepage/lib/homepage-creation-handoff";
+import { useSkillCreationHandoff } from "@/features/skill-market/hooks/use-skill-creation-handoff";
+import { consumeSkillCreationHandoff, SKILL_MARKET_KICKOFF } from "@/features/skill-market/lib/skill-creation-handoff";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
@@ -190,6 +192,9 @@ export default function ImagePage() {
     const initialPromptAppliedRef = useRef(false);
     const homepageStartedRef = useRef(false);
     const homepageDraft = useHomepageCreationDraft("image");
+    const skillHandoff = useSkillCreationHandoff("image");
+    const skillHandoffAppliedRef = useRef(false);
+    const skillHandoffStartedRef = useRef(false);
     const [homepageReady, setHomepageReady] = useState(false);
     const [focusInitialPrompt, setFocusInitialPrompt] = useState(false);
 
@@ -221,6 +226,15 @@ export default function ImagePage() {
         setFocusInitialPrompt(true);
         setHomepageReady(true);
     }, [homepageDraft, changeCreationMode]);
+
+    useEffect(() => {
+        if (!skillHandoff || skillHandoffAppliedRef.current) return;
+        skillHandoffAppliedRef.current = true;
+        setSelectedSkill(skillHandoff.skill);
+        changeCreationMode("agent");
+        setPrompt(SKILL_MARKET_KICKOFF);
+        setFocusInitialPrompt(true);
+    }, [skillHandoff, changeCreationMode]);
 
     useEffect(() => {
         let cancelled = false;
@@ -649,6 +663,14 @@ export default function ImagePage() {
         consumeHomepageCreationHandoff("image");
         void generate();
     }, [homepageReady, homepageDraft, prompt, references, selectedStyles, selectedSkill, creationMode]);
+
+    useEffect(() => {
+        if (!skillHandoff || skillHandoffStartedRef.current) return;
+        if (creationMode !== "agent" || selectedSkill?.id !== skillHandoff.skill.id || prompt.trim() !== SKILL_MARKET_KICKOFF) return;
+        skillHandoffStartedRef.current = true;
+        consumeSkillCreationHandoff("image");
+        void generate();
+    }, [skillHandoff, creationMode, selectedSkill, prompt]);
 
     const handleActionReply = async (value: string) => {
         if (isStreaming || isQueued) return;

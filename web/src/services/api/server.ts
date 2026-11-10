@@ -1021,6 +1021,62 @@ export function listSkills(targetType: SkillType) {
     return serverGet<SkillOptionListResponse>(`/skill/listSkills?targetType=${encodeURIComponent(targetType)}`);
 }
 
+export type SkillMarketCategory = "image" | "video" | "ecommerce" | "portrait" | "viralReplica";
+
+export type SkillReviewStatus = "private" | "pending" | "published" | "rejected";
+
+export type SkillUsageStep = {
+    title: string;
+    detail: string;
+};
+
+export type SkillMarketCard = {
+    id: number;
+    name: string;
+    subtitle: string;
+    description: string;
+    category: SkillMarketCategory;
+    targetType: "image" | "video";
+    coverUrl: string;
+    aspectRatio?: string;
+    workflowType?: string | null;
+    authorName: string;
+    official: boolean;
+    favorited: boolean;
+};
+
+export type SkillMarketDetail = SkillMarketCard & {
+    audience: string;
+    usageSteps: SkillUsageStep[];
+    status: number;
+    reviewStatus: SkillReviewStatus;
+    rejectReason: string;
+    systemPrompt?: string | null;
+    owned: boolean;
+    related: SkillMarketCard[];
+};
+
+export type SkillMineCard = SkillMarketCard & {
+    status: number;
+    reviewStatus: SkillReviewStatus;
+    rejectReason: string;
+    owned: boolean;
+};
+
+export type SaveUserSkillInput = {
+    id?: number;
+    name: string;
+    subtitle?: string;
+    description?: string;
+    category: SkillMarketCategory;
+    targetType: "image" | "video";
+    systemPrompt: string;
+    aspectRatio?: string;
+    coverUrl?: string;
+    audience?: string;
+    usageSteps?: SkillUsageStep[];
+};
+
 export type ServerSkill = {
     id: number;
     name: string;
@@ -1033,6 +1089,14 @@ export type ServerSkill = {
     sortOrder: number;
     createdAt: string;
     updatedAt: string;
+    category?: string | null;
+    subtitle?: string;
+    audience?: string;
+    usageSteps?: SkillUsageStep[];
+    ownerUserId?: number | null;
+    reviewStatus?: SkillReviewStatus;
+    rejectReason?: string;
+    authorName?: string;
 };
 
 export type ServerSkillListResponse = {
@@ -1044,6 +1108,7 @@ export type ServerSkillListParams = {
     keyword?: string;
     targetType?: "all" | SkillType;
     status?: number;
+    reviewStatus?: "all" | SkillReviewStatus;
     page?: number;
     pageSize?: number;
 };
@@ -1053,6 +1118,7 @@ function skillQuery(params: ServerSkillListParams = {}) {
     if (params.keyword) query.set("keyword", params.keyword);
     if (params.targetType) query.set("targetType", params.targetType);
     if (params.status !== undefined) query.set("status", String(params.status));
+    if (params.reviewStatus) query.set("reviewStatus", params.reviewStatus);
     return `?${query.toString()}`;
 }
 
@@ -1070,6 +1136,10 @@ export type ServerSkillInput = {
     coverUrl?: string;
     status?: number;
     sortOrder?: number;
+    category?: string | null;
+    subtitle?: string;
+    audience?: string;
+    usageSteps?: SkillUsageStep[];
 };
 
 export function createAdminSkill(input: Omit<ServerSkillInput, "id">) {
@@ -1086,6 +1156,58 @@ export function updateAdminSkillStatus(id: number, status: number) {
 
 export function deleteAdminSkills(ids: number[]) {
     return serverPost("/admin/skill/deleteSkills", { ids });
+}
+
+export function reviewAdminSkill(input: { id: number; approved: boolean; reason?: string }) {
+    return serverPost("/admin/skill/reviewSkill", input);
+}
+
+function skillMarketQuery(params: { category?: string; keyword?: string; tab?: string; page?: number; pageSize?: number } = {}) {
+    const query = new URLSearchParams({ page: String(params.page || 1), pageSize: String(params.pageSize || 12) });
+    if (params.category) query.set("category", params.category);
+    if (params.keyword) query.set("keyword", params.keyword);
+    if (params.tab) query.set("tab", params.tab);
+    return `?${query.toString()}`;
+}
+
+export function listMarketSkills(params: { category?: string; keyword?: string; page?: number; pageSize?: number } = {}) {
+    return serverGet<{ skills: SkillMarketCard[]; total: number }>(`/skill/listMarketSkills${skillMarketQuery(params)}`);
+}
+
+export function getSkillDetail(id: number) {
+    return serverGet<SkillMarketDetail>(`/skill/getSkillDetail?id=${id}`);
+}
+
+export function listMySkills(params: { tab: "created" | "favorite"; keyword?: string; page?: number; pageSize?: number }) {
+    return serverGet<{ skills: SkillMineCard[]; total: number }>(`/skill/listMySkills${skillMarketQuery(params)}`);
+}
+
+export function createUserSkill(input: SaveUserSkillInput) {
+    return serverPost("/skill/createSkill", input);
+}
+
+export function updateUserSkill(input: SaveUserSkillInput & { id: number }) {
+    return serverPost("/skill/updateSkill", input);
+}
+
+export function deleteUserSkill(id: number) {
+    return serverPost("/skill/deleteSkill", { id });
+}
+
+export function submitSkillReview(id: number) {
+    return serverPost("/skill/submitSkillReview", { id });
+}
+
+export function withdrawSkill(id: number) {
+    return serverPost("/skill/withdrawSkill", { id });
+}
+
+export function favoriteSkill(id: number) {
+    return serverPost("/skill/favoriteSkill", { id });
+}
+
+export function unfavoriteSkill(id: number) {
+    return serverPost("/skill/unfavoriteSkill", { id });
 }
 
 export type ServerGenerationStyleListParams = {

@@ -17,7 +17,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Checkbox, DatePicker, Drawer, Empty, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Activity, Bell, BookText, ChevronDown, ClipboardCheck, Coins, Edit, HardDrive, Image as ImageIcon, LayoutTemplate, Mail, Menu as MenuIcon, Palette, Plus, Power, Search, Send, Settings2, ShieldCheck, Sparkles, Tags, Ticket, Trash2, Upload, UserRound, UsersRound, Video, Wallet } from "lucide-react";
+import { Activity, Bell, BookText, Check, ChevronDown, ClipboardCheck, Coins, Edit, HardDrive, Image as ImageIcon, LayoutTemplate, Mail, Menu as MenuIcon, Palette, Plus, Power, Search, Send, Settings2, ShieldCheck, Sparkles, Tags, Ticket, Trash2, Upload, UserRound, UsersRound, Video, Wallet, X } from "lucide-react";
 
 import {
     adjustServerUserCredits,
@@ -47,6 +47,7 @@ import {
     updateAdminSkill,
     updateAdminSkillStatus,
     deleteAdminSkills,
+    reviewAdminSkill,
     listAdminHomepageShowcases,
     createAdminHomepageShowcase,
     updateAdminHomepageShowcase,
@@ -61,6 +62,8 @@ import {
     type ServerPrompt,
     type ServerGenerationStyle,
     type ServerSkill,
+    type SkillReviewStatus,
+    type SkillUsageStep,
     type SystemNotification,
 } from "@/services/api/server";
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
@@ -2046,7 +2049,22 @@ type SkillFormValues = {
     coverUrl?: string;
     sortOrder?: number;
     status?: number;
+    category?: string;
+    subtitle?: string;
+    audience?: string;
+    usageSteps?: SkillUsageStep[];
 };
+
+const skillReviewLabels: Record<SkillReviewStatus, string> = {
+    private: "skillMarket.private",
+    pending: "skillMarket.pending",
+    published: "skillMarket.published",
+    rejected: "skillMarket.rejected",
+};
+
+function emptySkillSteps(): SkillUsageStep[] {
+    return [{ title: "", detail: "" }, { title: "", detail: "" }, { title: "", detail: "" }];
+}
 
 function SkillManagement() {
     const translate = useTranslation();
@@ -2058,6 +2076,9 @@ function SkillManagement() {
     const [keyword, setKeyword] = useState("");
     const [targetType, setTargetType] = useState<"all" | "image" | "video" | "canvasSettingGraph">("all");
     const [status, setStatus] = useState<number | undefined>();
+    const [reviewStatus, setReviewStatus] = useState<"all" | SkillReviewStatus>("all");
+    const [rejecting, setRejecting] = useState<ServerSkill | null>(null);
+    const [rejectReason, setRejectReason] = useState("");
     const [loading, setLoading] = useState(false);
     const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
     const [editOpen, setEditOpen] = useState(false);
@@ -2066,6 +2087,7 @@ function SkillManagement() {
     const coverInputRef = useRef<HTMLInputElement>(null);
     const coverUrl = Form.useWatch("coverUrl", form) || "";
     const coverName = Form.useWatch("name", form) || translate("administration.skillCover");
+    const editingTargetType = Form.useWatch("targetType", form);
 
     const loadSkills = useCallback(
         async (nextPage = page) => {
@@ -2077,6 +2099,7 @@ function SkillManagement() {
                     keyword: keyword || undefined,
                     targetType,
                     status,
+                    reviewStatus,
                 });
                 setSkills(result.skills);
                 setTotal(result.total);
@@ -2087,7 +2110,7 @@ function SkillManagement() {
                 setLoading(false);
             }
         },
-        [keyword, message, page, status, targetType],
+        [keyword, message, page, reviewStatus, status, targetType],
     );
 
     useEffect(() => {
@@ -2096,7 +2119,7 @@ function SkillManagement() {
 
     const openCreate = () => {
         setEditingSkill(null);
-        form.setFieldsValue({ name: "", targetType: "image", description: "", systemPrompt: "", aspectRatio: "16:9", coverUrl: "", sortOrder: 1000, status: 1 });
+        form.setFieldsValue({ name: "", targetType: "image", description: "", systemPrompt: "", aspectRatio: "16:9", coverUrl: "", sortOrder: 1000, status: 1, category: "image", subtitle: "", audience: "", usageSteps: emptySkillSteps() });
         setEditOpen(true);
     };
 
@@ -2111,6 +2134,10 @@ function SkillManagement() {
             coverUrl: skill.coverUrl || "",
             sortOrder: skill.sortOrder ?? 1000,
             status: skill.status ?? 1,
+            category: skill.category || undefined,
+            subtitle: skill.subtitle || "",
+            audience: skill.audience || "",
+            usageSteps: [...(skill.usageSteps || []), ...emptySkillSteps()].slice(0, 3),
         });
         setEditOpen(true);
     };
@@ -2127,6 +2154,10 @@ function SkillManagement() {
                 coverUrl: (values.coverUrl || "").trim(),
                 sortOrder: values.sortOrder ?? 1000,
                 status: values.status ?? 1,
+                category: values.targetType === "canvasSettingGraph" ? null : values.category || null,
+                subtitle: values.subtitle?.trim() || "",
+                audience: values.audience?.trim() || "",
+                usageSteps: (values.usageSteps || []).map((step) => ({ title: step?.title?.trim() || "", detail: step?.detail?.trim() || "" })),
             };
             if (editingSkill) {
                 await updateAdminSkill({ id: editingSkill.id, ...input });
@@ -2202,6 +2233,18 @@ function SkillManagement() {
         });
     };
 
+    const reviewSkill = async (skill: ServerSkill, approved: boolean, reason = "") => {
+        try {
+            await reviewAdminSkill({ id: skill.id, approved, reason });
+            message.success(approved ? translate("administration.skillApproved") : translate("administration.skillRejected"));
+            setRejecting(null);
+            setRejectReason("");
+            await loadSkills(page);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("administration.failedToUpdateSkillStatus"));
+        }
+    };
+
     const columns: ColumnsType<ServerSkill> = [
         {
             title: translate("administration.skillName"),
@@ -2219,7 +2262,19 @@ function SkillManagement() {
             title: translate("administration.type"),
             dataIndex: "targetType",
             width: 110,
-            render: (value: string) => <Tag>{value === "video" ? translate("administration.video") : translate("administration.image")}</Tag>,
+            render: (value: string) => <Tag>{value === "video" ? translate("administration.video") : value === "canvasSettingGraph" ? translate("administration.canvasReferenceSheet") : translate("administration.image")}</Tag>,
+        },
+        {
+            title: translate("administration.skillCategory"),
+            dataIndex: "category",
+            width: 110,
+            render: (value: string) => value ? <Tag>{translate(`skillMarket.${value}`)}</Tag> : <span className="text-[var(--studio-faint)]">—</span>,
+        },
+        {
+            title: translate("administration.reviewFilter"),
+            dataIndex: "reviewStatus",
+            width: 100,
+            render: (value: SkillReviewStatus, skill) => <span className="text-[var(--studio-muted)]">{skill.ownerUserId ? translate(skillReviewLabels[value] || "skillMarket.published") : translate("skillMarket.official")}</span>,
         },
         {
             title: translate("administration.introduction"),
@@ -2253,12 +2308,22 @@ function SkillManagement() {
         {
             title: translate("administration.actions"),
             key: "actions",
-            width: 110,
+            width: 160,
             render: (_, skill) => (
                 <Space size={0}>
                     <Tooltip title={translate("administration.edit")}>
                         <Button type="text" size="small" shape="circle" icon={<Edit className="size-3.5" />} onClick={() => openEdit(skill)} aria-label={translate("administration.editSkill", { value0: skill.name })} />
                     </Tooltip>
+                    {skill.reviewStatus === "pending" && skill.ownerUserId ? (
+                        <>
+                            <Tooltip title={translate("administration.approve")}>
+                                <Button type="text" size="small" shape="circle" icon={<Check className="size-3.5" />} onClick={() => void reviewSkill(skill, true)} aria-label={translate("administration.approve")} />
+                            </Tooltip>
+                            <Tooltip title={translate("administration.reject")}>
+                                <Button type="text" size="small" shape="circle" icon={<X className="size-3.5" />} onClick={() => { setRejecting(skill); setRejectReason(""); }} aria-label={translate("administration.reject")} />
+                            </Tooltip>
+                        </>
+                    ) : null}
                     <Tooltip title={skill.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable")}>
                         <Button type="text" size="small" shape="circle" icon={<Power className="size-3.5" />} onClick={() => changeStatus(skill)} aria-label={translate("administration.skill", { value0: skill.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable"), value1: skill.name })} />
                     </Tooltip>
@@ -2307,6 +2372,20 @@ function SkillManagement() {
                             setPage(1);
                         }}
                     />
+                    <Select
+                        value={reviewStatus}
+                        options={[
+                            { label: translate("administration.reviewFilter"), value: "all" },
+                            { label: translate("skillMarket.pending"), value: "pending" },
+                            { label: translate("skillMarket.published"), value: "published" },
+                            { label: translate("skillMarket.rejected"), value: "rejected" },
+                            { label: translate("skillMarket.private"), value: "private" },
+                        ]}
+                        onChange={(value) => {
+                            setReviewStatus(value);
+                            setPage(1);
+                        }}
+                    />
                 </Space>
                 <Space>
                     {selectedRowKeys.length ? (
@@ -2348,12 +2427,47 @@ function SkillManagement() {
                                     { label: translate("administration.video"), value: "video" },
                                     { label: translate("administration.canvasReferenceSheet"), value: "canvasSettingGraph" },
                                 ]}
+                                onChange={(value) => {
+                                    if (value === "canvasSettingGraph") form.setFieldValue("category", undefined);
+                                }}
                             />
                         </Form.Item>
                     </div>
-                    <Form.Item name="description" label={translate("administration.skillIntroduction")}>
-                        <Input.TextArea rows={2} maxLength={500} placeholder={translate("administration.introductionShownInTheSkillSelector")} />
+                        <Form.Item name="description" label={translate("administration.skillIntroduction")}>
+                        <Input.TextArea rows={2} maxLength={4000} placeholder={translate("administration.introductionShownInTheSkillSelector")} />
                     </Form.Item>
+                    <div className="grid grid-cols-2 gap-3">
+                        <Form.Item name="category" label={translate("administration.skillCategory")}>
+                            <Select
+                                allowClear
+                                disabled={editingTargetType === "canvasSettingGraph"}
+                                options={[
+                                    { label: translate("skillMarket.image"), value: "image" },
+                                    { label: translate("skillMarket.video"), value: "video" },
+                                    { label: translate("skillMarket.ecommerce"), value: "ecommerce" },
+                                    { label: translate("skillMarket.portrait"), value: "portrait" },
+                                    { label: translate("skillMarket.viralReplica"), value: "viralReplica" },
+                                ]}
+                            />
+                        </Form.Item>
+                        <Form.Item name="subtitle" label={translate("administration.oneLineIntro")}>
+                            <Input maxLength={200} />
+                        </Form.Item>
+                    </div>
+                    <Form.Item name="audience" label={translate("administration.suitableFor")}>
+                        <Input.TextArea rows={2} maxLength={1000} />
+                    </Form.Item>
+                    <div className="mb-2 text-sm text-[var(--studio-ink)]">{translate("administration.usageSteps")}</div>
+                    {[0, 1, 2].map((index) => (
+                        <div key={index} className="grid grid-cols-[160px_minmax(0,1fr)] gap-3">
+                            <Form.Item name={["usageSteps", index, "title"]} label={`${index + 1}. ${translate("administration.stepTitle")}`}>
+                                <Input maxLength={40} />
+                            </Form.Item>
+                            <Form.Item name={["usageSteps", index, "detail"]} label={translate("administration.stepDetail")}>
+                                <Input maxLength={300} />
+                            </Form.Item>
+                        </div>
+                    ))}
                     <Form.Item name="coverUrl" label={translate("administration.cover")}>
                         <Input placeholder={translate("administration.httpsOptional")} />
                     </Form.Item>
@@ -2408,6 +2522,16 @@ function SkillManagement() {
                         </Form.Item>
                     </div>
                 </Form>
+            </Modal>
+            <Modal
+                title={translate("administration.reject")}
+                open={Boolean(rejecting)}
+                okText={translate("administration.reject")}
+                cancelText={translate("administration.cancel")}
+                onCancel={() => setRejecting(null)}
+                onOk={() => rejecting && reviewSkill(rejecting, false, rejectReason.trim())}
+            >
+                <Input.TextArea rows={3} maxLength={500} value={rejectReason} placeholder={translate("administration.enterRejectReason")} onChange={(event) => setRejectReason(event.target.value)} />
             </Modal>
         </div>
     );

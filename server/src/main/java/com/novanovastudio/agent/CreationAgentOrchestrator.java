@@ -300,7 +300,7 @@ public class CreationAgentOrchestrator {
         if (!StringUtils.hasText(message) && !StringUtils.hasText(reply)) {
             return Mono.empty();
         }
-        return resolveSkillSnapshot(request)
+        return resolveSkillSnapshot(request, userId)
                 .flatMap(skill -> {
                     JSONObject round = new JSONObject();
                     round.put("id", UUID.randomUUID().toString());
@@ -347,7 +347,7 @@ public class CreationAgentOrchestrator {
      * @param request AgentChatRequest 原始请求
      * @return Mono<Map<String, Object>> 技能快照或空Map
      */
-    private Mono<Map<String, Object>> resolveSkillSnapshot(AgentChatRequest request) {
+    private Mono<Map<String, Object>> resolveSkillSnapshot(AgentChatRequest request, Long userId) {
         if (request == null || !StringUtils.hasText(request.skillId())) {
             return Mono.just(readCanvasSettingGraphSnapshot(request));
         }
@@ -357,7 +357,7 @@ public class CreationAgentOrchestrator {
         } catch (NumberFormatException exception) {
             return Mono.just(readCanvasSettingGraphSnapshot(request));
         }
-        return skillService.findEnabledSkill(skillId)
+        return skillService.findUsableSkill(skillId, userId)
                 .map(skill -> {
                     Map<String, Object> snapshot = new LinkedHashMap<>();
                     snapshot.put("id", skill.getId());
@@ -969,7 +969,7 @@ public class CreationAgentOrchestrator {
         } catch (NumberFormatException exception) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidSkillID")));
         }
-        return skillService.findEnabledSkill(skillId).flatMap(skill -> {
+        return skillService.findUsableSkill(skillId, userId).flatMap(skill -> {
             if (!"video".equals(skill.getTargetType())) {
                 return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.thisSkillDoesNotSupportTheVideoPage")));
             }
@@ -1467,7 +1467,7 @@ public class CreationAgentOrchestrator {
                 } catch (NumberFormatException exception) {
                     return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidSkillID")));
                 }
-                return skillService.findEnabledSkill(skillId)
+                return skillService.findUsableSkill(skillId, userId)
                         .filter(skill -> ("canvas".equals(request.entrySource()) && "canvasSettingGraph".equals(skill.getTargetType()))
                                 || (("imagePage".equals(request.entrySource()) || "videoPage".equals(request.entrySource()))
                                 && !"canvasSettingGraph".equals(skill.getTargetType())))

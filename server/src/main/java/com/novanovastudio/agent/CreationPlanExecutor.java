@@ -559,7 +559,7 @@ public class CreationPlanExecutor {
         Mono<TaskExecutionResult> execution;
         if (CreationEntrySource.CANVAS.equals(plan.entrySource())) {
             validateSettingGraphTask(request, task);
-            execution = resolveSkillSnapshot(request)
+            execution = resolveSkillSnapshot(request, userId)
                     .flatMap(skillSnapshot -> executeCanvasTool(userId, sessionId, plan, task, firstResult.promptStrategy(), prompt, arguments, skillSnapshot, 1));
         } else {
             List<AgentChatRequest.Attachment> attachments = new ArrayList<>(
@@ -929,7 +929,7 @@ public class CreationPlanExecutor {
     private Mono<TaskExecutionResult> executeCanvasTask(Long userId, String sessionId, CreationPlan plan,
                                                          AgentChatRequest request, CreationTask task) {
         validateSettingGraphTask(request, task);
-        return resolveSkillSnapshot(request)
+        return resolveSkillSnapshot(request, userId)
                 .flatMap(skillSnapshot -> executeCanvasTool(userId, sessionId, plan, task, "KEEP", task.prompt(), task.toolArguments(), skillSnapshot, 0));
     }
 
@@ -954,7 +954,7 @@ public class CreationPlanExecutor {
                                                            List<AgentChatRequest.Attachment> dependencyAttachments) {
         if (CreationEntrySource.CANVAS.equals(plan.entrySource())) {
             validateSettingGraphTask(request, task);
-            return resolveSkillSnapshot(request)
+            return resolveSkillSnapshot(request, userId)
                     .flatMap(skillSnapshot -> executeCanvasTool(userId, sessionId, plan, task, decision.promptStrategy(),
                             finalPrompt, task.toolArguments(), skillSnapshot, 0));
         }
@@ -987,7 +987,7 @@ public class CreationPlanExecutor {
             } catch (NumberFormatException exception) {
                 return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidSkillID")));
             }
-            return skillService.findEnabledSkill(skillId)
+            return skillService.findUsableSkill(skillId, userId)
                     .map(skill -> {
                         Map<String, Object> input = baseSpecialistInput(task, originalPrompt);
                         input.put("skill", Map.of(
@@ -1096,7 +1096,7 @@ public class CreationPlanExecutor {
                                                         SpecialistAgentResult decision, String finalPrompt,
                                                         List<GenerationStyleDtos.GenerationStyleSnapshot> styles,
                                                         List<AgentChatRequest.Attachment> dependencyAttachments) {
-        return Mono.defer(() -> resolveSkillSnapshot(request)
+        return Mono.defer(() -> resolveSkillSnapshot(request, userId)
                 .flatMap(skillSnapshot -> workflowStageAttachments(userId, sessionId, plan, task, dependencyAttachments)
                         .map(stageAttachments -> {
                             Map<String, Object> arguments = generationArguments(finalPrompt, plan, plan.creationSettings(), plan.entrySource(), styles, task, skillSnapshot);
@@ -1192,7 +1192,7 @@ public class CreationPlanExecutor {
      * @param request AgentChatRequest 原始请求
      * @return Mono<Map<String, Object>> 技能快照或空Map
      */
-    private Mono<Map<String, Object>> resolveSkillSnapshot(AgentChatRequest request) {
+    private Mono<Map<String, Object>> resolveSkillSnapshot(AgentChatRequest request, Long userId) {
         if (request == null || !StringUtils.hasText(request.skillId())) {
             return Mono.just(canvasSettingGraphSnapshot(request));
         }
@@ -1202,7 +1202,7 @@ public class CreationPlanExecutor {
         } catch (NumberFormatException exception) {
             return Mono.just(canvasSettingGraphSnapshot(request));
         }
-        return skillService.findEnabledSkill(skillId)
+        return skillService.findUsableSkill(skillId, userId)
                 .map(skill -> Map.<String, Object>of(
                         "id", skill.getId(),
                         "name", skill.getName(),
