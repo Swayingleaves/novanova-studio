@@ -31,7 +31,7 @@ public class EmailRegistrationPolicy {
      * @return boolean 是否允许注册
      */
     public boolean isAllowed(String email) {
-        String configured = properties.getEmail().getAllowedSuffixes();
+        String configured = properties.emailSettings().allowedSuffixes();
         if (configured.isBlank()) return true;
         String domain = email.substring(email.lastIndexOf('@') + 1).toLowerCase(Locale.ROOT);
         // 完整匹配邮箱域名，禁止相似域名与未明确列出的子域名借用白名单。

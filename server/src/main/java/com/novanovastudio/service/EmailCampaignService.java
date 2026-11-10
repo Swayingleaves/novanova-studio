@@ -23,7 +23,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
-import org.springframework.boot.autoconfigure.mail.MailProperties;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import org.springframework.util.StringUtils;
@@ -57,8 +56,6 @@ public class EmailCampaignService {
     private final EmailCampaignProperties campaignProperties;
     /** 发件人配置。 */
     private final NovanovaProperties properties;
-    /** 邮件连接配置。 */
-    private final MailProperties mailProperties;
     /** 任务与全部快照共用事务。 */
     private final TransactionalOperator transactionalOperator;
 
@@ -67,7 +64,7 @@ public class EmailCampaignService {
      * @return 管理员可见配置
      */
     public Mono<EmailCampaignDtos.Settings> getSettings() {
-        return requirePlatformAdministrator().map(user -> new EmailCampaignDtos.Settings(configured(), properties.getEmail().getFrom(),
+        return requirePlatformAdministrator().map(user -> new EmailCampaignDtos.Settings(properties.emailSettings().configured(), properties.emailSettings().fromEmail(),
                 campaignProperties.getMinimumIntervalSeconds(), campaignProperties.getMaximumPerMinute(),
                 campaignProperties.getMaximumPerHour(), campaignProperties.getMaximumActiveCampaigns()));
     }
@@ -229,7 +226,7 @@ public class EmailCampaignService {
      * @throws BusinessException 配置、间隔或收件范围不合法时抛出
      */
     private void validateRequest(EmailCampaignDtos.CreateRequest request) {
-        if (!configured()) throw invalid("请先配置邮件服务器与发件人地址");
+        if (!properties.emailSettings().configured()) throw invalid("请先配置邮件服务器与发件人地址");
         if (request.intervalSeconds() < campaignProperties.getMinimumIntervalSeconds()) throw invalid("发送间隔不能小于全局最小间隔");
         boolean allUsers = "all".equals(request.recipientMode());
         if (!allUsers && !"selected".equals(request.recipientMode())) throw invalid("收件范围不合法");
@@ -359,18 +356,13 @@ public class EmailCampaignService {
      */
     private Mono<Long> saveCampaign(EmailCampaignDtos.CreateRequest request, EmailCampaignDtos.RecipientFilter recipientFilter,
             String bodyHtml, List<EmailCampaignRecords.Image> images, long userId) {
-        return repository.insertCampaign(request, bodyHtml, properties.getEmail().getFrom(), userId).flatMap(id ->
+        return repository.insertCampaign(request, bodyHtml, properties.emailSettings().fromEmail(), userId).flatMap(id ->
                 repository.snapshotRecipients(id, "all".equals(request.recipientMode()), request.userIds(), recipientFilter).flatMap(count -> {
                     if (count == 0) return Mono.error(invalid("当前没有可发送邮件的用户"));
                     if ("selected".equals(request.recipientMode()) && recipientFilter == null && count != request.userIds().size()) return Mono.error(invalid("部分所选用户已不存在或没有邮箱，请刷新后重新选择"));
                     return repository.updateRecipientCount(id, Math.toIntExact(count))
                             .thenMany(Flux.fromIterable(images).concatMap(image -> repository.insertImage(id, image))).then(Mono.just(id));
                 })).switchIfEmpty(repository.findByRequestId(request.requestId(), userId));
-    }
-
-    /** @return 邮件连接及发件人是否齐全 */
-    private boolean configured() {
-        return StringUtils.hasText(mailProperties.getHost()) && StringUtils.hasText(properties.getEmail().getFrom());
     }
 
     /**

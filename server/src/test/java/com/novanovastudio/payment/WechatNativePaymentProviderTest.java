@@ -24,8 +24,6 @@ import com.wechat.pay.java.service.payments.nativepay.model.PrepayRequest;
 import com.wechat.pay.java.service.payments.nativepay.model.PrepayResponse;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.Signature;
@@ -39,7 +37,6 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Answers;
@@ -65,9 +62,6 @@ class WechatNativePaymentProviderTest {
     private static final String TEST_API_KEY = "0123456789abcdef0123456789abcdef";
     /** 仅用于测试的微信支付公钥 ID。 */
     private static final String TEST_PUBLIC_KEY_ID = "PUB_KEY_ID_TEST0000000001";
-    /** 临时目录，不包含真实商户凭据。 */
-    @TempDir
-    Path temporaryDirectory;
     /** 应用配置。 */
     private NovanovaProperties properties;
     /** 被测渠道。 */
@@ -96,8 +90,8 @@ class WechatNativePaymentProviderTest {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         platformKeyPair = generator.generateKeyPair();
-        configuration.setPrivateKeyPath(writeKeyFile("private-key.pem", "PRIVATE KEY", generator.generateKeyPair().getPrivate().getEncoded()));
-        configuration.setPublicKeyPath(writeKeyFile("pub_key.pem", "PUBLIC KEY", platformKeyPair.getPublic().getEncoded()));
+        configuration.setPrivateKey(pem("PRIVATE KEY", generator.generateKeyPair().getPrivate().getEncoded()));
+        configuration.setPublicKey(pem("PUBLIC KEY", platformKeyPair.getPublic().getEncoded()));
         configuration.setPublicKeyId(TEST_PUBLIC_KEY_ID);
         NotificationParser parser = new NotificationParser(
                 Map.of("WECHATPAY2-SHA256-RSA2048", new RSAVerifier(platformKeyPair.getPublic(), TEST_PUBLIC_KEY_ID)),
@@ -159,8 +153,8 @@ class WechatNativePaymentProviderTest {
                     .verify();
         }
         properties.getWechat().setPublicKeyId(TEST_PUBLIC_KEY_ID);
-        for (String publicKeyPath : new String[]{"", temporaryDirectory.resolve("missing.pem").toString(), temporaryDirectory.toString()}) {
-            properties.getWechat().setPublicKeyPath(publicKeyPath);
+        for (String publicKey : new String[]{"", "not-a-key", "-----BEGIN PUBLIC KEY-----\n"}) {
+            properties.getWechat().setPublicKey(publicKey);
             StepVerifier.create(provider.queryOrder("order_123")).expectError(BusinessException.class).verify();
         }
         verify(service, never()).queryOrderByOutTradeNo(any());
@@ -344,16 +338,14 @@ class WechatNativePaymentProviderTest {
     }
 
     /**
-     * 把本地生成的测试密钥写入临时 PEM 文件，不使用任何真实商户凭据。
-     * @param name 临时文件名称
+     * 把本地生成的测试密钥编码为 PEM，不使用任何真实商户凭据。
      * @param type PEM 密钥类型
      * @param encoded 测试密钥的标准编码
-     * @return 测试文件绝对路径
-     * @throws Exception 临时文件写入失败时抛出
+     * @return PEM 文本
      */
-    private String writeKeyFile(String name, String type, byte[] encoded) throws Exception {
-        return Files.writeString(temporaryDirectory.resolve(name), "-----BEGIN " + type + "-----\n"
+    private String pem(String type, byte[] encoded) {
+        return "-----BEGIN " + type + "-----\n"
                 + Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(encoded)
-                + "\n-----END " + type + "-----\n").toString();
+                + "\n-----END " + type + "-----\n";
     }
 }

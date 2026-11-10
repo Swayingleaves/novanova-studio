@@ -40,7 +40,7 @@ class ThirdPartyAuthenticationServiceTest {
     @DisplayName("已有第三方绑定时使用绑定用户并刷新资料快照")
     void shouldUseExistingBinding() {
         TestContext context = testContext();
-        context.properties.getEmail().setAllowedSuffixes("qq.com");
+        context.properties.replaceEmailSettings(context.properties.emailSettings().withAllowedSuffixes("qq.com"));
         UserIdentityBinding binding = new UserIdentityBinding();
         binding.setId(6L);
         binding.setUserId(8L);
@@ -101,7 +101,7 @@ class ThirdPartyAuthenticationServiceTest {
     @DisplayName("已有本地账号首次绑定第三方身份时不发邀请奖励")
     void shouldNotGrantInvitationRewardForExistingEmail() {
         TestContext context = testContext();
-        context.properties.getEmail().setAllowedSuffixes("qq.com");
+        context.properties.replaceEmailSettings(context.properties.emailSettings().withAllowedSuffixes("qq.com"));
         User user = normalUser(8L);
         when(context.identityRepository.findBinding("linuxDo", "12345")).thenReturn(Mono.empty());
         when(context.userRepository.findByEmail(context.identity.email())).thenReturn(Mono.just(user));
@@ -123,7 +123,7 @@ class ThirdPartyAuthenticationServiceTest {
     @org.junit.jupiter.params.provider.ValueSource(strings = {"google", "linuxDo"})
     void shouldRejectNewUserOutsideEmailWhitelist(String providerId) {
         TestContext context = testContext();
-        context.properties.getEmail().setAllowedSuffixes("qq.com,gmail.com");
+        context.properties.replaceEmailSettings(context.properties.emailSettings().withAllowedSuffixes("qq.com,gmail.com"));
         ThirdPartyOAuth2Provider provider = mock(ThirdPartyOAuth2Provider.class);
         ThirdPartyUserIdentity identity = new ThirdPartyUserIdentity(providerId, "12345", "a56fv43@vn-v55.com", "新用户", "");
         when(context.registry.requireEnabled(providerId)).thenReturn(provider);
@@ -157,7 +157,7 @@ class ThirdPartyAuthenticationServiceTest {
         OAuth2User oauth2User = mock(OAuth2User.class);
         ThirdPartyUserIdentity identity = new ThirdPartyUserIdentity("linuxDo", "12345", "user@example.com", "tester", "");
         NovanovaProperties properties = new NovanovaProperties();
-        properties.getEmail().setAllowedSuffixes("@example.com");
+        properties.replaceEmailSettings(properties.emailSettings().withAllowedSuffixes("@example.com"));
         when(registry.requireEnabled("linuxDo")).thenReturn(provider);
         when(provider.resolveIdentity(oauth2User)).thenReturn(identity);
         when(invitationService.generateInvitationCode()).thenReturn("INVITATIONCODE01");

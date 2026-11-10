@@ -17,7 +17,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Checkbox, DatePicker, Drawer, Empty, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Activity, Bell, BookText, ChevronDown, ClipboardCheck, Coins, Edit, HardDrive, Image as ImageIcon, LayoutTemplate, Mail, Menu as MenuIcon, Palette, Plus, Power, Search, Send, Settings2, ShieldCheck, Sparkles, Tags, Ticket, Trash2, Upload, UserRound, UsersRound, Video } from "lucide-react";
+import { Activity, Bell, BookText, ChevronDown, ClipboardCheck, Coins, Edit, HardDrive, Image as ImageIcon, LayoutTemplate, Mail, Menu as MenuIcon, Palette, Plus, Power, Search, Send, Settings2, ShieldCheck, Sparkles, Tags, Ticket, Trash2, Upload, UserRound, UsersRound, Video, Wallet } from "lucide-react";
 
 import {
     adjustServerUserCredits,
@@ -78,6 +78,7 @@ import { StorageBillingManagement } from "./components/storage-billing-managemen
 import { CreditCardManagement } from "./components/credit-card-management";
 import { ApiLogsManagement } from "./components/api-logs-management";
 import { EmailCampaignManagement } from "./components/email-campaign-management";
+import { PaymentSettingsManagement } from "./components/payment-settings-management";
 import { StoryBiblePricingManagement } from "./components/story-bible-pricing-management";
 import { ComicDramaFinalPromptPricingManagement } from "./components/comic-drama-final-prompt-pricing-management";
 import { EpisodeBodiesPricingManagement } from "./components/episode-bodies-pricing-management";
@@ -166,6 +167,7 @@ export default function AdminSystemPage() {
         ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), icon: <Coins className="size-4" />, tab: "credits" }] : []),
         ...(!team ? [{ key: "creditCards", label: translate("administration.redemptionCodes"), icon: <Ticket className="size-4" />, tab: "creditCards" }] : []),
         ...(!team ? [{ key: "emailCampaigns", label: "邮件群发", icon: <Mail className="size-4" />, tab: "emailCampaigns" }] : []),
+        ...(!team ? [{ key: "paymentSettings", label: "支付配置", icon: <Wallet className="size-4" />, tab: "paymentSettings" }] : []),
         { key: "notifications", label: translate("administration.messageManagement"), icon: <Bell className="size-4" />, tab: "notifications" },
         { key: "prompts", label: translate("administration.promptLibrary"), icon: <BookText className="size-4" />, tab: "prompts" },
         { key: "styles", label: translate("administration.styleManagement"), icon: <Palette className="size-4" />, tab: "styles" },
@@ -206,6 +208,7 @@ export default function AdminSystemPage() {
         ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), children: <CreditConsumptionManagement /> }] : []),
         ...(!team ? [{ key: "creditCards", label: translate("administration.redemptionCodes"), children: <CreditCardManagement /> }] : []),
         ...(!team ? [{ key: "emailCampaigns", label: "邮件群发", children: <EmailCampaignManagement /> }] : []),
+        ...(!team ? [{ key: "paymentSettings", label: "支付配置", children: <PaymentSettingsManagement /> }] : []),
         { key: "notifications", label: translate("administration.messageManagement"), children: <TeamContentScope moduleName="notifications"><NotificationManagement /></TeamContentScope> },
         { key: "prompts", label: translate("administration.promptLibrary"), children: <TeamContentScope moduleName="prompts"><PromptManagement /></TeamContentScope> },
         { key: "styles", label: translate("administration.styleManagement"), children: <TeamContentScope moduleName="styles"><GenerationStyleManagement /></TeamContentScope> },

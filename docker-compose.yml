@@ -161,13 +161,6 @@ services:
       ADMIN_INITIAL_EMAIL: ${ADMIN_INITIAL_EMAIL:-admin@admin.com}
       ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-novanovastudio@pwss}
       ADMIN_INITIAL_NICKNAME: ${ADMIN_INITIAL_NICKNAME:-admin}
-      EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-}
-      EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-465}
-      EMAIL_SMTP_USERNAME: ${EMAIL_SMTP_USERNAME:-}
-      EMAIL_SMTP_PASSWORD: ${EMAIL_SMTP_PASSWORD:-}
-      EMAIL_SMTP_FROM: ${EMAIL_SMTP_FROM:-}
-      # 仅未设置时采用默认白名单，显式空值保留不限制注册的语义。
-      EMAIL_ALLOWED_SUFFIXES: ${EMAIL_ALLOWED_SUFFIXES-qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,foxmail.com,icloud.com,sina.com,aliyun.com,yeah.net,139.com,189.cn,sina.cn,vip.qq.com,vip.163.com,yahoo.com,live.com,msn.com,proton.me,protonmail.com}
       EMAIL_CAMPAIGN_MINIMUM_INTERVAL_SECONDS: ${EMAIL_CAMPAIGN_MINIMUM_INTERVAL_SECONDS:-3}
       EMAIL_CAMPAIGN_MAXIMUM_PER_MINUTE: ${EMAIL_CAMPAIGN_MAXIMUM_PER_MINUTE:-20}
       EMAIL_CAMPAIGN_MAXIMUM_PER_HOUR: ${EMAIL_CAMPAIGN_MAXIMUM_PER_HOUR:-200}
@@ -208,28 +201,11 @@ services:
       STORAGE_SIGN_DOWNLOAD_SECONDS: ${STORAGE_SIGN_DOWNLOAD_SECONDS:-300}
       STORAGE_SIGN_THIRD_PARTY_SECONDS: ${STORAGE_SIGN_THIRD_PARTY_SECONDS:-7200}
       STORAGE_SIGN_PUBLIC_PAGE_SECONDS: ${STORAGE_SIGN_PUBLIC_PAGE_SECONDS:-1800}
-      ALIPAY_ENABLED: ${ALIPAY_ENABLED:-false}
-      ALIPAY_APP_ID: ${ALIPAY_APP_ID:-}
-      ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY:-}
-      ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY:-}
-      ALIPAY_GATEWAY_URL: ${ALIPAY_GATEWAY_URL:-https://openapi.alipay.com/gateway.do}
-      ALIPAY_NOTIFY_URL: ${ALIPAY_NOTIFY_URL:-}
-      ALIPAY_RETURN_URL: ${ALIPAY_RETURN_URL:-}
-      WECHAT_ENABLED: ${WECHAT_ENABLED:-false}
-      WECHAT_APP_ID: ${WECHAT_APP_ID:-}
-      WECHAT_MERCHANT_ID: ${WECHAT_MERCHANT_ID:-}
-      WECHAT_MERCHANT_SERIAL_NUMBER: ${WECHAT_MERCHANT_SERIAL_NUMBER:-}
-      WECHAT_API_V3_KEY: ${WECHAT_API_V3_KEY:-}
-      WECHAT_PRIVATE_KEY_PATH: ${WECHAT_PRIVATE_KEY_PATH:-/app/config/wechatpay/apiclient_key.pem}
-      WECHAT_PUBLIC_KEY_PATH: ${WECHAT_PUBLIC_KEY_PATH:-/app/config/wechatpay/pub_key.pem}
-      WECHAT_PUBLIC_KEY_ID: ${WECHAT_PUBLIC_KEY_ID:-}
-      WECHAT_NOTIFY_URL: ${WECHAT_NOTIFY_URL:-}
     ports:
       - "127.0.0.1:${SERVER_PORT:-8080}:8080"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./server/config/prompts:/app/config/prompts:ro
-      - ${WECHAT_CERTIFICATE_DIRECTORY:-./server/config/wechatpay}:/app/config/wechatpay:ro
       - ./logs/server:/app/logs
     depends_on:
       postgres:

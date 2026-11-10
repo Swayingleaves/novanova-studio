@@ -19,8 +19,6 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
@@ -52,6 +50,8 @@ public class WechatNativePaymentProvider implements PaymentProvider {
     private final NovanovaProperties properties;
     /** 延迟初始化并复用使用微信支付公钥验签的客户端。 */
     private volatile Client client;
+    /** 构建当前客户端时使用的密钥材料；为空表示测试注入的客户端，配置变化后会重建。 */
+    private volatile String clientFingerprint;
 
     /**
      * 获取支付渠道标识。
@@ -234,19 +234,24 @@ public class WechatNativePaymentProvider implements PaymentProvider {
      * @return 支付客户端和通知解析器
      */
     private synchronized Client client() {
-        if (client == null) {
-            NovanovaProperties.Wechat configuration = properties.getWechat();
-            OkHttpClient transport = new OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS)
-                    .readTimeout(10, TimeUnit.SECONDS).writeTimeout(10, TimeUnit.SECONDS).callTimeout(15, TimeUnit.SECONDS)
-                    .addNetworkInterceptor(this::logExchange).build();
-            DefaultHttpClientBuilder builder = new DefaultHttpClientBuilder().okHttpClient(transport).enableRetryMultiDomain();
-            RSAPublicKeyConfig sdkConfiguration = new RSAPublicKeyConfig.Builder()
-                    .merchantId(configuration.getMerchantId()).privateKeyFromPath(configuration.getPrivateKeyPath())
-                    .merchantSerialNumber(configuration.getMerchantSerialNumber()).apiV3Key(configuration.getApiV3Key())
-                    .publicKeyFromPath(configuration.getPublicKeyPath()).publicKeyId(configuration.getPublicKeyId()).build();
-            client = new Client(new NativePayService.Builder().httpClient(builder.config(sdkConfiguration).build()).build(),
-                    new NotificationParser(sdkConfiguration));
+        NovanovaProperties.Wechat configuration = properties.getWechat();
+        String fingerprint = configuration.getMerchantId() + "\n" + configuration.getPrivateKey() + "\n" + configuration.getMerchantSerialNumber()
+                + "\n" + configuration.getApiV3Key() + "\n" + configuration.getPublicKey() + "\n" + configuration.getPublicKeyId();
+        // 测试可以直接注入客户端；正式配置变化后按密钥材料重新构建，避免后台改密钥后仍使用旧签名器。
+        if (client != null && (clientFingerprint == null || clientFingerprint.equals(fingerprint))) {
+            return client;
         }
+        OkHttpClient transport = new OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(10, TimeUnit.SECONDS).writeTimeout(10, TimeUnit.SECONDS).callTimeout(15, TimeUnit.SECONDS)
+                .addNetworkInterceptor(this::logExchange).build();
+        DefaultHttpClientBuilder builder = new DefaultHttpClientBuilder().okHttpClient(transport).enableRetryMultiDomain();
+        RSAPublicKeyConfig sdkConfiguration = new RSAPublicKeyConfig.Builder()
+                .merchantId(configuration.getMerchantId()).privateKey(configuration.getPrivateKey())
+                .merchantSerialNumber(configuration.getMerchantSerialNumber()).apiV3Key(configuration.getApiV3Key())
+                .publicKey(configuration.getPublicKey()).publicKeyId(configuration.getPublicKeyId()).build();
+        clientFingerprint = fingerprint;
+        client = new Client(new NativePayService.Builder().httpClient(builder.config(sdkConfiguration).build()).build(),
+                new NotificationParser(sdkConfiguration));
         return client;
     }
 
@@ -275,23 +280,34 @@ public class WechatNativePaymentProvider implements PaymentProvider {
     private void requireConfigured() {
         NovanovaProperties.Wechat configuration = properties.getWechat();
         if (!configuration.isEnabled() || configuration.getAppId().isBlank() || configuration.getMerchantId().isBlank()
-                || configuration.getPrivateKeyPath().isBlank() || configuration.getMerchantSerialNumber().isBlank()
-                || configuration.getApiV3Key().getBytes(StandardCharsets.UTF_8).length != 32 || configuration.getNotifyUrl().isBlank()
-                || !Files.isRegularFile(Path.of(configuration.getPrivateKeyPath()))
-                || !Files.isReadable(Path.of(configuration.getPrivateKeyPath()))) {
+                || !isPem(configuration.getPrivateKey(), "PRIVATE KEY") || configuration.getMerchantSerialNumber().isBlank()
+                || configuration.getApiV3Key().getBytes(StandardCharsets.UTF_8).length != 32 || configuration.getNotifyUrl().isBlank()) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, "微信支付尚未完成配置");
         }
         // 公钥 ID 与商户证书序列号用途不同，不允许缺失公钥时退回平台证书模式。
-        if (!configuration.getPublicKeyId().startsWith("PUB_KEY_ID_") || configuration.getPublicKeyPath().isBlank()
-                || !Files.isRegularFile(Path.of(configuration.getPublicKeyPath()))
-                || !Files.isReadable(Path.of(configuration.getPublicKeyPath()))) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "微信支付公钥尚未完成配置，请检查公钥 ID 和公钥文件");
+        if (!configuration.getPublicKeyId().startsWith("PUB_KEY_ID_") || !isPem(configuration.getPublicKey(), "PUBLIC KEY")) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "微信支付公钥尚未完成配置，请检查公钥 ID 和公钥内容");
         }
         URI uri = URI.create(configuration.getNotifyUrl());
         if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null
                 || uri.getQuery() != null || uri.getFragment() != null) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, "微信支付通知地址必须为不含查询参数的 HTTPS 地址");
         }
+    }
+
+    /**
+     * 判断文本是否包含成对的 PEM 标记。
+     *
+     * @param value 密钥文本
+     * @param marker PEM 类型标记
+     * @return 是否为对应类型的 PEM
+     */
+    private static boolean isPem(String value, String marker) {
+        if (value == null) {
+            return false;
+        }
+        String normalized = value.trim();
+        return normalized.contains("-----BEGIN") && normalized.contains("-----END") && normalized.contains(marker);
     }
 
     /**

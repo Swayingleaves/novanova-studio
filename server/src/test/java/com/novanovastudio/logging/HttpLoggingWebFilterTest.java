@@ -151,6 +151,41 @@ class HttpLoggingWebFilterTest {
         assertTrue(sanitizedBody.contains("[已脱敏]"));
     }
 
+    /** 支付配置里的私钥、公钥和 APIv3 密钥不能进入应用日志或接口记录。 */
+    @Test
+    @DisplayName("支付配置中的密钥会被脱敏")
+    void shouldSanitizePaymentSecrets() {
+        String body = "{\"appId\":\"2021000000000000\",\"privateKey\":\"alipay-private-secret\",\"publicKey\":\"alipay-public-secret\",\"apiV3Key\":\"0123456789abcdef0123456789abcdef\"}";
+        var applicationFilter = new HttpLoggingWebFilter();
+        var accessFilter = new ApiAccessLogWebFilter(org.mockito.Mockito.mock(com.novanovastudio.repository.ApiAccessLogRepository.class),
+                new com.novanovastudio.security.CurrentUserProvider(), org.mockito.Mockito.mock(com.novanovastudio.security.ClientAddressResolver.class));
+        String applicationLog = applicationFilter.sanitizeBody(body, MediaType.APPLICATION_JSON);
+        String accessLog = org.springframework.test.util.ReflectionTestUtils.invokeMethod(accessFilter, "sanitizeBody", body, MediaType.APPLICATION_JSON);
+        for (String sanitized : java.util.List.of(applicationLog, accessLog)) {
+            assertFalse(sanitized.contains("alipay-private-secret"));
+            assertFalse(sanitized.contains("alipay-public-secret"));
+            assertFalse(sanitized.contains("0123456789abcdef0123456789abcdef"));
+            assertTrue(sanitized.contains("2021000000000000"));
+        }
+    }
+
+    /** 邮件配置里的 SMTP 授权码不能进入应用日志或接口记录。 */
+    @Test
+    @DisplayName("邮件配置中的授权码会被脱敏")
+    void shouldSanitizeSmtpPassword() {
+        String body = "{\"smtpHost\":\"smtp.example.com\",\"smtpPassword\":\"secret-auth-code\",\"fromEmail\":\"user@example.com\"}";
+        var applicationFilter = new HttpLoggingWebFilter();
+        var accessFilter = new ApiAccessLogWebFilter(org.mockito.Mockito.mock(com.novanovastudio.repository.ApiAccessLogRepository.class),
+                new com.novanovastudio.security.CurrentUserProvider(), org.mockito.Mockito.mock(com.novanovastudio.security.ClientAddressResolver.class));
+        String applicationLog = applicationFilter.sanitizeBody(body, MediaType.APPLICATION_JSON);
+        String accessLog = org.springframework.test.util.ReflectionTestUtils.invokeMethod(accessFilter, "sanitizeBody", body, MediaType.APPLICATION_JSON);
+        for (String sanitized : java.util.List.of(applicationLog, accessLog)) {
+            assertFalse(sanitized.contains("secret-auth-code"));
+            assertTrue(sanitized.contains("smtp.example.com"));
+            assertTrue(sanitized.contains("user@example.com"));
+        }
+    }
+
     /**
      * 卡密兑换请求中的明文卡密不会写入请求日志。
      */

@@ -10,7 +10,6 @@ import java.net.URI;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.mail.MailProperties;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
@@ -40,14 +39,12 @@ public class TeamInvitationMailService {
     private final JavaMailSender mailSender;
     /** 项目业务配置。 */
     private final NovanovaProperties properties;
-    /** Spring 邮件连接配置。 */
-    private final MailProperties mailProperties;
 
     /**
      * 建邀请前做纯内存校验，配置缺失时立即失败，不占用事务与团队行锁。
      */
     public void requireConfigured() {
-        if (!StringUtils.hasText(mailProperties.getHost()) || !StringUtils.hasText(properties.getEmail().getFrom())) {
+        if (!properties.emailSettings().configured()) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.mailServiceNotConfiguredForTeamInvitation"));
         }
         frontendBaseUri();
@@ -68,7 +65,7 @@ public class TeamInvitationMailService {
             try {
                 MimeMessage message = mailSender.createMimeMessage();
                 MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
-                helper.setFrom(properties.getEmail().getFrom());
+                helper.setFrom(properties.emailSettings().fromEmail());
                 helper.setTo(email);
                 helper.setSubject(MAIL_BRAND_NAME + " 团队邀请");
                 helper.setText(buildInvitationEmailHtml(teamName, inviterName, invitationUrl), true);

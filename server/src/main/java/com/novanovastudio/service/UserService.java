@@ -941,13 +941,13 @@ public class UserService {
      */
     private Mono<Void> sendPasswordResetEmail(String email, String resetUrl) {
         return Mono.fromRunnable(() -> {
-            if (!StringUtils.hasText(properties.getEmail().getFrom())) {
+            if (!properties.emailSettings().configured()) {
                 throw new IllegalStateException("邮箱服务未配置，无法发送密码重置邮件");
             }
             try {
                 MimeMessage message = mailSender.createMimeMessage();
                 MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
-                helper.setFrom(properties.getEmail().getFrom());
+                helper.setFrom(properties.emailSettings().fromEmail());
                 helper.setTo(email);
                 helper.setSubject(MAIL_BRAND_NAME + " 重置密码");
                 helper.setText(buildPasswordResetEmailHtml(resetUrl), true);
@@ -1036,14 +1036,14 @@ public class UserService {
     private Mono<Void> sendEmailVerificationCode(String email, String code) {
         // 邮件发送属于阻塞IO，放入boundedElastic执行。
         return Mono.fromRunnable(() -> {
-            if (!StringUtils.hasText(properties.getEmail().getFrom())) {
+            if (!properties.emailSettings().configured()) {
                 throw new IllegalStateException("邮箱服务未配置，无法发送验证码");
             }
             try {
                 // 组装邮件主题和正文，并通过JavaMail发送验证码。
                 MimeMessage message = mailSender.createMimeMessage();
                 MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
-                helper.setFrom(properties.getEmail().getFrom());
+                helper.setFrom(properties.emailSettings().fromEmail());
                 helper.setTo(email);
                 helper.setSubject(MAIL_BRAND_NAME + " 登录验证码");
                 helper.setText(buildVerificationEmailHtml(code), true);

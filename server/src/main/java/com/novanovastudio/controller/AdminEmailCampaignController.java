@@ -2,8 +2,10 @@ package com.novanovastudio.controller;
 
 import com.novanovastudio.common.ApiResponse;
 import com.novanovastudio.dto.EmailCampaignDtos;
+import com.novanovastudio.dto.EmailSettingsDtos;
 import com.novanovastudio.security.RequireRole;
 import com.novanovastudio.service.EmailCampaignService;
+import com.novanovastudio.service.EmailSettingsService;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +30,30 @@ import reactor.core.publisher.Mono;
 public class AdminEmailCampaignController {
     /** 群发业务服务。 */
     private final EmailCampaignService service;
+    /** 邮件服务器与注册后缀配置。 */
+    private final EmailSettingsService emailSettingsService;
+
+    /**
+     * 读取 SMTP、发件人和注册邮箱后缀。响应不包含授权码明文。
+     *
+     * @return 邮件服务配置
+     */
+    @GetMapping("/getEmailServiceSettings")
+    public Mono<ApiResponse<EmailSettingsDtos.EmailServiceSettings>> getEmailServiceSettings() {
+        return emailSettingsService.getSettings().map(ApiResponse::ok);
+    }
+
+    /**
+     * 保存 SMTP、发件人和注册邮箱后缀。授权码留空时保留已保存的值。
+     *
+     * @param request 邮件服务配置
+     * @return 保存后的邮件服务配置
+     */
+    @PostMapping("/updateEmailServiceSettings")
+    public Mono<ApiResponse<EmailSettingsDtos.EmailServiceSettings>> updateEmailServiceSettings(
+            @Valid @RequestBody EmailSettingsDtos.UpdateEmailServiceSettings request) {
+        return emailSettingsService.updateSettings(request).map(ApiResponse::ok);
+    }
 
     /** @return 群发全局配置 */
     @GetMapping("/getSettings")

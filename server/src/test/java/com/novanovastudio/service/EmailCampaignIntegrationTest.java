@@ -36,7 +36,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.jsoup.Jsoup;
-import org.springframework.boot.autoconfigure.mail.MailProperties;
 import org.springframework.mail.MailAuthenticationException;
 import org.springframework.mail.MailSendException;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -99,14 +98,13 @@ class EmailCampaignIntegrationTest {
         repository = new EmailCampaignRepository(DatabaseClient.create(factory));
         transactions = TransactionalOperator.create(new R2dbcTransactionManager(factory));
         var properties = new NovanovaProperties();
-        properties.getEmail().setFrom("sender@example.com");
-        var mail = new MailProperties();
-        mail.setHost("mock-smtp");
+        properties.replaceEmailSettings(NovanovaProperties.RuntimeEmailSettings.defaults()
+                .withSmtpHost("mock-smtp").withFromEmail("sender@example.com"));
         limits = new EmailCampaignProperties();
         media = mock(PersistenceService.class);
         sender = mock(JavaMailSender.class);
         when(sender.createMimeMessage()).thenAnswer(ignored -> new MimeMessage(Session.getInstance(new Properties())));
-        service = new EmailCampaignService(repository, new CurrentUserProvider(), media, limits, properties, mail, transactions);
+        service = new EmailCampaignService(repository, new CurrentUserProvider(), media, limits, properties, transactions);
         dispatcher = new EmailCampaignDispatcher(repository, limits, sender, transactions);
     }
 

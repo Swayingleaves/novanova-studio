@@ -11,16 +11,25 @@ import org.junit.jupiter.api.Test;
  */
 class NovanovaPropertiesTest {
 
-    /** 验证邮箱白名单配置可以绑定，显式空值保留不限注册的语义。 */
+    /** 邮件服务快照来自管理后台，默认白名单与迁移一致，日志不能带出授权码。 */
     @Test
-    void shouldBindEmailRegistrationWhitelist() {
-        var source = new org.springframework.boot.context.properties.source.MapConfigurationPropertySource(
-                java.util.Map.of("novanova.email.allowed-suffixes", "@qq.com,gmail.com"));
-        var binder = new org.springframework.boot.context.properties.bind.Binder(source);
-        NovanovaProperties properties = binder.bind("novanova", NovanovaProperties.class).get();
-        Assertions.assertEquals("@qq.com,gmail.com", properties.getEmail().getAllowedSuffixes());
-        source.put("novanova.email.allowed-suffixes", "");
-        Assertions.assertEquals("", binder.bind("novanova", NovanovaProperties.class).get().getEmail().getAllowedSuffixes());
+    void shouldReplaceRuntimeEmailSettingsWithoutExposingPassword() {
+        NovanovaProperties properties = new NovanovaProperties();
+        Assertions.assertEquals(NovanovaProperties.RuntimeEmailSettings.DEFAULT_ALLOWED_SUFFIXES, properties.emailSettings().allowedSuffixes());
+        Assertions.assertEquals(465, properties.emailSettings().smtpPort());
+        Assertions.assertFalse(properties.emailSettings().configured());
+
+        properties.replaceEmailSettings(properties.emailSettings().withSmtpHost("smtp.example.com").withFromEmail("noreply@example.com")
+                .withAllowedSuffixes(""));
+        NovanovaProperties.RuntimeEmailSettings settings = new NovanovaProperties.RuntimeEmailSettings("smtp.example.com", 465, "user", "secret-auth", "noreply@example.com", "");
+        properties.replaceEmailSettings(settings);
+
+        Assertions.assertEquals("", properties.emailSettings().allowedSuffixes());
+        Assertions.assertTrue(properties.emailSettings().configured());
+        Assertions.assertEquals("secret-auth", properties.emailSettings().smtpPassword());
+        Assertions.assertFalse(properties.emailSettings().toString().contains("secret-auth"));
+        properties.replaceEmailSettings(null);
+        Assertions.assertEquals(NovanovaProperties.RuntimeEmailSettings.DEFAULT_ALLOWED_SUFFIXES, properties.emailSettings().allowedSuffixes());
     }
 
     /**

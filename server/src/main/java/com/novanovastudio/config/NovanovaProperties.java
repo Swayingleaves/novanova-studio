@@ -25,9 +25,6 @@ public class NovanovaProperties {
     /** admin */
     private Admin admin = new Admin();
 
-    /** 邮箱 */
-    private Email email = new Email();
-
     /** ai */
     private Ai ai = new Ai();
 
@@ -43,6 +40,9 @@ public class NovanovaProperties {
 
     /** 平台超时设置快照。数据库加载前使用与迁移默认值一致的初始值。 */
     private final AtomicReference<RuntimeTimeouts> timeoutSettings = new AtomicReference<>(RuntimeTimeouts.defaults());
+
+    /** 平台邮件服务配置快照。数据库加载前使用与迁移默认值一致的初始值，授权码保持明文仅存在于本进程。 */
+    private final AtomicReference<RuntimeEmailSettings> emailSettings = new AtomicReference<>(RuntimeEmailSettings.defaults());
 
     /**
      * 获取微信支付配置。
@@ -79,6 +79,24 @@ public class NovanovaProperties {
     }
 
     /**
+     * 读取当前邮件服务配置。
+     *
+     * @return RuntimeEmailSettings 邮件服务快照，授权码为明文
+     */
+    public RuntimeEmailSettings emailSettings() {
+        return emailSettings.get();
+    }
+
+    /**
+     * 用平台邮件服务配置覆盖运行时快照。
+     *
+     * @param settings RuntimeEmailSettings 邮件服务快照
+     */
+    public void replaceEmailSettings(RuntimeEmailSettings settings) {
+        emailSettings.set(settings == null ? RuntimeEmailSettings.defaults() : settings);
+    }
+
+    /**
      * 普通商户 APIv3 支付配置，使用微信支付公钥验签。
      * @author zhenglin.cn.cq@gmail.com
      * @date 2026-11-05 14:00
@@ -91,12 +109,14 @@ public class NovanovaProperties {
         private String appId = "";
         /** 直接收款的普通商户号。 */
         private String merchantId = "";
-        /** 商户 API 私钥文件路径，仅供服务端读取。 */
-        private String privateKeyPath = "";
+        /** 商户 API 私钥 PEM，仅供服务端签名。 */
+        @lombok.ToString.Exclude
+        private String privateKey = "";
         /** 商户 API 证书序列号。 */
         private String merchantSerialNumber = "";
-        /** 微信支付公钥文件路径，与商户 API 私钥分开配置。 */
-        private String publicKeyPath = "";
+        /** 微信支付公钥 PEM，与商户 API 私钥分开配置。 */
+        @lombok.ToString.Exclude
+        private String publicKey = "";
         /** 微信支付公钥 ID，以 PUB_KEY_ID_ 开头，不是商户证书序列号。 */
         private String publicKeyId = "";
         /** 用于解密回调的 APIv3 密钥。 */
@@ -158,24 +178,6 @@ public class NovanovaProperties {
      */
     public void setAdmin(Admin admin) {
         this.admin = admin;
-    }
-
-    /**
-     * 获取邮件配置
-     *
-     * @return Email 邮件配置
-     */
-    public Email getEmail() {
-        return email;
-    }
-
-    /**
-     * 设置邮件配置
-     *
-     * @param email Email 邮件配置
-     */
-    public void setEmail(Email email) {
-        this.email = email;
     }
 
     /**
@@ -542,53 +544,6 @@ public class NovanovaProperties {
     }
 
     /**
-     * 邮件配置
-     */
-    public static class Email {
-
-        /** 邮件发件人 */
-        private String from = "";
-
-        /** 允许注册的邮箱域名，逗号分隔；为空或包含独立星号表示不限制。 */
-        private String allowedSuffixes = "qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,foxmail.com,icloud.com,sina.com,aliyun.com,"
-                + "yeah.net,139.com,189.cn,sina.cn,vip.qq.com,vip.163.com,yahoo.com,live.com,msn.com,proton.me,protonmail.com";
-
-        /**
-         * 获取邮箱注册白名单。
-         * @return String 逗号分隔的邮箱域名
-         */
-        public String getAllowedSuffixes() {
-            return allowedSuffixes;
-        }
-
-        /**
-         * 设置邮箱注册白名单。
-         * @param allowedSuffixes String 逗号分隔的邮箱域名，支持带或不带前导 @
-         */
-        public void setAllowedSuffixes(String allowedSuffixes) {
-            this.allowedSuffixes = allowedSuffixes;
-        }
-
-        /**
-         * 获取发件人邮箱
-         *
-         * @return String 发件人邮箱
-         */
-        public String getFrom() {
-            return from;
-        }
-
-        /**
-         * 设置发件人邮箱
-         *
-         * @param from String 发件人邮箱
-         */
-        public void setFrom(String from) {
-            this.from = from;
-        }
-    }
-
-    /**
      * 对象存储配置。
      */
     public static class ObjectStorage {
@@ -778,6 +733,101 @@ public class NovanovaProperties {
             public void setMaxErrorRetry(int maxErrorRetry) {
                 this.maxErrorRetry = maxErrorRetry;
             }
+        }
+    }
+
+    /**
+     * 当前进程使用的邮件服务配置。授权码只在内存中保持明文。
+     *
+     * @param smtpHost SMTP 服务地址
+     * @param smtpPort SMTP 端口
+     * @param smtpUsername SMTP 登录用户名
+     * @param smtpPassword SMTP 登录密码或授权码
+     * @param fromEmail 发件人邮箱
+     * @param allowedSuffixes 允许注册的邮箱后缀
+     */
+    public record RuntimeEmailSettings(String smtpHost, int smtpPort, String smtpUsername, String smtpPassword, String fromEmail, String allowedSuffixes) {
+
+        /** 与数据库迁移默认值一致的注册邮箱后缀。 */
+        public static final String DEFAULT_ALLOWED_SUFFIXES = "qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,foxmail.com,icloud.com,sina.com,aliyun.com,"
+                + "yeah.net,139.com,189.cn,sina.cn,vip.qq.com,vip.163.com,yahoo.com,live.com,msn.com,proton.me,protonmail.com";
+
+        /**
+         * 空值按未配置处理，避免调用方再判空。
+         *
+         * @param smtpHost SMTP 服务地址
+         * @param smtpPort SMTP 端口
+         * @param smtpUsername SMTP 登录用户名
+         * @param smtpPassword SMTP 登录密码或授权码
+         * @param fromEmail 发件人邮箱
+         * @param allowedSuffixes 允许注册的邮箱后缀
+         */
+        public RuntimeEmailSettings {
+            smtpHost = smtpHost == null ? "" : smtpHost;
+            smtpUsername = smtpUsername == null ? "" : smtpUsername;
+            smtpPassword = smtpPassword == null ? "" : smtpPassword;
+            fromEmail = fromEmail == null ? "" : fromEmail;
+            allowedSuffixes = allowedSuffixes == null ? "" : allowedSuffixes;
+        }
+
+        /**
+         * 与数据库迁移默认值一致的初始快照。
+         *
+         * @return RuntimeEmailSettings 默认邮件配置
+         */
+        public static RuntimeEmailSettings defaults() {
+            return new RuntimeEmailSettings("", 465, "", "", "", DEFAULT_ALLOWED_SUFFIXES);
+        }
+
+        /**
+         * 发信地址和发件人都已填写时，验证码、邀请和群发可以发送。
+         *
+         * @return boolean 邮件服务是否已配置
+         */
+        public boolean configured() {
+            return !smtpHost.isBlank() && !fromEmail.isBlank();
+        }
+
+        /**
+         * 替换 SMTP 服务地址。
+         *
+         * @param smtpHost String SMTP 服务地址
+         * @return RuntimeEmailSettings 新快照
+         */
+        public RuntimeEmailSettings withSmtpHost(String smtpHost) {
+            return new RuntimeEmailSettings(smtpHost, smtpPort, smtpUsername, smtpPassword, fromEmail, allowedSuffixes);
+        }
+
+        /**
+         * 替换发件人邮箱。
+         *
+         * @param fromEmail String 发件人邮箱
+         * @return RuntimeEmailSettings 新快照
+         */
+        public RuntimeEmailSettings withFromEmail(String fromEmail) {
+            return new RuntimeEmailSettings(smtpHost, smtpPort, smtpUsername, smtpPassword, fromEmail, allowedSuffixes);
+        }
+
+        /**
+         * 替换注册邮箱后缀。
+         *
+         * @param allowedSuffixes String 逗号分隔的邮箱后缀
+         * @return RuntimeEmailSettings 新快照
+         */
+        public RuntimeEmailSettings withAllowedSuffixes(String allowedSuffixes) {
+            return new RuntimeEmailSettings(smtpHost, smtpPort, smtpUsername, smtpPassword, fromEmail, allowedSuffixes);
+        }
+
+        /**
+         * 日志只说明授权码是否已设置。
+         *
+         * @return String 不含授权码明文的文本
+         */
+        @Override
+        public String toString() {
+            return "RuntimeEmailSettings[smtpHost=" + smtpHost + ", smtpPort=" + smtpPort + ", smtpUsername=" + smtpUsername
+                    + ", smtpPassword=" + (smtpPassword.isBlank() ? "" : "[已设置]") + ", fromEmail=" + fromEmail
+                    + ", allowedSuffixes=" + allowedSuffixes + "]";
         }
     }
 

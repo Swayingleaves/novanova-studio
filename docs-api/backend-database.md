@@ -150,7 +150,7 @@ OAuth2 第三方登录（Google、linux.do）的启用状态与凭据从 `.env` 
 
 订单创建接口为 `GET /api/v1/payment/credit/listProducts`、`POST /api/v1/payment/credit/createOrder` 和 `GET /api/v1/payment/credit/getOrderStatus`。支付宝回调接口为 `POST /api/v1/payment/alipay/notify` 和 `GET /api/v1/payment/alipay/return`；微信 Native 回调为 `POST /api/v1/payment/wechat/notify`。同步回跳只重定向到前端购买页，到账必须以验签后的异步通知或渠道查单为准；服务端核对支付渠道、应用标识、商户订单号、金额和成功状态（支付宝 `TRADE_SUCCESS`/`TRADE_FINISHED`、微信 `SUCCESS`），微信额外核对商户号、人民币币种和 Native 交易类型，在事务内更新订单、余额和 `credit_purchase` 流水，并发布积分余额事件。微信待支付订单由后台每 30 秒分页查单，新增 `idx_credit_purchase_orders_wechat_pending` 部分索引（索引键 `id`，限定平台钱包的微信待支付订单）；超时订单先查单、关单，再更新本地状态。新商户订单号统一为 32 位随机标识。微信部署要求见 [微信支付接入说明](wechatpay/接入说明.md)。
 
-商品管理接口位于 `/api/v1/config/creditProduct/`，仅平台管理员可用。支付宝密钥和网关配置只通过部署环境注入，异步通知地址必须可以被支付宝公网访问。
+商品管理接口位于 `/api/v1/config/creditProduct/`，仅平台管理员可用。支付宝和微信支付的密钥、网关与通知地址在管理后台「支付配置」维护，见「支付配置」。异步通知地址必须可以被对应支付渠道公网访问。
 
 ## 首充赠送（V77、V79）
 
@@ -182,7 +182,7 @@ OAuth2 第三方登录（Google、linux.do）的启用状态与凭据从 `.env` 
 
 任务状态为 `queued`（排队）、`running`（发送中）、`completed`（所有收件人均已处理）和 `cancelled`（剩余任务已取消）。逐封状态为 `queued`、`sending`、`sent`（邮件服务器已接受）、`failed`（明确未发送成功）、`unknown`（结果不确定）和 `cancelled`。`completed` 不代表全部投递成功，须结合逐封数量判断。
 
-派发使用全局串行队列，间隔从上一封处理完成时计算。连续一分钟、一小时窗口按 `started_at` 统计尝试次数，失败也占用额度；达到额度后保留排队。默认最小间隔3秒、每分钟20封、每小时200封，最多20个活动任务，可用 `EMAIL_CAMPAIGN_*` 环境变量调整。事务不跨越图片下载或 SMTP 网络请求。
+派发使用全局串行队列，间隔从上一封处理完成时计算。连续一分钟、一小时窗口按 `started_at` 统计尝试次数，失败也占用额度；达到额度后保留排队。默认最小间隔3秒、每分钟20封、每小时200封，最多20个活动任务，可用 `EMAIL_CAMPAIGN_*` 环境变量调整。事务不跨越图片下载或 SMTP 网络请求。SMTP 服务器、发件人和注册邮箱白名单不在环境变量中配置，见「邮件服务配置」。
 
 发送结果不确定或服务中断后在途超过5分钟的记录标为 `unknown`，不自动重发；尚未领取的记录重启后继续排队。发件服务器认证失败（包括 SMTP 535）时，当前邮件记为 `failed`，同一事务内将该任务及剩余待发送邮件记为 `cancelled`，保留已发送结果，重启后也不自动恢复；管理员检查发件账号与授权码后可重新创建任务。普通收件地址或内容错误只影响当前一封。取消只终止 `queued` 记录，已经发送中的邮件保留实际结果。正文经 jsoup 白名单清理，图片按现有媒体归属校验读取后保存独立快照，避免临时签名链接过期。四张表均限制平台空间访问，接口还要求平台管理员身份，团队管理员不可使用。
 
@@ -1028,3 +1028,24 @@ V61 按空间、用户、原配置和对象键精确关联已有媒体及原文�
 | `tencent_cos_socket_timeout_milliseconds` | 120000 | 腾讯云 COS 单次读取 |
 
 以秒为单位的字段取值 `1`–`86400`，毫秒字段取值 `1`–`3600000`。进行中的任务仍使用开始时读到的超时。
+
+## 邮件服务配置（企业版 V90、社区版 V91）
+
+新增单行表 `platform_email_settings`（`id` 固定为 1）。后台入口为「邮件群发 · 邮件配置」，接口为 `GET/POST /api/v1/admin/email/getEmailServiceSettings`、`updateEmailServiceSettings`，仅平台空间的全局管理员可读写。服务端启动后读取该行，并每 5 秒刷新；保存后当前实例立即生效，下一次发信即使用新的 SMTP 连接。这些配置不再通过环境变量注入。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `smtp_host` | 空 | SMTP 服务地址 |
+| `smtp_port` | 465 | SMTP 端口，取值 `1`–`65535`。连接固定启用 SSL |
+| `smtp_username` | 空 | SMTP 登录用户名 |
+| `smtp_password` | 空 | SMTP 登录密码或授权码。使用应用密钥加密后保存，接口只返回是否已设置；保存时留空表示不修改 |
+| `from_email` | 空 | 发件人邮箱。与 `smtp_host` 同时非空时，验证码、密码重置、团队邀请和群发才视为已配置 |
+| `allowed_suffixes` | 常见邮箱域名 | 注册邮箱白名单，逗号分隔，支持 `qq.com` 或 `@qq.com`。空值或包含独立 `*` 表示不限制。邮箱验证码和第三方首次注册共用；已有账号登录和绑定不受影响 |
+
+授权码依赖 `APP_SECRET_KEY` 加解密。更换应用密钥后，已保存的授权码无法解密，需要在后台重新填写。未配置邮件服务器时，Actuator 不检查 SMTP 连通性。
+
+## 支付配置（企业版 V91、社区版 V92）
+
+新增单行表 `platform_payment_settings`（`id` 固定为 1）。后台入口为「支付配置」，支付宝和微信支付分成两个页签。接口为 `GET /api/v1/admin/payment/getPaymentSettings`、`POST /api/v1/admin/payment/updateAlipaySettings` 和 `POST /api/v1/admin/payment/updateWechatSettings`，仅平台空间的全局管理员可读写。服务端启动后读取该行，并每 5 秒刷新；保存后当前实例立即生效。这些配置不再通过环境变量或证书目录注入。
+
+支付宝保存应用标识、应用私钥、支付宝公钥、网关、异步通知地址和同步回跳地址。微信 Native 支付保存应用标识、商户号、商户 API 证书序列号、商户私钥 PEM、32 字节 APIv3 密钥、微信支付公钥 PEM、公钥 ID 和通知地址。应用私钥、商户私钥和 APIv3 密钥使用 `APP_SECRET_KEY` 加密；支付宝公钥和微信支付公钥按原文保存，但接口都不返回密钥正文，只返回是否已设置。保存时对应密钥留空表示不修改。启用某一渠道时，该渠道的必填项必须已经齐全。更换应用密钥后，已加密的密钥无法解密，需要重新填写。未启用微信支付时，后台不扫描微信待支付订单。
