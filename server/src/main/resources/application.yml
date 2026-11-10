@@ -286,8 +286,8 @@ novanova:
       # 分镜资产图片提示词模板文件路径
       image-storyboard-asset-file: ${AI_SYSTEM_PROMPT_IMAGE_STORYBOARD_ASSET_FILE:file:./server/config/prompts/image-storyboard-asset.md}
     storyboard-agent:
-      # 分镜 Agent 单次调用超时时间（秒）
-      timeout-seconds: ${AI_STORYBOARD_AGENT_TIMEOUT_SECONDS:90}
+      # 分镜 Agent 单次调用超时时间（秒）。整集拆分且单镜头较长时，模型思考和结构化输出会超过 3 分钟。
+      timeout-seconds: ${AI_STORYBOARD_AGENT_TIMEOUT_SECONDS:600}
       # 批量合成镜头提示词时同时请求模型的镜头数量
       compose-concurrency: ${AI_STORYBOARD_COMPOSE_CONCURRENCY:4}
     script-agent:

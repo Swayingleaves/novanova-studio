@@ -916,8 +916,8 @@ public class NovanovaProperties {
          */
         public static class StoryboardAgent {
 
-            /** Agent单次调用超时时间（秒） */
-            private int timeoutSeconds = 90;
+            /** Agent单次调用超时时间（秒）。整集拆分需要覆盖较长的模型思考时间。 */
+            private int timeoutSeconds = 600;
 
             /** 批量合成镜头提示词时同时请求模型的镜头数量 */
             private int composeConcurrency = 4;

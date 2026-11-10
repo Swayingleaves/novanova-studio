@@ -274,12 +274,11 @@ public class ComicDramaService {
                             if (!StringUtils.hasText(source.scriptContent())) {
                                 return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "所选范围没有可用剧本正文"));
                             }
-                            // 预计镜头数量可以不填：不填时由模型按剧本内容自行判断，填了就必须按填的数量来。
+                            // 预计镜头数量可以不填：不填时按正文体量和单镜头时长估算，填了就必须按填的数量来。
                             // 创作重点同样可选，没填就不带这一段，避免指令里留下空的「创作重点：」。
-                            String instruction = (request.shotCount() == null
-                                    ? "请根据剧本正文的场次、动作与对白自行判断合适的镜头数量"
-                                    : "请拆分为约" + request.shotCount() + "个镜头")
+                            String instruction = shotPlanInstruction(request.shotCount(), request.shotDuration(), source.scriptContent())
                                     + "。节奏：" + text(request.rhythm())
+                                    + "。单镜头时长：" + shotDurationInstruction(request.shotDuration())
                                     + (StringUtils.hasText(request.focus()) ? "。创作重点：" + request.focus().trim() : "");
                             Mono<String> sourceEpisode = StringUtils.hasText(request.sceneId())
                                     ? repository.getSceneEpisodeId(request.projectId(), request.sceneId())
@@ -288,7 +287,7 @@ public class ComicDramaService {
                                     new StoryboardDtos.GenerateStoryboardRequest(source.scriptContent(), instruction,
                                             source.visualStyle(), request.model()))
                                     .flatMap(response -> {
-                                        JSONObject data = (JSONObject) JSON.toJSON(response);
+                                        JSONObject data = (JSONObject) JSON.toJSON(alignShotDurations(response, request.shotDuration()));
                                         data.put("sourceScriptExcerpt", source.scriptContent());
                                         data.put("sourceEpisodeId", resolvedEpisodeId);
                                         data.put("sourceSceneId", text(request.sceneId()));
@@ -1455,6 +1454,146 @@ public class ComicDramaService {
     /** 创建稳定标识。 */
     private String id() {
         return UUID.randomUUID().toString();
+    }
+
+    /**
+     * 把模型返回的单镜头秒数收进所选时长档。
+     *
+     * @param response 分镜生成结果
+     * @param shotDuration 时长档位：short、medium、long
+     * @return 时长已对齐的生成结果
+     */
+    private StoryboardDtos.GenerateStoryboardResponse alignShotDurations(
+            StoryboardDtos.GenerateStoryboardResponse response, String shotDuration) {
+        return new StoryboardDtos.GenerateStoryboardResponse(response.shots().stream()
+                .map(shot -> new StoryboardDtos.StoryboardShot(shot.id(), shot.shotNumber(),
+                        alignShotDuration(shotDuration, shot.durationSeconds()), shot.visualDescription(), shot.shotSize(),
+                        shot.lightingAtmosphere(), shot.dialogueVoiceover(), shot.soundEffect(), shot.cameraMovement(),
+                        shot.finalPrompt(), shot.assetIds()))
+                .toList(), response.assets(), response.chargedCredits());
+    }
+
+    /**
+     * 生成镜头数量要求。未指定数量时，用正文体量除以该档位的单镜头时长。
+     *
+     * @param shotCount 用户指定的镜头数量，未填时为 null
+     * @param shotDuration 时长档位：short、medium、long
+     * @param scriptContent 本次拆分的剧本正文
+     * @return 镜头数量要求
+     */
+    static String shotPlanInstruction(Integer shotCount, String shotDuration, String scriptContent) {
+        if (shotCount != null) {
+            return "请拆分为约" + shotCount + "个镜头";
+        }
+        int count = estimateShotCount(shotDuration, scriptContent);
+        return "请结合正文体量拆分为约" + count
+                + "个镜头，把能在单镜头时长内演完的连续动作、对白和反应合并进同一镜头，只在场景、时间或叙事段落切换，或内容超出单镜头时长上限时才切下一镜";
+    }
+
+    /**
+     * 按正文体量和单镜头时长估算镜头数量。
+     * <p>
+     * 中文对白大约每秒 4 个字，动作描述按同样密度折成画面时间。简短按 5 秒、中等按 7 秒、超长按 12 秒，
+     * 所以同一段正文在超长档的镜头数更少，在简短档更多。
+     *
+     * @param shotDuration 时长档位：short、medium、long
+     * @param scriptContent 本次拆分的剧本正文
+     * @return 至少为 1 的镜头数量
+     */
+    static int estimateShotCount(String shotDuration, String scriptContent) {
+        int units = countScriptUnits(scriptContent);
+        int unitsPerShot = preferredShotSeconds(shotDuration) * 4;
+        if (units == 0) {
+            return 1;
+        }
+        return Math.max(1, (units + unitsPerShot / 2) / unitsPerShot);
+    }
+
+    /**
+     * 统计会占用画面时间的正文字数，不计空白和标点。
+     *
+     * @param scriptContent 剧本正文
+     * @return 字数
+     */
+    static int countScriptUnits(String scriptContent) {
+        if (!StringUtils.hasText(scriptContent)) {
+            return 0;
+        }
+        int count = 0;
+        for (int offset = 0; offset < scriptContent.length(); ) {
+            int codePoint = scriptContent.codePointAt(offset);
+            offset += Character.charCount(codePoint);
+            if (Character.isWhitespace(codePoint)) {
+                continue;
+            }
+            int type = Character.getType(codePoint);
+            if (type == Character.CONNECTOR_PUNCTUATION || type == Character.DASH_PUNCTUATION
+                    || type == Character.START_PUNCTUATION || type == Character.END_PUNCTUATION
+                    || type == Character.INITIAL_QUOTE_PUNCTUATION || type == Character.FINAL_QUOTE_PUNCTUATION
+                    || type == Character.OTHER_PUNCTUATION) {
+                continue;
+            }
+            count++;
+        }
+        return count;
+    }
+
+    /**
+     * 各时长档用于估算镜头数量的代表秒数。
+     *
+     * @param shotDuration 时长档位：short、medium、long
+     * @return 代表秒数
+     */
+    private static int preferredShotSeconds(String shotDuration) {
+        return switch (shotDuration) {
+            case "short" -> 5;
+            case "medium" -> 7;
+            case "long" -> 12;
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "分镜头时长档位无效");
+        };
+    }
+
+    /**
+     * 生成传给分镜模型的单镜头时长要求。
+     *
+     * @param shotDuration 时长档位：short、medium、long
+     * @return 时长要求
+     */
+    static String shotDurationInstruction(String shotDuration) {
+        return switch (shotDuration) {
+            case "short" -> "每个镜头时长控制在 5 秒左右，只使用 4、5 或 6 秒，并以 5 秒为主";
+            case "medium" -> "每个镜头时长控制在 5 到 8 秒";
+            case "long" -> "每个镜头时长控制在 10 到 15 秒，不要短于 10 秒，也不要超过 15 秒";
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "分镜头时长档位无效");
+        };
+    }
+
+    /**
+     * 将单镜头秒数限制在所选档位内。
+     *
+     * @param shotDuration 时长档位：short、medium、long
+     * @param seconds 模型返回的秒数
+     * @return 落在该档区间内的秒数
+     */
+    static int alignShotDuration(String shotDuration, int seconds) {
+        int minimum;
+        int maximum;
+        switch (shotDuration) {
+            case "short" -> {
+                minimum = 4;
+                maximum = 6;
+            }
+            case "medium" -> {
+                minimum = 5;
+                maximum = 8;
+            }
+            case "long" -> {
+                minimum = 10;
+                maximum = 15;
+            }
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "分镜头时长档位无效");
+        }
+        return Math.min(maximum, Math.max(minimum, seconds));
     }
 
     /** 标准化可选文本。 */

@@ -98,6 +98,8 @@ type ComicDramaState = {
         shotCount?: number;
         rhythm: string;
         focus: string;
+        /** 单镜头时长档位：short 约 5 秒，medium 为 5 到 8 秒，long 为 10 到 15 秒。 */
+        shotDuration: "short" | "medium" | "long";
         model: string;
     }) => Promise<ComicDramaShotDraft>;
     confirmShotDraft: (draftId: string) => Promise<ComicDramaMutationResult>;

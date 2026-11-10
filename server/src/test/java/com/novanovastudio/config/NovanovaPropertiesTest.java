@@ -71,7 +71,7 @@ class NovanovaPropertiesTest {
     void shouldConfigureStoryboardAgentTimeout() {
         NovanovaProperties properties = new NovanovaProperties();
 
-        Assertions.assertEquals(90, properties.getAi().getStoryboardAgent().getTimeoutSeconds());
+        Assertions.assertEquals(600, properties.getAi().getStoryboardAgent().getTimeoutSeconds());
 
         properties.getAi().getStoryboardAgent().setTimeoutSeconds(180);
 

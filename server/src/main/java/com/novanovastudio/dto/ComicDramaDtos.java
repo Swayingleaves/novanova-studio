@@ -237,11 +237,15 @@ public final class ComicDramaDtos {
                                           @NotNull @Valid AssetVersion version) {
     }
 
-    /** 生成镜头草稿请求。 */
+    /**
+     * 生成镜头草稿请求。
+     * <p>shotDuration 是单镜头时长档位：short 约 5 秒，medium 为 5 到 8 秒，long 为 10 到 15 秒。</p>
+     */
     public record GenerateShotDraftRequest(@NotBlank @Size(max = 64) String projectId,
                                            @Size(max = 64) String episodeId, @Size(max = 64) String sceneId,
                                            @Min(1) Integer shotCount, @Size(max = 120) String rhythm,
                                            @Size(max = 8000) String focus,
+                                           @NotBlank @Pattern(regexp = "short|medium|long") String shotDuration,
                                            @NotBlank @Size(max = 256) String model,
                                            @AssertTrue(message = "生成镜头草稿前必须明确确认费用") boolean confirmed) {
     }
