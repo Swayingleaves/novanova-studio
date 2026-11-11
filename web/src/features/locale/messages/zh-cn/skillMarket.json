@@ -27,6 +27,7 @@
   "systemPrompt": "流程提示词",
   "cover": "封面",
   "uploadCover": "上传封面",
+  "selectAnImageFile": "请选择图片文件",
   "usageSteps": "使用步骤",
   "stepTitle": "步骤标题",
   "stepDetail": "步骤说明",

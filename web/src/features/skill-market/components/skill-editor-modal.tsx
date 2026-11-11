@@ -67,13 +67,45 @@ export function SkillEditorModal({ open, skill, onClose, onSaved }: SkillEditorM
     const { message } = App.useApp();
     const [form] = Form.useForm<SkillEditorValues>();
     const [uploading, setUploading] = useState(false);
+    const [coverFile, setCoverFile] = useState<File | null>(null);
+    const [coverPreview, setCoverPreview] = useState("");
     const category = Form.useWatch("category", form);
     const coverUrl = Form.useWatch("coverUrl", form) || "";
     const targetLocked = category === "image" || category === "video";
+    const shownCover = coverPreview || coverUrl;
+
+    const clearCoverFile = () => {
+        setCoverFile(null);
+        setCoverPreview((current) => {
+            if (current.startsWith("blob:")) URL.revokeObjectURL(current);
+            return "";
+        });
+    };
+
+    const selectCover = (file: File | undefined) => {
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            message.error(translate("skillMarket.selectAnImageFile"));
+            return;
+        }
+        setCoverFile(file);
+        setCoverPreview((current) => {
+            if (current.startsWith("blob:")) URL.revokeObjectURL(current);
+            return URL.createObjectURL(file);
+        });
+    };
 
     const save = async () => {
+        let values: SkillEditorValues;
         try {
-            const values = await form.validateFields();
+            values = await form.validateFields();
+        } catch {
+            return;
+        }
+        setUploading(true);
+        try {
+            let cover = values.coverUrl?.trim() || "";
+            if (coverFile) cover = (await uploadImage(coverFile, { compress: true })).url;
             const targetType = values.category === "image" ? "image" : values.category === "video" ? "video" : values.targetType;
             const input: SaveUserSkillInput = {
                 name: values.name.trim(),
@@ -81,7 +113,7 @@ export function SkillEditorModal({ open, skill, onClose, onSaved }: SkillEditorM
                 description: values.description?.trim() || "",
                 category: values.category,
                 targetType,
-                coverUrl: values.coverUrl?.trim() || "",
+                coverUrl: cover,
                 audience: values.audience?.trim() || "",
                 systemPrompt: values.systemPrompt.trim(),
                 aspectRatio: values.aspectRatio || "16:9",
@@ -95,21 +127,11 @@ export function SkillEditorModal({ open, skill, onClose, onSaved }: SkillEditorM
                 await createUserSkill(input);
                 message.success(translate("skillMarket.createdSuccess"));
             }
+            clearCoverFile();
             onSaved();
             onClose();
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
-        }
-    };
-
-    const uploadCover = async (file: File | undefined) => {
-        if (!file) return;
-        setUploading(true);
-        try {
-            const uploaded = await uploadImage(file, { compress: true });
-            form.setFieldValue("coverUrl", uploaded.url);
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : translate("skillMarket.loadFailed"));
         } finally {
             setUploading(false);
         }
@@ -126,6 +148,7 @@ export function SkillEditorModal({ open, skill, onClose, onSaved }: SkillEditorM
             confirmLoading={uploading}
             width={720}
             afterOpenChange={(visible) => {
+                clearCoverFile();
                 if (visible) form.setFieldsValue(toFormValues(skill || undefined));
             }}
         >
@@ -180,11 +203,11 @@ export function SkillEditorModal({ open, skill, onClose, onSaved }: SkillEditorM
                     </Form.Item>
                 </div>
                 <Form.Item name="coverUrl" label={translate("skillMarket.cover")}>
-                    <Input />
+                    <Input onChange={() => { if (coverFile) clearCoverFile(); }} />
                 </Form.Item>
                 <div className="mb-4 flex items-center gap-3">
                     <div className="h-20 w-28 overflow-hidden rounded-md border border-[var(--studio-line)] bg-[var(--studio-media)]">
-                        {coverUrl ? <img src={coverUrl} alt="" className="size-full object-cover" /> : null}
+                        {shownCover ? <img src={shownCover} alt="" className="size-full object-cover" /> : null}
                     </div>
                     <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-[var(--studio-line)] px-3 py-1.5 text-sm text-[var(--studio-ink)]">
                         <Upload className="size-3.5" />
@@ -194,7 +217,7 @@ export function SkillEditorModal({ open, skill, onClose, onSaved }: SkillEditorM
                             type="file"
                             accept="image/*"
                             onChange={(event) => {
-                                void uploadCover(event.target.files?.[0]);
+                                selectCover(event.target.files?.[0]);
                                 event.target.value = "";
                             }}
                         />

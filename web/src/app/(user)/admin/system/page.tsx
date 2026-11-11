@@ -2088,8 +2088,11 @@ function SkillManagement() {
     const [editOpen, setEditOpen] = useState(false);
     const [editingSkill, setEditingSkill] = useState<ServerSkill | null>(null);
     const [coverUploading, setCoverUploading] = useState(false);
+    const [coverFile, setCoverFile] = useState<File | null>(null);
+    const [coverPreview, setCoverPreview] = useState("");
     const coverInputRef = useRef<HTMLInputElement>(null);
     const coverUrl = Form.useWatch("coverUrl", form) || "";
+    const shownCover = coverPreview || coverUrl;
     const coverName = Form.useWatch("name", form) || translate("administration.skillCover");
     const editingTargetType = Form.useWatch("targetType", form);
 
@@ -2123,12 +2126,14 @@ function SkillManagement() {
 
     const openCreate = () => {
         setEditingSkill(null);
+        clearCoverFile();
         form.setFieldsValue({ name: "", targetType, description: "", systemPrompt: "", aspectRatio: "16:9", coverUrl: "", sortOrder: 1000, status: 1, category: targetType === "canvasSettingGraph" ? undefined : targetType, subtitle: "", audience: "", usageSteps: emptySkillSteps(), workflowId: "" });
         setEditOpen(true);
     };
 
     const openEdit = (skill: ServerSkill) => {
         setEditingSkill(skill);
+        clearCoverFile();
         form.setFieldsValue({
             name: skill.name,
             targetType: skill.targetType,
@@ -2148,15 +2153,23 @@ function SkillManagement() {
     };
 
     const saveSkill = async () => {
+        let values: SkillFormValues;
         try {
-            const values = await form.validateFields();
+            values = await form.validateFields();
+        } catch {
+            return;
+        }
+        setCoverUploading(true);
+        try {
+            let cover = (values.coverUrl || "").trim();
+            if (coverFile) cover = (await uploadImage(coverFile, { compress: true })).url;
             const input = {
                 name: values.name.trim(),
                 targetType: values.targetType,
                 description: (values.description || "").trim(),
                 systemPrompt: values.systemPrompt.trim(),
                 aspectRatio: values.aspectRatio || "16:9",
-                coverUrl: (values.coverUrl || "").trim(),
+                coverUrl: cover,
                 sortOrder: values.sortOrder ?? 1000,
                 status: values.status ?? 1,
                 category: values.targetType === "canvasSettingGraph" ? null : values.category || null,
@@ -2172,30 +2185,36 @@ function SkillManagement() {
                 await createAdminSkill(input);
                 message.success(translate("administration.skillCreated"));
             }
+            clearCoverFile();
             setEditOpen(false);
             await loadSkills(editingSkill ? page : 1);
             if (!editingSkill) setPage(1);
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
+        } finally {
+            setCoverUploading(false);
         }
     };
 
-    const uploadCover = async (file: File | undefined) => {
+    const clearCoverFile = () => {
+        setCoverFile(null);
+        setCoverPreview((current) => {
+            if (current.startsWith("blob:")) URL.revokeObjectURL(current);
+            return "";
+        });
+    };
+
+    const selectCover = (file: File | undefined) => {
         if (!file) return;
         if (!file.type.startsWith("image/")) {
             message.error(translate("administration.selectAnImageFile"));
             return;
         }
-        setCoverUploading(true);
-        try {
-            const uploaded = await uploadImage(file, { compress: true });
-            form.setFieldValue("coverUrl", uploaded.url);
-            message.success(translate("administration.coverUploaded"));
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : translate("administration.failedToUploadCover"));
-        } finally {
-            setCoverUploading(false);
-        }
+        setCoverFile(file);
+        setCoverPreview((current) => {
+            if (current.startsWith("blob:")) URL.revokeObjectURL(current);
+            return URL.createObjectURL(file);
+        });
     };
 
     const changeStatus = (skill: ServerSkill) => {
@@ -2388,7 +2407,7 @@ function SkillManagement() {
             ) : (
                 <Empty description={translate("administration.noSkills")} className="border border-dashed border-[var(--studio-line)] py-12" />
             )}
-            <Modal title={editingSkill ? translate("administration.editSkill_149fb4") : translate("administration.addSkill")} open={editOpen} onOk={saveSkill} onCancel={() => setEditOpen(false)} okText={translate("administration.save")} cancelText={translate("administration.cancel")} width={640} confirmLoading={coverUploading}>
+            <Modal title={editingSkill ? translate("administration.editSkill_149fb4") : translate("administration.addSkill")} open={editOpen} onOk={saveSkill} onCancel={() => { clearCoverFile(); setEditOpen(false); }} okText={translate("administration.save")} cancelText={translate("administration.cancel")} width={640} confirmLoading={coverUploading}>
                 <Form form={form} layout="vertical">
                     <div className="grid grid-cols-3 gap-3">
                         <Form.Item name="name" label={translate("administration.skillName")} rules={[{ required: true, message: translate("administration.enterSkillName") }]} className="col-span-2">
@@ -2454,7 +2473,7 @@ function SkillManagement() {
                         </div>
                     ))}
                     <Form.Item name="coverUrl" label={translate("administration.cover")}>
-                        <Input placeholder={translate("administration.httpsOptional")} />
+                        <Input placeholder={translate("administration.httpsOptional")} onChange={() => { if (coverFile) clearCoverFile(); }} />
                     </Form.Item>
                     <Form.Item name="aspectRatio" label={translate("administration.defaultAspectRatio")} rules={[{ required: true, message: translate("administration.selectDefaultAspectRatio") }]}>
                         <Select
@@ -2469,7 +2488,7 @@ function SkillManagement() {
                     </Form.Item>
                     <div className="mb-4 flex items-start gap-3">
                         <div className="h-28 w-[84px] shrink-0 overflow-hidden rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface-raised)]">
-                            <GenerationStyleCover key={coverUrl} style={{ name: coverName, coverUrl }} className="size-full" />
+                            <GenerationStyleCover key={shownCover} style={{ name: coverName, coverUrl: shownCover }} className="size-full" />
                         </div>
                         <div className="min-w-0">
                             <input
@@ -2478,11 +2497,11 @@ function SkillManagement() {
                                 type="file"
                                 accept="image/*"
                                 onChange={(event) => {
-                                    void uploadCover(event.target.files?.[0]);
+                                    selectCover(event.target.files?.[0]);
                                     event.target.value = "";
                                 }}
                             />
-                            <Button icon={<Upload className="size-3.5" />} loading={coverUploading} onClick={() => coverInputRef.current?.click()}>
+                            <Button icon={<Upload className="size-3.5" />} onClick={() => coverInputRef.current?.click()}>
                                 {translate("administration.uploadCover")}</Button>
                             <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("administration.publicStorageURLIsSavedAndShownInThe")}</p>
                         </div>

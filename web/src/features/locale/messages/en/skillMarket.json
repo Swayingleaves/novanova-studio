@@ -27,6 +27,7 @@
   "systemPrompt": "Workflow prompt",
   "cover": "Cover",
   "uploadCover": "Upload cover",
+  "selectAnImageFile": "Select an image file",
   "usageSteps": "Steps",
   "stepTitle": "Step title",
   "stepDetail": "Step detail",
