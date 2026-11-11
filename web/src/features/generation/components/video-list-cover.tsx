@@ -18,14 +18,14 @@ export function useVideoListCover(storageKey?: string) {
         let active = true;
         let objectUrl = "";
         setState({ ready: false });
-        void loadVideoListCover(key).then((blob) => {
+        void loadVideoListCover(key).then((source) => {
             if (!active) return;
-            if (!blob) {
-                setState({ ready: true });
+            if (source?.blob) {
+                objectUrl = URL.createObjectURL(source.blob);
+                setState({ ready: true, src: objectUrl });
                 return;
             }
-            objectUrl = URL.createObjectURL(blob);
-            setState({ ready: true, src: objectUrl });
+            setState({ ready: true, src: source?.url || undefined });
         });
         return () => {
             active = false;

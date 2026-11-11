@@ -9,21 +9,24 @@ const coverStore = localforage.createInstance({
     storeName: "video_list_covers",
 });
 
-type PendingCover = { storageKey: string; resolve: (blob: Blob | null) => void };
+/** 封面展示来源。blob 是本地缓存；url 是对象存储临时地址，脚本读不到字节时仍可直接给图片标签使用。 */
+export type VideoCoverSource = { blob?: Blob; url?: string };
+
+type PendingCover = { storageKey: string; resolve: (source: VideoCoverSource | null) => void };
 
 const pending: PendingCover[] = [];
-const inflight = new Map<string, Promise<Blob | null>>();
+const inflight = new Map<string, Promise<VideoCoverSource | null>>();
 let scheduled = false;
 
 /**
  * 读取视频封面。本地已有时不再访问对象存储；没有封面的历史视频返回空。
  */
-export function loadVideoListCover(storageKey: string): Promise<Blob | null> {
+export function loadVideoListCover(storageKey: string): Promise<VideoCoverSource | null> {
     const key = storageKey.trim();
     if (!key) return Promise.resolve(null);
     const current = inflight.get(key);
     if (current) return current;
-    const task = new Promise<Blob | null>((resolve) => {
+    const task = new Promise<VideoCoverSource | null>((resolve) => {
         pending.push({ storageKey: key, resolve });
         if (!scheduled) {
             scheduled = true;
@@ -48,14 +51,14 @@ async function resolveCoverBatch(batch: PendingCover[]) {
         items.push(item);
         grouped.set(item.storageKey, items);
     }
-    const deliver = (storageKey: string, blob: Blob | null) => {
-        for (const item of grouped.get(storageKey) || []) item.resolve(blob);
+    const deliver = (storageKey: string, source: VideoCoverSource | null) => {
+        for (const item of grouped.get(storageKey) || []) item.resolve(source);
     };
     const missing: string[] = [];
     await Promise.all([...grouped.keys()].map(async (storageKey) => {
         const cached = await coverStore.getItem<Blob>(teamStorageKey(storageKey)).catch(() => null);
         if (cached instanceof Blob && cached.size > 0) {
-            deliver(storageKey, cached);
+            deliver(storageKey, { blob: cached });
             return;
         }
         missing.push(storageKey);
@@ -79,19 +82,18 @@ async function resolveCoverBatch(batch: PendingCover[]) {
         try {
             const response = await fetch(url);
             if (!response.ok) {
-                deliver(storageKey, null);
+                deliver(storageKey, { url });
                 return;
             }
             const shrunk = await shrinkCover(await response.blob());
             if (!shrunk?.size) {
-                deliver(storageKey, null);
+                deliver(storageKey, { url });
                 return;
             }
             await coverStore.setItem(teamStorageKey(storageKey), shrunk).catch(() => undefined);
-            deliver(storageKey, shrunk);
-        } catch (error) {
-            console.error("读取视频封面失败", storageKey, error);
-            deliver(storageKey, null);
+            deliver(storageKey, { blob: shrunk, url });
+        } catch {
+            deliver(storageKey, { url });
         }
     }));
 }
