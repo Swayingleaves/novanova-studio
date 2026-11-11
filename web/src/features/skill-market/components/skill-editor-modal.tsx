@@ -98,7 +98,7 @@ export function SkillEditorModal({ open, skill, onClose, onSaved }: SkillEditorM
         if (!file) return;
         setUploading(true);
         try {
-            const uploaded = await uploadImage(file);
+            const uploaded = await uploadImage(file, { compress: true });
             form.setFieldValue("coverUrl", uploaded.url);
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("skillMarket.loadFailed"));

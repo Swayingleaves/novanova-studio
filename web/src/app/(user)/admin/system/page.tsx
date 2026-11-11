@@ -2182,7 +2182,7 @@ function SkillManagement() {
         }
         setCoverUploading(true);
         try {
-            const uploaded = await uploadImage(file);
+            const uploaded = await uploadImage(file, { compress: true });
             form.setFieldValue("coverUrl", uploaded.url);
             message.success(translate("administration.coverUploaded"));
         } catch (error) {

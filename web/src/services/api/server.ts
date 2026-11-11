@@ -48,6 +48,8 @@ export type ServerMediaInput = {
     height?: number;
     durationMs?: number;
     metadata?: unknown;
+    /** 为 true 时服务端按高质量策略压缩图片，技能封面上传使用。 */
+    compress?: boolean;
 };
 
 export type ServerMediaInfo = {
@@ -1410,6 +1412,7 @@ export function uploadServerMedia(file: Blob, input: ServerMediaInput, fileName 
     appendFormValue(formData, "width", input.width);
     appendFormValue(formData, "height", input.height);
     appendFormValue(formData, "durationMs", input.durationMs);
+    if (input.compress) formData.set("compress", "true");
     if (input.metadata !== undefined) formData.set("metadata", JSON.stringify(input.metadata));
     return serverFetch<ServerMediaInfo>("/media/uploadMedia", { method: "POST", body: formData });
 }

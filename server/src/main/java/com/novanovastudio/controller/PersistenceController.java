@@ -380,6 +380,7 @@ public class PersistenceController {
      * @param height Integer 高度
      * @param durationMs Integer 时长
      * @param metadata String 扩展元数据JSON
+     * @param compress String 为 true 时对图片做高质量压缩，技能封面上传使用
      * @return Mono<ApiResponse<UploadedMediaResponse>> 上传结果
      */
     @PostMapping("/media/uploadMedia")
@@ -390,8 +391,9 @@ public class PersistenceController {
                                                                                 @RequestPart(value = "width", required = false) String width,
                                                                                 @RequestPart(value = "height", required = false) String height,
                                                                                 @RequestPart(value = "durationMs", required = false) String durationMs,
-                                                                                @RequestPart(value = "metadata", required = false) String metadata) {
-        return file.flatMap(filePart -> persistenceService.uploadMedia(filePart, new PersistenceDtos.RegisterRemoteMediaRequest(kind, null, storageKey, mimeType, null, parseIntOrNull(width), parseIntOrNull(height), parseIntOrNull(durationMs), parseMetadata(metadata)))).map(ApiResponse::ok);
+                                                                                @RequestPart(value = "metadata", required = false) String metadata,
+                                                                                @RequestPart(value = "compress", required = false) String compress) {
+        return file.flatMap(filePart -> persistenceService.uploadMedia(filePart, new PersistenceDtos.RegisterRemoteMediaRequest(kind, null, storageKey, mimeType, null, parseIntOrNull(width), parseIntOrNull(height), parseIntOrNull(durationMs), parseMetadata(metadata)), compressRequested(compress))).map(ApiResponse::ok);
     }
 
     /**
@@ -555,5 +557,15 @@ public class PersistenceController {
         } catch (NumberFormatException exception) {
             return null;
         }
+    }
+
+    /**
+     * 判断本次上传是否要求压缩图片。
+     *
+     * @param compress String 表单中的压缩标记
+     * @return boolean 明确要求压缩时返回 true
+     */
+    private boolean compressRequested(String compress) {
+        return "true".equalsIgnoreCase(compress) || "1".equals(compress);
     }
 }

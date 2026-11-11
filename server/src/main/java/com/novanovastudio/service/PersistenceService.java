@@ -17,6 +17,7 @@ import com.novanovastudio.ai.VideoResolution;
 import com.novanovastudio.agent.AgentActivityService;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.common.ImageCompressor;
 import com.novanovastudio.common.SensitiveDataCrypto;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
@@ -1378,13 +1379,14 @@ public class PersistenceService {
     }
 
     /**
-     * 上传媒体并保存元数据
+     * 上传媒体并保存元数据。
      *
      * @param file FilePart 媒体文件
      * @param input RegisterRemoteMediaRequest 媒体元数据
+     * @param compressImage boolean 为 true 且类型是图片时，先按封面质量策略压缩
      * @return Mono<UploadedMediaResponse> 上传结果
      */
-    public Mono<PersistenceDtos.UploadedMediaResponse> uploadMedia(FilePart file, PersistenceDtos.RegisterRemoteMediaRequest input) {
+    public Mono<PersistenceDtos.UploadedMediaResponse> uploadMedia(FilePart file, PersistenceDtos.RegisterRemoteMediaRequest input, boolean compressImage) {
         // 上传前读取全站默认对象存储配置，媒体记录仍归属当前用户。
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> readFilePart(file)
@@ -1395,30 +1397,54 @@ public class PersistenceService {
                             }
                             return getPlatformObjectStorageConfig().flatMap(objectStorageConfig -> {
                                 String mimeType = firstNonEmpty(input.mimeType(), file.headers().getContentType() == null ? null : file.headers().getContentType().toString(), URLConnection.guessContentTypeFromName(file.filename()), "application/octet-stream");
-                                if ("audio".equals(kind)) {
-                                    if (fileBytes.length < 1 || fileBytes.length > 15L * 1024 * 1024) {
-                                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.audioIsRequiredAndMustNotExceed15MB")));
+                                return compressUploadedImage(fileBytes, mimeType, file.filename(), compressImage, kind).flatMap(compressed -> {
+                                    if ("audio".equals(kind)) {
+                                        if (compressed.data().length < 1 || compressed.data().length > 15L * 1024 * 1024) {
+                                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.audioIsRequiredAndMustNotExceed15MB")));
+                                        }
                                     }
-                                }
-                                String storageKey = firstNonEmpty(input.storageKey(), kind + ":" + newId());
-                                Mono<AudioMediaProbe.ProbeResult> probe = "audio".equals(kind)
-                                        ? Mono.fromCallable(() -> AudioMediaProbe.probe(fileBytes, file.filename(), properties))
-                                        .subscribeOn(Schedulers.boundedElastic())
-                                        : Mono.just(new AudioMediaProbe.ProbeResult(input.durationMs() == null ? -1 : input.durationMs(), mimeType));
-                                return probe.flatMap(probeResult -> {
-                                    String storedMimeType = "audio".equals(kind) ? probeResult.mimeType() : mimeType;
-                                    String objectKey = buildObjectKey(objectStorageConfig, kind, file.filename(), storedMimeType);
-                                    Integer actualDuration = probeResult.durationMs();
-                                    return putObject(objectStorageConfig, objectKey, fileBytes, storedMimeType,
-                                                    StorageFileService.describe(file.filename(), kind, storedMimeType, "upload"))
-                                            .flatMap(publicUrl -> {
-                                                Integer storedDuration = actualDuration < 0 ? null : actualDuration;
-                                                PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, kind, null, publicUrl, objectKey, objectStorageConfig, storedMimeType, (long) fileBytes.length, input.width(), input.height(), storedDuration, input.metadata());
-                                                return saveUploadedMedia(record);
-                                            });
+                                    String storedMimeType = compressed.changed() ? compressed.mimeType() : mimeType;
+                                    String storedFileName = compressed.changed() ? compressed.fileName() : file.filename();
+                                    Integer storedWidth = compressed.changed() ? compressed.width() : input.width();
+                                    Integer storedHeight = compressed.changed() ? compressed.height() : input.height();
+                                    byte[] storedBytes = compressed.data();
+                                    String storageKey = firstNonEmpty(input.storageKey(), kind + ":" + newId());
+                                    Mono<AudioMediaProbe.ProbeResult> probe = "audio".equals(kind)
+                                            ? Mono.fromCallable(() -> AudioMediaProbe.probe(storedBytes, storedFileName, properties))
+                                            .subscribeOn(Schedulers.boundedElastic())
+                                            : Mono.just(new AudioMediaProbe.ProbeResult(input.durationMs() == null ? -1 : input.durationMs(), storedMimeType));
+                                    return probe.flatMap(probeResult -> {
+                                        String objectMimeType = "audio".equals(kind) ? probeResult.mimeType() : storedMimeType;
+                                        String objectKey = buildObjectKey(objectStorageConfig, kind, storedFileName, objectMimeType);
+                                        Integer actualDuration = probeResult.durationMs();
+                                        return putObject(objectStorageConfig, objectKey, storedBytes, objectMimeType,
+                                                        StorageFileService.describe(storedFileName, kind, objectMimeType, "upload"))
+                                                .flatMap(publicUrl -> {
+                                                    Integer storedDuration = actualDuration < 0 ? null : actualDuration;
+                                                    PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, kind, null, publicUrl, objectKey, objectStorageConfig, objectMimeType, (long) storedBytes.length, storedWidth, storedHeight, storedDuration, input.metadata());
+                                                    return saveUploadedMedia(record);
+                                                });
+                                    });
                                 });
                             });
                         }));
+    }
+
+    /**
+     * 技能封面等需要压缩的图片先缩小体积，其它上传保持原文件。
+     *
+     * @param data byte[] 原始字节
+     * @param mimeType String 原始媒体类型
+     * @param fileName String 原始文件名
+     * @param compressImage boolean 调用方是否要求压缩
+     * @param kind String 媒体类型
+     * @return Mono<CompressedImage> 实际要存储的图片
+     */
+    private Mono<ImageCompressor.CompressedImage> compressUploadedImage(byte[] data, String mimeType, String fileName, boolean compressImage, String kind) {
+        if (!compressImage || !"image".equals(kind)) {
+            return Mono.just(ImageCompressor.CompressedImage.unchanged(data, mimeType, fileName));
+        }
+        return Mono.fromCallable(() -> ImageCompressor.compress(data, mimeType, fileName)).subscribeOn(Schedulers.boundedElastic());
     }
 
     /**

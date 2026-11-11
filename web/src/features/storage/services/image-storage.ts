@@ -48,7 +48,7 @@ function writeCachedUrl(storageKey: string, url: string, expiresAt?: string) {
     resolvedUrls.set(storageKey, { url, expiresAt: expiresAt ? Date.parse(expiresAt) : undefined });
 }
 
-export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
+export async function uploadImage(input: string | Blob, options?: { compress?: boolean }): Promise<UploadedImage> {
     if (typeof input === "string" && /^https?:\/\//i.test(input)) {
         const meta = await readImageMeta(input);
         const media = await registerRemoteMedia({ kind: "image", sourceUrl: input, mimeType: meta.mimeType, width: meta.width, height: meta.height });
@@ -68,6 +68,7 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
             mimeType: blob.type || meta.mimeType,
             width: meta.width,
             height: meta.height,
+            compress: options?.compress,
         },
         input instanceof File ? input.name : "image.png",
     );
