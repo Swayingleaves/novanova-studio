@@ -1051,8 +1051,8 @@ export type SkillPendingRevision = {
     name: string;
     subtitle: string;
     description: string;
-    category: string;
-    targetType: string;
+    category: SkillMarketCategory;
+    targetType: "image" | "video";
     coverUrl: string;
     aspectRatio: string;
     audience: string;
