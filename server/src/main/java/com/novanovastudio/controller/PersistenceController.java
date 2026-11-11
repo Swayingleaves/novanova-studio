@@ -441,6 +441,17 @@ public class PersistenceController {
     }
 
     /**
+     * 批量换取视频封面的临时读地址。历史视频没有封面时地址为空。
+     *
+     * @param request MediaAccessRequest 视频媒体存储键列表
+     * @return Mono&lt;ApiResponse&lt;MediaAccessResponse&gt;&gt; 封面读地址明细
+     */
+    @PostMapping("/media/batchVideoCoverAccess")
+    public Mono<ApiResponse<PersistenceDtos.MediaAccessResponse>> batchVideoCoverAccess(@Valid @RequestBody PersistenceDtos.MediaAccessRequest request) {
+        return persistenceService.batchVideoCoverAccess(request.storageKeys()).map(ApiResponse::ok);
+    }
+
+    /**
      * 下载当前用户的媒体文件。
      *
      * @param request MediaInfoRequest 媒体存储键请求

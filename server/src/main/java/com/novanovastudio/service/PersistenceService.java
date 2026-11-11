@@ -32,6 +32,7 @@ import com.novanovastudio.security.TeamScope;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.storage.MediaAccessService;
 import com.novanovastudio.storage.ObjectStorageService;
+import com.novanovastudio.storage.VideoCoverExtractor;
 import com.novanovastudio.task.ModelTaskExecutionDispatcher;
 import java.io.InputStream;
 import java.net.URLConnection;
@@ -50,6 +51,7 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -1624,12 +1626,12 @@ public class PersistenceService {
             String normalizedKind = normalizeMediaKind(kind);
             String storageKey = normalizedKind + ":" + newId();
             String objectKey = buildObjectKey(objectStorageConfig, normalizedKind, fileName, mimeType);
-            return putObject(objectStorageConfig, objectKey, data, firstNonEmpty(mimeType, "application/octet-stream"),
+            String storedMimeType = firstNonEmpty(mimeType, "application/octet-stream");
+            return captureVideoCover(objectStorageConfig, normalizedKind, data, fileName)
+                    .flatMap(coverObjectKey -> putObject(objectStorageConfig, objectKey, data, storedMimeType,
                             StorageFileService.describe(firstNonEmpty(fileName, objectKey), normalizedKind, mimeType, "generated"))
-                    .flatMap(publicUrl -> {
-                        PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, sourceUrl, publicUrl, objectKey, objectStorageConfig, mimeType, (long) data.length, width, height, durationMs, null);
-                        return saveUploadedMedia(record);
-                    });
+                            .flatMap(publicUrl -> finishGeneratedMedia(objectStorageConfig, userId, storageKey, normalizedKind, sourceUrl, publicUrl, objectKey, storedMimeType, data.length, width, height, durationMs, coverObjectKey))
+                            .onErrorResume(error -> discardVideoCover(objectStorageConfig.id(), coverObjectKey).then(Mono.error(error))));
         });
     }
 
@@ -1675,13 +1677,12 @@ public class PersistenceService {
                     String normalizedKind = normalizeMediaKind(kind);
                     String storageKey = normalizedKind + ":" + newId();
                     String objectKey = buildObjectKey(objectStorageConfig, normalizedKind, fileName, mimeType);
-                    return putObject(objectStorageConfig, objectKey, file, firstNonEmpty(mimeType, "application/octet-stream"),
+                    String storedMimeType = firstNonEmpty(mimeType, "application/octet-stream");
+                    return captureVideoCover(objectStorageConfig, normalizedKind, file)
+                            .flatMap(coverObjectKey -> putObject(objectStorageConfig, objectKey, file, storedMimeType,
                                     StorageFileService.describe(firstNonEmpty(fileName, objectKey), normalizedKind, mimeType, "generated"))
-                            .flatMap(publicUrl -> {
-                                PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, sourceUrl, publicUrl, objectKey,
-                                        objectStorageConfig, mimeType, bytes, width, height, durationMs, null);
-                                return saveUploadedMedia(record);
-                            });
+                                    .flatMap(publicUrl -> finishGeneratedMedia(objectStorageConfig, userId, storageKey, normalizedKind, sourceUrl, publicUrl, objectKey, storedMimeType, bytes, width, height, durationMs, coverObjectKey))
+                                    .onErrorResume(error -> discardVideoCover(objectStorageConfig.id(), coverObjectKey).then(Mono.error(error))));
                 }));
     }
 
@@ -1745,6 +1746,33 @@ public class PersistenceService {
      */
     public Mono<PersistenceDtos.MediaAccessResponse> batchListThumbnailAccess(List<String> storageKeys) {
         return batchMediaAccess(storageKeys, MediaAccessService.Purpose.LIST_THUMBNAIL);
+    }
+
+    /**
+     * 批量换取视频封面的临时读地址。没有封面的历史视频返回空地址。
+     *
+     * @param storageKeys List&lt;String&gt; 视频媒体存储键
+     * @return Mono&lt;MediaAccessResponse&gt; 封面读地址明细
+     */
+    public Mono<PersistenceDtos.MediaAccessResponse> batchVideoCoverAccess(List<String> storageKeys) {
+        List<String> normalized = storageKeys == null ? List.of() : storageKeys.stream()
+                .filter(StringUtils::hasText).map(String::trim).distinct().toList();
+        if (normalized.isEmpty()) {
+            return Mono.just(new PersistenceDtos.MediaAccessResponse(List.of()));
+        }
+        if (normalized.size() > 200) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "单次最多换取200个媒体地址"));
+        }
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> repository.getMediaBatch(userId, normalized).collectList()
+                        .flatMap(records -> {
+                            Map<String, PersistenceRecords.MediaFileRecord> byKey = new LinkedHashMap<>();
+                            records.forEach(record -> byKey.put(record.getStorageKey(), record));
+                            return Flux.fromIterable(normalized)
+                                    .concatMap(key -> videoCoverAccess(byKey.get(key), key))
+                                    .collectList()
+                                    .map(PersistenceDtos.MediaAccessResponse::new);
+                        }));
     }
 
     /**
@@ -2178,6 +2206,192 @@ public class PersistenceService {
      * @param bytes Long 文件字节数
      */
     public record DownloadedMediaFile(String storageKey, Path path, String mimeType, Long bytes) {
+    }
+
+    /**
+     * 保存已上传的生成媒体。视频封面键写入元数据；保存失败时封面对象一并进入删除队列。
+     *
+     * @param config ObjectStorageConfig 对象存储配置
+     * @param userId Long 用户ID
+     * @param storageKey String 媒体存储键
+     * @param kind String 媒体类型
+     * @param sourceUrl String 上游原始链接
+     * @param publicUrl String 对象公开地址
+     * @param objectKey String 对象键
+     * @param mimeType String MIME类型
+     * @param bytes long 文件字节数
+     * @param width Integer 宽度
+     * @param height Integer 高度
+     * @param durationMs Integer 时长毫秒
+     * @param coverObjectKey String 封面对象键，没有封面时为空
+     * @return Mono&lt;UploadedMediaResponse&gt; 媒体响应
+     */
+    private Mono<PersistenceDtos.UploadedMediaResponse> finishGeneratedMedia(
+            PersistenceDtos.ObjectStorageConfig config, Long userId, String storageKey, String kind, String sourceUrl,
+            String publicUrl, String objectKey, String mimeType, long bytes, Integer width, Integer height, Integer durationMs, String coverObjectKey) {
+        PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, kind, sourceUrl, publicUrl, objectKey, config, mimeType, bytes, width, height, durationMs, videoCoverMetadata(coverObjectKey));
+        Mono<PersistenceDtos.UploadedMediaResponse> saved = saveUploadedMedia(record);
+        if (!StringUtils.hasText(coverObjectKey)) {
+            return saved;
+        }
+        return saved.onErrorResume(error -> discardVideoCover(config.id(), coverObjectKey).then(Mono.error(error)));
+    }
+
+    /**
+     * 从视频字节截取封面并上传。截帧失败时返回空键，不影响视频本身保存。
+     *
+     * @param config ObjectStorageConfig 对象存储配置
+     * @param kind String 媒体类型
+     * @param data byte[] 视频字节
+     * @param fileName String 文件名
+     * @return Mono&lt;String&gt; 封面对象键，没有封面时为空
+     */
+    private Mono<String> captureVideoCover(PersistenceDtos.ObjectStorageConfig config, String kind, byte[] data, String fileName) {
+        if (!"video".equals(kind) || data == null || data.length == 0) {
+            return Mono.just("");
+        }
+        return Mono.fromCallable(() -> {
+                    Path input = Files.createTempFile("novanova-generated-video-", ".mp4");
+                    try {
+                        Files.write(input, data);
+                        return input;
+                    } catch (Exception exception) {
+                        deleteCoverSource(input);
+                        throw exception;
+                    }
+                }).subscribeOn(Schedulers.boundedElastic())
+                .flatMap(input -> captureVideoCover(config, kind, input).doFinally(signal -> deleteCoverSource(input)))
+                .onErrorResume(error -> {
+                    log.error("准备视频封面截帧失败", error);
+                    return Mono.just("");
+                });
+    }
+
+    /**
+     * 从本地视频截取封面并上传。截帧失败时返回空键，不影响视频本身保存。
+     *
+     * @param config ObjectStorageConfig 对象存储配置
+     * @param kind String 媒体类型
+     * @param video Path 本地视频
+     * @return Mono&lt;String&gt; 封面对象键，没有封面时为空
+     */
+    private Mono<String> captureVideoCover(PersistenceDtos.ObjectStorageConfig config, String kind, Path video) {
+        if (!"video".equals(kind)) {
+            return Mono.just("");
+        }
+        return Mono.fromCallable(() -> {
+                    byte[] frame = VideoCoverExtractor.extract(video, properties.getAi().getVideoComposition().getFfmpegExecutable());
+                    if (frame == null || frame.length == 0) {
+                        return Optional.<ImageCompressor.CompressedImage>empty();
+                    }
+                    ImageCompressor.CompressedImage compressed = ImageCompressor.compress(frame, "image/jpeg", "cover.jpg");
+                    return compressed.data() == null || compressed.data().length == 0 ? Optional.<ImageCompressor.CompressedImage>empty() : Optional.of(compressed);
+                }).subscribeOn(Schedulers.boundedElastic())
+                .flatMap(compressed -> {
+                    if (compressed.isEmpty()) {
+                        return Mono.just("");
+                    }
+                    ImageCompressor.CompressedImage cover = compressed.get();
+                    String coverObjectKey = buildObjectKey(config, "image", cover.fileName(), cover.mimeType());
+                    return putObject(config, coverObjectKey, cover.data(), cover.mimeType(),
+                            StorageFileService.describe("cover.jpg", "image", cover.mimeType(), "generated"))
+                            .doOnNext(ignored -> log.info("视频封面已保存: coverObjectKey={}, bytes={}", coverObjectKey, cover.data().length))
+                            .thenReturn(coverObjectKey)
+                            .onErrorResume(error -> {
+                                log.error("保存视频封面失败: coverObjectKey={}", coverObjectKey, error);
+                                return discardVideoCover(config.id(), coverObjectKey).thenReturn("");
+                            });
+                })
+                .onErrorResume(error -> {
+                    log.error("截取或保存视频封面失败", error);
+                    return Mono.just("");
+                });
+    }
+
+    /**
+     * 把封面对象键写入媒体元数据。
+     *
+     * @param coverObjectKey String 封面对象键
+     * @return JSONObject 元数据，没有封面时返回 null
+     */
+    private JSONObject videoCoverMetadata(String coverObjectKey) {
+        if (!StringUtils.hasText(coverObjectKey)) {
+            return null;
+        }
+        JSONObject metadata = new JSONObject();
+        metadata.put("coverObjectKey", coverObjectKey);
+        return metadata;
+    }
+
+    /**
+     * 读取媒体记录上的视频封面对象键。
+     *
+     * @param record MediaFileRecord 媒体记录
+     * @return String 封面对象键，没有时为空
+     */
+    private String videoCoverObjectKey(PersistenceRecords.MediaFileRecord record) {
+        if (record == null || !StringUtils.hasText(record.getMetadata())) {
+            return "";
+        }
+        try {
+            JSONObject metadata = JSON.parseObject(record.getMetadata());
+            return metadata == null ? "" : firstNonEmpty(metadata.getString("coverObjectKey"));
+        } catch (Exception exception) {
+            log.error("读取视频封面键失败: storageKey={}", record.getStorageKey(), exception);
+            return "";
+        }
+    }
+
+    /**
+     * 签发一条视频封面临时地址。没有封面时返回空地址。
+     *
+     * @param record MediaFileRecord 视频媒体记录
+     * @param storageKey String 请求中的视频存储键
+     * @return Mono&lt;MediaAccessItem&gt; 封面地址
+     */
+    private Mono<PersistenceDtos.MediaAccessItem> videoCoverAccess(PersistenceRecords.MediaFileRecord record, String storageKey) {
+        String coverObjectKey = videoCoverObjectKey(record);
+        if (record == null || !StringUtils.hasText(coverObjectKey) || !StringUtils.hasText(record.getObjectStorageConfigId())) {
+            return Mono.just(new PersistenceDtos.MediaAccessItem(storageKey, "", null));
+        }
+        return mediaAccessService.signObject(record.getObjectStorageConfigId(), coverObjectKey, "cover.jpg", "image/jpeg", MediaAccessService.Purpose.PREVIEW, false)
+                .map(access -> new PersistenceDtos.MediaAccessItem(storageKey, access.url(), access.expiresAt()))
+                .defaultIfEmpty(new PersistenceDtos.MediaAccessItem(storageKey, "", null))
+                .onErrorResume(error -> {
+                    log.error("签发视频封面地址失败: storageKey={}", storageKey, error);
+                    return Mono.just(new PersistenceDtos.MediaAccessItem(storageKey, "", null));
+                });
+    }
+
+    /**
+     * 封面上传成功但视频记录没有保存时，把封面送入删除队列。
+     *
+     * @param storageId String 存储配置标识
+     * @param coverObjectKey String 封面对象键
+     * @return Mono&lt;Void&gt; 完成信号
+     */
+    private Mono<Void> discardVideoCover(String storageId, String coverObjectKey) {
+        if (!StringUtils.hasText(storageId) || !StringUtils.hasText(coverObjectKey)) {
+            return Mono.empty();
+        }
+        return storageBillingService.requestObjectDeletion(storageId, coverObjectKey)
+                .onErrorResume(error -> {
+                    log.error("登记视频封面删除失败: coverObjectKey={}", coverObjectKey, error);
+                    return Mono.empty();
+                });
+    }
+
+    /**
+     * 删除截帧用的临时视频。
+     *
+     * @param input Path 临时文件
+     */
+    private void deleteCoverSource(Path input) {
+        try {
+            Files.deleteIfExists(input);
+        } catch (java.io.IOException exception) {
+            log.error("清理截帧临时视频失败: file={}", input, exception);
+        }
     }
 
     /**

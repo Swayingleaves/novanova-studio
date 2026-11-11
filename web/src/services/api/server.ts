@@ -1393,6 +1393,11 @@ export function batchGetServerListThumbnailAccess(storageKeys: string[]) {
     return serverPost<{ items: ServerMediaAccessItem[] }>("/media/batchListThumbnailAccess", { storageKeys });
 }
 
+/** 批量换取视频生成结果的封面地址。历史视频没有封面时地址为空。 */
+export function batchGetServerVideoCoverAccess(storageKeys: string[]) {
+    return serverPost<{ items: ServerMediaAccessItem[] }>("/media/batchVideoCoverAccess", { storageKeys });
+}
+
 export async function downloadServerMedia(storageKey: string) {
     const response = await requestServer("/media/downloadMedia", {
         method: "POST",

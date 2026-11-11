@@ -29,6 +29,7 @@ import { CreationWorkspace } from "@/features/generation/components/creation-wor
 import { RecentReferenceAssetPicker } from "@/features/generation/components/recent-reference-asset-picker";
 import { ImageSettingsPanel } from "@/features/generation/components/image-settings-panel";
 import { MEDIA_FALLBACK_IMAGE, MediaPreview, useMediaFallback } from "@/features/generation/components/media-fallback";
+import { useVideoListCover, VideoListCover } from "@/features/generation/components/video-list-cover";
 import { sizeFromAspectRatio, VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/features/generation/components/video-settings-panel";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { seedanceReferenceLabel, SEEDANCE_REFERENCE_LIMITS } from "@/features/generation/lib/seedance-video";
@@ -2395,7 +2396,9 @@ function buildVideoConversationItems(conversations: Conversation[], activeId: st
             id: conversation.id,
             title: conversation.title,
             subtitle: translate("video.rounds", { value0: formatConversationTime(conversation.updatedAt), value1: conversation.rounds.length }),
-            preview: <MediaPreview kind="video" src={latestVideo?.url} className="size-10 rounded-xl object-cover" />,
+            preview: latestVideo?.storageKey
+                ? <VideoListCover storageKey={latestVideo.storageKey} className="size-10 rounded-xl object-cover" />
+                : <MediaPreview kind="image" className="size-10 rounded-xl object-cover" />,
             active: activeId === conversation.id,
             selected: selectedIds.includes(conversation.id),
             status: isSessionBusy(conversation.id) ? "running" : getGenerationConversationStatus(conversation),
@@ -2796,6 +2799,7 @@ function ResultCard({
     const translate = useTranslation();
     const [isDownloading, setIsDownloading] = useState(false);
     const copyText = useCopyText();
+    const cover = useVideoListCover(video.storageKey);
     // 有存储键时通过接口换取当前临时地址，视频加载失败会再续签一次。
     const media = useMediaUrl({ storageKey: video.storageKey, url: video.url, objectStorage: video.objectStorage, kind: "media" });
     const displaySrc = media.url || video.url;
@@ -2831,18 +2835,22 @@ function ResultCard({
                     if (!preview.missing) onOpenDetail(video);
                 }}
             >
-                {preview.missing ? (
+                {!cover.ready ? (
+                    <div className="aspect-video max-h-96 w-full bg-black" />
+                ) : cover.src ? (
+                    <img src={cover.src} alt="" className="pointer-events-none max-h-96 w-full object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} />
+                ) : preview.missing ? (
                     <img src={preview.displaySrc} alt={translate("video.generatedVideoCannotBeLoaded")} className="max-h-96 w-full object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} />
                 ) : (
                     <video src={displaySrc} muted preload="metadata" playsInline className="pointer-events-none max-h-96 w-full object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} onError={handlePreviewError} />
                 )}
-                {preview.missing ? null : (
+                {cover.src || (cover.ready && !preview.missing) ? (
                     <div className="absolute inset-0 grid place-items-center">
                         <div className="grid size-12 place-items-center rounded-full bg-black/50 text-white backdrop-blur-sm transition group-hover:scale-110">
                             <Play className="size-5" />
                         </div>
                     </div>
-                )}
+                ) : null}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--studio-line)] px-3 py-2.5">
                 <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-[var(--studio-muted)]">
