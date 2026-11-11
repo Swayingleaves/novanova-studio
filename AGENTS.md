@@ -66,6 +66,7 @@
 - 编写 Ant Design 相关代码时，参考 https://ant.design/llms-full.txt 理解组件 API、示例和设计规范，并优先结合项目当前 antd 版本与既有写法。
 - 新增或修改 Ant Design 组件时，核对当前安装版本的废弃属性并使用替代 API：Modal 遮罩关闭使用 `mask.closable`；InputNumber 单位使用 `suffix`，独立附加控件使用 `Space.Compact`，不要新增 `maskClosable`、`addonBefore` 或 `addonAfter`。
 - antd 组件自带固定宽度的样式（如 `InputNumber` 默认 90px）是无 CSS 层的样式，优先级高于 Tailwind v4 放在 `@layer utilities` 里的工具类，所以 `className="w-full"` 对它无效。必须用 v4 的后缀感叹号写法 `className="w-full!"`（前缀写法 `!w-full` 在 v4 已失效）。同一个表单里如果有字段没撑满、和其他字段对不齐，先查这里。
+- `antd/dist/reset.css` 也是无 CSS 层的全局样式，其中 `input, button, select, textarea { color: inherit; font-size: inherit; }` 会盖掉原生 `button` 上的 `text-*` 工具类。表现是：深色主题下主色（浅色）胶囊按钮里文字跟着变成浅灰、字号比设计的大，看着像"没适配主题"。原生 `button` 指定文字颜色或字号时同样必须用后缀感叹号：`text-sm!`、`text-[var(--studio-action-foreground)]!`；背景和边框不受影响，不用加。
 - 表单字段的 `<label>` 默认是行内元素：控件有固定宽度时会和 label 挤在同一行，没有固定宽度时会换到下一行，同一排的两个字段就会一上一下。统一给 label 加 `block`，让每个字段都是「标签在上、控件在下」。
 - API 请求统一放在 `web/src/services/api/`。
 - 全局或跨页面状态优先放在 `web/src/stores/`。

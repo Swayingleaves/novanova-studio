@@ -82,7 +82,7 @@ export default function SkillMarketPage() {
                         <button
                             key={item}
                             type="button"
-                            className={cn("rounded-full border px-3 py-1 text-sm", category === item ? "border-[var(--studio-action)] bg-[var(--studio-action)] text-[var(--studio-action-foreground)]" : "border-[var(--studio-line)] bg-[var(--studio-surface)] text-[var(--studio-muted)] hover:text-[var(--studio-ink)]")}
+                            className={cn("rounded-full border px-3 py-1 text-sm!", category === item ? "border-[var(--studio-action)] bg-[var(--studio-action)] text-[var(--studio-action-foreground)]!" : "border-[var(--studio-line)] bg-[var(--studio-surface)] text-[var(--studio-muted)]! hover:text-[var(--studio-ink)]!")}
                             onClick={() => {
                                 setCategory(item);
                                 setPage(1);
