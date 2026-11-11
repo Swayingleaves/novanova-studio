@@ -46,6 +46,18 @@ export interface CanvasAssistantImage {
     objectStorage?: ObjectStorageFile;
 }
 
+export type CanvasAssistantChoice = {
+    label: string;
+    value: string;
+    multiple?: boolean;
+    action?: string;
+};
+
+export type CanvasAssistantAction = {
+    type: string;
+    options?: CanvasAssistantChoice[];
+};
+
 export interface CanvasAssistantMessage {
     /** 系统计划执行状态，避免依赖已翻译的显示文案判断终态。 */
     executionStatus?: string;
@@ -57,6 +69,8 @@ export interface CanvasAssistantMessage {
     detail?: unknown;
     references?: CanvasAssistantReference[];
     generationStyles?: Array<{ id: number; name: string; generationType: "image" | "video" }>;
+    /** 当前回复触发的用户动作，例如打开模型设置或确认。 */
+    action?: CanvasAssistantAction;
 }
 
 export interface CanvasAssistantSession {

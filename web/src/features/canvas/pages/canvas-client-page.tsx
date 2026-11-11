@@ -167,6 +167,7 @@ import {
     type CanvasDirectorDeskNode,
     type CanvasDirectorDeskExportSource,
     type CanvasDirectorDeskProject,
+    type CanvasAssistantAction,
     type CanvasAssistantMessage,
     type CanvasAssistantSession,
     type CanvasConnection,
@@ -3315,14 +3316,14 @@ function CanvasWorkspacePage() {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyCanvasNodeAttributes(node, { fontSize }) : node)));
     }, []);
 
-    const handleUploadRequest = useCallback((nodeId?: string, position?: CanvasPoint) => {
+    const handleUploadRequest = useCallback((nodeId?: string, position?: CanvasPoint, accept?: string) => {
         if (nodeId && useCanvasUiStore.getState().uploadingNodeIds.has(nodeId)) return;
         const input = imageInputRef.current;
         const scope = mediaUploadScopeRef.current;
         if (!input || !scope || scope.controller.signal.aborted) return;
         uploadTargetRef.current = { nodeId, position: position || getCanvasCenter(), scope };
         input.multiple = !nodeId;
-        input.accept = nodeId && nodesRef.current.some((node) => node.id === nodeId && isAudioNode(node)) ? ".mp3,.wav,audio/mpeg,audio/wav" : "image/*,video/*,.mp3,.wav,audio/mpeg,audio/wav";
+        input.accept = accept || (nodeId && nodesRef.current.some((node) => node.id === nodeId && isAudioNode(node)) ? ".mp3,.wav,audio/mpeg,audio/wav" : "image/*,video/*,.mp3,.wav,audio/mpeg,audio/wav");
         input.click();
     }, [getCanvasCenter]);
 
@@ -3447,14 +3448,17 @@ function CanvasWorkspacePage() {
         [updateAssistantSession],
     );
 
+    const assistantActionsRef = useRef(new Map<string, CanvasAssistantAction>());
     const upsertAssistantMessage = useCallback(
         (sessionId: string, messageId: string, text: string) => {
+            const action = assistantActionsRef.current.get(messageId);
             updateAssistantSession(sessionId, (session) => {
                 const exists = session.messages.some((item) => item.id === messageId);
+                const assistantMessage: CanvasAssistantMessage = { id: messageId, role: "assistant", text, ...(action ? { action } : {}) };
                 return {
                     ...session,
                     title: session.messages.length ? session.title : text.slice(0, 18) || translate("canvas.newConversation"),
-                    messages: exists ? session.messages.map((item) => (item.id === messageId ? { ...item, role: "assistant" as const, text } : item)) : [...session.messages, { id: messageId, role: "assistant" as const, text }],
+                    messages: exists ? session.messages.map((item) => (item.id === messageId ? { ...item, ...assistantMessage } : item)) : [...session.messages, assistantMessage],
                     updatedAt: new Date().toISOString(),
                 };
             });
@@ -3510,12 +3514,15 @@ function CanvasWorkspacePage() {
         },
         onThoughtDelta,
         onThoughtComplete,
-        onTaskComplete: (_messageId, text) => {
+        onTaskComplete: (_messageId, text, action) => {
             resetThinkings();
             const sessionId = activeAgentSessionIdRef.current;
             if (!sessionId) return;
             const displayMessageId = activeAgentAssistantMessageIdRef.current || nanoid();
             activeAgentAssistantMessageIdRef.current = displayMessageId;
+            if (action?.type === "choice" && action.options?.length) {
+                assistantActionsRef.current.set(displayMessageId, { type: action.type, options: action.options });
+            }
             completeTextMessage(sessionId, displayMessageId, text);
         },
         onCanceled: () => {
@@ -5550,6 +5557,8 @@ function CanvasWorkspacePage() {
             {assistantMounted ? (
                 <CanvasChatPanel
                     onCollapse={closeAgent}
+                    onUploadImage={() => handleUploadRequest(undefined, undefined, "image/*")}
+                    onUploadVideo={() => handleUploadRequest(undefined, undefined, "video/mp4,video/quicktime,video/*")}
                     nodes={nodes}
                     onNodeDropRef={onNodeDropRef}
                     messages={activeSessionMessages}
@@ -5623,6 +5632,8 @@ function CanvasWorkspacePage() {
                     config={config}
                     model={config.agentModel}
                     onModelChange={(model) => updateConfig("agentModel", model)}
+                    onImageModelChange={(model) => updateConfig("imageModel", model)}
+                    onVideoModelChange={(model) => updateConfig("videoModel", model)}
                     onMissingConfig={() => showMissingAiConfig("text")}
                 />
             ) : null}

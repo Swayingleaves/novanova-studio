@@ -5,8 +5,11 @@ import { App, Form, Input, Modal, Select } from "antd";
 import { Upload } from "lucide-react";
 
 import { useTranslation } from "@/features/locale/use-translation";
+import { ModelConfigTextArea } from "@/app/(user)/admin/system/components/model-config-textarea";
+import { SkillPromptLabel } from "@/features/skill-market/components/skill-prompt-help";
+import { SKILL_PROMPT_ACTIONS } from "@/features/skill-market/lib/skill-prompt-actions";
 import { uploadImage } from "@/features/storage/services/image-storage";
-import { createUserSkill, updateUserSkill, type SaveUserSkillInput, type SkillMarketCategory, type SkillMineCard, type SkillUsageStep } from "@/services/api/server";
+import { createUserSkill, updateUserSkill, type SaveUserSkillInput, type SkillMarketCategory, type SkillMineCard, type SkillPendingRevision, type SkillUsageStep } from "@/services/api/server";
 
 type SkillEditorValues = {
     name: string;
@@ -19,6 +22,7 @@ type SkillEditorValues = {
     systemPrompt: string;
     aspectRatio?: string;
     usageSteps?: SkillUsageStep[];
+    workflowId: string;
 };
 
 const categories: SkillMarketCategory[] = ["image", "video", "ecommerce", "portrait", "viralReplica"];
@@ -31,26 +35,29 @@ function emptySteps(): SkillUsageStep[] {
     ];
 }
 
-function toFormValues(skill?: SkillMineCard & { systemPrompt?: string | null; audience?: string; usageSteps?: SkillUsageStep[] }): SkillEditorValues {
-    const steps = [...(skill?.usageSteps || [])];
+function toFormValues(skill?: SkillMineCard & { systemPrompt?: string | null; audience?: string; usageSteps?: SkillUsageStep[]; workflowId?: string | null; pendingRevision?: SkillPendingRevision | null }): SkillEditorValues {
+    const draft = skill?.pendingRevision;
+    const source = draft ? { ...skill, ...draft } : skill;
+    const steps = [...(source?.usageSteps || [])];
     while (steps.length < 3) steps.push({ title: "", detail: "" });
     return {
-        name: skill?.name || "",
-        subtitle: skill?.subtitle || "",
-        description: skill?.description || "",
-        category: skill?.category || "image",
-        targetType: skill?.category === "video" ? "video" : skill?.targetType === "video" ? "video" : "image",
-        coverUrl: skill?.coverUrl || "",
-        audience: skill?.audience || "",
-        systemPrompt: skill?.systemPrompt || "",
-        aspectRatio: skill?.aspectRatio || "16:9",
+        name: source?.name || "",
+        subtitle: source?.subtitle || "",
+        description: source?.description || "",
+        category: source?.category || "image",
+        targetType: source?.category === "video" ? "video" : source?.targetType === "video" ? "video" : "image",
+        coverUrl: source?.coverUrl || "",
+        audience: source?.audience || "",
+        systemPrompt: source?.systemPrompt || "",
+        aspectRatio: source?.aspectRatio || "16:9",
         usageSteps: steps.slice(0, 3),
+        workflowId: source?.workflowId || "",
     };
 }
 
 type SkillEditorModalProps = {
     open: boolean;
-    skill?: (SkillMineCard & { systemPrompt?: string | null; audience?: string; usageSteps?: SkillUsageStep[] }) | null;
+    skill?: (SkillMineCard & { systemPrompt?: string | null; audience?: string; usageSteps?: SkillUsageStep[]; workflowId?: string | null }) | null;
     onClose: () => void;
     onSaved: () => void;
 };
@@ -79,10 +86,11 @@ export function SkillEditorModal({ open, skill, onClose, onSaved }: SkillEditorM
                 systemPrompt: values.systemPrompt.trim(),
                 aspectRatio: values.aspectRatio || "16:9",
                 usageSteps: (values.usageSteps || []).map((step) => ({ title: step?.title?.trim() || "", detail: step?.detail?.trim() || "" })),
+                workflowId: values.workflowId.trim(),
             };
             if (skill) {
                 await updateUserSkill({ ...input, id: skill.id });
-                message.success(translate("skillMarket.updatedSuccess"));
+                message.success(skill.reviewStatus === "published" ? translate("skillMarket.updateSubmitted") : translate("skillMarket.updatedSuccess"));
             } else {
                 await createUserSkill(input);
                 message.success(translate("skillMarket.createdSuccess"));
@@ -135,6 +143,17 @@ export function SkillEditorModal({ open, skill, onClose, onSaved }: SkillEditorM
                         />
                     </Form.Item>
                 </div>
+                <Form.Item
+                    name="workflowId"
+                    label={translate("skillMarket.workflowId")}
+                    extra={translate("skillMarket.workflowIdHint")}
+                    rules={[
+                        { required: true, message: translate("skillMarket.workflowIdRequired") },
+                        { pattern: /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/, message: translate("skillMarket.workflowIdInvalid") },
+                    ]}
+                >
+                    <Input maxLength={64} placeholder="fight-storyboard" />
+                </Form.Item>
                 <Form.Item name="subtitle" label={translate("skillMarket.subtitle")}>
                     <Input maxLength={200} placeholder={translate("skillMarket.subtitlePlaceholder")} />
                 </Form.Item>
@@ -198,8 +217,14 @@ export function SkillEditorModal({ open, skill, onClose, onSaved }: SkillEditorM
                         </Form.Item>
                     </div>
                 ))}
-                <Form.Item name="systemPrompt" label={translate("skillMarket.systemPrompt")} rules={[{ required: true, message: translate("skillMarket.promptRequired") }]}>
-                    <Input.TextArea rows={8} placeholder={translate("skillMarket.promptPlaceholder")} />
+                <Form.Item name="systemPrompt" label={<SkillPromptLabel text={translate("skillMarket.systemPrompt")} />} rules={[{ required: true, message: translate("skillMarket.promptRequired") }]}>
+                    <ModelConfigTextArea
+                        title={translate("skillMarket.systemPrompt")}
+                        placeholder={translate("skillMarket.promptPlaceholder")}
+                        minRows={8}
+                        maxRows={12}
+                        mentions={SKILL_PROMPT_ACTIONS.map((action) => ({ label: translate(`skillMarket.${action.labelKey}`), token: action.token }))}
+                    />
                 </Form.Item>
             </Form>
         </Modal>

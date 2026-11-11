@@ -74,6 +74,9 @@ public record AgentAction(
      * @return AgentChoice 当前语言选项
      */
     private AgentChoice localizedChoice(AgentChoice option, Locale locale) {
+        if ("adjust_video_duration".equals(option.action())) {
+            return new AgentChoice(SystemMessage.of("business.confirmDurationSettings").render(locale), option.value(), option.multiple(), option.action());
+        }
         if (option.value() == null) return option;
         String key = switch (option.value()) {
             case "确认生成" -> "business.confirmGeneration";

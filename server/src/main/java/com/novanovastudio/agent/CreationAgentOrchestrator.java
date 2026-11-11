@@ -365,8 +365,13 @@ public class CreationAgentOrchestrator {
                     snapshot.put("targetType", skill.getTargetType());
                     snapshot.put("systemPrompt", skill.getSystemPrompt());
                     snapshot.put("aspectRatio", skill.getAspectRatio() == null ? "16:9" : skill.getAspectRatio());
-                    if (CreationEntrySource.VIDEO_PAGE.equals(request.entrySource()) && videoWorkflowRegistry != null) {
-                        videoWorkflowRegistry.resolveWorkflowType(skill.getSystemPrompt()).ifPresent(type -> snapshot.put("workflowType", type));
+                    if (CreationEntrySource.VIDEO_PAGE.equals(request.entrySource()) && videoWorkflowRegistry != null
+                            && StringUtils.hasText(skill.getWorkflowId())
+                            && videoWorkflowRegistry.isRegistered(skill.getWorkflowId())) {
+                        snapshot.put("workflowType", skill.getWorkflowId().trim().toLowerCase(java.util.Locale.ROOT));
+                    }
+                    if (StringUtils.hasText(skill.getWorkflowId())) {
+                        snapshot.put("workflowId", skill.getWorkflowId());
                     }
                     return snapshot;
                 })
@@ -568,11 +573,40 @@ public class CreationAgentOrchestrator {
                         ? Mono.empty()
                         : sessionService.appendUserMessage(session.id(), userMessageId, request.message())
                                 .then(isRequestCancellationRequested(active))
-                                .flatMap(canceledAfterAppend -> Boolean.TRUE.equals(canceledAfterAppend)
-                                        ? Mono.empty()
-                                        : request.chatMode()
-                                        ? executeChatGeneration(userId, session, request, active)
-                                        : createAndExecutePlan(userId, session, request, active)));
+                                .flatMap(canceledAfterAppend -> {
+                                    if (Boolean.TRUE.equals(canceledAfterAppend)) {
+                                        return Mono.empty();
+                                    }
+                                    Mono<Void> mismatchedDuration = rejectMismatchedVideoDuration(userId, session, request);
+                                    if (mismatchedDuration != null) {
+                                        return mismatchedDuration;
+                                    }
+                                    return request.chatMode()
+                                            ? executeChatGeneration(userId, session, request, active)
+                                            : createAndExecutePlan(userId, session, request, active);
+                                }));
+    }
+
+    /**
+     * 用户在对话里要求的视频时长和页面配置不一致时，先提示修改配置，不进入规划或生成。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 会话
+     * @param request AgentChatRequest 对话请求
+     * @return Mono<Void> 已拦截时的完成信号；无需拦截时返回 null
+     */
+    private Mono<Void> rejectMismatchedVideoDuration(Long userId, AgentSession session, AgentChatRequest request) {
+        if (request == null || !CreationEntrySource.VIDEO_PAGE.equals(request.entrySource()) || request.creationSettings() == null) {
+            return null;
+        }
+        VideoDurationRequest.Mismatch mismatch = VideoDurationRequest.mismatch(request.message(), request.creationSettings().seconds());
+        if (mismatch == null) {
+            return null;
+        }
+        SystemMessage message = SystemMessage.of("system.videoDurationMismatch", mismatch.requestedSeconds(), mismatch.configuredSeconds());
+        List<AgentChoice> choices = List.of(new AgentChoice("确认", String.valueOf(mismatch.requestedSeconds()), false, "adjust_video_duration"));
+        return saveClarificationRound(userId, session, request, message.diagnostic(), choices)
+                .then(completeWithMessage(userId, session.id(), message, AgentAction.choice(choices)));
     }
 
     /**
@@ -679,7 +713,7 @@ public class CreationAgentOrchestrator {
                 : request != null && request.creationSettings() != null
                 ? request.creationSettings() : candidate == null ? null : candidate.creationSettings();
         try {
-            return planValidator.validate(candidate, request.entrySource(), settings);
+            return planValidator.validate(SkillPromptActions.normalize(candidate), request.entrySource(), settings);
         } catch (BusinessException exception) {
             // 校验失败时记录模型原始计划，便于区分模型标注错误与服务端约束缺陷。
             log.warn("主Agent候选计划校验失败: entrySource={}, plan={}",
@@ -973,32 +1007,32 @@ public class CreationAgentOrchestrator {
             if (!"video".equals(skill.getTargetType())) {
                 return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.thisSkillDoesNotSupportTheVideoPage")));
             }
-            return Mono.justOrEmpty(videoWorkflowRegistry.resolveWorkflowType(skill.getSystemPrompt())
-                    .map(workflowType -> {
-                        VideoWorkflowDefinition definition = videoWorkflowRegistry.require(workflowType);
-                        Map<String, Object> skillSnapshot = new LinkedHashMap<>();
-                        skillSnapshot.put("id", skill.getId());
-                        skillSnapshot.put("name", skill.getName());
-                        skillSnapshot.put("targetType", skill.getTargetType());
-                        skillSnapshot.put("systemPrompt", skill.getSystemPrompt());
-                        skillSnapshot.put("workflowType", workflowType);
-                        VideoWorkflowContext context = new VideoWorkflowContext(UUID.randomUUID().toString(), workflowType,
-                                skillSnapshot, request.message(), definition.clarificationQuestion(), List.of(), Map.of(),
-                                Map.of(), request.creationSettings(), "clarifying", 1);
-                        return context;
-                    }))
-                    .flatMap(context -> videoWorkflowContextRepository.create(userId, session.id(), context)
+            String workflowId = skill.getWorkflowId() == null ? "" : skill.getWorkflowId().trim().toLowerCase(java.util.Locale.ROOT);
+            if (!videoWorkflowRegistry.isRegistered(workflowId)) {
+                return Mono.empty();
+            }
+            VideoWorkflowDefinition definition = videoWorkflowRegistry.require(workflowId);
+            Map<String, Object> skillSnapshot = new LinkedHashMap<>();
+            skillSnapshot.put("id", skill.getId());
+            skillSnapshot.put("name", skill.getName());
+            skillSnapshot.put("targetType", skill.getTargetType());
+            skillSnapshot.put("systemPrompt", skill.getSystemPrompt());
+            skillSnapshot.put("workflowId", workflowId);
+            skillSnapshot.put("workflowType", workflowId);
+            VideoWorkflowContext context = new VideoWorkflowContext(UUID.randomUUID().toString(), workflowId,
+                    skillSnapshot, request.message(), definition.clarificationQuestion(), List.of(), Map.of(),
+                    Map.of(), request.creationSettings(), "clarifying", 1);
+            return videoWorkflowContextRepository.create(userId, session.id(), context)
                             .then(callWorkflowConversationAgent(userId, session, request, model,
                                     videoWorkflowRegistry.require(context.workflowType()), context, "clarifying"))
                             .flatMap(turn -> {
-                                VideoWorkflowDefinition definition = videoWorkflowRegistry.require(context.workflowType());
                                 if (turn.isDraft() && definition.isDraftComplete(turn.prompts())) {
                                     return videoWorkflowContextRepository.saveDrafts(context, turn.prompts())
                                             .map(updated -> workflowClarificationPlan(updated, definition,
                                                     definition.draftDisplayMessage(turn.message(), updated.draftedPrompts()), turn.choices()));
                                 }
                                 return Mono.just(workflowClarificationPlan(context, definition, turn.message(), turn.choices()));
-                            }));
+                            });
         });
     }
 
@@ -1019,6 +1053,7 @@ public class CreationAgentOrchestrator {
                                                                               VideoWorkflowDefinition definition,
                                                                               VideoWorkflowContext context, String phase) {
         Map<String, Object> input = new LinkedHashMap<>();
+        input.put("workflowId", context.workflowType());
         input.put("workflowType", context.workflowType());
         input.put("phase", phase);
         input.put("originalRequest", context.originalRequest());
@@ -1187,10 +1222,16 @@ public class CreationAgentOrchestrator {
     private CreationPlan workflowClarificationPlan(VideoWorkflowContext context, VideoWorkflowDefinition definition,
                                                    String replyMessage, List<AgentChoice> turnChoices) {
         String message = StringUtils.hasText(replyMessage) ? replyMessage : definition.clarificationQuestion();
-        List<AgentChoice> choices = context.hasDraftedPrompts() ? List.of(
-                new AgentChoice("确认生成", "确认生成", null, null),
-                new AgentChoice("调整提示词", "我想调整提示词", null, null))
-                : turnChoices == null ? List.of() : turnChoices;
+        List<AgentChoice> choices;
+        if (context.hasDraftedPrompts()) {
+            List<AgentChoice> draftChoices = new ArrayList<>();
+            draftChoices.add(new AgentChoice("确认生成", "确认生成", null, null));
+            draftChoices.add(new AgentChoice("调整提示词", "我想调整提示词", null, null));
+            draftChoices.addAll(SkillPromptActions.userActions(turnChoices));
+            choices = draftChoices;
+        } else {
+            choices = turnChoices == null ? List.of() : turnChoices;
+        }
         return new CreationPlan("", "视频技能工作流", CreationEntrySource.VIDEO_PAGE,
                 "正在补充工作流信息", message, false, context.creationSettings(), List.of(), choices, context.workflowType());
     }
@@ -1472,13 +1513,21 @@ public class CreationAgentOrchestrator {
                                 || (("imagePage".equals(request.entrySource()) || "videoPage".equals(request.entrySource()))
                                 && !"canvasSettingGraph".equals(skill.getTargetType())))
                         .onErrorResume(exception -> Mono.empty())
-                        .map(skill -> {
+                        .flatMap(skill -> {
+                            Map<String, Object> skillInput = new java.util.LinkedHashMap<>();
+                            skillInput.put("name", skill.getName());
+                            skillInput.put("targetType", skill.getTargetType());
+                            skillInput.put("workflowId", skill.getWorkflowId() == null ? "" : skill.getWorkflowId());
+                            skillInput.put("instructions", skill.getSystemPrompt());
                             input.put("skillId", request.skillId());
-                            input.put("skill", Map.of(
-                                    "name", skill.getName(),
-                                    "targetType", skill.getTargetType(),
-                                    "instructions", skill.getSystemPrompt()));
-                            return agentFactory.mainAgent(model, skill.getSystemPrompt());
+                            input.put("skill", skillInput);
+                            String workflowInstruction = StringUtils.hasText(skill.getWorkflowId())
+                                    ? "\n\n工作流标识：CreationPlan 的 workflowId 必须填写为「" + skill.getWorkflowId()
+                                    + "」，与技能声明完全一致，不得留空或改写。workflowType 必须留空，由服务端根据 workflowId 确认工作流。"
+                                    : "";
+                            String prompt = skill.getSystemPrompt() == null ? "" : skill.getSystemPrompt();
+                            return callMainAgentWith(agentFactory.mainAgent(model, prompt + workflowInstruction), userId, session, input)
+                                    .map(plan -> SkillWorkflowConfirmation.confirm(plan, skill.getWorkflowId(), videoWorkflowRegistry));
                         })
                         .switchIfEmpty(Mono.defer(() -> {
                             Map<String, Object> snapshot = readCanvasSettingGraphSnapshot(request);
@@ -1487,9 +1536,8 @@ public class CreationAgentOrchestrator {
                             }
                             input.put("skillId", request.skillId());
                             input.put("skill", Map.of("name", snapshot.get("name"), "targetType", snapshot.get("targetType"), "instructions", snapshot.get("systemPrompt")));
-                            return Mono.just(agentFactory.mainAgent(model, String.valueOf(snapshot.get("systemPrompt"))));
-                        }))
-                        .flatMap(skillAgent -> callMainAgentWith(skillAgent, userId, session, input));
+                            return callMainAgentWith(agentFactory.mainAgent(model, String.valueOf(snapshot.get("systemPrompt"))), userId, session, input);
+                        }));
             }
             agent = agentFactory.mainAgent(model);
             return callMainAgentWith(agent, userId, session, input);

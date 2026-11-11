@@ -181,7 +181,9 @@ public class SkillService {
         record.setOwnerUserId(null);
         record.setReviewStatus(SkillRecords.REVIEW_PUBLISHED);
         record.setRejectReason("");
-        return repository.createSkill(record)
+        record.setWorkflowId(normalizeWorkflowId(request.workflowId()));
+        return ensureUniqueWorkflowId(record.getWorkflowId(), null)
+                .then(repository.createSkill(record))
                 .doOnSuccess(id -> log.info("创建技能成功: id={}, type={}", id, record.getTargetType()))
                 .then();
     }
@@ -200,7 +202,9 @@ public class SkillService {
                 request.name(), request.description(), request.targetType(), request.systemPrompt(), request.aspectRatio(), request.coverUrl(), request.status(), request.sortOrder());
         applyMarketFields(record, request.category(), request.subtitle(), request.audience(), request.usageSteps(), false);
         record.setId(request.id());
-        return repository.updateSkill(record)
+        record.setWorkflowId(normalizeWorkflowId(request.workflowId()));
+        return ensureUniqueWorkflowId(record.getWorkflowId(), request.id())
+                .then(repository.updateSkill(record))
                 .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.skillNotFound"))))
                 .doOnSuccess(ignored -> log.info("更新技能成功: id={}", request.id()));
     }
@@ -253,14 +257,16 @@ public class SkillService {
             record.setSortOrder(DEFAULT_SORT_ORDER);
             record.setReviewStatus(SkillRecords.REVIEW_PRIVATE);
             record.setRejectReason("");
-            return repository.createSkill(record)
+            record.setWorkflowId(normalizeWorkflowId(request.workflowId()));
+            return ensureUniqueWorkflowId(record.getWorkflowId(), null)
+                    .then(repository.createSkill(record))
                     .doOnSuccess(id -> log.info("用户创建技能成功: id={}, userId={}", id, userId))
                     .then();
         });
     }
 
     /**
-     * 用户更新自己的技能。已发布内容修改后退回审核中。
+     * 用户更新自己的技能。已发布技能只保存待审核更新，线上版本继续可用。
      *
      * @param request 更新请求
      * @return 操作完成信号
@@ -275,16 +281,19 @@ public class SkillService {
                 .flatMap(existing -> {
                     SkillRecords.SkillRecord record = buildUserRecord(request);
                     record.setId(existing.getId());
-                    if (SkillRecords.REVIEW_PUBLISHED.equals(existing.getReviewStatus())) {
-                        record.setReviewStatus(SkillRecords.REVIEW_PENDING);
-                        record.setRejectReason("");
-                    } else {
+                    record.setWorkflowId(normalizeWorkflowId(request.workflowId()));
+                    return ensureUniqueWorkflowId(record.getWorkflowId(), existing.getId()).then(Mono.defer(() -> {
+                        if (SkillRecords.REVIEW_PUBLISHED.equals(existing.getReviewStatus())) {
+                            return repository.savePendingRevision(existing.getId(), userId, JSON.toJSONString(toStoredRevision(record)))
+                                    .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.skillNotOwned"))))
+                                    .doOnSuccess(ignored -> log.info("已发布技能提交更新审核: id={}, userId={}", request.id(), userId));
+                        }
                         record.setReviewStatus(existing.getReviewStatus());
                         record.setRejectReason(existing.getRejectReason());
-                    }
-                    return repository.updateOwnedSkill(record, userId)
-                            .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.skillNotOwned"))))
-                            .doOnSuccess(ignored -> log.info("用户更新技能成功: id={}, userId={}, reviewStatus={}", request.id(), userId, record.getReviewStatus()));
+                        return repository.updateOwnedSkill(record, userId)
+                                .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.skillNotOwned"))))
+                                .doOnSuccess(ignored -> log.info("用户更新技能成功: id={}, userId={}, reviewStatus={}", request.id(), userId, record.getReviewStatus()));
+                    }));
                 }));
     }
 
@@ -350,11 +359,29 @@ public class SkillService {
         if (reason.length() > 500) {
             return Mono.error(invalid(SystemMessage.of("business.skillRejectReasonIsTooLong")));
         }
-        String reviewStatus = Boolean.TRUE.equals(request.approved()) ? SkillRecords.REVIEW_PUBLISHED : SkillRecords.REVIEW_REJECTED;
-        String storedReason = Boolean.TRUE.equals(request.approved()) ? "" : reason;
-        return repository.reviewSkill(request.id(), reviewStatus, storedReason)
-                .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(invalid(SystemMessage.of("business.skillIsNotPendingReview"))))
-                .doOnSuccess(ignored -> log.info("审核技能: id={}, reviewStatus={}", request.id(), reviewStatus));
+        boolean approved = Boolean.TRUE.equals(request.approved());
+        String storedReason = approved ? "" : reason;
+        return repository.findAnyById(request.id()).switchIfEmpty(Mono.error(invalid(SystemMessage.of("business.skillIsNotPendingReview"))))
+                .flatMap(existing -> {
+                    if (SkillRecords.REVIEW_PUBLISHED.equals(existing.getReviewStatus())
+                            && SkillRecords.REVISION_PENDING.equals(existing.getRevisionStatus())) {
+                        if (!approved) {
+                            return repository.rejectPendingRevision(existing.getId(), storedReason)
+                                    .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(invalid(SystemMessage.of("business.skillIsNotPendingReview"))));
+                        }
+                        SkillRecords.SkillRecord revision = fromStoredRevision(existing.getPendingRevision());
+                        return ensureUniqueWorkflowId(revision.getWorkflowId(), existing.getId())
+                                .then(repository.applyPendingRevision(existing.getId(), revision))
+                                .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(invalid(SystemMessage.of("business.skillIsNotPendingReview"))));
+                    }
+                    if (!SkillRecords.REVIEW_PENDING.equals(existing.getReviewStatus())) {
+                        return Mono.error(invalid(SystemMessage.of("business.skillIsNotPendingReview")));
+                    }
+                    String reviewStatus = approved ? SkillRecords.REVIEW_PUBLISHED : SkillRecords.REVIEW_REJECTED;
+                    return repository.reviewSkill(existing.getId(), reviewStatus, storedReason)
+                            .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(invalid(SystemMessage.of("business.skillIsNotPendingReview"))));
+                })
+                .doOnSuccess(ignored -> log.info("审核技能: id={}, approved={}", request.id(), approved));
     }
 
     /**
@@ -609,13 +636,16 @@ public class SkillService {
                         url, workflowType, systemPrompt, record.getAspectRatio()));
     }
 
-    /** 技能记录转管理端条目，封面按预览用途现签。 */
+    /** 技能记录转管理端条目。有待审核更新时展示待更新内容，线上版本仍由市场接口返回。 */
     private Mono<SkillDtos.SkillItem> toItem(SkillRecords.SkillRecord record) {
-        return mediaAccessService.signUrl(record.getCoverUrl() == null ? "" : record.getCoverUrl(), MediaAccessService.Purpose.PREVIEW)
-                .map(url -> new SkillDtos.SkillItem(record.getId(), record.getName(), record.getDescription(), record.getTargetType(), record.getSystemPrompt(), url,
-                        record.getAspectRatio(), record.getStatus(), record.getSortOrder(), formatTime(record.getCreatedAt()), formatTime(record.getUpdatedAt()),
-                        record.getCategory(), record.getSubtitle(), record.getAudience(), parseUsageSteps(record.getUsageSteps()),
-                        record.getOwnerUserId(), record.getReviewStatus(), record.getRejectReason(), record.getAuthorName()));
+        SkillRecords.SkillRecord pending = SkillRecords.REVISION_PENDING.equals(record.getRevisionStatus()) ? pendingRevision(record) : null;
+        SkillRecords.SkillRecord shown = pending == null ? record : pending;
+        return mediaAccessService.signUrl(shown.getCoverUrl() == null ? "" : shown.getCoverUrl(), MediaAccessService.Purpose.PREVIEW)
+                .map(url -> new SkillDtos.SkillItem(record.getId(), shown.getName(), shown.getDescription(), shown.getTargetType(), shown.getSystemPrompt(), url,
+                        shown.getAspectRatio(), record.getStatus(), record.getSortOrder(), formatTime(record.getCreatedAt()), formatTime(record.getUpdatedAt()),
+                        shown.getCategory(), shown.getSubtitle(), shown.getAudience(), parseUsageSteps(shown.getUsageSteps()),
+                        record.getOwnerUserId(), record.getReviewStatus(), record.getRejectReason(), record.getAuthorName(), shown.getWorkflowId(),
+                        record.getRevisionStatus()));
     }
 
     /** 技能记录转市场卡片。 */
@@ -630,22 +660,101 @@ public class SkillService {
     private Mono<SkillDtos.SkillMineCard> toMineCard(SkillRecords.SkillRecord record, Long userId) {
         return toCard(record).map(card -> new SkillDtos.SkillMineCard(card.id(), card.name(), card.subtitle(), card.description(), card.category(),
                 card.targetType(), card.coverUrl(), card.aspectRatio(), card.workflowType(), card.authorName(), card.official(), card.favorited(),
-                record.getStatus(), record.getReviewStatus(), record.getRejectReason(), userId.equals(record.getOwnerUserId())));
+                record.getStatus(), record.getReviewStatus(), record.getRejectReason(), userId.equals(record.getOwnerUserId()),
+                record.getRevisionStatus()));
     }
 
     /** 组装详情。系统提示词和驳回原因只返回给作者。 */
     private SkillDtos.SkillDetail toDetail(SkillRecords.SkillRecord record, Long userId, SkillDtos.SkillMarketCard card, List<SkillDtos.SkillMarketCard> related) {
         boolean owned = userId.equals(record.getOwnerUserId());
+        SkillRecords.SkillRecord pending = owned ? pendingRevision(record) : null;
+        SkillDtos.SkillPendingRevision pendingView = pending == null ? null : new SkillDtos.SkillPendingRevision(
+                pending.getName(), pending.getSubtitle(), pending.getDescription(), pending.getCategory(), pending.getTargetType(),
+                pending.getCoverUrl(), pending.getAspectRatio(), pending.getAudience(), parseUsageSteps(pending.getUsageSteps()),
+                pending.getSystemPrompt(), pending.getWorkflowId());
         return new SkillDtos.SkillDetail(card.id(), card.name(), card.subtitle(), card.description(), card.category(), card.targetType(),
                 card.coverUrl(), card.aspectRatio(), card.workflowType(), record.getAudience(), parseUsageSteps(record.getUsageSteps()),
                 card.authorName(), card.official(), card.favorited(), record.getStatus(), record.getReviewStatus(),
-                owned ? record.getRejectReason() : "", owned ? record.getSystemPrompt() : null, owned, related);
+                owned ? record.getRejectReason() : "", owned ? record.getSystemPrompt() : null, owned, related, record.getWorkflowId(),
+                owned ? record.getRevisionStatus() : "", owned ? record.getRevisionRejectReason() : "", pendingView);
     }
 
-    /** 视频技能识别工作流类型。 */
+    /** 读取待审核更新。没有或内容损坏时返回空，避免影响线上技能。 */
+    private SkillRecords.SkillRecord pendingRevision(SkillRecords.SkillRecord record) {
+        boolean reviewable = SkillRecords.REVISION_PENDING.equals(record.getRevisionStatus())
+                || SkillRecords.REVISION_REJECTED.equals(record.getRevisionStatus());
+        if (!reviewable || !StringUtils.hasText(record.getPendingRevision())) {
+            return null;
+        }
+        try {
+            return fromStoredRevision(record.getPendingRevision());
+        } catch (RuntimeException exception) {
+            log.warn("技能待审核更新无法读取: id={}", record.getId());
+            return null;
+        }
+    }
+
+    /** 把用户提交的内容收成待审核快照。 */
+    private StoredSkillRevision toStoredRevision(SkillRecords.SkillRecord record) {
+        return new StoredSkillRevision(record.getName(), record.getSubtitle(), record.getDescription(), record.getCategory(),
+                record.getTargetType(), record.getSystemPrompt(), record.getAspectRatio(), record.getCoverUrl(),
+                record.getAudience(), record.getUsageSteps(), record.getWorkflowId());
+    }
+
+    /** 把待审核快照还原成可写回技能表的记录。 */
+    private SkillRecords.SkillRecord fromStoredRevision(String json) {
+        StoredSkillRevision stored = JSON.parseObject(json, StoredSkillRevision.class);
+        if (stored == null || !StringUtils.hasText(stored.systemPrompt()) || !StringUtils.hasText(stored.workflowId())) {
+            throw invalid(SystemMessage.of("business.skillIsNotPendingReview"));
+        }
+        SkillRecords.SkillRecord record = new SkillRecords.SkillRecord();
+        record.setName(stored.name());
+        record.setSubtitle(stored.subtitle());
+        record.setDescription(stored.description());
+        record.setCategory(stored.category());
+        record.setTargetType(stored.targetType());
+        record.setSystemPrompt(stored.systemPrompt());
+        record.setAspectRatio(stored.aspectRatio());
+        record.setCoverUrl(stored.coverUrl());
+        record.setAudience(stored.audience());
+        record.setUsageSteps(stored.usageSteps());
+        record.setWorkflowId(stored.workflowId());
+        return record;
+    }
+
+    /** 已发布技能的待审核内容。 */
+    private record StoredSkillRevision(String name, String subtitle, String description, String category, String targetType,
+                                       String systemPrompt, String aspectRatio, String coverUrl, String audience,
+                                       String usageSteps, String workflowId) {
+    }
+
+    /** 视频技能只有在 workflowId 对应已注册工作流时才进入服务端工作流。 */
     private String workflowType(SkillRecords.SkillRecord record) {
-        return "video".equals(record.getTargetType())
-                ? videoWorkflowRegistry.resolveWorkflowType(record.getSystemPrompt()).orElse(null) : null;
+        if (!SkillRecords.TYPE_VIDEO.equals(record.getTargetType()) || !StringUtils.hasText(record.getWorkflowId())) {
+            return null;
+        }
+        String workflowId = record.getWorkflowId().trim().toLowerCase(Locale.ROOT);
+        return videoWorkflowRegistry.isRegistered(workflowId) ? workflowId : null;
+    }
+
+    /** 规范化工作流标识。创建和更新都必须填写，且只能使用小写字母、数字、下划线和连字符。 */
+    private String normalizeWorkflowId(String workflowId) {
+        String value = workflowId == null ? "" : workflowId.trim().toLowerCase(Locale.ROOT);
+        if (!StringUtils.hasText(value)) {
+            throw invalid(SystemMessage.of("business.skillWorkflowIdIsRequired"));
+        }
+        if (!value.matches("[a-z0-9][a-z0-9_-]{0,63}")) {
+            throw invalid(SystemMessage.of("business.skillWorkflowIdIsInvalid"));
+        }
+        return value;
+    }
+
+    /** 未删除技能的工作流标识必须唯一。 */
+    private Mono<Void> ensureUniqueWorkflowId(String workflowId, Long excludeId) {
+        return repository.workflowIdExists(workflowId, excludeId)
+                .flatMap(exists -> Boolean.TRUE.equals(exists)
+                        ? Mono.error(invalid(SystemMessage.of("business.skillWorkflowIdAlreadyExists")))
+                        : Mono.empty());
     }
 
     /** 必填文本。 */

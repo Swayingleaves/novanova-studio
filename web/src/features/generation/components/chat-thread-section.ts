@@ -27,6 +27,7 @@ import { formatGenerationStyleMessage } from "../lib/style-command.ts";
  * @param choiceDisabledReasons  Record<string,string> 可选：choice 选项禁用原因，key 为选项 value（如"确认生成"），命中后按钮置灰并提示
  * @param renderChoiceSettings   (roundId) => ReactNode 可选：choice 轮次的内联设置内容（如工作流图片参数卡片），按 user round id 返回内容；返回非空时展示在助手文本与选项按钮之间
  * @param renderUserContent      (round) => ReactNode 可选：渲染用户消息内容（如把 @ 图片/视频引用渲染成芯片），提供时替代纯文本
+ * @param awaitingReply          boolean 可选：请求仍在进行。思考中由思考块自己转圈；思考结束到回复到达前，在最新轮次补一个加载状态
  */
 export function buildChatThreadSection(
     messages: ChatMessageItem[],
@@ -39,6 +40,7 @@ export function buildChatThreadSection(
     choiceDisabledReasons?: Record<string, string>,
     renderChoiceSettings?: (roundId: string) => React.ReactNode,
     renderUserContent?: (round: { id: string; userText: string; attachments?: ChatAttachment[] }) => React.ReactNode,
+    awaitingReply?: boolean,
 ): CreationThreadSection | null {
     if (!messages.length && !thinkings.length && !activeThinking && !streamingText) return null;
     const allThinkings = (activeThinking ? [...thinkings, activeThinking] : thinkings).filter((thinking) => thinking.text);
@@ -128,6 +130,18 @@ export function buildChatThreadSection(
         latestConversationRound.thinkings = allThinkings;
         latestConversationRound.activeThinkingId = activeThinking?.id;
     }
+    // 思考流已经结束、正文和工具都还没到时，页面会停在折叠后的「思考过程」上。这时请求通常还在跑。
+    if (
+        awaitingReply
+        && !activeThinking
+        && !streamingText
+        && latestConversationRound
+        && !latestConversationRound.assistantText
+        && !latestConversationRound.resultContent
+        && !latestConversationRound.statusText
+    ) {
+        latestConversationRound.awaitingReply = true;
+    }
 
     return { id: "chat", label: translate("generation.currentConversation"), rounds };
 }
@@ -171,9 +185,9 @@ function renderUserAttachments(attachments?: ChatAttachment[], styles?: ChatGene
     const imageAttachments = visibleAttachments.filter((attachment) => !attachment.type || attachment.type.startsWith("image/"));
     const videoAttachments = visibleAttachments.filter((attachment) => attachment.type?.startsWith("video/"));
 
-    return React.createElement(
+    const skillAndStyles = React.createElement(
         "div",
-        { className: "flex flex-wrap gap-2" },
+        { className: "flex flex-wrap justify-end gap-2" },
         skill ? React.createElement(
             "span",
             {
@@ -194,6 +208,10 @@ function renderUserAttachments(attachments?: ChatAttachment[], styles?: ChatGene
             React.createElement(Palette, { className: "size-3.5 shrink-0 text-[var(--studio-action)]" }),
             React.createElement("span", { className: "truncate" }, style.name),
         )),
+    );
+    const media = visibleAttachments.length ? React.createElement(
+        "div",
+        { className: "flex flex-wrap justify-end gap-2" },
         React.createElement(
             Image.PreviewGroup,
             null,
@@ -216,5 +234,11 @@ function renderUserAttachments(attachments?: ChatAttachment[], styles?: ChatGene
             muted: true,
             controls: true,
         })),
+    ) : null;
+    return React.createElement(
+        "div",
+        { className: "flex flex-col items-end gap-2" },
+        skill || styles?.length ? skillAndStyles : null,
+        media,
     );
 }

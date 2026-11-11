@@ -14,7 +14,8 @@ import java.util.List;
  * @param creationSettings CreationSettings 页面生成硬约束
  * @param tasks List<CreationTask> 计划任务列表
  * @param choices List<AgentChoice> 需要用户从选项中挑选时的可点击选项，可为空
- * @param workflowType String 服务端注册的视频工作流类型
+ * @param workflowType String 服务端注册的视频工作流类型，只有 workflowId 命中注册表时才填写
+ * @param workflowId String 技能声明的工作流标识，必须与技能 workflowId 一致
  * @author   zhenglin.cn.cq@gmail.com
  * @date     2026-07-23 00:00
  */
@@ -28,7 +29,8 @@ public record CreationPlan(
         CreationSettings creationSettings,
         List<CreationTask> tasks,
         List<AgentChoice> choices,
-        String workflowType
+        String workflowType,
+        String workflowId
 ) {
 
     /**
@@ -48,6 +50,18 @@ public record CreationPlan(
                         String clarificationQuestion, Boolean canvasGuidance, CreationSettings creationSettings,
                         List<CreationTask> tasks, List<AgentChoice> choices) {
         this(planId, intent, entrySource, summary, clarificationQuestion, canvasGuidance,
-                creationSettings, tasks, choices, null);
+                creationSettings, tasks, choices, null, null);
+    }
+
+    /**
+     * 保留仅携带已注册工作流类型的构造方式。
+     *
+     * @param workflowType String 服务端注册的视频工作流类型
+     */
+    public CreationPlan(String planId, String intent, String entrySource, String summary,
+                        String clarificationQuestion, Boolean canvasGuidance, CreationSettings creationSettings,
+                        List<CreationTask> tasks, List<AgentChoice> choices, String workflowType) {
+        this(planId, intent, entrySource, summary, clarificationQuestion, canvasGuidance,
+                creationSettings, tasks, choices, workflowType, null);
     }
 }

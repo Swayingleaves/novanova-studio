@@ -48,7 +48,8 @@ public final class SkillDtos {
     public record SkillItem(Long id, String name, String description, String targetType, String systemPrompt, String coverUrl,
                             String aspectRatio, Integer status, Integer sortOrder, String createdAt, String updatedAt,
                             String category, String subtitle, String audience, List<SkillUsageStep> usageSteps,
-                            Long ownerUserId, String reviewStatus, String rejectReason, String authorName) {
+                            Long ownerUserId, String reviewStatus, String rejectReason, String authorName, String workflowId,
+                            String revisionStatus) {
     }
 
     /**
@@ -91,6 +92,7 @@ public final class SkillDtos {
      * @param coverUrl 封面地址
      * @param status 状态
      * @param sortOrder 排序值
+     * @param workflowId 工作流标识，必填且唯一
      */
     public record CreateSkillRequest(@NotBlank(message = "business.skillNameIsRequired") String name,
                                      String description,
@@ -98,7 +100,8 @@ public final class SkillDtos {
                                      @NotBlank(message = "business.skillSystemPromptIsRequired") String systemPrompt,
                                      String aspectRatio, String coverUrl,
                                      Integer status, Integer sortOrder,
-                                     String category, String subtitle, String audience, List<SkillUsageStep> usageSteps) {
+                                     String category, String subtitle, String audience, List<SkillUsageStep> usageSteps,
+                                     @NotBlank(message = "business.skillWorkflowIdIsRequired") String workflowId) {
     }
 
     /**
@@ -113,6 +116,7 @@ public final class SkillDtos {
      * @param coverUrl 封面地址
      * @param status 状态
      * @param sortOrder 排序值
+     * @param workflowId 工作流标识，必填且唯一
      */
     public record UpdateSkillRequest(Long id,
                                      @NotBlank(message = "business.skillNameIsRequired") String name,
@@ -121,7 +125,8 @@ public final class SkillDtos {
                                      @NotBlank(message = "business.skillSystemPromptIsRequired") String systemPrompt,
                                      String aspectRatio, String coverUrl,
                                      Integer status, Integer sortOrder,
-                                     String category, String subtitle, String audience, List<SkillUsageStep> usageSteps) {
+                                     String category, String subtitle, String audience, List<SkillUsageStep> usageSteps,
+                                     @NotBlank(message = "business.skillWorkflowIdIsRequired") String workflowId) {
     }
 
     /**
@@ -190,7 +195,16 @@ public final class SkillDtos {
     public record SkillDetail(Long id, String name, String subtitle, String description, String category, String targetType,
                               String coverUrl, String aspectRatio, String workflowType, String audience, List<SkillUsageStep> usageSteps,
                               String authorName, boolean official, boolean favorited, Integer status, String reviewStatus,
-                              String rejectReason, String systemPrompt, boolean owned, List<SkillMarketCard> related) {
+                              String rejectReason, String systemPrompt, boolean owned, List<SkillMarketCard> related, String workflowId,
+                              String revisionStatus, String revisionRejectReason, SkillPendingRevision pendingRevision) {
+    }
+
+    /**
+     * 作者正在审核中的更新。市场和创作页仍使用已发布内容。
+     */
+    public record SkillPendingRevision(String name, String subtitle, String description, String category, String targetType,
+                                       String coverUrl, String aspectRatio, String audience, List<SkillUsageStep> usageSteps,
+                                       String systemPrompt, String workflowId) {
     }
 
     /**
@@ -198,7 +212,8 @@ public final class SkillDtos {
      */
     public record SkillMineCard(Long id, String name, String subtitle, String description, String category, String targetType,
                                 String coverUrl, String aspectRatio, String workflowType, String authorName, boolean official,
-                                boolean favorited, Integer status, String reviewStatus, String rejectReason, boolean owned) {
+                                boolean favorited, Integer status, String reviewStatus, String rejectReason, boolean owned,
+                                String revisionStatus) {
     }
 
     /**
@@ -224,6 +239,7 @@ public final class SkillDtos {
      * @param coverUrl 封面地址
      * @param audience 适合人群
      * @param usageSteps 使用步骤
+     * @param workflowId 工作流标识，必填且唯一
      */
     public record SaveUserSkillRequest(Long id,
                                        @NotBlank(message = "business.skillNameIsRequired") String name,
@@ -232,7 +248,8 @@ public final class SkillDtos {
                                        @NotBlank(message = "business.skillCategoryIsRequired") String category,
                                        @NotBlank(message = "business.skillTypeIsRequired") String targetType,
                                        @NotBlank(message = "business.skillSystemPromptIsRequired") String systemPrompt,
-                                       String aspectRatio, String coverUrl, String audience, List<SkillUsageStep> usageSteps) {
+                                       String aspectRatio, String coverUrl, String audience, List<SkillUsageStep> usageSteps,
+                                       @NotBlank(message = "business.skillWorkflowIdIsRequired") String workflowId) {
     }
 
     /**

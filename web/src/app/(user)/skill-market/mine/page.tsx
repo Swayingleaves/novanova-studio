@@ -121,7 +121,7 @@ export default function MySkillsPage() {
                         <SkillMarketCardView
                             key={skill.id}
                             item={skill}
-                            status={tab === "created" ? <Tag className="m-0">{translate(statusKey[skill.reviewStatus])}</Tag> : undefined}
+                            status={tab === "created" ? <Tag className="m-0">{translate(skill.reviewStatus === "published" && skill.revisionStatus === "pending" ? "skillMarket.updatePending" : skill.reviewStatus === "published" && skill.revisionStatus === "rejected" ? "skillMarket.updateRejected" : statusKey[skill.reviewStatus])}</Tag> : undefined}
                             onOpen={() => router.push(`/skill-market/${skill.id}`)}
                             onFavorite={tab === "favorite" ? () => void run(() => unfavoriteSkill(skill.id), translate("skillMarket.unfavoritedSuccess")) : undefined}
                             extra={tab === "created" ? (

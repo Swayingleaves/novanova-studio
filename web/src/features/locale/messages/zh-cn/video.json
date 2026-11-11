@@ -51,6 +51,7 @@
     "optimizePromptWithAI": "AI优化提示词",
     "assetLibrary": "资产库",
     "moreSettings": "更多设置",
+    "continueAfterSettings": "继续",
     "imageGenerationSettings": "图片生成设置",
     "selectQualityResolutionAspectRatioAndModelBeforeConfirming": "请为本次生成选择画质、清晰度、比例和模型，选择后才能确认生成。",
     "model": "模型",

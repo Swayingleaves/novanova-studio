@@ -39,6 +39,10 @@ public final class SkillRecords {
     public static final String REVIEW_PUBLISHED = "published";
     /** 审核状态：已驳回。 */
     public static final String REVIEW_REJECTED = "rejected";
+    /** 已发布技能的更新：审核中。 */
+    public static final String REVISION_PENDING = "pending";
+    /** 已发布技能的更新：已驳回。 */
+    public static final String REVISION_REJECTED = "rejected";
 
     private SkillRecords() {
     }
@@ -59,6 +63,8 @@ public final class SkillRecords {
         private String targetType;
         /** 技能流程系统提示词，驱动主Agent引导式多轮对话。 */
         private String systemPrompt;
+        /** 工作流标识。创建时必填，未删除技能之间唯一，服务端和 Agent 都用它确认工作流。 */
+        private String workflowId;
         /** 默认生成比例，例如16:9、9:16。 */
         private String aspectRatio;
         /** 技能封面地址。 */
@@ -87,6 +93,12 @@ public final class SkillRecords {
         private String reviewStatus;
         /** 驳回原因。 */
         private String rejectReason;
+        /** 已发布技能的待审核更新 JSON。审核通过前不覆盖线上字段。 */
+        private String pendingRevision;
+        /** 更新审核状态：空、pending 或 rejected。 */
+        private String revisionStatus;
+        /** 更新驳回原因。 */
+        private String revisionRejectReason;
         /** 作者展示名，联表查询时填充。 */
         private String authorName;
         /** 当前用户是否已收藏，联表查询时填充。 */

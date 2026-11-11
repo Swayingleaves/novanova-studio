@@ -29,10 +29,11 @@ import { CreationWorkspace } from "@/features/generation/components/creation-wor
 import { RecentReferenceAssetPicker } from "@/features/generation/components/recent-reference-asset-picker";
 import { ImageSettingsPanel } from "@/features/generation/components/image-settings-panel";
 import { MEDIA_FALLBACK_IMAGE, MediaPreview, useMediaFallback } from "@/features/generation/components/media-fallback";
-import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/features/generation/components/video-settings-panel";
+import { sizeFromAspectRatio, VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/features/generation/components/video-settings-panel";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { seedanceReferenceLabel, SEEDANCE_REFERENCE_LIMITS } from "@/features/generation/lib/seedance-video";
 import { readVideoGenerationConstraintIssue, readVideoModelConfiguration } from "@/features/generation/lib/video-generation-constraints";
+import { readVideoDurationRange } from "@/features/generation/lib/video-duration";
 import { formatBytes, formatDuration } from "@/features/generation/lib/image-utils";
 import { formatVideoGenerationSettingsSummary } from "@/features/generation/lib/generation-settings-summary";
 import type { ReferenceImage } from "@/features/generation/types/image";
@@ -50,7 +51,9 @@ import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { useHomepageCreationDraft } from "@/features/homepage/hooks/use-homepage-creation-draft";
 import { consumeHomepageCreationHandoff, peekHomepageCreationHandoff } from "@/features/homepage/lib/homepage-creation-handoff";
 import { useSkillCreationHandoff } from "@/features/skill-market/hooks/use-skill-creation-handoff";
-import { consumeSkillCreationHandoff, SKILL_MARKET_KICKOFF } from "@/features/skill-market/lib/skill-creation-handoff";
+import { consumeSkillCreationHandoff, peekSkillCreationHandoff, skillMarketKickoff } from "@/features/skill-market/lib/skill-creation-handoff";
+import { ASK_USER_MODEL_CONFIG, CONTINUE_AFTER_MODEL_CONFIG, MODEL_CONFIG_CONFIRMED_MESSAGE } from "@/features/skill-market/lib/skill-prompt-actions";
+import { clearResumedSkillConversation, readResumedSkillConversation, skillOptionFromSnapshot, writeResumedSkillConversation } from "@/features/skill-market/lib/skill-conversation-resume";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
@@ -61,7 +64,7 @@ import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import type { AgentActivityState, ChatAttachment, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
 import { chatAttachmentsToMentionReferences, PromptMentionText } from "@/features/generation/components/prompt-mention-text";
-import { ChoiceHistoryBar } from "@/features/generation/components/creation-message-thread";
+import { ChoiceGroup, ChoiceHistoryBar } from "@/features/generation/components/creation-message-thread";
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import {
     createToolExecutionActivity,
@@ -261,11 +264,15 @@ export default function VideoPage() {
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
     const { mode: creationMode, changeMode: changeCreationMode } = useCreationMode("video");
+    const [skillMarketTaskActive, setSkillMarketTaskActive] = useState(false);
+    const skillTaskLockedRef = useRef(false);
     // Chat 模式不走 Agent 规划，风格与技能都不参与生成，切换时清空避免残留
     const handleCreationModeChange = (nextMode: CreationMode) => {
+        if (skillTaskLockedRef.current && nextMode === "chat") return;
         if (nextMode === "chat") {
             setSelectedStyles([]);
             setSelectedSkill(null);
+            clearResumedSkillConversation("video");
         }
         changeCreationMode(nextMode);
     };
@@ -301,6 +308,12 @@ export default function VideoPage() {
     }, [promptReferences]);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [durationContinueReady, setDurationContinueReady] = useState(false);
+    const [durationContinuePrompt, setDurationContinuePrompt] = useState("");
+    const durationAdjustPendingRef = useRef(false);
+    const [modelConfigContinueReady, setModelConfigContinueReady] = useState(false);
+    const [modelConfigRoundId, setModelConfigRoundId] = useState("");
+    const modelConfigPendingRef = useRef(false);
     const [videoDraftSettingsModified, setVideoDraftSettingsModified] = useState(false);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const [promptEditDialogOpen, setPromptEditDialogOpen] = useState(false);
@@ -319,6 +332,9 @@ export default function VideoPage() {
     const skillHandoff = useSkillCreationHandoff("video");
     const skillHandoffAppliedRef = useRef(false);
     const skillHandoffStartedRef = useRef(false);
+    const skillMarketEntryRef = useRef(false);
+    if (skillHandoff || peekSkillCreationHandoff("video")) skillMarketEntryRef.current = true;
+    const skillResumeAppliedRef = useRef(false);
     const [homepageReady, setHomepageReady] = useState(false);
     const [focusInitialPrompt, setFocusInitialPrompt] = useState(false);
 
@@ -347,11 +363,41 @@ export default function VideoPage() {
     useEffect(() => {
         if (!skillHandoff || skillHandoffAppliedRef.current) return;
         skillHandoffAppliedRef.current = true;
+        // 技能市场的「去创作」每次都新开对话，不接着上次的技能会话。
+        clearResumedSkillConversation("video");
+        activeIdRef.current = null;
+        setActiveId(null);
+        setChatMessages([]);
+        chatMessagesRef.current = [];
+        setToolCalls([]);
+        toolCallsRef.current = [];
+        resetThinkings();
+        setStreamingText(null);
+        streamingTextRef.current = null;
+        clearDurationContinue();
+        clearModelConfigContinue();
+        resetSession();
+        setReferences([]);
+        setVideoReferences([]);
         setSelectedSkill(skillHandoff.skill);
+        setSkillMarketTaskActive(true);
         changeCreationMode("agent");
-        setPrompt(SKILL_MARKET_KICKOFF);
+        setPrompt(skillMarketKickoff(skillHandoff.skill.name));
         setFocusInitialPrompt(true);
+        updateVideoSettings("videoGenerationMode", "text-to-video");
     }, [skillHandoff, changeCreationMode]);
+
+    useEffect(() => {
+        if (!activeId || !selectedSkill) return;
+        writeResumedSkillConversation("video", { sessionId: activeId, skill: selectedSkill });
+    }, [activeId, selectedSkill]);
+
+    useEffect(() => {
+        if (!selectedSkill) return;
+        const full = skillOptions.find((skill) => skill.id === selectedSkill.id);
+        if (!full || (full.workflowType === selectedSkill.workflowType && full.aspectRatio === selectedSkill.aspectRatio && full.description === selectedSkill.description && full.coverUrl === selectedSkill.coverUrl)) return;
+        setSelectedSkill(full);
+    }, [skillOptions, selectedSkill]);
 
     useEffect(() => {
         let cancelled = false;
@@ -393,10 +439,11 @@ export default function VideoPage() {
 
     useEffect(() => {
         if (!configHydrated || peekHomepageCreationHandoff("video")) return;
+        const fromSkillMarket = skillMarketEntryRef.current;
         void loadVideoLastUsedSettings()
             .then((settings) => {
                 updateConfig("vquality", settings.vquality);
-                updateConfig("videoGenerationMode", settings.videoGenerationMode);
+                updateConfig("videoGenerationMode", fromSkillMarket ? "text-to-video" : settings.videoGenerationMode);
                 updateConfig("size", settings.size);
                 updateConfig("videoSeconds", settings.videoSeconds);
                 updateConfig("videoWatermark", settings.videoWatermark);
@@ -445,6 +492,12 @@ export default function VideoPage() {
     const [toolCalls, setToolCalls] = useState<ToolCallState[]>([]);
     const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null);
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
+    const currentTaskUsesSkill = skillMarketTaskActive || chatMessages.some((message) => Boolean(message.skill)) || Boolean(activeConversation?.rounds.some((round) => round.skill));
+    skillTaskLockedRef.current = currentTaskUsesSkill;
+    useEffect(() => {
+        if (!currentTaskUsesSkill || creationMode !== "chat") return;
+        changeCreationMode("agent");
+    }, [currentTaskUsesSkill, creationMode, changeCreationMode]);
     const latestRound = activeConversation?.rounds.at(-1);
     // 实时对话中的草案待确认轮：SSE 聊天区最后一条携带 choice 动作且含"确认生成"选项的助手消息。
     // 不依赖后端落库时序（saveClarificationRound 是异步落库，latestRound 可能尚未刷新），
@@ -806,18 +859,18 @@ export default function VideoPage() {
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
 
     // SSE 请求状态丢失（刷新页面、连接中断或服务重启）但记录轮次仍在生成时，直接取消底层AI任务实现停止。
-    const stopPendingGeneration = async () => {
+    const activeVideoTaskIds = () => {
         const conversation = conversationsRef.current.find((item) => item.id === activeIdRef.current);
-        if (!conversation) return;
-        const taskIds = [
-            ...new Set(
-                conversation.rounds.flatMap((round) => [
-                    ...(round.result?.status === "pending" && round.result.taskId ? [round.result.taskId] : []),
-                    ...(round.stages || []).filter((stage) => stage.taskId && stage.status === "pending").map((stage) => stage.taskId as string),
-                    ...(round.tasks || []).flatMap((task) => (isPendingWorkflowTask(task) ? [task.taskId] : [])),
-                ]),
-            ),
-        ];
+        const pending = conversation ? conversation.rounds.flatMap((round) => [
+            ...(round.result?.status === "pending" && round.result.taskId ? [round.result.taskId] : []),
+            ...(round.stages || []).filter((stage) => stage.taskId && stage.status === "pending").map((stage) => stage.taskId as string),
+            ...(round.tasks || []).flatMap((task) => (isPendingWorkflowTask(task) ? [task.taskId] : [])),
+        ]) : [];
+        const live = toolCallsRef.current.flatMap((call) => call.status === "executing" && call.taskId ? [call.taskId] : []);
+        return [...new Set([...pending, ...live])];
+    };
+    const stopPendingGeneration = async () => {
+        const taskIds = activeVideoTaskIds();
         if (!taskIds.length) {
             message.warning(translate("video.noActiveGenerationToStop"));
             return;
@@ -842,17 +895,44 @@ export default function VideoPage() {
         setActiveId(sessionId);
     }, [sessionId]);
 
+    // 离开页面会卸载状态。记住正在使用的技能会话，回来后继续引导，而不是把回答当成新视频直接生成。
+    useEffect(() => {
+        if (skillResumeAppliedRef.current || skillHandoff || peekSkillCreationHandoff("video") || peekHomepageCreationHandoff("video")) return;
+        const resumed = readResumedSkillConversation("video");
+        if (!resumed) return;
+        skillResumeAppliedRef.current = true;
+        setSelectedSkill(resumed.skill);
+        changeCreationMode("agent");
+        activeIdRef.current = resumed.sessionId;
+        setActiveId(resumed.sessionId);
+        restoreSession(resumed.sessionId);
+    }, [skillHandoff, changeCreationMode, restoreSession]);
+
     useEffect(() => {
         let cancelled = false;
-        void refreshConversations().then(() => {
-            if (cancelled || activeIdRef.current || hasInflightWork()) return;
-            activeIdRef.current = null;
-            setActiveId(null);
+        void refreshConversations().then((nextConversations) => {
+            if (cancelled || activeIdRef.current || hasInflightWork() || skillHandoff || peekHomepageCreationHandoff("video") || peekSkillCreationHandoff("video")) return;
+            const ongoing = [...nextConversations].sort((left, right) => right.updatedAt - left.updatedAt).find((conversation) => {
+                const latest = conversation.rounds.at(-1);
+                return Boolean(latest?.skill?.id) && latest?.result?.status !== "success" && latest?.result?.status !== "pending" && !latest?.result?.video?.url;
+            });
+            const skill = skillOptionFromSnapshot(ongoing?.rounds.at(-1)?.skill);
+            if (!ongoing || !skill) {
+                activeIdRef.current = null;
+                setActiveId(null);
+                return;
+            }
+            skillResumeAppliedRef.current = true;
+            setSelectedSkill(skill);
+            changeCreationMode("agent");
+            activeIdRef.current = ongoing.id;
+            setActiveId(ongoing.id);
+            restoreSession(ongoing.id);
         });
         return () => {
             cancelled = true;
         };
-    }, [hasInflightWork, refreshConversations]);
+    }, [changeCreationMode, hasInflightWork, refreshConversations, restoreSession, skillHandoff]);
 
     useEffect(() => {
         if (!hasRunningGeneration(conversations)) return;
@@ -983,6 +1063,61 @@ export default function VideoPage() {
         }
     };
 
+    const clearDurationContinue = () => {
+        durationAdjustPendingRef.current = false;
+        setDurationContinueReady(false);
+        setDurationContinuePrompt("");
+    };
+
+    const clearModelConfigContinue = () => {
+        modelConfigPendingRef.current = false;
+        setModelConfigContinueReady(false);
+        setModelConfigRoundId("");
+    };
+
+    /** 打开更多设置让用户确认模型。技能配置了默认画幅时，先把它换成当前视频模型可用的尺寸。关闭后才出现继续。 */
+    const beginModelConfigAdjustment = (roundId = "live") => {
+        const ratio = selectedSkill?.aspectRatio?.trim();
+        if (ratio) {
+            const nextSize = sizeFromAspectRatio(config, ratio);
+            if (nextSize !== config.size) {
+                updateVideoSettings("size", nextSize);
+                setVideoDraftSettingsModified(true);
+            }
+        }
+        modelConfigPendingRef.current = true;
+        setModelConfigContinueReady(false);
+        setModelConfigRoundId(roundId);
+        setSettingsOpen(true);
+    };
+
+    /** 把页面时长改成对话要求的秒数，并打开更多设置。关闭设置后才出现继续。 */
+    const beginDurationAdjustment = (seconds: string, promptOverride?: string) => {
+        const parsed = Math.floor(Number(seconds));
+        if (!Number.isSafeInteger(parsed) || parsed < 1) return;
+        const range = readVideoDurationRange(config);
+        const next = range.max >= range.min && range.max >= 1 ? Math.min(range.max, Math.max(range.min, parsed)) : parsed;
+        updateVideoSettings("videoSeconds", String(next));
+        setVideoDraftSettingsModified(true);
+        const promptText = promptOverride?.trim() || [...chatMessagesRef.current].reverse().find((item) => item.role === "user" && item.text.trim())?.text || "";
+        setDurationContinuePrompt(promptText);
+        setDurationContinueReady(false);
+        durationAdjustPendingRef.current = true;
+        setSettingsOpen(true);
+    };
+
+    const closeVideoSettings = () => {
+        setSettingsOpen(false);
+        if (durationAdjustPendingRef.current) {
+            durationAdjustPendingRef.current = false;
+            setDurationContinueReady(true);
+        }
+        if (modelConfigPendingRef.current) {
+            modelConfigPendingRef.current = false;
+            setModelConfigContinueReady(true);
+        }
+    };
+
     const generate = async () => {
         if (isStreaming || isQueued) return;
         const text = prompt.trim();
@@ -1017,7 +1152,7 @@ export default function VideoPage() {
         });
         // 无技能时每次提交都是真实视频生成；选择技能后仅在即将创建生成任务的确认阶段校验报价与余额。
         // 技能市场的开场白只负责开始引导，这一轮还不创建视频任务。
-        const startingSkillGuide = Boolean(selectedSkill) && text === SKILL_MARKET_KICKOFF;
+        const startingSkillGuide = Boolean(selectedSkill) && text === skillMarketKickoff(selectedSkill?.name || "");
         const shouldValidateQuote = !startingSkillGuide && (!selectedSkill?.workflowType || workflowChargingNext || workflowImageConfirmNext);
         if (shouldValidateQuote) {
             // 每次确认生成都必须先显式选择图片模型与参数
@@ -1061,6 +1196,8 @@ export default function VideoPage() {
             }
         }
         const attachments = buildChatAttachments(allRefs);
+        clearDurationContinue();
+        clearModelConfigContinue();
 
         setChatMessages((prev) => {
             const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments, generationStyles: selectedStyles, skill: selectedSkill }];
@@ -1098,7 +1235,7 @@ export default function VideoPage() {
 
     useEffect(() => {
         if (!skillHandoff || skillHandoffStartedRef.current) return;
-        if (creationMode !== "agent" || selectedSkill?.id !== skillHandoff.skill.id || prompt.trim() !== SKILL_MARKET_KICKOFF) return;
+        if (creationMode !== "agent" || selectedSkill?.id !== skillHandoff.skill.id || prompt.trim() !== skillMarketKickoff(skillHandoff.skill.name)) return;
         skillHandoffStartedRef.current = true;
         consumeSkillCreationHandoff("video");
         void generate();
@@ -1149,6 +1286,8 @@ export default function VideoPage() {
         if (/^\d+:\d+$/.test(text)) {
             updateConfig("size", text);
         }
+        clearDurationContinue();
+        clearModelConfigContinue();
         setChatMessages((prev) => {
             const next = [...prev, { id: nanoid(), role: "user" as const, text, skill: selectedSkill }];
             chatMessagesRef.current = next;
@@ -1206,6 +1345,14 @@ export default function VideoPage() {
         }
         setPromptEditDialogOpen(false);
         void handleActionReply(values.video.trim());
+    };
+
+    /** 按动作打开图片或视频文件选择。上传完成后仍走同一条参考素材回传。 */
+    const openReferenceUpload = (kind: "image" | "video") => {
+        const input = uploadChoiceInputRef.current;
+        if (!input) return;
+        input.accept = kind === "video" ? "video/mp4,video/quicktime,video/*" : "image/*";
+        input.click();
     };
 
     /** 技能引导中"上传图片"按钮选择文件后：上传参考素材并在对话区回显，随后自动发送带附件的消息。 */
@@ -1312,9 +1459,13 @@ export default function VideoPage() {
         setVideoReferences([]);
         setSelectedStyles([]);
         setSelectedSkill(null);
+        setSkillMarketTaskActive(false);
+        clearResumedSkillConversation("video");
         setSelectedIds([]);
         setManagementMode(false);
         setMobileSidebarOpen(false);
+        clearDurationContinue();
+        clearModelConfigContinue();
         setChatMessages([]);
         chatMessagesRef.current = [];
         resetThinkings();
@@ -1333,6 +1484,8 @@ export default function VideoPage() {
         setActiveId(conversation.id);
         activeIdRef.current = conversation.id;
         setVideoDraftSettingsModified(false);
+        clearDurationContinue();
+        clearModelConfigContinue();
         setChatMessages([]);
         chatMessagesRef.current = [];
         setToolCalls([]);
@@ -1344,7 +1497,11 @@ export default function VideoPage() {
         setReferences([]);
         setVideoReferences([]);
         setSelectedStyles([]);
-        setSelectedSkill(null);
+        setSkillMarketTaskActive(false);
+        const skill = skillOptionFromSnapshot(conversation.rounds.at(-1)?.skill, skillOptions);
+        setSelectedSkill(skill);
+        if (skill) changeCreationMode("agent");
+        else clearResumedSkillConversation("video");
         setMobileSidebarOpen(false);
         restoreSession(conversation.id);
     };
@@ -1369,6 +1526,8 @@ export default function VideoPage() {
             setVideoReferences([]);
             setSelectedStyles([]);
             setSelectedSkill(null);
+            setSkillMarketTaskActive(false);
+            clearResumedSkillConversation("video");
             resetSession();
         }
         setSelectedIds([]);
@@ -1724,8 +1883,40 @@ export default function VideoPage() {
         const mentionReferences = chatAttachmentsToMentionReferences(attachments, seedanceReferenceLabel);
         return mentionReferences.length ? <PromptMentionText text={userText} references={mentionReferences} /> : userText;
     };
+    const durationThreadMessages = durationContinueReady
+        ? chatMessages.map((message, index, all) => {
+              if (message.role !== "assistant" || !message.action?.options?.some((option) => option.action === "adjust_video_duration")) return message;
+              const laterAdjustment = all.slice(index + 1).some((item) => item.role === "assistant" && item.action?.options?.some((option) => option.action === "adjust_video_duration"));
+              if (laterAdjustment) return message;
+              const userText = [...all.slice(0, index)].reverse().find((item) => item.role === "user" && item.text.trim())?.text || durationContinuePrompt;
+              if (!userText || !message.action) return message;
+              return {
+                  ...message,
+                  action: {
+                      ...message.action,
+                      type: "choice" as const,
+                      options: [{ label: translate("video.continueAfterSettings"), value: userText, action: "continue_after_duration" }],
+                  },
+              };
+          })
+        : chatMessages;
+    const skillThreadMessages = modelConfigContinueReady && modelConfigRoundId === "live"
+        ? durationThreadMessages.map((message, index, all) => {
+              const isModelPrompt = message.role === "assistant" && message.action?.options?.some((option) => option.action === ASK_USER_MODEL_CONFIG);
+              const laterPrompt = all.slice(index + 1).some((item) => item.role === "assistant" && item.action?.options?.some((option) => option.action === ASK_USER_MODEL_CONFIG));
+              if (!isModelPrompt || laterPrompt || !message.action) return message;
+              return {
+                  ...message,
+                  action: {
+                      ...message.action,
+                      type: "choice" as const,
+                      options: [{ label: translate("agentActions.continueAfterModelConfig"), value: MODEL_CONFIG_CONFIRMED_MESSAGE, action: CONTINUE_AFTER_MODEL_CONFIG }],
+                  },
+              };
+          })
+        : durationThreadMessages;
     const chatThreadSection = buildChatThreadSection(
-        chatMessages,
+        skillThreadMessages,
         completedThinkings,
         activeThinking,
         streamingText,
@@ -1759,6 +1950,7 @@ export default function VideoPage() {
             return null;
         },
         renderVideoUserContent,
+        isStreaming || isQueued,
     );
     // 聊天区已实时渲染的生成轮次不再进入历史区，避免同一轮重复展示；纯文本对话保留在聊天区。
     // 当前会话激活时（chatMessages 非空），已落库的纯对话轮次也在聊天区渲染过，历史区一并跳过；
@@ -1775,6 +1967,9 @@ export default function VideoPage() {
                   }),
               }
             : activeConversation;
+    const interactiveChoiceRoundId = chatMessages.length
+        ? undefined
+        : [...(activeConversation?.rounds ?? [])].reverse().find((round) => round.choices?.length && round.result?.status !== "success" && round.result?.status !== "pending" && !round.result?.video?.url)?.id;
     const threadSections = displayedConversation
         ? buildVideoThreadSections(displayedConversation, liveRoundIds, {
               uploadingObjectStorageId,
@@ -1783,6 +1978,18 @@ export default function VideoPage() {
               onUploadObjectStorage: uploadResultToObjectStorage,
               onOpenDetail: openVideoResultDetail,
               onRegenerate: regenerateRound,
+              onAdjustDuration: beginDurationAdjustment,
+              onOpenModelSettings: beginModelConfigAdjustment,
+              onModelConfigContinue: () => void handleActionReply(MODEL_CONFIG_CONFIRMED_MESSAGE),
+              modelConfigContinueRoundId: modelConfigContinueReady ? modelConfigRoundId : "",
+              onDurationContinue: (prompt) => void handleActionReply(prompt),
+              durationContinuePrompt: durationContinueReady ? durationContinuePrompt : "",
+              interactiveChoiceRoundId,
+              onChoiceReply: (value) => void handleActionReply(value),
+              onUploadChoice: () => openReferenceUpload("image"),
+              onUploadVideoChoice: () => openReferenceUpload("video"),
+              onPromptEdit: handlePromptEdit,
+              choiceDisabledReasons: workflowConfirmDisabledReasons,
           })
         : [];
     // 历史记录与当前生成中消息同时展示，避免续写时把已保存历史临时隐藏。
@@ -1845,10 +2052,10 @@ export default function VideoPage() {
                     sections: allThreadSections,
                     onActionReply: (value) => void handleActionReply(value),
                     onPromptEdit: handlePromptEdit,
-                    onUploadImage: () => {
-                        // 与页面"添加参考图"同一上传链路；上传完成后自动发送带附件消息，对话区回显图片
-                        uploadChoiceInputRef.current?.click();
-                    },
+                    onAdjustDuration: (seconds) => beginDurationAdjustment(seconds),
+                    onOpenModelSettings: () => beginModelConfigAdjustment("live"),
+                    onUploadImage: () => openReferenceUpload("image"),
+                    onUploadVideo: () => openReferenceUpload("video"),
                     emptyState: (
                         <div className="flex h-full flex-col justify-center pb-28 pt-12">
                             <div className="relative mx-auto w-full max-w-5xl px-6 sm:px-10 lg:-left-4 lg:px-3">
@@ -1885,6 +2092,7 @@ export default function VideoPage() {
                     actions: composerActions,
                     creationMode,
                     onCreationModeChange: handleCreationModeChange,
+                    chatModeLocked: currentTaskUsesSkill,
                     running: isStreaming || activeConversationPending,
                     queued: isQueued,
                     canSubmit: canGenerate,
@@ -1895,17 +2103,20 @@ export default function VideoPage() {
                     onStyleSelect: (style) => setSelectedStyles([style]),
                     onStyleRemove: (styleId) => setSelectedStyles((current) => current.filter((style) => style.id !== styleId)),
                     onSkillSelect: (skill) => setSelectedSkill(skill),
-                    onSkillRemove: () => setSelectedSkill(null),
+                    onSkillRemove: () => {
+                        setSelectedSkill(null);
+                        clearResumedSkillConversation("video");
+                    },
                     onPasteImages: (files) => void addReferences(files),
                     onSubmit: () => void generate(),
                     onStop: isStreaming || isQueued
-                        ? () => void runCancelWithProviderRequestPolicy(modal, (forfeit) => cancelMessage(forfeit)).catch((error) => message.error(error instanceof Error ? error.message : translate("chat.failedToStopGeneration")))
+                        ? () => void runCancelWithProviderRequestPolicy(modal, (forfeit) => cancelMessage(forfeit), activeVideoTaskIds()).catch((error) => message.error(error instanceof Error ? error.message : translate("chat.failedToStopGeneration")))
                         : activeConversationPending ? () => void stopPendingGeneration() : undefined,
                 }}
                 settings={{
                     open: settingsOpen,
                     title: translate("video.videoSettings"),
-                    onClose: () => setSettingsOpen(false),
+                    onClose: closeVideoSettings,
                     content: (
                         <div className="space-y-4">
                             <VideoSettingsPanel config={config} onConfigChange={handleVideoSettingsChange} theme={theme} showTitle={false} className="space-y-4 px-0 py-0" />
@@ -2202,6 +2413,18 @@ function buildVideoThreadSections(
         onUploadObjectStorage: (video: GeneratedVideo) => void;
         onOpenDetail: (video: GeneratedVideo, round: Round) => void;
         onRegenerate: (round: Round) => Promise<void>;
+        onAdjustDuration: (seconds: string, prompt: string) => void;
+        onOpenModelSettings: (roundId: string) => void;
+        onModelConfigContinue: () => void;
+        modelConfigContinueRoundId: string;
+        onDurationContinue: (prompt: string) => void;
+        durationContinuePrompt: string;
+        interactiveChoiceRoundId?: string;
+        onChoiceReply: (value: string) => void;
+        onUploadChoice: () => void;
+        onUploadVideoChoice: () => void;
+        onPromptEdit: (value: string, assistantText?: string, draftedPrompts?: Record<string, string>) => void;
+        choiceDisabledReasons?: Record<string, string>;
     },
 ): CreationThreadSection[] {
     const sectionMap = new Map<string, CreationThreadSection["rounds"]>();
@@ -2255,7 +2478,40 @@ function buildVideoThreadSections(
             assistantText: buildVideoAssistantText(round),
             draftedPrompts: round.draftedPrompts,
             activities: round.activities,
-            actionBar: round.choices?.length ? <ChoiceHistoryBar choices={round.choices} /> : undefined,
+            actionBar: round.choices?.length && handlers.durationContinuePrompt && handlers.durationContinuePrompt === round.prompt
+                ? (
+                    <div className="pt-2">
+                        <Button type="primary" onClick={() => handlers.onDurationContinue(round.prompt)}>
+                            {translate("video.continueAfterSettings")}
+                        </Button>
+                    </div>
+                )
+                : round.choices?.some((choice) => choice.action === ASK_USER_MODEL_CONFIG) && handlers.modelConfigContinueRoundId === round.id
+                    ? (
+                        <div className="pt-2">
+                            <Button type="primary" onClick={handlers.onModelConfigContinue}>
+                                {translate("agentActions.continueAfterModelConfig")}
+                            </Button>
+                        </div>
+                    )
+                : round.id === handlers.interactiveChoiceRoundId && round.choices?.length
+                    ? (
+                        <ChoiceGroup
+                            options={round.choices}
+                            assistantText={buildVideoAssistantText(round)}
+                            draftedPrompts={round.draftedPrompts}
+                            onReply={handlers.onChoiceReply}
+                            onPromptEdit={handlers.onPromptEdit}
+                            onUpload={handlers.onUploadChoice}
+                            onUploadVideo={handlers.onUploadVideoChoice}
+                            onAdjustDuration={(seconds) => handlers.onAdjustDuration(seconds, round.prompt)}
+                            onOpenModelSettings={() => handlers.onOpenModelSettings(round.id)}
+                            disabledReasons={handlers.choiceDisabledReasons}
+                        />
+                    )
+                    : round.choices?.some((choice) => choice.action === "adjust_video_duration")
+                        ? <ChoiceHistoryBar choices={round.choices} onSelect={(choice) => handlers.onAdjustDuration(choice.value, round.prompt)} />
+                        : round.choices?.length ? <ChoiceHistoryBar choices={round.choices} /> : undefined,
             resultContent: (
                 <div className="space-y-3">
                     {round.stages?.length ? (

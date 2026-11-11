@@ -1,7 +1,7 @@
 "use client";
 
 import { translateMessage } from "@/features/locale/translate";
-import { cancelAiTask, isProviderRequestAlreadySentError, markGenerationCancelForfeit, type ServerAiTask } from "@/services/api/server";
+import { cancelAiTask, getAiTaskInfo, isProviderRequestAlreadySentError, markGenerationCancelForfeit, type ServerAiTask } from "@/services/api/server";
 
 export type CancelRefundOutcome = "empty" | "refunded" | "forfeited" | "declined";
 
@@ -38,10 +38,26 @@ function confirmForfeit(modal: ConfirmModal) {
     });
 }
 
-/** 先按可退款规则取消。服务端拒绝已发送的请求时，确认后只取消这些任务且不退款。 */
+/** 查询哪些图片或视频任务已经把请求发往供应商。查询失败的任务留给后续取消接口判断。 */
+async function submittedMediaTaskIds(taskIds: string[]) {
+    const tasks = await Promise.all(taskIds.map((taskId) => getAiTaskInfo(taskId).catch(() => null)));
+    return taskIds.filter((taskId, index) => {
+        const task = tasks[index];
+        return Boolean(task && isSubmittedMediaTask(task));
+    });
+}
+
+/** 先按可退款规则取消。请求已经进入生成阶段时，先确认再停止，且不退还积分。 */
 export async function cancelAiTasksWithRefundPolicy(taskIds: string[], modal: ConfirmModal): Promise<CancelRefundOutcome> {
     const ids = [...new Set(taskIds.filter(Boolean))];
     if (!ids.length) return "empty";
+    const submitted = await submittedMediaTaskIds(ids);
+    if (submitted.length) {
+        if (!await confirmForfeit(modal)) return "declined";
+        markGenerationCancelForfeit(submitted);
+        await Promise.all(ids.map((taskId) => cancelAiTask(taskId, { forfeitRefund: true })));
+        return "forfeited";
+    }
     const results = await Promise.allSettled(ids.map((taskId) => cancelAiTask(taskId)));
     const blocked = ids.filter((_, index) => {
         const result = results[index];
@@ -57,7 +73,14 @@ export async function cancelAiTasksWithRefundPolicy(taskIds: string[], modal: Co
 }
 
 /** 对话停止先询问服务端。已发送的图片或视频请求需要确认后才真正取消，且不退款。 */
-export async function runCancelWithProviderRequestPolicy(modal: ConfirmModal, cancel: (forfeitSubmittedGeneration: boolean) => Promise<void>) {
+export async function runCancelWithProviderRequestPolicy(modal: ConfirmModal, cancel: (forfeitSubmittedGeneration: boolean) => Promise<void>, taskIds: string[] = []) {
+    const submitted = await submittedMediaTaskIds([...new Set(taskIds.filter(Boolean))]);
+    if (submitted.length) {
+        if (!await confirmForfeit(modal)) return false;
+        markGenerationCancelForfeit(submitted);
+        await cancel(true);
+        return true;
+    }
     try {
         await cancel(false);
         return true;

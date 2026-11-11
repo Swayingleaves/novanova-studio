@@ -32,7 +32,7 @@ import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import type { AgentActivityState, ChatAttachment, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
 import { chatAttachmentsToMentionReferences, PromptMentionText } from "@/features/generation/components/prompt-mention-text";
-import { ChoiceHistoryBar } from "@/features/generation/components/creation-message-thread";
+import { ChoiceGroup, ChoiceHistoryBar } from "@/features/generation/components/creation-message-thread";
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, mergePlanTaskActivityMessage, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { cancelAiTasksWithRefundPolicy, runCancelWithProviderRequestPolicy } from "@/features/generation/lib/cancel-provider-generation";
@@ -65,7 +65,9 @@ import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { useHomepageCreationDraft } from "@/features/homepage/hooks/use-homepage-creation-draft";
 import { consumeHomepageCreationHandoff, peekHomepageCreationHandoff } from "@/features/homepage/lib/homepage-creation-handoff";
 import { useSkillCreationHandoff } from "@/features/skill-market/hooks/use-skill-creation-handoff";
-import { consumeSkillCreationHandoff, SKILL_MARKET_KICKOFF } from "@/features/skill-market/lib/skill-creation-handoff";
+import { consumeSkillCreationHandoff, peekSkillCreationHandoff, skillMarketKickoff } from "@/features/skill-market/lib/skill-creation-handoff";
+import { ASK_USER_MODEL_CONFIG, CONTINUE_AFTER_MODEL_CONFIG, MODEL_CONFIG_CONFIRMED_MESSAGE } from "@/features/skill-market/lib/skill-prompt-actions";
+import { clearResumedSkillConversation, readResumedSkillConversation, skillOptionFromSnapshot, writeResumedSkillConversation } from "@/features/skill-market/lib/skill-conversation-resume";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
@@ -162,11 +164,15 @@ export default function ImagePage() {
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
     const { mode: creationMode, changeMode: changeCreationMode } = useCreationMode("image");
+    const [skillMarketTaskActive, setSkillMarketTaskActive] = useState(false);
+    const skillTaskLockedRef = useRef(false);
     // Chat 模式不走 Agent 规划，风格与技能都不参与生成，切换时清空避免残留
     const handleCreationModeChange = (nextMode: CreationMode) => {
+        if (skillTaskLockedRef.current && nextMode === "chat") return;
         if (nextMode === "chat") {
             setSelectedStyles([]);
             setSelectedSkill(null);
+            clearResumedSkillConversation("image");
         }
         changeCreationMode(nextMode);
     };
@@ -181,6 +187,9 @@ export default function ImagePage() {
     const previousImageReferencesRef = useRef<PromptImageReference[]>([]);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [modelConfigContinueReady, setModelConfigContinueReady] = useState(false);
+    const [modelConfigRoundId, setModelConfigRoundId] = useState("");
+    const modelConfigPendingRef = useRef(false);
     const [imageDraftSettingsModified, setImageDraftSettingsModified] = useState(false);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
@@ -195,6 +204,9 @@ export default function ImagePage() {
     const skillHandoff = useSkillCreationHandoff("image");
     const skillHandoffAppliedRef = useRef(false);
     const skillHandoffStartedRef = useRef(false);
+    const skillMarketEntryRef = useRef(false);
+    if (skillHandoff || peekSkillCreationHandoff("image")) skillMarketEntryRef.current = true;
+    const skillResumeAppliedRef = useRef(false);
     const [homepageReady, setHomepageReady] = useState(false);
     const [focusInitialPrompt, setFocusInitialPrompt] = useState(false);
 
@@ -230,11 +242,39 @@ export default function ImagePage() {
     useEffect(() => {
         if (!skillHandoff || skillHandoffAppliedRef.current) return;
         skillHandoffAppliedRef.current = true;
+        // 技能市场的「去创作」每次都新开对话，不接着上次的技能会话。
+        clearResumedSkillConversation("image");
+        historyRequestVersion.current += 1;
+        activeIdRef.current = null;
+        setActiveId(null);
+        setConversationHistory(null);
+        setChatMessages([]);
+        chatMessagesRef.current = [];
+        setToolCalls([]);
+        toolCallsRef.current = [];
+        resetThinkings();
+        setStreamingText(null);
+        streamingTextRef.current = null;
+        clearModelConfigContinue();
+        resetSession();
         setSelectedSkill(skillHandoff.skill);
+        setSkillMarketTaskActive(true);
         changeCreationMode("agent");
-        setPrompt(SKILL_MARKET_KICKOFF);
+        setPrompt(skillMarketKickoff(skillHandoff.skill.name));
         setFocusInitialPrompt(true);
     }, [skillHandoff, changeCreationMode]);
+
+    useEffect(() => {
+        if (!activeId || !selectedSkill) return;
+        writeResumedSkillConversation("image", { sessionId: activeId, skill: selectedSkill });
+    }, [activeId, selectedSkill]);
+
+    useEffect(() => {
+        if (!selectedSkill) return;
+        const full = skillOptions.find((skill) => skill.id === selectedSkill.id);
+        if (!full || (full.workflowType === selectedSkill.workflowType && full.aspectRatio === selectedSkill.aspectRatio && full.description === selectedSkill.description && full.coverUrl === selectedSkill.coverUrl)) return;
+        setSelectedSkill(full);
+    }, [skillOptions, selectedSkill]);
 
     useEffect(() => {
         let cancelled = false;
@@ -509,6 +549,12 @@ export default function ImagePage() {
     const creditBalance = useModelCreditBalance("image");
     const balanceInsufficient = useInsufficientCreditsPrompt({ enabled: effectiveConfig.modelCosts.some((item) => item.model === model && item.taskType === "image"), requiredCredits: creditCost, availableCredits: creditBalance });
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
+    const currentTaskUsesSkill = skillMarketTaskActive || chatMessages.some((message) => Boolean(message.skill)) || Boolean(activeConversation?.rounds.some((round) => round.skill));
+    skillTaskLockedRef.current = currentTaskUsesSkill;
+    useEffect(() => {
+        if (!currentTaskUsesSkill || creationMode !== "chat") return;
+        changeCreationMode("agent");
+    }, [currentTaskUsesSkill, creationMode, changeCreationMode]);
     const latestRound = activeConversation?.rounds.at(-1);
     const historyModel = !imageDraftSettingsModified && activeId && latestRound?.config ? latestRound.config.imageModel || latestRound.config.model || "" : "";
     // 新对话没有可回显的历史轮次时，直接展示进入页面后已载入的默认配置，样式与改过「更多设置」后一致。
@@ -516,12 +562,17 @@ export default function ImagePage() {
     const historySettingsSummary = !imageDraftSettingsModified && activeId && latestRound?.config ? buildImageSettingsSummary(latestRound.config, effectiveConfig, historyModel) : "";
     const settingsSummary = historySettingsSummary || pageSettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingImageConversation(activeConversation) : false;
-    const stopPendingGeneration = async () => {
+    const activeImageTaskIds = () => {
         const conversation = conversationsRef.current.find((item) => item.id === activeIdRef.current);
-        const taskIds = [...new Set((conversation?.rounds ?? []).flatMap((round) => [
+        const pending = (conversation?.rounds ?? []).flatMap((round) => [
             ...(round.taskId && round.results.some((result) => result.status === "pending") ? [round.taskId] : []),
             ...round.results.flatMap((result) => result.status === "pending" && result.taskId ? [result.taskId] : []),
-        ]))];
+        ]);
+        const live = toolCallsRef.current.flatMap((call) => call.status === "executing" && call.taskId ? [call.taskId] : []);
+        return [...new Set([...pending, ...live])];
+    };
+    const stopPendingGeneration = async () => {
+        const taskIds = activeImageTaskIds();
         if (!taskIds.length) {
             message.warning(translate("generation.noActiveGenerationToStop"));
             return;
@@ -548,10 +599,39 @@ export default function ImagePage() {
         setActiveId(sessionId);
     }, [sessionId]);
 
+    // 离开页面会卸载状态。记住正在使用的技能会话，回来后继续引导，而不是把回答当成新图片直接生成。
+    useEffect(() => {
+        if (skillResumeAppliedRef.current || skillHandoff || peekSkillCreationHandoff("image") || peekHomepageCreationHandoff("image")) return;
+        const resumed = readResumedSkillConversation("image");
+        if (!resumed) return;
+        skillResumeAppliedRef.current = true;
+        setSelectedSkill(resumed.skill);
+        changeCreationMode("agent");
+        activeIdRef.current = resumed.sessionId;
+        setActiveId(resumed.sessionId);
+        restoreSession(resumed.sessionId);
+    }, [skillHandoff, changeCreationMode, restoreSession]);
+
     useEffect(() => {
         let cancelled = false;
         void refreshConversations().then((nextConversations) => {
-            if (cancelled || activeIdRef.current || hasInflightWork()) return;
+            if (cancelled || activeIdRef.current || hasInflightWork() || skillHandoff || peekSkillCreationHandoff("image")) return;
+            if (!peekHomepageCreationHandoff("image")) {
+                const ongoing = [...nextConversations].sort((left, right) => right.updatedAt - left.updatedAt).find((conversation) => {
+                    const latest = conversation.rounds.at(-1);
+                    return Boolean(latest?.skill?.id) && !latest?.results?.some((result) => result.status === "success" || result.status === "pending" || Boolean(result.image?.dataUrl));
+                });
+                const skill = skillOptionFromSnapshot(ongoing?.rounds.at(-1)?.skill);
+                if (ongoing && skill) {
+                    skillResumeAppliedRef.current = true;
+                    setSelectedSkill(skill);
+                    changeCreationMode("agent");
+                    activeIdRef.current = ongoing.id;
+                    setActiveId(ongoing.id);
+                    restoreSession(ongoing.id);
+                    return;
+                }
+            }
             const pendingConversation = findLatestPendingConversation(nextConversations, hasPendingImageConversation);
             if (!pendingConversation) return;
             activeIdRef.current = pendingConversation.id;
@@ -561,7 +641,7 @@ export default function ImagePage() {
         return () => {
             cancelled = true;
         };
-    }, [hasInflightWork, refreshConversations, restoreSession]);
+    }, [changeCreationMode, hasInflightWork, refreshConversations, restoreSession, skillHandoff]);
 
     useEffect(() => {
         if (!hasRunningGeneration(conversations)) return;
@@ -625,6 +705,32 @@ export default function ImagePage() {
         return uploaded;
     };
 
+    const clearModelConfigContinue = () => {
+        modelConfigPendingRef.current = false;
+        setModelConfigContinueReady(false);
+        setModelConfigRoundId("");
+    };
+
+    /** 打开更多设置让用户确认模型。技能配置了默认画幅时，先把它选进设置。关闭后才出现继续。 */
+    const beginModelConfigAdjustment = (roundId = "live") => {
+        const ratio = selectedSkill?.aspectRatio?.trim();
+        if (ratio && ratio !== config.size) {
+            updateImageSettings("size", ratio);
+            setImageDraftSettingsModified(true);
+        }
+        modelConfigPendingRef.current = true;
+        setModelConfigContinueReady(false);
+        setModelConfigRoundId(roundId);
+        setSettingsOpen(true);
+    };
+
+    const closeImageSettings = () => {
+        setSettingsOpen(false);
+        if (!modelConfigPendingRef.current) return;
+        modelConfigPendingRef.current = false;
+        setModelConfigContinueReady(true);
+    };
+
     const generate = async () => {
         if (isStreaming || isQueued) return;
         const text = prompt.trim();
@@ -638,6 +744,7 @@ export default function ImagePage() {
         if (balanceInsufficient) { showInsufficientCredits(); return; }
 
         resetThinkings();
+        clearModelConfigContinue();
 
         // Add user message to chat
         setChatMessages((prev) => {
@@ -666,7 +773,7 @@ export default function ImagePage() {
 
     useEffect(() => {
         if (!skillHandoff || skillHandoffStartedRef.current) return;
-        if (creationMode !== "agent" || selectedSkill?.id !== skillHandoff.skill.id || prompt.trim() !== SKILL_MARKET_KICKOFF) return;
+        if (creationMode !== "agent" || selectedSkill?.id !== skillHandoff.skill.id || prompt.trim() !== skillMarketKickoff(skillHandoff.skill.name)) return;
         skillHandoffStartedRef.current = true;
         consumeSkillCreationHandoff("image");
         void generate();
@@ -681,6 +788,7 @@ export default function ImagePage() {
         if (/^\d+:\d+$/.test(text)) {
             updateConfig("size", text);
         }
+        clearModelConfigContinue();
         setChatMessages((prev) => {
             const next = [...prev, { id: nanoid(), role: "user" as const, text, skill: selectedSkill }];
             chatMessagesRef.current = next;
@@ -740,9 +848,12 @@ export default function ImagePage() {
         setReferences([]);
         setSelectedStyles([]);
         setSelectedSkill(null);
+        setSkillMarketTaskActive(false);
+        clearResumedSkillConversation("image");
         setSelectedIds([]);
         setManagementMode(false);
         setMobileSidebarOpen(false);
+        clearModelConfigContinue();
         setChatMessages([]);
         chatMessagesRef.current = [];
         resetThinkings();
@@ -777,6 +888,7 @@ export default function ImagePage() {
         setActiveId(conversation.id);
         activeIdRef.current = conversation.id;
         setImageDraftSettingsModified(false);
+        clearModelConfigContinue();
         // 清空 chat 状态，切换为历史记录视图
         setChatMessages([]);
         chatMessagesRef.current = [];
@@ -788,7 +900,11 @@ export default function ImagePage() {
         setPrompt("");
         setReferences([]);
         setSelectedStyles([]);
-        setSelectedSkill(null);
+        setSkillMarketTaskActive(false);
+        const skill = skillOptionFromSnapshot(conversation.rounds.at(-1)?.skill, skillOptions);
+        setSelectedSkill(skill);
+        if (skill) changeCreationMode("agent");
+        else clearResumedSkillConversation("image");
         setMobileSidebarOpen(false);
         restoreSession(conversation.id);
         void loadConversationHistory(conversation);
@@ -815,6 +931,8 @@ export default function ImagePage() {
             setReferences([]);
             setSelectedStyles([]);
             setSelectedSkill(null);
+            setSkillMarketTaskActive(false);
+            clearResumedSkillConversation("image");
             resetSession();
         }
         setSelectedIds([]);
@@ -1063,6 +1181,9 @@ export default function ImagePage() {
               }),
           }
         : activeConversation;
+    const interactiveChoiceRoundId = chatMessages.length
+        ? undefined
+        : [...(activeConversation?.rounds ?? [])].reverse().find((round) => round.choices?.length && !round.results.some((result) => result.status === "success" || result.status === "pending" || Boolean(result.image)))?.id;
     const threadSections = displayedConversation
         ? buildImageThreadSections(displayedConversation, {
               uploadingObjectStorageId,
@@ -1072,6 +1193,13 @@ export default function ImagePage() {
               onUploadObjectStorage: uploadResultToObjectStorage,
               onOpenDetail: openImageResultDetail,
               onRegenerate: regenerateRound,
+              interactiveChoiceRoundId,
+              onChoiceReply: (value) => void handleActionReply(value),
+              onOpenModelSettings: beginModelConfigAdjustment,
+              onModelConfigContinue: () => void handleActionReply(MODEL_CONFIG_CONFIRMED_MESSAGE),
+              modelConfigContinueRoundId: modelConfigContinueReady ? modelConfigRoundId : "",
+              onUploadChoice: () => uploadChoiceInputRef.current?.click(),
+              onUploadVideoChoice: () => message.warning(translate("image.imageWorkspaceAcceptsTextOrImageReferences")),
           })
         : [];
 
@@ -1080,8 +1208,23 @@ export default function ImagePage() {
         const mentionReferences = chatAttachmentsToMentionReferences(attachments, (_kind, index) => imageReferenceLabel(index));
         return mentionReferences.length ? <PromptMentionText text={userText} references={mentionReferences} /> : userText;
     };
+    const skillThreadMessages = modelConfigContinueReady && modelConfigRoundId === "live"
+        ? chatMessages.map((message, index, all) => {
+              const isModelPrompt = message.role === "assistant" && message.action?.options?.some((option) => option.action === ASK_USER_MODEL_CONFIG);
+              const laterPrompt = all.slice(index + 1).some((item) => item.role === "assistant" && item.action?.options?.some((option) => option.action === ASK_USER_MODEL_CONFIG));
+              if (!isModelPrompt || laterPrompt || !message.action) return message;
+              return {
+                  ...message,
+                  action: {
+                      ...message.action,
+                      type: "choice" as const,
+                      options: [{ label: translate("agentActions.continueAfterModelConfig"), value: MODEL_CONFIG_CONFIRMED_MESSAGE, action: CONTINUE_AFTER_MODEL_CONFIG }],
+                  },
+              };
+          })
+        : chatMessages;
     const chatThreadSection = buildChatThreadSection(
-        chatMessages,
+        skillThreadMessages,
         completedThinkings,
         activeThinking,
         streamingText,
@@ -1107,6 +1250,7 @@ export default function ImagePage() {
         undefined,
         undefined,
         renderImageUserContent,
+        isStreaming || isQueued,
     );
     // 历史记录与当前生成中消息同时展示；当前待生成轮次仅在聊天区渲染。
     const activeHistory = conversationHistory?.id === activeId ? conversationHistory : null;
@@ -1175,10 +1319,9 @@ export default function ImagePage() {
                 thread={{
                     sections: allThreadSections,
                     onActionReply: (value) => void handleActionReply(value),
-                    onUploadImage: () => {
-                        // 与页面"添加参考图"同一上传链路；上传完成后自动发送带附件消息，对话区回显图片
-                        uploadChoiceInputRef.current?.click();
-                    },
+                    onOpenModelSettings: () => beginModelConfigAdjustment("live"),
+                    onUploadImage: () => uploadChoiceInputRef.current?.click(),
+                    onUploadVideo: () => message.warning(translate("image.imageWorkspaceAcceptsTextOrImageReferences")),
                     emptyState: activeConversation ? (
                         <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-[var(--studio-muted)]" role={activeHistory?.error ? "alert" : "status"}>
                             {activeHistory?.loading ? <LoaderCircle className="size-5 animate-spin" /> : null}
@@ -1221,6 +1364,7 @@ export default function ImagePage() {
                     actions: composerActions,
                     creationMode,
                     onCreationModeChange: handleCreationModeChange,
+                    chatModeLocked: currentTaskUsesSkill,
                     running: isStreaming || activeConversationPending,
                     queued: isQueued,
                     canSubmit: canGenerate,
@@ -1231,17 +1375,20 @@ export default function ImagePage() {
                     onStyleSelect: (style) => setSelectedStyles([style]),
                     onStyleRemove: (styleId) => setSelectedStyles((current) => current.filter((style) => style.id !== styleId)),
                     onSkillSelect: (skill) => setSelectedSkill(skill),
-                    onSkillRemove: () => setSelectedSkill(null),
+                    onSkillRemove: () => {
+                        setSelectedSkill(null);
+                        clearResumedSkillConversation("image");
+                    },
                     onPasteImages: (files) => void addReferences(files),
                     onSubmit: () => void generate(),
                     onStop: isStreaming || isQueued
-                        ? () => void runCancelWithProviderRequestPolicy(modal, (forfeit) => cancelMessage(forfeit)).catch((error) => message.error(error instanceof Error ? error.message : translate("chat.failedToStopGeneration")))
+                        ? () => void runCancelWithProviderRequestPolicy(modal, (forfeit) => cancelMessage(forfeit), activeImageTaskIds()).catch((error) => message.error(error instanceof Error ? error.message : translate("chat.failedToStopGeneration")))
                         : activeConversationPending ? () => void stopPendingGeneration() : undefined,
                 }}
                 settings={{
                     open: settingsOpen,
                     title: translate("image.imageSettings"),
-                    onClose: () => setSettingsOpen(false),
+                    onClose: closeImageSettings,
                     content: (
                         <div className="space-y-4">
                             <ImageSettingsPanel config={config} onConfigChange={handleImageSettingsChange} theme={theme} showTitle={false} showCount={false} className="space-y-4 px-0 py-0" />
@@ -1412,6 +1559,14 @@ function buildImageThreadSections(
         onUploadObjectStorage: (image: GeneratedImage, index: number) => void;
         onOpenDetail: (image: GeneratedImage, index: number, round: Round) => void;
         onRegenerate: (round: Round) => Promise<void>;
+        interactiveChoiceRoundId?: string;
+        onChoiceReply: (value: string) => void;
+        onOpenModelSettings: (roundId: string) => void;
+        onModelConfigContinue: () => void;
+        modelConfigContinueRoundId: string;
+        onUploadChoice: () => void;
+        onUploadVideoChoice: () => void;
+        onPromptEdit?: (value: string, assistantText?: string, draftedPrompts?: Record<string, string>) => void;
     },
 ): CreationThreadSection[] {
     const sectionMap = new Map<string, CreationThreadSection["rounds"]>();
@@ -1450,7 +1605,27 @@ function buildImageThreadSections(
             statusText: buildImageStatusText(round),
             assistantText: buildImageAssistantText(round),
             activities: round.activities,
-            actionBar: round.choices?.length ? <ChoiceHistoryBar choices={round.choices} /> : undefined,
+            actionBar: round.choices?.some((choice) => choice.action === ASK_USER_MODEL_CONFIG) && handlers.modelConfigContinueRoundId === round.id
+                ? (
+                    <div className="pt-2">
+                        <Button type="primary" onClick={handlers.onModelConfigContinue}>
+                            {translate("agentActions.continueAfterModelConfig")}
+                        </Button>
+                    </div>
+                )
+                : round.id === handlers.interactiveChoiceRoundId && round.choices?.length
+                ? (
+                    <ChoiceGroup
+                        options={round.choices}
+                        assistantText={buildImageAssistantText(round)}
+                        onReply={handlers.onChoiceReply}
+                        onPromptEdit={handlers.onPromptEdit}
+                        onUpload={handlers.onUploadChoice}
+                        onUploadVideo={handlers.onUploadVideoChoice}
+                        onOpenModelSettings={() => handlers.onOpenModelSettings(round.id)}
+                    />
+                )
+                : round.choices?.length ? <ChoiceHistoryBar choices={round.choices} /> : undefined,
             resultContent: (
                 <div className="flex flex-wrap items-start gap-3">
                     {round.results.map((result, index) =>

@@ -16,7 +16,8 @@ test("共享输入区在 AI 优化按钮左侧渲染 Agent / Chat 分段开关",
 
     assert.match(composer, /<Segmented/);
     assert.match(composer, /className="creation-composer-mode"/);
-    assert.match(composer, /value=\{chatMode \? "chat" : "agent"\}/);
+    assert.match(composer, /value=\{chatMode && !chatModeLocked \? "chat" : "agent"\}/);
+    assert.match(composer, /disabled: chatModeLocked/);
     assert.match(composer, /disabled=\{requestActive\}/);
     assert.match(composer, /composer-mode/);
     assert.ok(composer.indexOf("composer-mode") < composer.indexOf("{submitActions.map(renderAction)}"), "模式开关应位于提交簇内、AI 优化按钮之前");
@@ -39,6 +40,8 @@ test("图片页和视频页都接入模式并透传给 Agent 请求", () => {
         assert.match(page, /useCreationMode\("(image|video)"\)/);
         assert.match(page, /creationMode,/);
         assert.match(page, /onCreationModeChange: handleCreationModeChange/);
+        assert.match(page, /chatModeLocked: currentTaskUsesSkill/);
+        assert.match(page, /skillTaskLockedRef.current && nextMode === "chat"/);
         assert.match(page, /mode: creationMode/);
         assert.match(page, /creationMode !== "chat" && !ensureModelConfiguration\("text"\)/);
     });

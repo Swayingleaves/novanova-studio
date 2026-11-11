@@ -7,7 +7,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 import { useLocale } from "next-intl";
 import { useCallback, useEffect, useRef } from "react";
 
-import { agentChat, agentRequestStatus, agentReplayPendingTools, agentSubscribeEvents, agentSubmitToolResult, cancelAgentChat, type AgentChatHistoryMessage, type AgentEvent, type CreationSettings } from "@/features/canvas/api/agent";
+import { agentChat, agentRequestStatus, agentReplayPendingTools, agentSubscribeEvents, agentSubmitToolResult, cancelAgentChat, type AgentAction, type AgentChatHistoryMessage, type AgentEvent, type CreationSettings } from "@/features/canvas/api/agent";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { isTerminalAgentRequestStatus, matchesAgentRequest, shouldApplyAgentQueueStatus, type AgentQueueStatus } from "@/features/chat/agent-event-match";
 import { readAiTaskError } from "@/services/api/server";
@@ -26,7 +26,7 @@ interface UseAgentSSEProps {
   onTextDelta: (messageId: string, delta: string) => void;
   onThoughtDelta?: (thoughtId: string, delta: string) => void;
   onThoughtComplete?: (thoughtId: string, durationMs: number) => void;
-  onTaskComplete: (messageId: string, text: string) => void;
+  onTaskComplete: (messageId: string, text: string, action?: AgentAction) => void;
   onCanceled?: (message: string) => void;
   onPlanCreated?: (planId: string, summary: string, taskCount: number) => void;
   onPlanTaskStatus?: (planId: string, taskId: string, status: string, message: string) => void;
@@ -235,7 +235,7 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
       activeRequestRef.current = false;
       queueStatusRef.current = null;
       markRequestTerminal(data.requestId);
-      onTaskCompleteRef.current(data.messageId || "", data.text || "");
+      onTaskCompleteRef.current(data.messageId || "", data.text || "", data.action);
     });
 
     es.addEventListener("canceled", (e: MessageEvent) => {

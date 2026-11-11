@@ -26,15 +26,15 @@ public class SkillRepository {
 
     /** 技能列。 */
     private static final String SKILL_COLUMNS = """
-            id, name, description, target_type, system_prompt, aspect_ratio, cover_url, status, sort_order,
+            id, name, description, target_type, system_prompt, workflow_id, aspect_ratio, cover_url, status, sort_order,
             created_at, updated_at, deleted_at, category, subtitle, audience, usage_steps, owner_user_id,
-            review_status, reject_reason
+            review_status, reject_reason, pending_revision, revision_status, revision_reject_reason
             """;
     /** 带表别名的技能列。 */
     private static final String SKILL_COLUMNS_ALIASED = """
-            s.id, s.name, s.description, s.target_type, s.system_prompt, s.aspect_ratio, s.cover_url, s.status, s.sort_order,
+            s.id, s.name, s.description, s.target_type, s.system_prompt, s.workflow_id, s.aspect_ratio, s.cover_url, s.status, s.sort_order,
             s.created_at, s.updated_at, s.deleted_at, s.category, s.subtitle, s.audience, s.usage_steps, s.owner_user_id,
-            s.review_status, s.reject_reason
+            s.review_status, s.reject_reason, s.pending_revision, s.revision_status, s.revision_reject_reason
             """;
     /** 作者展示名。官方技能留空，由接口返回官方标记。 */
     private static final String AUTHOR_NAME = """
@@ -304,9 +304,9 @@ public class SkillRepository {
      */
     public Mono<Long> createSkill(SkillRecords.SkillRecord record) {
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                INSERT INTO skills(name, description, target_type, system_prompt, aspect_ratio, cover_url, status, sort_order,
+                INSERT INTO skills(name, description, target_type, system_prompt, workflow_id, aspect_ratio, cover_url, status, sort_order,
                     category, subtitle, audience, usage_steps, owner_user_id, review_status, reject_reason)
-                VALUES (:name, :description, :targetType, :systemPrompt, :aspectRatio, :coverUrl, :status, :sortOrder,
+                VALUES (:name, :description, :targetType, :systemPrompt, :workflowId, :aspectRatio, :coverUrl, :status, :sortOrder,
                     :category, :subtitle, :audience, :usageSteps, :ownerUserId, :reviewStatus, :rejectReason)
                 RETURNING id
                 """)
@@ -314,6 +314,7 @@ public class SkillRepository {
                 .bind("description", record.getDescription())
                 .bind("targetType", record.getTargetType())
                 .bind("systemPrompt", record.getSystemPrompt())
+                .bind("workflowId", record.getWorkflowId())
                 .bind("aspectRatio", record.getAspectRatio())
                 .bind("coverUrl", record.getCoverUrl())
                 .bind("status", record.getStatus())
@@ -341,6 +342,7 @@ public class SkillRepository {
                     description = :description,
                     target_type = :targetType,
                     system_prompt = :systemPrompt,
+                    workflow_id = :workflowId,
                     aspect_ratio = :aspectRatio,
                     cover_url = :coverUrl,
                     status = :status,
@@ -349,6 +351,9 @@ public class SkillRepository {
                     subtitle = :subtitle,
                     audience = :audience,
                     usage_steps = :usageSteps,
+                    pending_revision = NULL,
+                    revision_status = '',
+                    revision_reject_reason = '',
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id AND deleted_at IS NULL
                 """)
@@ -357,6 +362,7 @@ public class SkillRepository {
                 .bind("description", record.getDescription())
                 .bind("targetType", record.getTargetType())
                 .bind("systemPrompt", record.getSystemPrompt())
+                .bind("workflowId", record.getWorkflowId())
                 .bind("aspectRatio", record.getAspectRatio())
                 .bind("coverUrl", record.getCoverUrl())
                 .bind("status", record.getStatus())
@@ -382,6 +388,7 @@ public class SkillRepository {
                     description = :description,
                     target_type = :targetType,
                     system_prompt = :systemPrompt,
+                    workflow_id = :workflowId,
                     aspect_ratio = :aspectRatio,
                     cover_url = :coverUrl,
                     category = :category,
@@ -399,6 +406,7 @@ public class SkillRepository {
                 .bind("description", record.getDescription())
                 .bind("targetType", record.getTargetType())
                 .bind("systemPrompt", record.getSystemPrompt())
+                .bind("workflowId", record.getWorkflowId())
                 .bind("aspectRatio", record.getAspectRatio())
                 .bind("coverUrl", record.getCoverUrl())
                 .bind("subtitle", empty(record.getSubtitle()))
@@ -459,12 +467,119 @@ public class SkillRepository {
     public Mono<Long> withdrawSkill(Long id, Long userId) {
         return databaseClient.sql("""
                 UPDATE skills
-                SET review_status = 'private', reject_reason = '', updated_at = CURRENT_TIMESTAMP
+                SET review_status = 'private', reject_reason = '',
+                    pending_revision = NULL, revision_status = '', revision_reject_reason = '',
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id AND owner_user_id = :userId AND deleted_at IS NULL
                   AND review_status IN ('pending', 'published', 'rejected')
                 """)
                 .bind("id", id)
                 .bind("userId", userId)
+                .fetch()
+                .rowsUpdated();
+    }
+
+    /**
+     * 按ID查询未删除技能，供审核读取待更新内容。
+     *
+     * @param id 技能ID
+     * @return 技能记录
+     */
+    public Mono<SkillRecords.SkillRecord> findAnyById(Long id) {
+        return databaseClient.sql("""
+                SELECT %s, '' AS author_name, FALSE AS favorited
+                FROM skills
+                WHERE id = :id AND deleted_at IS NULL
+                """.formatted(SKILL_COLUMNS))
+                .bind("id", id)
+                .map((row, metadata) -> map(row))
+                .one();
+    }
+
+    /**
+     * 保存已发布技能的待审核更新，不改线上字段。
+     *
+     * @param id 技能ID
+     * @param userId 作者用户ID
+     * @param pendingRevision 待审核内容 JSON
+     * @return 更新行数
+     */
+    public Mono<Long> savePendingRevision(Long id, Long userId, String pendingRevision) {
+        return databaseClient.sql("""
+                UPDATE skills
+                SET pending_revision = :pendingRevision,
+                    revision_status = 'pending',
+                    revision_reject_reason = '',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id AND owner_user_id = :userId AND deleted_at IS NULL
+                  AND review_status = 'published'
+                """)
+                .bind("id", id)
+                .bind("userId", userId)
+                .bind("pendingRevision", pendingRevision)
+                .fetch()
+                .rowsUpdated();
+    }
+
+    /**
+     * 审核通过后，用待更新内容替换线上技能。
+     *
+     * @param id 技能ID
+     * @param revision 待更新内容
+     * @return 更新行数
+     */
+    public Mono<Long> applyPendingRevision(Long id, SkillRecords.SkillRecord revision) {
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
+                UPDATE skills
+                SET name = :name,
+                    description = :description,
+                    target_type = :targetType,
+                    system_prompt = :systemPrompt,
+                    workflow_id = :workflowId,
+                    aspect_ratio = :aspectRatio,
+                    cover_url = :coverUrl,
+                    category = :category,
+                    subtitle = :subtitle,
+                    audience = :audience,
+                    usage_steps = :usageSteps,
+                    pending_revision = NULL,
+                    revision_status = '',
+                    revision_reject_reason = '',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id AND deleted_at IS NULL AND review_status = 'published' AND revision_status = 'pending'
+                """)
+                .bind("id", id)
+                .bind("name", revision.getName())
+                .bind("description", revision.getDescription())
+                .bind("targetType", revision.getTargetType())
+                .bind("systemPrompt", revision.getSystemPrompt())
+                .bind("workflowId", revision.getWorkflowId())
+                .bind("aspectRatio", revision.getAspectRatio())
+                .bind("coverUrl", revision.getCoverUrl())
+                .bind("subtitle", empty(revision.getSubtitle()))
+                .bind("audience", empty(revision.getAudience()))
+                .bind("usageSteps", empty(revision.getUsageSteps()).isBlank() ? "[]" : revision.getUsageSteps());
+        spec = R2dbcBindings.bindNullable(spec, "category", revision.getCategory(), String.class);
+        return spec.fetch().rowsUpdated();
+    }
+
+    /**
+     * 驳回已发布技能的更新，线上内容保持不变。
+     *
+     * @param id 技能ID
+     * @param reason 驳回原因
+     * @return 更新行数
+     */
+    public Mono<Long> rejectPendingRevision(Long id, String reason) {
+        return databaseClient.sql("""
+                UPDATE skills
+                SET revision_status = 'rejected',
+                    revision_reject_reason = :reason,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id AND deleted_at IS NULL AND review_status = 'published' AND revision_status = 'pending'
+                """)
+                .bind("id", id)
+                .bind("reason", reason == null ? "" : reason)
                 .fetch()
                 .rowsUpdated();
     }
@@ -615,7 +730,9 @@ public class SkillRepository {
             conditions.add("s.target_type = :targetType");
             binds.add(new BindValue("targetType", request.targetType()));
         }
-        if (request.reviewStatus() != null && !request.reviewStatus().isBlank()
+        if ("pending".equals(request.reviewStatus())) {
+            conditions.add("(s.review_status = 'pending' OR s.revision_status = 'pending')");
+        } else if (request.reviewStatus() != null && !request.reviewStatus().isBlank()
                 && !"all".equalsIgnoreCase(request.reviewStatus())) {
             conditions.add("s.review_status = :reviewStatus");
             binds.add(new BindValue("reviewStatus", request.reviewStatus()));
@@ -685,6 +802,27 @@ public class SkillRepository {
         return result;
     }
 
+    /**
+     * 判断未删除技能中是否已有相同工作流标识。
+     *
+     * @param workflowId 规范化后的工作流标识
+     * @param excludeId 更新时排除的技能ID，创建时为空
+     * @return 是否已存在
+     */
+    public Mono<Boolean> workflowIdExists(String workflowId, Long excludeId) {
+        String sql = """
+                SELECT COUNT(1) AS total
+                FROM skills
+                WHERE deleted_at IS NULL AND lower(workflow_id) = :workflowId
+                """ + (excludeId == null ? "" : " AND id <> :excludeId");
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(sql).bind("workflowId", workflowId);
+        if (excludeId != null) {
+            spec = spec.bind("excludeId", excludeId);
+        }
+        return spec.map((row, metadata) -> row.get("total", Long.class)).one()
+                .map(total -> total != null && total > 0);
+    }
+
     /** 映射数据库行。 */
     private SkillRecords.SkillRecord map(Row row) {
         SkillRecords.SkillRecord record = new SkillRecords.SkillRecord();
@@ -693,6 +831,7 @@ public class SkillRepository {
         record.setDescription(empty(row.get("description", String.class)));
         record.setTargetType(row.get("target_type", String.class));
         record.setSystemPrompt(row.get("system_prompt", String.class));
+        record.setWorkflowId(empty(row.get("workflow_id", String.class)));
         record.setAspectRatio(row.get("aspect_ratio", String.class));
         record.setCoverUrl(empty(row.get("cover_url", String.class)));
         record.setStatus(row.get("status", Integer.class));
@@ -707,6 +846,9 @@ public class SkillRepository {
         record.setOwnerUserId(row.get("owner_user_id", Long.class));
         record.setReviewStatus(row.get("review_status", String.class));
         record.setRejectReason(empty(row.get("reject_reason", String.class)));
+        record.setPendingRevision(row.get("pending_revision", String.class));
+        record.setRevisionStatus(empty(row.get("revision_status", String.class)));
+        record.setRevisionRejectReason(empty(row.get("revision_reject_reason", String.class)));
         record.setAuthorName(empty(row.get("author_name", String.class)));
         record.setFavorited(readFlag(row.get("favorited")));
         return record;

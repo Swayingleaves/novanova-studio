@@ -120,6 +120,7 @@ public class SystemPromptTemplateService {
             case AGENT_STORYBOARD -> systemPrompt.getAgentStoryboardFile();
             case AGENT_SCRIPT -> systemPrompt.getAgentScriptFile();
             case AGENT_STORY_BIBLE -> systemPrompt.getAgentStoryBibleFile();
+            case AGENT_USER_ACTIONS -> systemPrompt.getAgentUserActionsFile();
             case IMAGE_STORYBOARD_ASSET -> systemPrompt.getImageStoryboardAssetFile();
         };
     }

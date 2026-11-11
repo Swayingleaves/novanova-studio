@@ -42,7 +42,7 @@ public class AgentScopeAgentFactory {
      * @return ReActAgent 主Agent
      */
     public ReActAgent mainAgent(Model model, String extraSystemPrompt) {
-        String prompt = promptService.get(PromptTemplateType.AGENT_MAIN);
+        String prompt = promptService.get(PromptTemplateType.AGENT_MAIN) + "\n\n" + promptService.get(PromptTemplateType.AGENT_USER_ACTIONS);
         if (StringUtils.hasText(extraSystemPrompt)) {
             prompt = prompt + "\n\n" + extraSystemPrompt;
         }
@@ -124,7 +124,7 @@ public class AgentScopeAgentFactory {
      * @return ReActAgent 工作流对话Agent
      */
     public ReActAgent workflowConversationAgent(Model model, String conversationPrompt) {
-        return build("workflow-conversation-agent", conversationPrompt, model,
+        return build("workflow-conversation-agent", conversationPrompt + "\n\n" + promptService.get(PromptTemplateType.AGENT_USER_ACTIONS), model,
                 "只能返回 VideoWorkflowConversationTurn 结构化结果，不得调用工具，不得创建生成任务。", true);
     }
 

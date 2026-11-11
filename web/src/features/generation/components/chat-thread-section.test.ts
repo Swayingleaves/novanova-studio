@@ -121,6 +121,32 @@ test("buildChatThreadSection 将思考块挂到最新轮次且不影响计划活
     assert.deepEqual(section?.rounds[1]?.activities, [activity]);
 });
 
+test("buildChatThreadSection 在思考结束、回复未到时标记等待", () => {
+    const messages: ChatMessageItem[] = [{ id: "user-7", role: "user", text: "已确认模型配置" }];
+    const completedThinking: ThinkingBlockState = { id: "reply-7:block-1", text: "确认模型后继续收集信息", durationMs: 1800, collapsed: true };
+
+    const waiting = buildChatThreadSection(messages, [completedThinking], null, null, [], () => null, undefined, undefined, undefined, undefined, true);
+    assert.equal(waiting?.rounds[0]?.awaitingReply, true);
+
+    const thinking = buildChatThreadSection(messages, [], { id: "reply-7:block-2", text: "还在推理", durationMs: 0, collapsed: false }, null, [], () => null, undefined, undefined, undefined, undefined, true);
+    assert.equal(thinking?.rounds[0]?.awaitingReply, undefined);
+
+    const replied = buildChatThreadSection(
+        [...messages, { id: "assistant-7", role: "assistant", text: "这一段打斗按哪种类型做？" }],
+        [completedThinking],
+        null,
+        null,
+        [],
+        () => null,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+    );
+    assert.equal(replied?.rounds[0]?.awaitingReply, undefined);
+});
+
 test("buildChatThreadSection 将画布引导动作绑定到助手所在轮次", () => {
     const action = { type: "navigate" as const, label: "去画布操作", href: "/canvas", initialPrompt: "生成三个分镜" };
     const messages: ChatMessageItem[] = [

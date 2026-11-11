@@ -225,6 +225,8 @@ novanova:
       agent-script-file: ${AI_SYSTEM_PROMPT_AGENT_SCRIPT_FILE:file:./server/config/prompts/agent-script.md}
       # 故事知识库分析 Agent 系统提示词文件路径
       agent-story-bible-file: ${AI_SYSTEM_PROMPT_AGENT_STORY_BIBLE_FILE:file:./server/config/prompts/agent-story-bible.md}
+      # 对话和规划 Agent 共用的用户动作标识清单
+      agent-user-actions-file: ${AI_SYSTEM_PROMPT_AGENT_USER_ACTIONS_FILE:file:./server/config/prompts/agent-user-actions.md}
       # 分镜资产图片提示词模板文件路径
       image-storyboard-asset-file: ${AI_SYSTEM_PROMPT_IMAGE_STORYBOARD_ASSET_FILE:file:./server/config/prompts/image-storyboard-asset.md}
     storyboard-agent:

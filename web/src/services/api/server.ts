@@ -1047,6 +1047,20 @@ export type SkillMarketCard = {
     favorited: boolean;
 };
 
+export type SkillPendingRevision = {
+    name: string;
+    subtitle: string;
+    description: string;
+    category: string;
+    targetType: string;
+    coverUrl: string;
+    aspectRatio: string;
+    audience: string;
+    usageSteps: SkillUsageStep[];
+    systemPrompt: string;
+    workflowId: string;
+};
+
 export type SkillMarketDetail = SkillMarketCard & {
     audience: string;
     usageSteps: SkillUsageStep[];
@@ -1056,6 +1070,10 @@ export type SkillMarketDetail = SkillMarketCard & {
     systemPrompt?: string | null;
     owned: boolean;
     related: SkillMarketCard[];
+    workflowId?: string | null;
+    revisionStatus?: string;
+    revisionRejectReason?: string;
+    pendingRevision?: SkillPendingRevision | null;
 };
 
 export type SkillMineCard = SkillMarketCard & {
@@ -1063,6 +1081,7 @@ export type SkillMineCard = SkillMarketCard & {
     reviewStatus: SkillReviewStatus;
     rejectReason: string;
     owned: boolean;
+    revisionStatus?: string;
 };
 
 export type SaveUserSkillInput = {
@@ -1077,6 +1096,7 @@ export type SaveUserSkillInput = {
     coverUrl?: string;
     audience?: string;
     usageSteps?: SkillUsageStep[];
+    workflowId: string;
 };
 
 export type ServerSkill = {
@@ -1097,8 +1117,10 @@ export type ServerSkill = {
     usageSteps?: SkillUsageStep[];
     ownerUserId?: number | null;
     reviewStatus?: SkillReviewStatus;
+    revisionStatus?: string;
     rejectReason?: string;
     authorName?: string;
+    workflowId?: string | null;
 };
 
 export type ServerSkillListResponse = {
@@ -1142,6 +1164,7 @@ export type ServerSkillInput = {
     subtitle?: string;
     audience?: string;
     usageSteps?: SkillUsageStep[];
+    workflowId: string;
 };
 
 export function createAdminSkill(input: Omit<ServerSkillInput, "id">) {

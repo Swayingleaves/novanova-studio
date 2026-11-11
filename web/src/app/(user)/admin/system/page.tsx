@@ -72,6 +72,9 @@ import { getHomepageTargetPath } from "@/features/homepage/api/homepage-showcase
 import { adminCreditFilterKey, adminCreditUserLabel } from "./admin-credit-utils";
 import { TeamContentScope } from "./components/team-content-scope";
 import { TeamManagement, CurrentTeamManagement } from "./components/team-management";
+import { ModelConfigTextArea } from "./components/model-config-textarea";
+import { SkillPromptLabel } from "@/features/skill-market/components/skill-prompt-help";
+import { SKILL_PROMPT_ACTIONS } from "@/features/skill-market/lib/skill-prompt-actions";
 import { SystemConfiguration, type ConfigurationTabKey } from "./components/system-configuration";
 import { OAuthClientManagement } from "./components/oauth-client-management";
 import { OAuthIntegrationManagement } from "./components/oauth-integration-management";
@@ -2053,6 +2056,7 @@ type SkillFormValues = {
     subtitle?: string;
     audience?: string;
     usageSteps?: SkillUsageStep[];
+    workflowId: string;
 };
 
 const skillReviewLabels: Record<SkillReviewStatus, string> = {
@@ -2074,7 +2078,7 @@ function SkillManagement() {
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
     const [keyword, setKeyword] = useState("");
-    const [targetType, setTargetType] = useState<"all" | "image" | "video" | "canvasSettingGraph">("all");
+    const [targetType, setTargetType] = useState<"image" | "video" | "canvasSettingGraph">("image");
     const [status, setStatus] = useState<number | undefined>();
     const [reviewStatus, setReviewStatus] = useState<"all" | SkillReviewStatus>("all");
     const [rejecting, setRejecting] = useState<ServerSkill | null>(null);
@@ -2119,7 +2123,7 @@ function SkillManagement() {
 
     const openCreate = () => {
         setEditingSkill(null);
-        form.setFieldsValue({ name: "", targetType: "image", description: "", systemPrompt: "", aspectRatio: "16:9", coverUrl: "", sortOrder: 1000, status: 1, category: "image", subtitle: "", audience: "", usageSteps: emptySkillSteps() });
+        form.setFieldsValue({ name: "", targetType, description: "", systemPrompt: "", aspectRatio: "16:9", coverUrl: "", sortOrder: 1000, status: 1, category: targetType === "canvasSettingGraph" ? undefined : targetType, subtitle: "", audience: "", usageSteps: emptySkillSteps(), workflowId: "" });
         setEditOpen(true);
     };
 
@@ -2138,6 +2142,7 @@ function SkillManagement() {
             subtitle: skill.subtitle || "",
             audience: skill.audience || "",
             usageSteps: [...(skill.usageSteps || []), ...emptySkillSteps()].slice(0, 3),
+            workflowId: skill.workflowId || "",
         });
         setEditOpen(true);
     };
@@ -2158,6 +2163,7 @@ function SkillManagement() {
                 subtitle: values.subtitle?.trim() || "",
                 audience: values.audience?.trim() || "",
                 usageSteps: (values.usageSteps || []).map((step) => ({ title: step?.title?.trim() || "", detail: step?.detail?.trim() || "" })),
+                workflowId: values.workflowId.trim(),
             };
             if (editingSkill) {
                 await updateAdminSkill({ id: editingSkill.id, ...input });
@@ -2245,95 +2251,27 @@ function SkillManagement() {
         }
     };
 
-    const columns: ColumnsType<ServerSkill> = [
-        {
-            title: translate("administration.skillName"),
-            dataIndex: "name",
-            render: (name: string, skill) => (
-                <div className="flex min-w-0 items-center gap-2">
-                    <Sparkles className="size-3.5 shrink-0 text-[var(--studio-action)]" />
-                    <span className="truncate font-medium text-[var(--studio-ink)]" title={name}>
-                        {name}
-                    </span>
-                </div>
-            ),
-        },
-        {
-            title: translate("administration.type"),
-            dataIndex: "targetType",
-            width: 110,
-            render: (value: string) => <Tag>{value === "video" ? translate("administration.video") : value === "canvasSettingGraph" ? translate("administration.canvasReferenceSheet") : translate("administration.image")}</Tag>,
-        },
-        {
-            title: translate("administration.skillCategory"),
-            dataIndex: "category",
-            width: 110,
-            render: (value: string) => value ? <Tag>{translate(`skillMarket.${value}`)}</Tag> : <span className="text-[var(--studio-faint)]">—</span>,
-        },
-        {
-            title: translate("administration.reviewFilter"),
-            dataIndex: "reviewStatus",
-            width: 100,
-            render: (value: SkillReviewStatus, skill) => <span className="text-[var(--studio-muted)]">{skill.ownerUserId ? translate(skillReviewLabels[value] || "skillMarket.published") : translate("skillMarket.official")}</span>,
-        },
-        {
-            title: translate("administration.introduction"),
-            dataIndex: "description",
-            ellipsis: true,
-            render: (description: string) => (description ? <span className="text-[var(--studio-muted)]">{description}</span> : <span className="text-[var(--studio-faint)]">—</span>),
-        },
-        {
-            title: translate("administration.defaultAspectRatio"),
-            dataIndex: "aspectRatio",
-            width: 100,
-            render: (value: string) => <span className="tabular-nums text-[var(--studio-muted)]">{value || "16:9"}</span>,
-        },
-        {
-            title: translate("administration.status"),
-            dataIndex: "status",
-            width: 80,
-            render: (value: number) =>
-                value === 1 ? (
-                    <span className="text-[var(--studio-success)]">{translate("administration.enable")}</span>
-                ) : (
-                    <span className="text-[var(--studio-muted)]">{translate("administration.disable_4e6fd0")}</span>
-                ),
-        },
-        {
-            title: translate("administration.sort"),
-            dataIndex: "sortOrder",
-            width: 80,
-            render: (value: number) => <span className="tabular-nums text-[var(--studio-muted)]">{value}</span>,
-        },
-        {
-            title: translate("administration.actions"),
-            key: "actions",
-            width: 160,
-            render: (_, skill) => (
-                <Space size={0}>
-                    <Tooltip title={translate("administration.edit")}>
-                        <Button type="text" size="small" shape="circle" icon={<Edit className="size-3.5" />} onClick={() => openEdit(skill)} aria-label={translate("administration.editSkill", { value0: skill.name })} />
-                    </Tooltip>
-                    {skill.reviewStatus === "pending" && skill.ownerUserId ? (
-                        <>
-                            <Tooltip title={translate("administration.approve")}>
-                                <Button type="text" size="small" shape="circle" icon={<Check className="size-3.5" />} onClick={() => void reviewSkill(skill, true)} aria-label={translate("administration.approve")} />
-                            </Tooltip>
-                            <Tooltip title={translate("administration.reject")}>
-                                <Button type="text" size="small" shape="circle" icon={<X className="size-3.5" />} onClick={() => { setRejecting(skill); setRejectReason(""); }} aria-label={translate("administration.reject")} />
-                            </Tooltip>
-                        </>
-                    ) : null}
-                    <Tooltip title={skill.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable")}>
-                        <Button type="text" size="small" shape="circle" icon={<Power className="size-3.5" />} onClick={() => changeStatus(skill)} aria-label={translate("administration.skill", { value0: skill.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable"), value1: skill.name })} />
-                    </Tooltip>
-                </Space>
-            ),
-        },
-    ];
+    const reviewLabel = (skill: ServerSkill) => {
+        if (skill.revisionStatus === "pending") return translate("skillMarket.updatePending");
+        if (!skill.ownerUserId) return translate("skillMarket.official");
+        return translate(skillReviewLabels[skill.reviewStatus || "published"] || "skillMarket.published");
+    };
 
     return (
         <div>
+            <Tabs
+                activeKey={targetType}
+                items={[
+                    { key: "image", label: translate("administration.image") },
+                    { key: "video", label: translate("administration.video") },
+                    { key: "canvasSettingGraph", label: translate("administration.canvasReferenceSheet") },
+                ]}
+                onChange={(value) => {
+                    setTargetType(value as "image" | "video" | "canvasSettingGraph");
+                    setSelectedRowKeys([]);
+                    setPage(1);
+                }}
+            />
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <Space wrap>
                     <Input.Search
@@ -2344,19 +2282,6 @@ function SkillManagement() {
                         onSearch={() => {
                             setPage(1);
                             void loadSkills(1);
-                        }}
-                    />
-                    <Select
-                        value={targetType}
-                        options={[
-                            { label: translate("administration.allTypes"), value: "all" },
-                            { label: translate("administration.image"), value: "image" },
-                            { label: translate("administration.video"), value: "video" },
-                            { label: translate("administration.canvasReferenceSheet"), value: "canvasSettingGraph" },
-                        ]}
-                        onChange={(value) => {
-                            setTargetType(value);
-                            setPage(1);
                         }}
                     />
                     <Select
@@ -2396,24 +2321,73 @@ function SkillManagement() {
                         {translate("administration.addSkill")}</Button>
                 </Space>
             </div>
-            <Table<ServerSkill>
-                rowKey="id"
-                columns={columns}
-                dataSource={skills}
-                loading={loading}
-                pagination={{
-                    current: page,
-                    pageSize: PAGE_SIZE,
-                    total,
-                    showSizeChanger: false,
-                    onChange: setPage,
-                }}
-                rowSelection={{
-                    selectedRowKeys,
-                    onChange: setSelectedRowKeys,
-                }}
-                locale={{ emptyText: <Empty description={translate("administration.noSkills")} /> }}
-            />
+            {loading ? (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                    {Array.from({ length: 10 }, (_, index) => (
+                        <Skeleton.Image key={index} active className="!h-auto !w-full [&_.ant-skeleton-image]:aspect-[3/4] [&_.ant-skeleton-image]:h-auto [&_.ant-skeleton-image]:w-full" />
+                    ))}
+                </div>
+            ) : skills.length ? (
+                <>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                        {skills.map((skill) => {
+                            const selected = selectedRowKeys.includes(skill.id);
+                            const needsReview = (skill.reviewStatus === "pending" || skill.revisionStatus === "pending") && Boolean(skill.ownerUserId);
+                            return (
+                                <article
+                                    key={skill.id}
+                                    className={`group relative overflow-hidden rounded-md border bg-[var(--studio-surface)] transition ${selected ? "border-[var(--studio-action)] ring-1 ring-[var(--studio-action)]" : "border-[var(--studio-line)] hover:border-[var(--studio-line-strong)]"}`}
+                                >
+                                    <div className="relative aspect-[3/4] overflow-hidden bg-[var(--studio-surface-raised)]">
+                                        <GenerationStyleCover key={skill.coverUrl} style={{ name: skill.name, coverUrl: skill.coverUrl }} className="size-full transition duration-200 group-hover:scale-[1.02] motion-reduce:transform-none" />
+                                        <span className="absolute left-2 top-2">
+                                            <Checkbox
+                                                checked={selected}
+                                                aria-label={skill.name}
+                                                onChange={(event) => setSelectedRowKeys((current) => (event.target.checked ? [...new Set([...current, skill.id])] : current.filter((id) => id !== skill.id)))}
+                                            />
+                                        </span>
+                                        <span className={`absolute right-2 top-2 rounded-sm border px-1.5 py-0.5 text-[11px] ${skill.status === 1 ? "border-[var(--studio-success)] text-[var(--studio-success)]" : "border-[var(--studio-line-strong)] text-[var(--studio-muted)]"}`}>
+                                            {skill.status === 1 ? translate("administration.enable") : translate("administration.disable_4e6fd0")}
+                                        </span>
+                                        <span className="absolute bottom-2 left-2 max-w-[calc(100%-16px)] truncate rounded-sm bg-[var(--studio-surface)] px-1.5 py-0.5 text-[11px] text-[var(--studio-muted)]">{reviewLabel(skill)}</span>
+                                    </div>
+                                    <div className="min-w-0 border-t border-[var(--studio-line)] p-2.5">
+                                        <div className="flex min-w-0 items-center justify-between gap-2">
+                                            <span className="truncate text-sm font-medium text-[var(--studio-ink)]" title={skill.name}>{skill.name}</span>
+                                            <span className="shrink-0 text-[11px] text-[var(--studio-muted)]">{skill.aspectRatio || "16:9"}</span>
+                                        </div>
+                                        <p className="mt-1 truncate text-xs text-[var(--studio-muted)]">{skill.subtitle || skill.description || (skill.category ? translate(`skillMarket.${skill.category}`) : translate("administration.uncategorized"))}</p>
+                                        <div className="mt-2 flex items-center justify-end gap-1">
+                                            <Tooltip title={translate("administration.edit")}>
+                                                <Button type="text" size="small" shape="circle" icon={<Edit className="size-3.5" />} onClick={() => openEdit(skill)} aria-label={translate("administration.editSkill", { value0: skill.name })} />
+                                            </Tooltip>
+                                            {needsReview ? (
+                                                <>
+                                                    <Tooltip title={translate("administration.approve")}>
+                                                        <Button type="text" size="small" shape="circle" icon={<Check className="size-3.5" />} onClick={() => void reviewSkill(skill, true)} aria-label={translate("administration.approve")} />
+                                                    </Tooltip>
+                                                    <Tooltip title={translate("administration.reject")}>
+                                                        <Button type="text" size="small" shape="circle" icon={<X className="size-3.5" />} onClick={() => { setRejecting(skill); setRejectReason(""); }} aria-label={translate("administration.reject")} />
+                                                    </Tooltip>
+                                                </>
+                                            ) : null}
+                                            <Tooltip title={skill.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable")}>
+                                                <Button type="text" size="small" shape="circle" icon={<Power className="size-3.5" />} onClick={() => changeStatus(skill)} aria-label={translate("administration.skill", { value0: skill.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable"), value1: skill.name })} />
+                                            </Tooltip>
+                                        </div>
+                                    </div>
+                                </article>
+                            );
+                        })}
+                    </div>
+                    <div className="mt-5 flex justify-end">
+                        <Pagination current={page} pageSize={PAGE_SIZE} total={total} showSizeChanger={false} onChange={setPage} />
+                    </div>
+                </>
+            ) : (
+                <Empty description={translate("administration.noSkills")} className="border border-dashed border-[var(--studio-line)] py-12" />
+            )}
             <Modal title={editingSkill ? translate("administration.editSkill_149fb4") : translate("administration.addSkill")} open={editOpen} onOk={saveSkill} onCancel={() => setEditOpen(false)} okText={translate("administration.save")} cancelText={translate("administration.cancel")} width={640} confirmLoading={coverUploading}>
                 <Form form={form} layout="vertical">
                     <div className="grid grid-cols-3 gap-3">
@@ -2433,6 +2407,17 @@ function SkillManagement() {
                             />
                         </Form.Item>
                     </div>
+                    <Form.Item
+                        name="workflowId"
+                        label={translate("administration.workflowId")}
+                        extra={translate("administration.workflowIdHint")}
+                        rules={[
+                            { required: true, message: translate("administration.workflowIdRequired") },
+                            { pattern: /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/, message: translate("administration.workflowIdInvalid") },
+                        ]}
+                    >
+                        <Input maxLength={64} placeholder="fight-storyboard" />
+                    </Form.Item>
                         <Form.Item name="description" label={translate("administration.skillIntroduction")}>
                         <Input.TextArea rows={2} maxLength={4000} placeholder={translate("administration.introductionShownInTheSkillSelector")} />
                     </Form.Item>
@@ -2502,10 +2487,13 @@ function SkillManagement() {
                             <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("administration.publicStorageURLIsSavedAndShownInThe")}</p>
                         </div>
                     </div>
-                    <Form.Item name="systemPrompt" label={translate("administration.workflowPrompt")} rules={[{ required: true, message: translate("administration.enterWorkflowPrompt") }]}>
-                        <Input.TextArea
-                            rows={12}
+                    <Form.Item name="systemPrompt" label={<SkillPromptLabel text={translate("administration.workflowPrompt")} />} rules={[{ required: true, message: translate("administration.enterWorkflowPrompt") }]}>
+                        <ModelConfigTextArea
+                            title={translate("administration.workflowPrompt")}
                             placeholder={translate("administration.builtInGenerationInstructionsGuideAgentStepByStep")}
+                            minRows={8}
+                            maxRows={12}
+                            mentions={SKILL_PROMPT_ACTIONS.map((action) => ({ label: translate(`skillMarket.${action.labelKey}`), token: action.token }))}
                         />
                     </Form.Item>
                     <div className="grid grid-cols-3 gap-3">

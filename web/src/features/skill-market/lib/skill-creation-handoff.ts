@@ -2,8 +2,11 @@ import type { SkillOption } from "@/services/api/server";
 
 export type SkillCreationTarget = "image" | "video";
 
-/** 进入创作页后自动发给 Agent 的第一句，用来开始技能引导。 */
-export const SKILL_MARKET_KICKOFF = "开始使用这个技能";
+/** 进入创作页后自动发给 Agent 的第一句。左侧任务标题取这句，所以带上技能名。 */
+export function skillMarketKickoff(skillName: string): string {
+    const name = skillName.trim();
+    return name ? `开始使用【${name}】技能` : "开始使用这个技能";
+}
 
 export type SkillCreationHandoff = {
     target: SkillCreationTarget;

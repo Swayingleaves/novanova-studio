@@ -1397,6 +1397,9 @@ public class NovanovaProperties {
             /** 故事知识库分析Agent文件路径 */
             private String agentStoryBibleFile = "";
 
+            /** 用户动作标识清单文件路径 */
+            private String agentUserActionsFile = "";
+
             /** 分镜资产图片提示词模板文件路径 */
             private String imageStoryboardAssetFile = "";
 
@@ -1578,6 +1581,24 @@ public class NovanovaProperties {
              */
             public void setAgentStoryBibleFile(String agentStoryBibleFile) {
                 this.agentStoryBibleFile = agentStoryBibleFile;
+            }
+
+            /**
+             * 获取用户动作标识清单文件路径。
+             *
+             * @return String 用户动作标识清单文件路径
+             */
+            public String getAgentUserActionsFile() {
+                return agentUserActionsFile;
+            }
+
+            /**
+             * 设置用户动作标识清单文件路径。
+             *
+             * @param agentUserActionsFile String 用户动作标识清单文件路径
+             */
+            public void setAgentUserActionsFile(String agentUserActionsFile) {
+                this.agentUserActionsFile = agentUserActionsFile;
             }
 
             /**
