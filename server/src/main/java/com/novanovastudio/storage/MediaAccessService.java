@@ -85,6 +85,8 @@ public class MediaAccessService {
     public enum Purpose {
         /** 页面预览、图片/视频/音频播放 */
         PREVIEW,
+        /** 任务列表缩略图。支持的服务商在读取时把长边缩到 160 像素 */
+        LIST_THUMBNAIL,
         /** 附件下载 */
         DOWNLOAD,
         /** 第三方模型拉取参考素材 */
@@ -306,9 +308,11 @@ public class MediaAccessService {
         if (cached != null && cached.expiresAt().minus(MIN_REMAINING_TTL).isAfter(Instant.now())) {
             return Mono.just(cached.url());
         }
-        return Mono.fromCallable(() -> objectStorageService.createReadUrl(config, key,
-                        StringUtils.hasText(fileName) ? fileName : lastSegment(key),
-                        StringUtils.hasText(mimeType) ? mimeType : null, download, expiresAt))
+        String resolvedName = StringUtils.hasText(fileName) ? fileName : lastSegment(key);
+        String resolvedMimeType = StringUtils.hasText(mimeType) ? mimeType : null;
+        return Mono.fromCallable(() -> purpose == Purpose.LIST_THUMBNAIL
+                        ? objectStorageService.createListThumbnailReadUrl(config, key, resolvedName, resolvedMimeType, download, expiresAt)
+                        : objectStorageService.createReadUrl(config, key, resolvedName, resolvedMimeType, download, expiresAt))
                 .subscribeOn(Schedulers.boundedElastic())
                 .doOnNext(url -> {
                     if (signedUrls.size() > SIGNED_URL_CACHE_LIMIT) {

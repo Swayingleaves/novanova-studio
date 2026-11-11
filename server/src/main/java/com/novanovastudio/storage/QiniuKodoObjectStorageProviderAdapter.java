@@ -53,9 +53,47 @@ public class QiniuKodoObjectStorageProviderAdapter implements ObjectStorageProvi
      */
     @Override
     public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        return presign(config, key, fileName, download, expiresAt, false);
+    }
+
+    /**
+     * 签发图片处理缩略图地址，宽度不超过 160 像素，并纳入私有空间签名。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @return 带 imageView2 的临时只读地址
+     */
+    @Override
+    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        return presign(config, key, fileName, download, expiresAt, true);
+    }
+
+    /**
+     * 用七牛 SDK 签发临时只读地址。处理参数必须写进地址后再签名。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @param thumbnail 是否附加列表缩略图处理参数
+     * @return 临时只读地址
+     */
+    private String presign(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, boolean download, java.time.Instant expiresAt, boolean thumbnail) {
         validate(config);
         String url = ObjectStorageUrlBuilder.buildPublicUrl(config.publicBaseUrl(), key);
-        if (download && StringUtils.hasText(fileName)) url += "?attname=" + java.net.URLEncoder.encode(fileName, java.nio.charset.StandardCharsets.UTF_8);
+        String separator = "?";
+        if (thumbnail) {
+            url += separator + "imageView2/2/w/160";
+            separator = "&";
+        }
+        if (download && StringUtils.hasText(fileName)) {
+            url += separator + "attname=" + java.net.URLEncoder.encode(fileName, java.nio.charset.StandardCharsets.UTF_8);
+        }
         return Auth.create(config.accessKey(), config.secretKey()).privateDownloadUrlWithDeadline(url, expiresAt.getEpochSecond());
     }
 

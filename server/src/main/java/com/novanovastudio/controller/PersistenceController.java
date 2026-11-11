@@ -430,6 +430,17 @@ public class PersistenceController {
     }
 
     /**
+     * 批量换取列表缩略图的临时读地址。支持的对象存储会在读取时缩小图片。
+     *
+     * @param request MediaAccessRequest 媒体存储键列表
+     * @return Mono&lt;ApiResponse&lt;MediaAccessResponse&gt;&gt; 缩略图读地址明细
+     */
+    @PostMapping("/media/batchListThumbnailAccess")
+    public Mono<ApiResponse<PersistenceDtos.MediaAccessResponse>> batchListThumbnailAccess(@Valid @RequestBody PersistenceDtos.MediaAccessRequest request) {
+        return persistenceService.batchListThumbnailAccess(request.storageKeys()).map(ApiResponse::ok);
+    }
+
+    /**
      * 下载当前用户的媒体文件。
      *
      * @param request MediaInfoRequest 媒体存储键请求

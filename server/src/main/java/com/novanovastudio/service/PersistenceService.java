@@ -1734,6 +1734,27 @@ public class PersistenceService {
      * @return Mono<MediaAccessResponse> 读地址明细
      */
     public Mono<PersistenceDtos.MediaAccessResponse> batchMediaAccess(List<String> storageKeys) {
+        return batchMediaAccess(storageKeys, MediaAccessService.Purpose.PREVIEW);
+    }
+
+    /**
+     * 批量换取当前用户媒体的列表缩略图地址。
+     *
+     * @param storageKeys List&lt;String&gt; 媒体存储键
+     * @return Mono&lt;MediaAccessResponse&gt; 缩略图读地址明细
+     */
+    public Mono<PersistenceDtos.MediaAccessResponse> batchListThumbnailAccess(List<String> storageKeys) {
+        return batchMediaAccess(storageKeys, MediaAccessService.Purpose.LIST_THUMBNAIL);
+    }
+
+    /**
+     * 按用途批量换取当前用户媒体的临时读地址。
+     *
+     * @param storageKeys List&lt;String&gt; 媒体存储键
+     * @param purpose MediaAccessService.Purpose 读地址用途
+     * @return Mono&lt;MediaAccessResponse&gt; 读地址明细
+     */
+    private Mono<PersistenceDtos.MediaAccessResponse> batchMediaAccess(List<String> storageKeys, MediaAccessService.Purpose purpose) {
         List<String> normalized = storageKeys == null ? List.of() : storageKeys.stream()
                 .filter(StringUtils::hasText).map(String::trim).distinct().toList();
         if (normalized.isEmpty()) {
@@ -1744,7 +1765,7 @@ public class PersistenceService {
         }
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> repository.getMediaBatch(userId, normalized).collectList()
-                        .flatMap(records -> mediaAccessService.signAll(records, MediaAccessService.Purpose.PREVIEW))
+                        .flatMap(records -> mediaAccessService.signAll(records, purpose))
                         .map(accesses -> new PersistenceDtos.MediaAccessResponse(normalized.stream().map(key -> {
                             MediaAccessService.Access access = accesses.get(key);
                             return new PersistenceDtos.MediaAccessItem(key, access == null ? "" : access.url(), access == null ? null : access.expiresAt());

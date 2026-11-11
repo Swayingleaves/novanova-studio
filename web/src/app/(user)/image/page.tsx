@@ -23,6 +23,7 @@ import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
 import { RecentReferenceAssetPicker } from "@/features/generation/components/recent-reference-asset-picker";
 import { ImageSettingsPanel, imageQualityLabel, imageResolutionLabel, imageSizeLabel } from "@/features/generation/components/image-settings-panel";
+import { ImageListThumbnail } from "@/features/generation/components/image-list-thumbnail";
 import { MEDIA_FALLBACK_IMAGE, MediaPreview, useMediaFallback } from "@/features/generation/components/media-fallback";
 import { useModelCreditBalance } from "@/features/team/credit-balance";
 import { requestCreditCost } from "@/features/generation/constants/credits";
@@ -1541,7 +1542,9 @@ function buildImageConversationItems(conversations: Conversation[], activeId: st
             id: conversation.id,
             title: conversation.title,
             subtitle: translate("image.rounds", { value0: formatConversationTime(conversation.updatedAt), value1: conversation.rounds.length }),
-            preview: <MediaPreview kind="image" src={latestImage?.dataUrl} className="size-10 rounded-xl object-cover" />,
+            preview: latestImage?.storageKey
+                ? <ImageListThumbnail storageKey={latestImage.storageKey} className="size-10 rounded-xl object-cover" />
+                : <MediaPreview kind="image" src={latestImage?.dataUrl} className="size-10 rounded-xl object-cover" />,
             active: activeId === conversation.id,
             selected: selectedIds.includes(conversation.id),
             status: isSessionBusy(conversation.id) ? "running" : getGenerationConversationStatus(conversation),

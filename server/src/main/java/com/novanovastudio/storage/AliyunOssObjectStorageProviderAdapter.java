@@ -52,6 +52,38 @@ public class AliyunOssObjectStorageProviderAdapter implements ObjectStorageProvi
      */
     @Override
     public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        return presign(config, key, fileName, mimeType, download, expiresAt, null);
+    }
+
+    /**
+     * 签发带图片处理的缩略图地址，长边不超过 160 像素，不放大小图。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @return 带 image/resize 的临时 GET 地址
+     */
+    @Override
+    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        return presign(config, key, fileName, mimeType, download, expiresAt, "image/resize,m_lfit,w_160,h_160");
+    }
+
+    /**
+     * 用阿里云 SDK 签发临时 GET 地址。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @param process 图片处理参数，原图读取时为空
+     * @return 临时 GET 地址
+     */
+    private String presign(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, String process) {
         validate(config);
         ClientBuilderConfiguration clientConfiguration = new ClientBuilderConfiguration();
         clientConfiguration.setSignatureVersion(SignVersion.V4);
@@ -60,6 +92,9 @@ public class AliyunOssObjectStorageProviderAdapter implements ObjectStorageProvi
         try {
             var request = new com.aliyun.oss.model.GeneratePresignedUrlRequest(config.bucket(), key, com.aliyun.oss.HttpMethod.GET);
             request.setExpiration(java.util.Date.from(expiresAt));
+            if (org.springframework.util.StringUtils.hasText(process)) {
+                request.setProcess(process);
+            }
             var headers = new com.aliyun.oss.model.ResponseHeaderOverrides();
             if (org.springframework.util.StringUtils.hasText(fileName)) {
                 headers.setContentDisposition(org.springframework.http.ContentDisposition.builder(download ? "attachment" : "inline")

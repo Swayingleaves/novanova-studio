@@ -68,11 +68,46 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
      */
     @Override
     public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        return presign(config, key, fileName, mimeType, download, expiresAt, false);
+    }
+
+    /**
+     * 签发数据万象缩略图地址，长边不超过 160 像素。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @return 带 imageMogr2 的临时 GET 地址
+     */
+    @Override
+    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        return presign(config, key, fileName, mimeType, download, expiresAt, true);
+    }
+
+    /**
+     * 用腾讯云 SDK 签发临时 GET 地址。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @param thumbnail 是否附加列表缩略图处理参数
+     * @return 临时 GET 地址
+     */
+    private String presign(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, boolean thumbnail) {
         validate(config);
         COSClient client = createClient(config);
         try {
             var request = new com.qcloud.cos.model.GeneratePresignedUrlRequest(config.bucket(), key, com.qcloud.cos.http.HttpMethodName.GET);
             request.setExpiration(java.util.Date.from(expiresAt));
+            if (thumbnail) {
+                request.addRequestParameter("imageMogr2/thumbnail/160x", null);
+            }
             var headers = new com.qcloud.cos.model.ResponseHeaderOverrides();
             if (StringUtils.hasText(fileName)) {
                 headers.setContentDisposition(org.springframework.http.ContentDisposition.builder(download ? "attachment" : "inline")

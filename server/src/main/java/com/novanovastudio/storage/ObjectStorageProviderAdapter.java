@@ -30,6 +30,23 @@ public interface ObjectStorageProviderAdapter {
     }
 
     /**
+     * 签发长边不超过 160 像素的列表缩略图地址。
+     * <p>
+     * 服务商不能在读取时缩放时返回 null，调用方再决定是否使用原图地址。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否要求附件下载
+     * @param expiresAt 到期时间
+     * @return 缩略图临时地址，不支持时返回 null
+     */
+    default String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        return null;
+    }
+
+    /**
      * 获取适配器支持的服务商标识。
      *
      * @return String 服务商标识

@@ -1388,6 +1388,11 @@ export function batchGetServerMediaAccess(storageKeys: string[]) {
     return serverPost<{ items: ServerMediaAccessItem[] }>("/media/batchAccess", { storageKeys });
 }
 
+/** 批量换取任务列表缩略图地址。支持的对象存储会在读取时把长边缩到 160 像素。 */
+export function batchGetServerListThumbnailAccess(storageKeys: string[]) {
+    return serverPost<{ items: ServerMediaAccessItem[] }>("/media/batchListThumbnailAccess", { storageKeys });
+}
+
 export async function downloadServerMedia(storageKey: string) {
     const response = await requestServer("/media/downloadMedia", {
         method: "POST",

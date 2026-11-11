@@ -17,6 +17,7 @@ import java.util.function.Function;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
+import org.springframework.util.StringUtils;
 
 /**
  * @title        ObjectStorageService.java
@@ -157,6 +158,25 @@ public class ObjectStorageService {
      */
     public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
         return providerAdapter(config).createReadUrl(config, key, fileName, mimeType, download, expiresAt);
+    }
+
+    /**
+     * 签发列表缩略图地址。服务商支持读取时缩放则返回小图地址，否则返回原图地址。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否作为附件下载
+     * @param expiresAt 到期时间
+     * @return 缩略图或原图的临时只读地址
+     */
+    public String createListThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        String thumbnail = providerAdapter(config).createThumbnailReadUrl(config, key, fileName, mimeType, download, expiresAt);
+        if (StringUtils.hasText(thumbnail)) {
+            return thumbnail;
+        }
+        return createReadUrl(config, key, fileName, mimeType, download, expiresAt);
     }
 
     /**
