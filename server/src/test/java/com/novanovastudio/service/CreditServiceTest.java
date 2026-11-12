@@ -75,6 +75,7 @@ class CreditServiceTest {
                     }
                     return Mono.just(signed);
                 });
+        when(persistenceService.videoCoverUrls(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.just(new LinkedHashMap<>()));
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -90,11 +91,11 @@ class CreditServiceTest {
         LocalDate endDate = LocalDate.of(2026, 7, 31);
         CreditDtos.AdminTaskRecordItem firstTask = new CreditDtos.AdminTaskRecordItem(
                 "task-1", "image", "model-id", "success", "提示词", null, null, null,
-                java.math.BigDecimal.TEN, List.of(), null, "2026-07-02T12:00:00+08:00", null,
+                java.math.BigDecimal.TEN, List.of(), List.of(), List.of(), null, "2026-07-02T12:00:00+08:00", null,
                 8L, "creator", "创作者", "creator@example.com");
         CreditDtos.AdminTaskRecordItem secondTask = new CreditDtos.AdminTaskRecordItem(
                 "task-2", "image", "model-id", "success", "提示词", null, null, null,
-                java.math.BigDecimal.ONE, List.of(), null, "2026-07-03T12:00:00+08:00", null,
+                java.math.BigDecimal.ONE, List.of(), List.of(), List.of(), null, "2026-07-03T12:00:00+08:00", null,
                 9L, "another-creator", null, "another@example.com");
         when(creditRepository.listAdminTaskRecords(org.mockito.ArgumentMatchers.any(CreditRepository.TaskRecordQuery.class), anyInt(), anyInt()))
                 .thenAnswer(invocation -> {
@@ -132,7 +133,7 @@ class CreditServiceTest {
         String freshUrl = "https://bucket.oss-cn-hangzhou.aliyuncs.com/generated/result.png?Expires=999&Signature=fresh";
         CreditDtos.AdminTaskRecordItem task = new CreditDtos.AdminTaskRecordItem(
                 "task-1", "image", "model-id", "success", "提示词", "1024", "1:1", null,
-                java.math.BigDecimal.TEN, List.of(expiredUrl), null, "2026-07-02T12:00:00+08:00", "2026-07-02T12:01:00+08:00",
+                java.math.BigDecimal.TEN, List.of(expiredUrl), List.of(), List.of(), null, "2026-07-02T12:00:00+08:00", "2026-07-02T12:01:00+08:00",
                 8L, "creator", "创作者", "creator@example.com");
         when(creditRepository.listAdminTaskRecords(org.mockito.ArgumentMatchers.any(CreditRepository.TaskRecordQuery.class), anyInt(), anyInt()))
                 .thenReturn(Flux.just(task));

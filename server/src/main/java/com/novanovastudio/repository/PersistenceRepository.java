@@ -1053,6 +1053,23 @@ public class PersistenceRepository {
     }
 
     /**
+     * 按存储键批量查询媒体元数据，不限定用户。
+     * <p>
+     * 只供已经完成数据权限校验的服务端流程使用，例如按任务记录反查生成结果的视频封面。
+     *
+     * @param storageKeys List<String> 媒体存储键列表
+     * @return Flux<MediaFileRecord> 媒体记录流
+     */
+    public Flux<PersistenceRecords.MediaFileRecord> getMediaBatchByKeys(List<String> storageKeys) {
+        if (storageKeys == null || storageKeys.isEmpty()) {
+            return Flux.empty();
+        }
+        String sql = "SELECT storage_key, user_id, kind, source_url, object_storage_config_id, object_storage_provider, object_storage_url, object_storage_key, bucket, region, mime_type, bytes, width, height, duration_ms, metadata::text AS metadata, status, created_at, updated_at FROM media_files WHERE status = 1 AND storage_key IN (" + R2dbcBindings.namedPlaceholders("storageKey", storageKeys.size()) + ")";
+        DatabaseClient.GenericExecuteSpec spec = R2dbcBindings.bindList(databaseClient.sql(sql), "storageKey", storageKeys);
+        return spec.map((row, metadata) -> RowMappers.media(row)).all();
+    }
+
+    /**
      * 删除媒体元数据
      *
      * @param userId Long 用户ID

@@ -1776,6 +1776,54 @@ public class PersistenceService {
     }
 
     /**
+     * 按存储键批量签发视频封面的临时读地址，不限定用户。
+     * <p>
+     * 供已经完成数据权限校验的服务端流程使用，例如积分任务记录按生成结果反查视频封面。
+     *
+     * @param storageKeys List&lt;String&gt; 视频媒体存储键
+     * @return Mono&lt;Map&lt;String, String&gt;&gt; 存储键到封面地址的映射，没有封面时地址为空串
+     */
+    public Mono<Map<String, String>> videoCoverUrls(List<String> storageKeys) {
+        List<String> normalized = storageKeys == null ? List.of() : storageKeys.stream()
+                .filter(StringUtils::hasText).map(String::trim).distinct().toList();
+        if (normalized.isEmpty()) {
+            return Mono.just(Map.of());
+        }
+        if (normalized.size() > 200) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "单次最多换取200个媒体地址"));
+        }
+        return repository.getMediaBatchByKeys(normalized).collectList()
+                .flatMap(records -> {
+                    Map<String, PersistenceRecords.MediaFileRecord> byKey = new LinkedHashMap<>();
+                    records.forEach(record -> byKey.put(record.getStorageKey(), record));
+                    return Flux.fromIterable(normalized)
+                            .concatMap(key -> videoCoverUrl(byKey.get(key), key))
+                            .collectMap(Map.Entry::getKey, Map.Entry::getValue, LinkedHashMap::new);
+                });
+    }
+
+    /**
+     * 签发单条视频封面的临时读地址，没有封面时返回空串。
+     *
+     * @param record MediaFileRecord 视频媒体记录
+     * @param storageKey String 请求中的视频存储键
+     * @return Mono&lt;Map.Entry&lt;String, String&gt;&gt; 存储键与封面地址
+     */
+    private Mono<Map.Entry<String, String>> videoCoverUrl(PersistenceRecords.MediaFileRecord record, String storageKey) {
+        String coverObjectKey = videoCoverObjectKey(record);
+        if (record == null || !StringUtils.hasText(coverObjectKey) || !StringUtils.hasText(record.getObjectStorageConfigId())) {
+            return Mono.just(Map.entry(storageKey, ""));
+        }
+        return mediaAccessService.signObject(record.getObjectStorageConfigId(), coverObjectKey, "cover.jpg", "image/jpeg", MediaAccessService.Purpose.PREVIEW, false)
+                .map(access -> Map.entry(storageKey, access.url()))
+                .defaultIfEmpty(Map.entry(storageKey, ""))
+                .onErrorResume(error -> {
+                    log.error("签发视频封面地址失败: storageKey={}", storageKey, error);
+                    return Mono.just(Map.entry(storageKey, ""));
+                });
+    }
+
+    /**
      * 按用途批量换取当前用户媒体的临时读地址。
      *
      * @param storageKeys List&lt;String&gt; 媒体存储键

@@ -13,6 +13,13 @@ const thumbnailStore = localforage.createInstance({
 
 type PendingThumbnail = { storageKey: string; resolve: (blob: Blob | null) => void };
 
+/** 列表缩略图缓存键：优先用媒体存储键，没有时用去掉签名参数的地址。 */
+export function listThumbnailCacheKey(storageKey?: string, url?: string) {
+    const key = storageKey?.trim();
+    if (key) return key;
+    return url?.trim().split("?")[0] || "";
+}
+
 const pending: PendingThumbnail[] = [];
 const inflight = new Map<string, Promise<Blob | null>>();
 let scheduled = false;
@@ -46,6 +53,32 @@ export function loadImageListThumbnail(storageKey: string): Promise<Blob | null>
             }, 0);
         }
     });
+    inflight.set(key, task);
+    void task.finally(() => {
+        if (inflight.get(key) === task) inflight.delete(key);
+    });
+    return task;
+}
+
+/**
+ * 读取服务端已经签好地址的列表缩略图。
+ * <p>
+ * 用于无法按存储键批量换取地址的列表（例如管理员查看全站任务记录）。
+ * 缓存键优先用媒体存储键，没有存储键时用去掉签名参数的地址，命中缓存后不再请求对象存储。
+ */
+export function loadRemoteListThumbnail(cacheKey: string, url: string): Promise<Blob | null> {
+    const key = cacheKey.trim();
+    const target = url.trim();
+    if (!key || !target) return Promise.resolve(null);
+    const current = inflight.get(key);
+    if (current) return current;
+    const task = (async () => {
+        const cached = await thumbnailStore.getItem<Blob>(teamStorageKey(key)).catch(() => null);
+        if (cached instanceof Blob && cached.size > 0) return cached;
+        const shrunk = await fetchAndShrinkThumbnail(target, key);
+        if (shrunk) await thumbnailStore.setItem(teamStorageKey(key), shrunk).catch(() => undefined);
+        return shrunk;
+    })();
     inflight.set(key, task);
     void task.finally(() => {
         if (inflight.get(key) === task) inflight.delete(key);
@@ -88,24 +121,22 @@ async function resolveThumbnailBatch(batch: PendingThumbnail[]) {
             deliver(storageKey, null);
             return;
         }
-        try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                deliver(storageKey, null);
-                return;
-            }
-            const shrunk = await shrinkThumbnail(await response.blob());
-            if (!shrunk?.size) {
-                deliver(storageKey, null);
-                return;
-            }
-            await thumbnailStore.setItem(teamStorageKey(storageKey), shrunk).catch(() => undefined);
-            deliver(storageKey, shrunk);
-        } catch (error) {
-            console.error("读取列表缩略图失败", storageKey, error);
-            deliver(storageKey, null);
-        }
+        const shrunk = await fetchAndShrinkThumbnail(url, storageKey);
+        if (shrunk) await thumbnailStore.setItem(teamStorageKey(storageKey), shrunk).catch(() => undefined);
+        deliver(storageKey, shrunk);
     }));
+}
+
+async function fetchAndShrinkThumbnail(url: string, label: string): Promise<Blob | null> {
+    try {
+        const response = await fetch(url);
+        if (!response.ok) return null;
+        const shrunk = await shrinkThumbnail(await response.blob());
+        return shrunk?.size ? shrunk : null;
+    } catch (error) {
+        console.error("读取列表缩略图失败", label, error);
+        return null;
+    }
 }
 
 async function shrinkThumbnail(blob: Blob): Promise<Blob | null> {

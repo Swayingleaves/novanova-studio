@@ -18,6 +18,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -453,14 +454,24 @@ public class CreditService {
                             persistenceService.getPlatformModelConfigs().map(CreditService::displayNameIndex),
                             creditRepository.listTaskRecords(query, page, pageSize).collectList(),
                             creditRepository.countTaskRecords(query))
-                    .flatMap(result -> signResultUrls(result.getT2(), CreditDtos.TaskRecordItem::resultUrls)
-                            .map(replacements -> new CreditDtos.TaskRecordListResponse(result.getT2().stream()
-                                    .map(item -> new CreditDtos.TaskRecordItem(item.taskId(), item.taskType(),
+                    .flatMap(result -> Mono.zip(
+                                    signResultUrls(result.getT2(), CreditDtos.TaskRecordItem::resultUrls),
+                                    signThumbnailUrls(result.getT2(), CreditDtos.TaskRecordItem::taskType,
+                                            CreditDtos.TaskRecordItem::resultUrls, CreditDtos.TaskRecordItem::storageKeys))
+                            .map(signed -> {
+                                List<CreditDtos.TaskRecordItem> items = new ArrayList<>(result.getT2().size());
+                                for (int index = 0; index < result.getT2().size(); index++) {
+                                    CreditDtos.TaskRecordItem item = result.getT2().get(index);
+                                    items.add(new CreditDtos.TaskRecordItem(item.taskId(), item.taskType(),
                                             resolveModelDisplayName(result.getT1(), item.taskType(), item.model()), item.status(), item.prompt(),
                                             item.resolution(), item.size(), item.seconds(), item.consumedCredits(),
-                                            signedResultUrls(item.resultUrls(), replacements),
-                                            item.errorMessage(), item.createdAt(), item.completedAt()))
-                                    .toList(), result.getT3())));
+                                            signedResultUrls(item.resultUrls(), signed.getT1()),
+                                            item.storageKeys(),
+                                            signed.getT2().get(index),
+                                            item.errorMessage(), item.createdAt(), item.completedAt()));
+                                }
+                                return new CreditDtos.TaskRecordListResponse(items, result.getT3());
+                            }));
         });
     }
 
@@ -489,15 +500,91 @@ public class CreditService {
                             persistenceService.getPlatformModelConfigs().map(CreditService::displayNameIndex),
                             creditRepository.listAdminTaskRecords(query, page, pageSize).collectList(),
                             creditRepository.countTaskRecords(query))
-                    .flatMap(result -> signResultUrls(result.getT2(), CreditDtos.AdminTaskRecordItem::resultUrls)
-                            .map(replacements -> new CreditDtos.AdminTaskRecordListResponse(result.getT2().stream()
-                                    .map(item -> new CreditDtos.AdminTaskRecordItem(item.taskId(), item.taskType(),
+                    .flatMap(result -> Mono.zip(
+                                    signResultUrls(result.getT2(), CreditDtos.AdminTaskRecordItem::resultUrls),
+                                    signThumbnailUrls(result.getT2(), CreditDtos.AdminTaskRecordItem::taskType,
+                                            CreditDtos.AdminTaskRecordItem::resultUrls, CreditDtos.AdminTaskRecordItem::storageKeys))
+                            .map(signed -> {
+                                List<CreditDtos.AdminTaskRecordItem> items = new ArrayList<>(result.getT2().size());
+                                for (int index = 0; index < result.getT2().size(); index++) {
+                                    CreditDtos.AdminTaskRecordItem item = result.getT2().get(index);
+                                    items.add(new CreditDtos.AdminTaskRecordItem(item.taskId(), item.taskType(),
                                             resolveModelDisplayName(result.getT1(), item.taskType(), item.model()), item.status(), item.prompt(),
                                             item.resolution(), item.size(), item.seconds(), item.consumedCredits(),
-                                            signedResultUrls(item.resultUrls(), replacements),
-                                            item.errorMessage(), item.createdAt(), item.completedAt(), item.userId(), item.username(), item.nickname(), item.email()))
-                                    .toList(), result.getT3())));
+                                            signedResultUrls(item.resultUrls(), signed.getT1()),
+                                            item.storageKeys(),
+                                            signed.getT2().get(index),
+                                            item.errorMessage(), item.createdAt(), item.completedAt(), item.userId(), item.username(), item.nickname(), item.email()));
+                                }
+                                return new CreditDtos.AdminTaskRecordListResponse(items, result.getT3());
+                            }));
         }).contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
+    }
+
+    /**
+     * 按任务类型签发列表缩略图地址。
+     * <p>
+     * 图片取对象存储读取时缩放的小图，视频取保存时截取的封面；取不到时对应位置返回空串，
+     * 前端会退回原图或视频首帧，不影响任务记录本身的展示。
+     *
+     * @param records 当前页任务记录
+     * @param taskType 读取任务类型
+     * @param resultUrls 读取结果地址
+     * @param storageKeys 读取结果存储键
+     * @param <T> 任务记录类型
+     * @return 与记录顺序一致、与结果地址按下标对齐的缩略图地址
+     */
+    private <T> Mono<List<List<String>>> signThumbnailUrls(List<T> records, Function<T, String> taskType,
+                                                           Function<T, List<String>> resultUrls, Function<T, List<String>> storageKeys) {
+        List<String> imageUrls = new ArrayList<>();
+        List<String> videoKeys = new ArrayList<>();
+        for (T record : records) {
+            List<String> urls = resultUrls.apply(record);
+            if (urls == null || urls.isEmpty()) {
+                continue;
+            }
+            if (isVideoTaskType(taskType.apply(record))) {
+                List<String> keys = storageKeys.apply(record);
+                videoKeys.add(keys == null || keys.isEmpty() ? "" : keys.getFirst());
+            } else {
+                imageUrls.addAll(urls);
+            }
+        }
+        return Mono.zip(
+                        mediaAccessService.signUrls(imageUrls, MediaAccessService.Purpose.LIST_THUMBNAIL),
+                        persistenceService.videoCoverUrls(videoKeys))
+                .map(signed -> {
+                    List<List<String>> thumbnails = new ArrayList<>(records.size());
+                    for (T record : records) {
+                        List<String> urls = resultUrls.apply(record);
+                        if (urls == null || urls.isEmpty()) {
+                            thumbnails.add(List.of());
+                            continue;
+                        }
+                        if (isVideoTaskType(taskType.apply(record))) {
+                            List<String> keys = storageKeys.apply(record);
+                            String cover = signed.getT2().getOrDefault(keys == null || keys.isEmpty() ? "" : keys.getFirst(), "");
+                            List<String> covers = new ArrayList<>(urls.size());
+                            for (int index = 0; index < urls.size(); index++) {
+                                covers.add(index == 0 ? cover : "");
+                            }
+                            thumbnails.add(covers);
+                            continue;
+                        }
+                        thumbnails.add(urls.stream().map(url -> signed.getT1().getOrDefault(url, "")).toList());
+                    }
+                    return thumbnails;
+                });
+    }
+
+    /**
+     * 判断任务类型是否为视频生成。
+     *
+     * @param taskType String 任务类型
+     * @return boolean 是否为视频任务
+     */
+    private static boolean isVideoTaskType(String taskType) {
+        return "video".equals(taskType);
     }
 
     /**

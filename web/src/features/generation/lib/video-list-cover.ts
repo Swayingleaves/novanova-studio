@@ -44,6 +44,39 @@ export function loadVideoListCover(storageKey: string): Promise<VideoCoverSource
     return task;
 }
 
+/**
+ * 读取服务端已经签好地址的视频封面。
+ * <p>
+ * 用于无法按存储键批量换取封面的列表（例如管理员查看全站任务记录）。
+ * 缓存键优先用媒体存储键，没有存储键时用去掉签名参数的地址，命中缓存后不再请求对象存储。
+ */
+export function loadRemoteVideoCover(cacheKey: string, url: string): Promise<VideoCoverSource | null> {
+    const key = cacheKey.trim();
+    const target = url.trim();
+    if (!key || !target) return Promise.resolve(null);
+    const current = inflight.get(key);
+    if (current) return current;
+    const task = (async () => {
+        const cached = await coverStore.getItem<Blob>(teamStorageKey(key)).catch(() => null);
+        if (cached instanceof Blob && cached.size > 0) return { blob: cached, url: target };
+        try {
+            const response = await fetch(target);
+            if (!response.ok) return { url: target };
+            const shrunk = await shrinkCover(await response.blob());
+            if (!shrunk?.size) return { url: target };
+            await coverStore.setItem(teamStorageKey(key), shrunk).catch(() => undefined);
+            return { blob: shrunk, url: target };
+        } catch {
+            return { url: target };
+        }
+    })();
+    inflight.set(key, task);
+    void task.finally(() => {
+        if (inflight.get(key) === task) inflight.delete(key);
+    });
+    return task;
+}
+
 async function resolveCoverBatch(batch: PendingCover[]) {
     const grouped = new Map<string, PendingCover[]>();
     for (const item of batch) {

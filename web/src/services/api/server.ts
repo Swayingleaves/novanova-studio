@@ -607,6 +607,10 @@ export type ServerTaskRecord = {
     seconds: string | null;
     consumedCredits: CreditAmount;
     resultUrls: string[];
+    /** 生成结果的媒体存储键，与 resultUrls 一一对应，取不到时为空串。 */
+    storageKeys: string[];
+    /** 列表缩略图地址，与 resultUrls 一一对应，图片取读取时缩放的小图、视频取封面，取不到时为空串。 */
+    thumbnailUrls: string[];
     errorMessage: string | null;
     createdAt: string;
     completedAt: string | null;

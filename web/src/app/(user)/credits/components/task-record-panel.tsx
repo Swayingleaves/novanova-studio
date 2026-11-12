@@ -8,6 +8,8 @@ import { Button, Empty, Input, Modal, Pagination, Segmented, Skeleton, Table, Ta
 import { Image as ImageIcon, Play, Search, Video } from "lucide-react";
 
 import { listAdminTaskRecords, listTaskRecords, type ServerAdminTaskRecord, type ServerTaskRecord } from "@/services/api/server";
+import { ImageListThumbnail } from "@/features/generation/components/image-list-thumbnail";
+import { VideoListCover } from "@/features/generation/components/video-list-cover";
 
 import { formatCreditTime, generationTypeLabel } from "../credit-page-utils";
 import { formatConsumedCredits, formatTaskElapsedTime, TASK_RECORD_PAGE_SIZE, taskRecordStatusLabel, taskRecordStatusTone, taskRecordUserLabel } from "../task-record-utils";
@@ -261,26 +263,36 @@ function TaskRecordThumbnails({ record, onPreview, onExpired, compact }: { recor
     const visibleUrls = record.resultUrls.slice(0, compact ? 1 : 2);
     return (
         <div className="flex flex-wrap items-center gap-2">
-            {visibleUrls.map((url, index) => (
-                <button
-                    key={url}
-                    type="button"
-                    className="relative size-14 shrink-0 overflow-hidden rounded-md border border-[var(--studio-line)] bg-[var(--studio-media)]"
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        onPreview({ taskId: record.taskId, index, taskType: record.taskType, url });
-                    }}
-                >
-                    {record.taskType === "video" ? (
-                        <>
-                            <video src={`${url}#t=0.1`} muted playsInline preload="metadata" className="size-full object-cover" onError={() => onExpired(record.taskId)} />
-                            <span className="absolute inset-0 grid place-items-center bg-black/25"><Play className="size-4 fill-white text-white" /></span>
-                        </>
-                    ) : (
-                        <img src={url} alt="" loading="lazy" className="size-full object-cover" onError={() => onExpired(record.taskId)} />
-                    )}
-                </button>
-            ))}
+            {visibleUrls.map((url, index) => {
+                const thumbnailUrl = record.thumbnailUrls?.[index]?.trim();
+                const storageKey = record.storageKeys?.[index]?.trim();
+                return (
+                    <button
+                        key={url}
+                        type="button"
+                        className="relative size-14 shrink-0 overflow-hidden rounded-md border border-[var(--studio-line)] bg-[var(--studio-media)]"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onPreview({ taskId: record.taskId, index, taskType: record.taskType, url });
+                        }}
+                    >
+                        {record.taskType === "video" ? (
+                            <>
+                                {thumbnailUrl ? (
+                                    <VideoListCover storageKey={storageKey} url={thumbnailUrl} className="size-full object-cover" />
+                                ) : (
+                                    <video src={`${url}#t=0.1`} muted playsInline preload="metadata" className="size-full object-cover" onError={() => onExpired(record.taskId)} />
+                                )}
+                                <span className="absolute inset-0 grid place-items-center bg-black/25"><Play className="size-4 fill-white text-white" /></span>
+                            </>
+                        ) : thumbnailUrl ? (
+                            <ImageListThumbnail storageKey={storageKey} url={thumbnailUrl} className="size-full object-cover" />
+                        ) : (
+                            <img src={url} alt="" loading="lazy" className="size-full object-cover" onError={() => onExpired(record.taskId)} />
+                        )}
+                    </button>
+                );
+            })}
             {record.resultUrls.length > visibleUrls.length ? (
                 <span className="text-xs tabular-nums text-[var(--studio-muted)]">+{record.resultUrls.length - visibleUrls.length}</span>
             ) : null}

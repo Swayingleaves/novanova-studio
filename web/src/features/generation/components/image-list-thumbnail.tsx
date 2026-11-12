@@ -3,32 +3,34 @@
 import { useEffect, useState } from "react";
 
 import { MediaPreview } from "@/features/generation/components/media-fallback";
-import { loadImageListThumbnail } from "@/features/generation/lib/image-list-thumbnail";
+import { listThumbnailCacheKey, loadImageListThumbnail, loadRemoteListThumbnail } from "@/features/generation/lib/image-list-thumbnail";
 
 /** 任务列表缩略图：优先读本地小图，没有时再请求缩放后的对象存储地址。 */
-export function ImageListThumbnail({ storageKey, className }: { storageKey?: string; className?: string }) {
+export function ImageListThumbnail({ storageKey, url, className }: { storageKey?: string; url?: string; className?: string }) {
     const [src, setSrc] = useState<string>();
+    const remoteUrl = url?.trim();
 
     useEffect(() => {
-        const key = storageKey?.trim();
+        const key = listThumbnailCacheKey(storageKey, remoteUrl);
         if (!key) return;
         let active = true;
         let objectUrl = "";
-        void loadImageListThumbnail(key).then((blob) => {
+        const task = remoteUrl ? loadRemoteListThumbnail(key, remoteUrl) : loadImageListThumbnail(key);
+        void task.then((blob) => {
             if (!blob) return;
-            const url = URL.createObjectURL(blob);
+            const nextUrl = URL.createObjectURL(blob);
             if (!active) {
-                URL.revokeObjectURL(url);
+                URL.revokeObjectURL(nextUrl);
                 return;
             }
-            objectUrl = url;
-            setSrc(url);
+            objectUrl = nextUrl;
+            setSrc(nextUrl);
         });
         return () => {
             active = false;
             if (objectUrl) URL.revokeObjectURL(objectUrl);
         };
-    }, [storageKey]);
+    }, [storageKey, remoteUrl]);
 
     return <MediaPreview kind="image" src={src} className={className} />;
 }

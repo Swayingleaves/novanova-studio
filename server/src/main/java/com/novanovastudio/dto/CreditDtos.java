@@ -246,6 +246,8 @@ public final class CreditDtos {
      * @param seconds String 视频秒数，图片任务为 null
      * @param consumedCredits Long 任务实际消耗积分，已全额退款时为 0
      * @param resultUrls List<String> 生成结果媒体地址
+     * @param storageKeys List<String> 生成结果的媒体存储键，与结果地址一一对应，无法获取时为空
+     * @param thumbnailUrls List<String> 生成结果的列表缩略图地址，与结果地址一一对应，无法生成时为空
      * @param errorMessage String 失败原因，非失败任务为 null
      * @param createdAt String 任务创建时间
      * @param completedAt String 任务完成时间
@@ -260,6 +262,8 @@ public final class CreditDtos {
                                  String seconds,
                                  @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal consumedCredits,
                                  List<String> resultUrls,
+                                 List<String> storageKeys,
+                                 List<String> thumbnailUrls,
                                  String errorMessage,
                                  String createdAt,
                                  String completedAt) {
@@ -287,6 +291,8 @@ public final class CreditDtos {
      * @param seconds String 视频秒数，图片任务为 null
      * @param consumedCredits BigDecimal 任务实际消耗积分，已全额退款时为 0
      * @param resultUrls List<String> 生成结果媒体地址
+     * @param storageKeys List<String> 生成结果的媒体存储键，与结果地址一一对应，无法获取时为空
+     * @param thumbnailUrls List<String> 生成结果的列表缩略图地址，与结果地址一一对应，无法生成时为空
      * @param errorMessage String 失败原因，非失败任务为 null
      * @param createdAt String 任务创建时间
      * @param completedAt String 任务完成时间
@@ -305,6 +311,8 @@ public final class CreditDtos {
                                       String seconds,
                                       @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal consumedCredits,
                                       List<String> resultUrls,
+                                      List<String> storageKeys,
+                                      List<String> thumbnailUrls,
                                       String errorMessage,
                                       String createdAt,
                                       String completedAt,
