@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Heart } from "lucide-react";
 
 import { useTranslation } from "@/features/locale/use-translation";
+import { SkillCover } from "@/features/skill-market/components/skill-cover";
 import { cn } from "@/shared/lib/utils";
 import type { SkillMarketCard } from "@/services/api/server";
 
@@ -23,7 +24,7 @@ export function SkillMarketCardView({ item, onOpen, onFavorite, status, extra }:
         <article className="studio-panel-solid flex flex-col overflow-hidden">
             <button type="button" className="block text-left" onClick={onOpen}>
                 {item.coverUrl ? (
-                    <img src={item.coverUrl} alt="" className="aspect-[4/3] w-full object-cover" />
+                    <SkillCover src={item.coverUrl} className="aspect-[4/3] w-full object-cover" />
                 ) : (
                     <div className="studio-empty flex aspect-[4/3] items-center justify-center px-4 text-center text-sm">{item.name}</div>
                 )}

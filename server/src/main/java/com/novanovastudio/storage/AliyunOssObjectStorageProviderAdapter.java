@@ -56,7 +56,7 @@ public class AliyunOssObjectStorageProviderAdapter implements ObjectStorageProvi
     }
 
     /**
-     * 签发带图片处理的缩略图地址，长边不超过 160 像素，不放大小图。
+     * 签发带图片处理的读取地址，长边不超过指定像素，不放大小图。
      *
      * @param config 原对象存储配置
      * @param key 对象键
@@ -64,11 +64,13 @@ public class AliyunOssObjectStorageProviderAdapter implements ObjectStorageProvi
      * @param mimeType 文件媒体类型
      * @param download 是否附件下载
      * @param expiresAt 到期时间
+     * @param edge 缩放后的长边像素
      * @return 带 image/resize 的临时 GET 地址
      */
     @Override
-    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
-        return presign(config, key, fileName, mimeType, download, expiresAt, "image/resize,m_lfit,w_160,h_160");
+    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge) {
+        int size = Math.max(1, edge);
+        return presign(config, key, fileName, mimeType, download, expiresAt, "image/resize,m_lfit,w_" + size + ",h_" + size);
     }
 
     /**

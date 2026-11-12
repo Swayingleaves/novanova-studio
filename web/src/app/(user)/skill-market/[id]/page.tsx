@@ -5,6 +5,7 @@ import { App, Button, Empty, Spin } from "antd";
 import { ArrowLeft } from "lucide-react";
 
 import { SkillMarketCardView } from "@/features/skill-market/components/skill-market-card";
+import { SkillCover } from "@/features/skill-market/components/skill-cover";
 import { storeSkillCreationHandoff } from "@/features/skill-market/lib/skill-creation-handoff";
 import { useTranslation } from "@/features/locale/use-translation";
 import Link, { useRouter } from "@/shared/lib/team-navigation";
@@ -82,7 +83,7 @@ export default function SkillDetailPage({ params }: { params: Promise<{ id: stri
             <header className="flex flex-wrap items-start justify-between gap-4">
                 <div className="flex min-w-0 items-start gap-4">
                     <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md border border-[var(--studio-line)] bg-[var(--studio-media)]">
-                        {detail.coverUrl ? <img src={detail.coverUrl} alt="" className="size-full object-cover" /> : null}
+                        {detail.coverUrl ? <SkillCover src={detail.coverUrl} className="size-full object-cover" /> : null}
                     </div>
                     <div className="min-w-0">
                         <h1 className="studio-title text-2xl font-semibold">{detail.name}</h1>
@@ -97,7 +98,7 @@ export default function SkillDetailPage({ params }: { params: Promise<{ id: stri
                 <h2 className="studio-title text-lg font-semibold">{translate("skillMarket.showcase")}</h2>
                 <div className="grid gap-4 lg:grid-cols-2">
                     <div className="studio-panel-solid overflow-hidden">
-                        {detail.coverUrl ? <img src={detail.coverUrl} alt="" className="aspect-[4/3] w-full object-cover" /> : <div className="studio-empty flex aspect-[4/3] items-center justify-center px-6 text-center text-sm">{detail.subtitle || detail.name}</div>}
+                        {detail.coverUrl ? <SkillCover src={detail.coverUrl} alt={detail.name} className="aspect-[4/3] w-full object-cover" /> : <div className="studio-empty flex aspect-[4/3] items-center justify-center px-6 text-center text-sm">{detail.subtitle || detail.name}</div>}
                     </div>
                     <div className="studio-panel-solid flex flex-col justify-center gap-3 bg-[var(--studio-primary-soft)] p-6">
                         {(detail.usageSteps.length ? detail.usageSteps : [{ title: detail.subtitle || detail.name, detail: detail.description }]).map((step, index) => (

@@ -631,7 +631,7 @@ public class SkillService {
     private Mono<SkillDtos.SkillOption> toOption(SkillRecords.SkillRecord record) {
         String workflowType = workflowType(record);
         String systemPrompt = SkillRecords.TYPE_CANVAS_SETTING_GRAPH.equals(record.getTargetType()) ? record.getSystemPrompt() : null;
-        return mediaAccessService.signUrl(record.getCoverUrl() == null ? "" : record.getCoverUrl(), MediaAccessService.Purpose.PREVIEW)
+        return mediaAccessService.signUrl(record.getCoverUrl() == null ? "" : record.getCoverUrl(), MediaAccessService.Purpose.CARD_COVER)
                 .map(url -> new SkillDtos.SkillOption(record.getId(), record.getName(), record.getDescription(), record.getTargetType(),
                         url, workflowType, systemPrompt, record.getAspectRatio()));
     }
@@ -640,7 +640,7 @@ public class SkillService {
     private Mono<SkillDtos.SkillItem> toItem(SkillRecords.SkillRecord record) {
         SkillRecords.SkillRecord pending = SkillRecords.REVISION_PENDING.equals(record.getRevisionStatus()) ? pendingRevision(record) : null;
         SkillRecords.SkillRecord shown = pending == null ? record : pending;
-        return mediaAccessService.signUrl(shown.getCoverUrl() == null ? "" : shown.getCoverUrl(), MediaAccessService.Purpose.PREVIEW)
+        return mediaAccessService.signUrl(shown.getCoverUrl() == null ? "" : shown.getCoverUrl(), MediaAccessService.Purpose.CARD_COVER)
                 .map(url -> new SkillDtos.SkillItem(record.getId(), shown.getName(), shown.getDescription(), shown.getTargetType(), shown.getSystemPrompt(), url,
                         shown.getAspectRatio(), record.getStatus(), record.getSortOrder(), formatTime(record.getCreatedAt()), formatTime(record.getUpdatedAt()),
                         shown.getCategory(), shown.getSubtitle(), shown.getAudience(), parseUsageSteps(shown.getUsageSteps()),
@@ -650,7 +650,7 @@ public class SkillService {
 
     /** 技能记录转市场卡片。 */
     private Mono<SkillDtos.SkillMarketCard> toCard(SkillRecords.SkillRecord record) {
-        return mediaAccessService.signUrl(record.getCoverUrl() == null ? "" : record.getCoverUrl(), MediaAccessService.Purpose.PREVIEW)
+        return mediaAccessService.signUrl(record.getCoverUrl() == null ? "" : record.getCoverUrl(), MediaAccessService.Purpose.CARD_COVER)
                 .map(url -> new SkillDtos.SkillMarketCard(record.getId(), record.getName(), record.getSubtitle(), record.getDescription(),
                         record.getCategory(), record.getTargetType(), url, record.getAspectRatio(), workflowType(record),
                         record.getAuthorName(), record.getOwnerUserId() == null, Boolean.TRUE.equals(record.getFavorited())));

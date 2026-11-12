@@ -87,6 +87,8 @@ public class MediaAccessService {
         PREVIEW,
         /** 任务列表缩略图。支持的服务商在读取时把长边缩到 160 像素 */
         LIST_THUMBNAIL,
+        /** 卡片封面。支持的服务商在读取时把长边缩到 960 像素，供技能市场等大卡片展示 */
+        CARD_COVER,
         /** 附件下载 */
         DOWNLOAD,
         /** 第三方模型拉取参考素材 */
@@ -310,8 +312,9 @@ public class MediaAccessService {
         }
         String resolvedName = StringUtils.hasText(fileName) ? fileName : lastSegment(key);
         String resolvedMimeType = StringUtils.hasText(mimeType) ? mimeType : null;
-        return Mono.fromCallable(() -> purpose == Purpose.LIST_THUMBNAIL
-                        ? objectStorageService.createListThumbnailReadUrl(config, key, resolvedName, resolvedMimeType, download, expiresAt)
+        int edge = thumbnailEdge(purpose);
+        return Mono.fromCallable(() -> edge > 0
+                        ? objectStorageService.createThumbnailReadUrl(config, key, resolvedName, resolvedMimeType, download, expiresAt, edge)
                         : objectStorageService.createReadUrl(config, key, resolvedName, resolvedMimeType, download, expiresAt))
                 .subscribeOn(Schedulers.boundedElastic())
                 .doOnNext(url -> {
@@ -320,6 +323,20 @@ public class MediaAccessService {
                     }
                     signedUrls.put(cacheKey, new SignedUrl(url, expiresAt));
                 });
+    }
+
+    /**
+     * 按用途读取图片缩放长边，非图片缩略用途返回 0 表示读取原图。
+     *
+     * @param purpose Purpose 读地址用途
+     * @return int 缩放长边像素
+     */
+    private static int thumbnailEdge(Purpose purpose) {
+        return switch (purpose) {
+            case LIST_THUMBNAIL -> 160;
+            case CARD_COVER -> 960;
+            default -> 0;
+        };
     }
 
     /**

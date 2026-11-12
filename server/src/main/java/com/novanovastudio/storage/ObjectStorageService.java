@@ -161,7 +161,7 @@ public class ObjectStorageService {
     }
 
     /**
-     * 签发列表缩略图地址。服务商支持读取时缩放则返回小图地址，否则返回原图地址。
+     * 按指定长边签发图片读取地址。服务商支持读取时缩放则返回小图地址，否则返回原图地址。
      *
      * @param config 原对象存储配置
      * @param key 对象键
@@ -169,10 +169,11 @@ public class ObjectStorageService {
      * @param mimeType 文件媒体类型
      * @param download 是否作为附件下载
      * @param expiresAt 到期时间
-     * @return 缩略图或原图的临时只读地址
+     * @param edge 缩放后的长边像素
+     * @return 缩放后或原图的临时只读地址
      */
-    public String createListThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
-        String thumbnail = providerAdapter(config).createThumbnailReadUrl(config, key, fileName, mimeType, download, expiresAt);
+    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge) {
+        String thumbnail = providerAdapter(config).createThumbnailReadUrl(config, key, fileName, mimeType, download, expiresAt, edge);
         if (StringUtils.hasText(thumbnail)) {
             return thumbnail;
         }

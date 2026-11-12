@@ -68,11 +68,11 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
      */
     @Override
     public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
-        return presign(config, key, fileName, mimeType, download, expiresAt, false);
+        return presign(config, key, fileName, mimeType, download, expiresAt, 0);
     }
 
     /**
-     * 签发数据万象缩略图地址，长边不超过 160 像素。
+     * 签发数据万象图片处理地址，长边不超过指定像素。
      *
      * @param config 原对象存储配置
      * @param key 对象键
@@ -80,11 +80,12 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
      * @param mimeType 文件媒体类型
      * @param download 是否附件下载
      * @param expiresAt 到期时间
+     * @param edge 缩放后的长边像素
      * @return 带 imageMogr2 的临时 GET 地址
      */
     @Override
-    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
-        return presign(config, key, fileName, mimeType, download, expiresAt, true);
+    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge) {
+        return presign(config, key, fileName, mimeType, download, expiresAt, Math.max(1, edge));
     }
 
     /**
@@ -96,17 +97,17 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
      * @param mimeType 文件媒体类型
      * @param download 是否附件下载
      * @param expiresAt 到期时间
-     * @param thumbnail 是否附加列表缩略图处理参数
+     * @param thumbnailEdge 附加图片处理时的长边像素，0 表示读取原图
      * @return 临时 GET 地址
      */
-    private String presign(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, boolean thumbnail) {
+    private String presign(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int thumbnailEdge) {
         validate(config);
         COSClient client = createClient(config);
         try {
             var request = new com.qcloud.cos.model.GeneratePresignedUrlRequest(config.bucket(), key, com.qcloud.cos.http.HttpMethodName.GET);
             request.setExpiration(java.util.Date.from(expiresAt));
-            if (thumbnail) {
-                request.addRequestParameter("imageMogr2/thumbnail/160x", null);
+            if (thumbnailEdge > 0) {
+                request.addRequestParameter("imageMogr2/thumbnail/" + thumbnailEdge + "x", null);
             }
             var headers = new com.qcloud.cos.model.ResponseHeaderOverrides();
             if (StringUtils.hasText(fileName)) {

@@ -53,11 +53,11 @@ public class QiniuKodoObjectStorageProviderAdapter implements ObjectStorageProvi
      */
     @Override
     public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
-        return presign(config, key, fileName, download, expiresAt, false);
+        return presign(config, key, fileName, download, expiresAt, 0);
     }
 
     /**
-     * 签发图片处理缩略图地址，宽度不超过 160 像素，并纳入私有空间签名。
+     * 签发图片处理地址，宽度不超过指定像素，并纳入私有空间签名。
      *
      * @param config 原对象存储配置
      * @param key 对象键
@@ -65,11 +65,12 @@ public class QiniuKodoObjectStorageProviderAdapter implements ObjectStorageProvi
      * @param mimeType 文件媒体类型
      * @param download 是否附件下载
      * @param expiresAt 到期时间
+     * @param edge 缩放后的长边像素
      * @return 带 imageView2 的临时只读地址
      */
     @Override
-    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
-        return presign(config, key, fileName, download, expiresAt, true);
+    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge) {
+        return presign(config, key, fileName, download, expiresAt, Math.max(1, edge));
     }
 
     /**
@@ -80,15 +81,15 @@ public class QiniuKodoObjectStorageProviderAdapter implements ObjectStorageProvi
      * @param fileName 原始文件名
      * @param download 是否附件下载
      * @param expiresAt 到期时间
-     * @param thumbnail 是否附加列表缩略图处理参数
+     * @param thumbnailEdge 附加图片处理时的宽度像素，0 表示读取原图
      * @return 临时只读地址
      */
-    private String presign(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, boolean download, java.time.Instant expiresAt, boolean thumbnail) {
+    private String presign(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, boolean download, java.time.Instant expiresAt, int thumbnailEdge) {
         validate(config);
         String url = ObjectStorageUrlBuilder.buildPublicUrl(config.publicBaseUrl(), key);
         String separator = "?";
-        if (thumbnail) {
-            url += separator + "imageView2/2/w/160";
+        if (thumbnailEdge > 0) {
+            url += separator + "imageView2/2/w/" + thumbnailEdge;
             separator = "&";
         }
         if (download && StringUtils.hasText(fileName)) {
