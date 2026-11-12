@@ -226,7 +226,7 @@
     "message169PanoramicScene": "16:9 场景全景",
     "message916FullBodyCharacter": "9:16 全身立绘",
     "message34StandardCharacter": "3:4 标准立绘",
-    "charactersUseAThreeViewReferenceSheetOnAWhite": "人物固定输出纯白背景的三视图设定图（正面/侧面/背面并排）。",
+    "charactersUseAThreeViewReferenceSheetOnAWhite": "人物固定输出浅灰背景的四视角设定图（左侧肖像特写，右侧正面/侧面/背面并排）。",
     "propsUseAMultiViewReferenceSheetOnAWhite": "道具固定输出纯白背景的多视角设定图（正面/45度斜视/侧面并排）。",
     "scenesUseAnEmptyEnvironmentReferenceWithNoCharactersOr": "场景固定输出空景设定图，画面中不出现人物与剧情动作。",
     "couldNotLoadAssetVersions": "加载资产版本失败",

@@ -226,7 +226,7 @@
     "message169PanoramicScene": "16:9 panoramic scene",
     "message916FullBodyCharacter": "9:16 full-body character",
     "message34StandardCharacter": "3:4 standard character",
-    "charactersUseAThreeViewReferenceSheetOnAWhite": "Characters use a three-view reference sheet on a white background: front, side, and back side by side.",
+    "charactersUseAThreeViewReferenceSheetOnAWhite": "Characters use a four-view reference sheet on a light gray background: a close-up portrait plus front, side, and back views side by side.",
     "propsUseAMultiViewReferenceSheetOnAWhite": "Props use a multi-view reference sheet on a white background: front, 45-degree angle, and side side by side.",
     "scenesUseAnEmptyEnvironmentReferenceWithNoCharactersOr": "Scenes use an empty environment reference with no characters or story action.",
     "couldNotLoadAssetVersions": "Could not load asset versions",
