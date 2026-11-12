@@ -4,6 +4,7 @@ import { Alert, App, Button, Empty, Input, Modal, Pagination, Tag } from "antd";
 import { Heart, Play, Search } from "lucide-react";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { FANTASTIC_SHOW_CATEGORIES } from "@/features/homepage/lib/fantastic-show";
+import { loadHomepageMedia } from "@/features/homepage/lib/homepage-media-cache";
 import { CanvasProjectPreview } from "@/features/canvas/components/canvas-project-preview";
 import type { CanvasDocument } from "@/features/canvas/types";
 import { SharedCanvasViewer } from "@/features/shared-work/components/shared-content";
@@ -155,18 +156,48 @@ function FilterText({ active, onClick, children }: { active: boolean; onClick: (
     );
 }
 
+/**
+ * 首页作品媒体。
+ * <p>
+ * 按对象存储返回的原始字节缓存到本地，命中后不再请求；读取失败时回退到原始地址，不影响展示。
+ */
+function CachedWorkMedia({ src, alt, className, onReady }: { src?: string; alt?: string; className?: string; onReady?: (width: number, height: number) => void }) {
+    const [resolved, setResolved] = useState<string>();
+    useEffect(() => {
+        const url = src?.trim();
+        if (!url) {
+            setResolved(undefined);
+            return;
+        }
+        let active = true;
+        let objectUrl = "";
+        void loadHomepageMedia(url).then((blob) => {
+            if (!active) return;
+            if (!blob) {
+                setResolved(url);
+                return;
+            }
+            objectUrl = URL.createObjectURL(blob);
+            setResolved(objectUrl);
+        });
+        return () => {
+            active = false;
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+        };
+    }, [src]);
+    return <img src={resolved} alt={alt || ""} loading="lazy" className={className} onLoad={(event) => onReady?.(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} />;
+}
+
 function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; pending: boolean; onToggleLike: () => void }) {
     const isVideo = item.workType === "video";
     const isCanvas = item.workType === "canvas";
     const [previewing, setPreviewing] = useState(false);
+    const [hovering, setHovering] = useState(false);
     const [ratio, setRatio] = useState<number | null>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
+    const cover = item.thumbnailUrl?.trim() || "";
+    const showVideo = isVideo && (!cover || hovering);
     const openPreview = () => setPreviewing(true);
-    const playVideo = () => {
-        const video = videoRef.current;
-        if (!video || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-        void video.play().catch(() => undefined);
-    };
     const stopVideo = () => {
         const video = videoRef.current;
         if (!video) return;
@@ -176,6 +207,12 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
     const rememberRatio = (width: number, height: number) => {
         if (width > 0 && height > 0) setRatio(width / height);
     };
+    // 悬停时才挂载视频并播放；没有封面时只能保留视频首帧，保持原有行为。
+    useEffect(() => {
+        if (!hovering || !showVideo) return;
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        void videoRef.current?.play().catch(() => undefined);
+    }, [hovering, showVideo]);
     return (
         <>
             <article
@@ -197,23 +234,21 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
                 <div
                     className="group relative overflow-hidden rounded-xl bg-[var(--studio-media)]"
                     style={{ aspectRatio: isCanvas ? 16 / 9 : ratio ?? (isVideo ? 16 / 9 : 3 / 4) }}
-                    onMouseEnter={isVideo ? playVideo : undefined}
-                    onMouseLeave={isVideo ? stopVideo : undefined}
+                    onMouseEnter={() => setHovering(true)}
+                    onMouseLeave={() => {
+                        setHovering(false);
+                        stopVideo();
+                    }}
                 >
                     {isCanvas ? (
                         <FantasticCanvasPreview code={item.shareCode} title={item.title} />
-                    ) : isVideo ? (
-                        <video ref={videoRef} src={item.mediaUrl} poster={item.thumbnailUrl || undefined} muted loop playsInline preload="metadata" className="pointer-events-none size-full object-cover" onLoadedMetadata={(event) => rememberRatio(event.currentTarget.videoWidth, event.currentTarget.videoHeight)} />
+                    ) : isVideo && showVideo ? (
+                        <video ref={videoRef} src={item.mediaUrl} poster={cover || undefined} muted loop playsInline preload="metadata" className="pointer-events-none size-full object-cover" onLoadedMetadata={(event) => rememberRatio(event.currentTarget.videoWidth, event.currentTarget.videoHeight)} />
                     ) : (
-                        <img
-                            src={item.mediaUrl}
-                            alt=""
-                            loading="lazy"
+                        <CachedWorkMedia
+                            src={isVideo ? cover : item.mediaUrl}
                             className="size-full object-cover transition-transform group-hover:scale-[1.025] motion-reduce:transform-none"
-                            ref={(node) => {
-                                if (node?.complete) rememberRatio(node.naturalWidth, node.naturalHeight);
-                            }}
-                            onLoad={(event) => rememberRatio(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+                            onReady={rememberRatio}
                         />
                     )}
                     {isVideo ? (
@@ -337,7 +372,7 @@ function FantasticPreviewMedia({ item, snapshot, loading }: { item: FantasticWor
     }
     if (!item.mediaUrl) return <div className="grid min-h-48 place-items-center rounded-lg bg-[var(--studio-media)] text-sm text-[var(--studio-muted)]">暂无媒体</div>;
     if (item.workType === "video") return <video src={item.mediaUrl} poster={item.thumbnailUrl || undefined} controls autoPlay playsInline className="max-h-[70vh] w-full rounded-lg bg-black object-contain" />;
-    return <img src={item.mediaUrl} alt={item.title} className="max-h-[70vh] w-full rounded-lg bg-[var(--studio-media)] object-contain" />;
+    return <CachedWorkMedia src={item.mediaUrl} alt={item.title} className="max-h-[70vh] w-full rounded-lg bg-[var(--studio-media)] object-contain" />;
 }
 
 function PreviewField({ label, value }: { label: string; value: string }) {

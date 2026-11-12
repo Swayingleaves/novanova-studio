@@ -11,10 +11,12 @@ import com.novanovastudio.repository.PersistenceRepository;
 import com.novanovastudio.repository.SharedWorkRepository;
 import com.novanovastudio.storage.MediaAccessService;
 import com.novanovastudio.storage.ObjectStorageService;
+import com.novanovastudio.storage.VideoCoverExtractor;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -25,6 +27,7 @@ import reactor.core.scheduler.Schedulers;
  * @author zhenglin.cn.cq@gmail.com
  * @date 2026-11-06 10:00
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SharedWorkMediaService {
@@ -78,8 +81,44 @@ public class SharedWorkMediaService {
                     StorageFileService.describe(source.fileName(), category(file.mimeType()), file.mimeType(), "generated"), () -> {
                         objectStorageService.putPrivateObject(config, key, path, file.mimeType());
                         return key;
-                    })).then(repository.heartbeat(code));
+                    })).then(storeVideoCover(code, source.assetId(), file.mimeType(), path, config))
+                    .then(repository.heartbeat(code));
         }));
+    }
+
+    /**
+     * 为视频副本截取一张首页卡片封面，失败时不影响分享本身。
+     * @param code 分享标识
+     * @param assetId 媒体标识
+     * @param mimeType 实际媒体类型
+     * @param video 已下载的本地视频
+     * @param config 目标存储
+     * @return 完成信号，没有封面时也是完成
+     */
+    private Mono<Void> storeVideoCover(String code, String assetId, String mimeType, Path video, PersistenceDtos.ObjectStorageConfig config) {
+        if (!mimeType.startsWith("video/")) return Mono.empty();
+        String key = "shared-work/" + code + "/" + assetId + ".cover.jpg";
+        return Mono.fromCallable(() -> VideoCoverExtractor.extract(video,
+                        properties.getAi().getVideoComposition().getFfmpegExecutable(), VideoCoverExtractor.SHARE_EDGE))
+                .subscribeOn(Schedulers.boundedElastic())
+                .filter(bytes -> bytes != null && bytes.length > 0)
+                .flatMap(bytes -> storageBillingService.storeObject(config, key, bytes.length,
+                                StorageFileService.describe("cover.jpg", "image", "image/jpeg", "generated"), () -> {
+                                    Path cover = Files.createTempFile("novanova-share-cover-", ".jpg");
+                                    try {
+                                        Files.write(cover, bytes);
+                                        objectStorageService.putPrivateObject(config, key, cover, "image/jpeg");
+                                        return key;
+                                    } finally {
+                                        Files.deleteIfExists(cover);
+                                    }
+                                })
+                        .flatMap(coverKey -> repository.updateMediaCover(code, assetId, coverKey, "image/jpeg")))
+                .onErrorResume(error -> {
+                    log.error("生成分享视频封面失败，保留无封面记录: code={}, assetId={}", code, assetId, error);
+                    return Mono.empty();
+                })
+                .then();
     }
 
     /**
