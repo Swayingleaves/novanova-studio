@@ -69,6 +69,16 @@
   <tbody>
     <tr>
       <td align="center" width="33%">
+        <img src="logo/novanovastudio-108x108.png" alt="Novanova Studio" width="220" />
+      </td>
+      <td align="left" width="33%">
+       https://api.novanovastudio.cn <br>
+        nana官方API <br>
+        seedance2.0、wan3.0渠道超低折扣;官链返回~
+      </td>
+    </tr>
+    <tr>
+      <td align="center" width="33%">
         <img src="github_images/sponsor/notoken.png" alt="notoken" width="220" />
       </td>
       <td align="left" width="33%">
