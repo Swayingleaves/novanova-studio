@@ -161,6 +161,7 @@ export default function AdminSystemPage() {
                 { key: "configuration:objectStorage", label: translate("appShell.objectStorage_2caed1"), tab: "configuration", sub: "objectStorage" },
                 ...(!team ? [{ key: "configuration:timeouts", label: translate("administration.timeoutSettings"), tab: "configuration", sub: "timeouts" }] : []),
                 { key: "configuration:community", label: translate("administration.communityConfig"), tab: "configuration", sub: "community" },
+                { key: "configuration:externalLink", label: translate("administration.externalLinkConfig"), tab: "configuration", sub: "externalLink" },
             ],
         },
         ...(!team ? [{ key: "identityAuth", label: translate("administration.identityAuthentication"), icon: <ShieldCheck className="size-4" />, leaves: [

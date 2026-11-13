@@ -1053,6 +1053,14 @@ V61 按空间、用户、原配置和对象键精确关联已有媒体及原文�
 
 保存时先在事务内用咨询锁 `hashtext('platform-community-configs')` 串行化，再删除旧行并按序重新插入，任何一条校验失败或写入失败都整批回滚，数据库不会留下部分更新。团队作用域一律拒绝写入，只有平台空间的全局管理员可以修改；图片地址不做下载校验，上传复用媒体上传接口，删除配置不会删除已上传的媒体文件。
 
+## 平台展示外链配置（V96）
+
+| 表 | 关键字段及约束 |
+| --- | --- |
+| `platform_external_link_config` | 单行表，`id` 固定为 1；`title`（最长 80）、`url`（最长 2048，仅 `http/https`）、`description`（最长 1000，可为空）、`cover_url`（最长 2048，仅 `http/https`，可为空，弹窗展示用）、`created_at`/`updated_at` |
+
+右上角入口只展示标题，点击后弹窗展示封面、说明与「前往」按钮；表里没有记录时不渲染入口。封面在 `db/migration/V97` 中由 `logo_url` 重命名而来。公开读取走 `GET /api/v1/platform/getExternalLinkConfig`（未配置时 `data` 为 `null`），平台管理员保存走 `POST /api/v1/admin/platform/saveExternalLinkConfig`。标题和链接同时为空表示移除入口，服务端直接删除该行；只填其中一项时返回参数错误，logo 地址可以留空。团队作用域一律拒绝写入。
+
 ## 平台超时设置（V89）
 
 新增单行表 `platform_timeout_settings`（`id` 固定为 1）。后台入口为「配置与用户偏好 · 超时设置」，接口为 `GET/POST /api/v1/config/timeout/getTimeoutSettings`、`updateTimeoutSettings`，仅平台空间的全局管理员可读写。服务端启动后读取该行，并每 5 秒刷新；保存后当前实例立即生效。这些时间不再通过环境变量配置。
