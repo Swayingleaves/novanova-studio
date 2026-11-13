@@ -3,13 +3,14 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Form, Input } from "antd";
+import { App, Button, Checkbox, Form, Input } from "antd";
 import type { InputRef } from "antd";
 import { useRouter } from "@/shared/lib/team-navigation";
 
 import { loginByAccount, registerByEmail, sendEmailCode, ServerApiError } from "@/services/api/server";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { OAuth2LoginOptions } from "@/features/auth/components/oauth2-login-options";
+import { TermsDialog } from "@/features/auth/components/terms-dialog";
 import { completeAuthentication } from "@/features/auth/lib/complete-authentication";
 import { useSpaceBrand } from "@/features/team/use-space-brand";
 
@@ -57,6 +58,8 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
     const [submitting, setSubmitting] = useState(false);
     const [codeCooldownSeconds, setCodeCooldownSeconds] = useState(0);
     const [codeSentToEmail, setCodeSentToEmail] = useState("");
+    const [agreedToTerms, setAgreedToTerms] = useState(false);
+    const [termsOpen, setTermsOpen] = useState(false);
     const closeAuthModal = useUserStore((state) => state.closeAuthModal);
     const emailInputRef = useRef<InputRef>(null);
     const emailValue = Form.useWatch("email", form) as string | undefined;
@@ -97,6 +100,13 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
     const backToCredentials = (account?: string) => {
         if (account) form.setFieldValue("account", account);
         setStep("credentials");
+    };
+
+    /** 未勾选服务协议时提示并阻止提交。 */
+    const ensureTermsAgreed = () => {
+        if (agreedToTerms) return true;
+        message.warning(translate("auth.pleaseAgreeToTerms"));
+        return false;
     };
 
     const sendCode = async () => {
@@ -142,6 +152,7 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
             return;
         }
         const account = values.account.trim();
+        if (!ensureTermsAgreed()) return;
         // 同一个账号已经翻过一次：直接翻回邮箱面，邮箱和验证码都还在，不再请求登录、不再发信。
         if (pendingAccount && account === pendingAccount) {
             setStep("email");
@@ -179,6 +190,7 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
             return;
         }
         const password = String(form.getFieldValue("password") ?? "");
+        if (!ensureTermsAgreed()) return;
         if (password.length < 8) {
             message.warning(translate("auth.atLeast8Characters"));
             backToCredentials();
@@ -232,6 +244,7 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
                         <Button type="link" className="min-h-9 px-0 text-xs" onClick={goToForgotPassword}>
                             {translate("auth.forgotPassword")}</Button>
                     </div>
+                    <TermsAgreement checked={agreedToTerms} onChange={setAgreedToTerms} onOpenTerms={() => setTermsOpen(true)} />
                     <Button type="primary" size="large" block loading={submitting} className="h-12! font-medium" onClick={submitCredentials}>
                         {translate("auth.signInOrSignUp")}</Button>
                     {canResumeEmailStep ? (
@@ -265,13 +278,40 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
                             </div>
                         </div>
                     </div>
+                    <TermsAgreement checked={agreedToTerms} onChange={setAgreedToTerms} onOpenTerms={() => setTermsOpen(true)} />
                     <Button type="primary" size="large" block loading={submitting} className="mt-1 h-12! font-medium" onClick={submitRegistration}>
                         {translate("auth.signInOrSignUp")}</Button>
                     <Button type="link" block className="mt-1 min-h-9 text-xs" onClick={() => backToCredentials()}>
                         {translate("auth.backToSignIn")}</Button>
                 </div>
             </div>
+            <TermsDialog open={termsOpen} onClose={() => setTermsOpen(false)} />
         </Form>
+    );
+}
+
+/** 协议勾选行：勾选状态跨两个面共享，点协议名单独打开条款弹窗。 */
+function TermsAgreement({ checked, onChange, onOpenTerms }: { checked: boolean; onChange: (checked: boolean) => void; onOpenTerms: () => void }) {
+    const translate = useTranslation();
+
+    return (
+        <Checkbox checked={checked} onChange={(event) => onChange(event.target.checked)} className="auth-terms mb-3 flex! items-start text-xs!">
+            <span className="text-xs leading-relaxed text-[var(--studio-muted)]">
+                {translate("auth.agreeToTermsPrefix")}
+                <button
+                    type="button"
+                    className="text-xs! text-[var(--studio-primary)]! hover:underline"
+                    onClick={(event) => {
+                        // 阻止点击冒泡到 Checkbox 的 label，否则看协议会顺手把勾选切掉。
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onOpenTerms();
+                    }}
+                >
+                    {translate("auth.termsOfService")}
+                </button>
+            </span>
+        </Checkbox>
     );
 }
 
