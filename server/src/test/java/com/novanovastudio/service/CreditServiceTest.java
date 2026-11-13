@@ -14,8 +14,12 @@ import com.novanovastudio.dto.InvitationDtos;
 import com.novanovastudio.repository.CreditRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.TeamScope;
+import com.novanovastudio.storage.MediaAccessService;
 import java.time.LocalDate;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +48,9 @@ class CreditServiceTest {
     /** 持久化服务 */
     private PersistenceService persistenceService;
 
+    /** 私有存储读地址签发 */
+    private MediaAccessService mediaAccessService;
+
     /** 待测试积分服务 */
     private CreditService creditService;
 
@@ -58,10 +65,21 @@ class CreditServiceTest {
         currentUserProvider = mock(CurrentUserProvider.class);
         persistenceService = mock(PersistenceService.class);
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of()));
+        mediaAccessService = mock(MediaAccessService.class);
+        when(mediaAccessService.signUrls(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    Map<String, String> signed = new LinkedHashMap<>();
+                    Collection<String> urls = invocation.getArgument(0);
+                    if (urls != null) {
+                        urls.forEach(url -> signed.put(url, url));
+                    }
+                    return Mono.just(signed);
+                });
+        when(persistenceService.videoCoverUrls(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.just(new LinkedHashMap<>()));
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        creditService = new CreditService(creditRepository, creditGrantService, persistenceService, currentUserProvider, transactionalOperator, com.novanovastudio.TeamTestSupport.taskScope());
+        creditService = new CreditService(creditRepository, creditGrantService, persistenceService, currentUserProvider, transactionalOperator, com.novanovastudio.TeamTestSupport.taskScope(), mediaAccessService);
     }
 
     /**
@@ -73,11 +91,11 @@ class CreditServiceTest {
         LocalDate endDate = LocalDate.of(2026, 7, 31);
         CreditDtos.AdminTaskRecordItem firstTask = new CreditDtos.AdminTaskRecordItem(
                 "task-1", "image", "model-id", "success", "提示词", null, null, null,
-                java.math.BigDecimal.TEN, List.of(), null, "2026-07-02T12:00:00+08:00", null,
+                java.math.BigDecimal.TEN, List.of(), List.of(), List.of(), null, "2026-07-02T12:00:00+08:00", null,
                 8L, "creator", "创作者", "creator@example.com");
         CreditDtos.AdminTaskRecordItem secondTask = new CreditDtos.AdminTaskRecordItem(
                 "task-2", "image", "model-id", "success", "提示词", null, null, null,
-                java.math.BigDecimal.ONE, List.of(), null, "2026-07-03T12:00:00+08:00", null,
+                java.math.BigDecimal.ONE, List.of(), List.of(), List.of(), null, "2026-07-03T12:00:00+08:00", null,
                 9L, "another-creator", null, "another@example.com");
         when(creditRepository.listAdminTaskRecords(org.mockito.ArgumentMatchers.any(CreditRepository.TaskRecordQuery.class), anyInt(), anyInt()))
                 .thenAnswer(invocation -> {
@@ -103,6 +121,31 @@ class CreditServiceTest {
                         && response.records().getFirst().nickname().equals("创作者")
                         && response.records().get(1).userId() == 9L
                         && response.records().get(1).email().equals("another@example.com"))
+                .verifyComplete();
+    }
+
+    /**
+     * 管理员再次查看任务结果时，应返回按当前存储配置重新签名的地址。
+     */
+    @Test
+    void shouldResignExpiredTaskResultUrlsForAdministrator() {
+        String expiredUrl = "https://bucket.oss-cn-hangzhou.aliyuncs.com/generated/result.png?Expires=1&Signature=expired";
+        String freshUrl = "https://bucket.oss-cn-hangzhou.aliyuncs.com/generated/result.png?Expires=999&Signature=fresh";
+        CreditDtos.AdminTaskRecordItem task = new CreditDtos.AdminTaskRecordItem(
+                "task-1", "image", "model-id", "success", "提示词", "1024", "1:1", null,
+                java.math.BigDecimal.TEN, List.of(expiredUrl), List.of(), List.of(), null, "2026-07-02T12:00:00+08:00", "2026-07-02T12:01:00+08:00",
+                8L, "creator", "创作者", "creator@example.com");
+        when(creditRepository.listAdminTaskRecords(org.mockito.ArgumentMatchers.any(CreditRepository.TaskRecordQuery.class), anyInt(), anyInt()))
+                .thenReturn(Flux.just(task));
+        when(creditRepository.countTaskRecords(org.mockito.ArgumentMatchers.any(CreditRepository.TaskRecordQuery.class))).thenReturn(Mono.just(1L));
+        when(mediaAccessService.signUrls(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(MediaAccessService.Purpose.PREVIEW)))
+                .thenReturn(Mono.just(Map.of(expiredUrl, freshUrl)));
+
+        StepVerifier.create(creditService.listAdminTaskRecords(LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31), "image", null, 1, 20))
+                .assertNext(response -> {
+                    Assertions.assertEquals(List.of(freshUrl), response.records().getFirst().resultUrls());
+                    Assertions.assertEquals("创作者", response.records().getFirst().nickname());
+                })
                 .verifyComplete();
     }
 

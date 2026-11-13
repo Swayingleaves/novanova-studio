@@ -96,11 +96,13 @@ class StorageCapacityServiceIntegrationTest {
         when(persistence.getPlatformObjectStorageConfig()).thenAnswer(ignored -> Mono.just(config(storageId)));
         when(persistence.getObjectStorageForCleanup(anyString())).thenAnswer(call -> Mono.just(config(call.getArgument(0))));
         objectStorage = mock(ObjectStorageService.class);
+        when(objectStorage.createReadUrl(any(), anyString(), any(), any(), anyBoolean(), any())).thenReturn("https://example.com/signed-object");
         ObjectProvider<StorageCapacityService> capacityProvider = mock(ObjectProvider.class);
         repository = new StorageCapacityRepository(client, teamRepository);
         billing = new StorageBillingService(new StorageBillingRepository(client, teamRepository), teamRepository, userProvider, grants, persistenceProvider, capacityProvider, objectStorage, transaction);
         service = new StorageCapacityService(repository, teamRepository, credits, grants, userProvider, billing, persistenceProvider, objectStorage, transaction);
-        fileService = new StorageFileService(new StorageFileRepository(client, teamRepository), userProvider, persistenceProvider, objectStorage, transaction);
+        var mediaAccess = new com.novanovastudio.storage.MediaAccessService(persistenceProvider, objectStorage, new com.novanovastudio.config.NovanovaProperties());
+        fileService = new StorageFileService(new StorageFileRepository(client, teamRepository), userProvider, persistenceProvider, mediaAccess, transaction);
         when(capacityProvider.getObject()).thenReturn(service);
     }
 

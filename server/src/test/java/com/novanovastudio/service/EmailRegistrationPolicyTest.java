@@ -57,7 +57,7 @@ class EmailRegistrationPolicyTest {
     })
     void shouldApplyConfiguredDomains(String configured, String email, boolean allowed) {
         NovanovaProperties properties = new NovanovaProperties();
-        properties.getEmail().setAllowedSuffixes(configured);
+        properties.replaceEmailSettings(properties.emailSettings().withAllowedSuffixes(configured));
         assertEquals(allowed, new EmailRegistrationPolicy(properties).isAllowed(email));
     }
 
@@ -69,7 +69,7 @@ class EmailRegistrationPolicyTest {
     @ValueSource(strings = {"", "  ", "*", "qq.com, *"})
     void shouldAllowAnyDomainWhenExplicitlyUnrestricted(String configured) {
         NovanovaProperties properties = new NovanovaProperties();
-        properties.getEmail().setAllowedSuffixes(configured);
+        properties.replaceEmailSettings(properties.emailSettings().withAllowedSuffixes(configured));
         assertDoesNotThrow(() -> new EmailRegistrationPolicy(properties).validate("user@custom.example"));
     }
 }

@@ -9,13 +9,14 @@ import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.dto.SharedWorkDtos;
 import com.novanovastudio.repository.PersistenceRepository;
 import com.novanovastudio.repository.SharedWorkRepository;
-import com.novanovastudio.security.TeamScope;
+import com.novanovastudio.storage.MediaAccessService;
 import com.novanovastudio.storage.ObjectStorageService;
+import com.novanovastudio.storage.VideoCoverExtractor;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.Base64;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -26,6 +27,7 @@ import reactor.core.scheduler.Schedulers;
  * @author zhenglin.cn.cq@gmail.com
  * @date 2026-11-06 10:00
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SharedWorkMediaService {
@@ -43,6 +45,8 @@ public class SharedWorkMediaService {
     private final AiHttpClient httpClient;
     /** 沿用现有媒体输入大小限制。 */
     private final NovanovaProperties properties;
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
 
     /**
      * 校验本次选定的存储能够保存私有媒体，不允许降级为公有对象。
@@ -77,8 +81,44 @@ public class SharedWorkMediaService {
                     StorageFileService.describe(source.fileName(), category(file.mimeType()), file.mimeType(), "generated"), () -> {
                         objectStorageService.putPrivateObject(config, key, path, file.mimeType());
                         return key;
-                    })).then(repository.heartbeat(code));
+                    })).then(storeVideoCover(code, source.assetId(), file.mimeType(), path, config))
+                    .then(repository.heartbeat(code));
         }));
+    }
+
+    /**
+     * 为视频副本截取一张首页卡片封面，失败时不影响分享本身。
+     * @param code 分享标识
+     * @param assetId 媒体标识
+     * @param mimeType 实际媒体类型
+     * @param video 已下载的本地视频
+     * @param config 目标存储
+     * @return 完成信号，没有封面时也是完成
+     */
+    private Mono<Void> storeVideoCover(String code, String assetId, String mimeType, Path video, PersistenceDtos.ObjectStorageConfig config) {
+        if (!mimeType.startsWith("video/")) return Mono.empty();
+        String key = "shared-work/" + code + "/" + assetId + ".cover.jpg";
+        return Mono.fromCallable(() -> VideoCoverExtractor.extract(video,
+                        properties.getAi().getVideoComposition().getFfmpegExecutable(), VideoCoverExtractor.SHARE_EDGE))
+                .subscribeOn(Schedulers.boundedElastic())
+                .filter(bytes -> bytes != null && bytes.length > 0)
+                .flatMap(bytes -> storageBillingService.storeObject(config, key, bytes.length,
+                                StorageFileService.describe("cover.jpg", "image", "image/jpeg", "generated"), () -> {
+                                    Path cover = Files.createTempFile("novanova-share-cover-", ".jpg");
+                                    try {
+                                        Files.write(cover, bytes);
+                                        objectStorageService.putPrivateObject(config, key, cover, "image/jpeg");
+                                        return key;
+                                    } finally {
+                                        Files.deleteIfExists(cover);
+                                    }
+                                })
+                        .flatMap(coverKey -> repository.updateMediaCover(code, assetId, coverKey, "image/jpeg")))
+                .onErrorResume(error -> {
+                    log.error("生成分享视频封面失败，保留无封面记录: code={}, assetId={}", code, assetId, error);
+                    return Mono.empty();
+                })
+                .then();
     }
 
     /**
@@ -93,30 +133,28 @@ public class SharedWorkMediaService {
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "原素材不属于当前用户或已删除，请重新保存素材后分享")))
                 .flatMap(record -> {
                     if (record.getObjectStorageConfigId() != null && record.getObjectStorageKey() != null) {
+                        // 模型厂商拉取参考素材使用两小时签名地址，复制与预览共用同一读取出口。
                         return storageBillingService.requireObjectAvailable(userId, record.getObjectStorageConfigId(), record.getObjectStorageKey())
-                                .then(persistenceService.getObjectStorageForCleanup(record.getObjectStorageConfigId())
-                                        .contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true)))
-                                .flatMap(config -> Mono.fromCallable(() -> objectStorageService.createReadUrl(config, record.getObjectStorageKey(),
-                                        source.fileName(), source.mimeType(), false, Instant.now().plusSeconds(300))).subscribeOn(Schedulers.boundedElastic()));
+                                .then(mediaAccessService.signObject(record.getObjectStorageConfigId(), record.getObjectStorageKey(),
+                                        source.fileName(), source.mimeType(), MediaAccessService.Purpose.THIRD_PARTY, false))
+                                .map(MediaAccessService.Access::url)
+                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "原素材没有可读取地址")));
                     }
                     String url = record.getObjectStorageUrl() == null || record.getObjectStorageUrl().isBlank() ? record.getSourceUrl() : record.getObjectStorageUrl();
                     if (url == null || url.isBlank()) return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "原素材没有可读取地址"));
-                    return Mono.just(url);
+                    return mediaAccessService.signUrl(url, MediaAccessService.Purpose.THIRD_PARTY);
                 });
     }
 
     /**
-     * 为已经校验作品状态的媒体签发五分钟读取授权。
+     * 为已经校验作品状态的媒体签发公开页读取授权。
      * @param asset 内部媒体记录
      * @return 临时地址与到期时间
      */
     public Mono<SharedWorkDtos.MediaAccess> access(JSONObject asset) {
-        Instant expiresAt = Instant.now().plusSeconds(300);
-        return persistenceService.getObjectStorageForCleanup(asset.getString("storageId"))
-                .contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true))
-                .flatMap(config -> Mono.fromCallable(() -> objectStorageService.createReadUrl(config, asset.getString("objectKey"),
-                        asset.getString("fileName"), asset.getString("mimeType"), false, expiresAt)).subscribeOn(Schedulers.boundedElastic()))
-                .map(url -> new SharedWorkDtos.MediaAccess(url, expiresAt.toString()));
+        return mediaAccessService.signObject(asset.getString("storageId"), asset.getString("objectKey"),
+                        asset.getString("fileName"), asset.getString("mimeType"), MediaAccessService.Purpose.PUBLIC_PAGE, false)
+                .map(access -> new SharedWorkDtos.MediaAccess(access.url(), access.expiresAt()));
     }
 
     /**

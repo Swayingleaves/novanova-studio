@@ -104,6 +104,19 @@ public class ScriptController {
     }
 
     /**
+     * 更新剧本项目封面。漫剧项目与剧本一对一，更新后两边看到同一张封面。
+     *
+     * @param request 封面更新请求
+     * @param httpRequest 当前HTTP请求
+     * @return 已保存的封面
+     */
+    @PostMapping("/updateCover")
+    public Mono<ApiResponse<ScriptDtos.ProjectCover>> updateCover(
+            @Valid @RequestBody ScriptDtos.UpdateCoverRequest request, ServerHttpRequest httpRequest) {
+        return execute("更新剧本封面", httpRequest, request, scriptService.updateCover(request));
+    }
+
+    /**
      * 查询剧本项目基础详情。
      *
      * @param request 项目标识请求

@@ -1,6 +1,6 @@
 package com.novanovastudio.security.oauth2;
 
-import com.novanovastudio.config.NovanovaProperties;
+import com.novanovastudio.service.OAuthProviderConfigService;
 import java.net.URI;
 import java.util.Locale;
 import lombok.RequiredArgsConstructor;
@@ -8,7 +8,7 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.oidc.IdTokenClaimNames;
-import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -41,7 +41,7 @@ public class GoogleOAuth2Provider implements ThirdPartyOAuth2Provider {
     private static final String ISSUER_URI = "https://accounts.google.com";
 
     /** OAuth2回调路径 */
-    private static final String CALLBACK_PATH = "/api/v1/auth/oauth/callback/google";
+    private static final String CALLBACK_PATH = OAuth2ProviderCatalog.GOOGLE.callbackPath();
 
     /** 基础邮箱格式 */
     private static final String EMAIL_PATTERN = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
@@ -58,8 +58,8 @@ public class GoogleOAuth2Provider implements ThirdPartyOAuth2Provider {
     /** 头像地址最大长度 */
     private static final int MAX_AVATAR_LENGTH = 255;
 
-    /** 服务配置 */
-    private final NovanovaProperties properties;
+    /** OAuth2登录渠道配置服务 */
+    private final OAuthProviderConfigService providerConfigService;
 
     /**
      * 获取渠道唯一标识。
@@ -78,7 +78,7 @@ public class GoogleOAuth2Provider implements ThirdPartyOAuth2Provider {
      */
     @Override
     public String displayName() {
-        return "Google";
+        return OAuth2ProviderCatalog.GOOGLE.displayName();
     }
 
     /**
@@ -88,7 +88,7 @@ public class GoogleOAuth2Provider implements ThirdPartyOAuth2Provider {
      */
     @Override
     public boolean enabled() {
-        return properties.getOauth2().getGoogle().isEnabled();
+        return providerConfigService.find(PROVIDER_ID).map(ThirdPartyOAuth2Configuration::enabled).orElse(false);
     }
 
     /**
@@ -99,16 +99,17 @@ public class GoogleOAuth2Provider implements ThirdPartyOAuth2Provider {
      */
     @Override
     public ClientRegistration clientRegistration() {
-        NovanovaProperties.OAuth2.Google configuration = properties.getOauth2().getGoogle();
-        requireConfiguration(configuration.getClientId(), "OAUTH2_GOOGLE_CLIENT_ID");
-        requireConfiguration(configuration.getClientSecret(), "OAUTH2_GOOGLE_CLIENT_SECRET");
-        requireConfiguration(configuration.getRedirectUri(), "OAUTH2_GOOGLE_REDIRECT_URI");
+        ThirdPartyOAuth2Configuration configuration = providerConfigService.find(PROVIDER_ID)
+                .orElseThrow(() -> new IllegalStateException("Google登录未在管理后台完成配置"));
+        requireConfiguration(configuration.clientId(), "Client ID");
+        requireConfiguration(configuration.clientSecret(), "Client Secret");
+        requireConfiguration(configuration.redirectUri(), "回调地址");
         return ClientRegistration.withRegistrationId(PROVIDER_ID)
-                .clientId(configuration.getClientId().trim())
-                .clientSecret(configuration.getClientSecret().trim())
+                .clientId(configuration.clientId().trim())
+                .clientSecret(configuration.clientSecret().trim())
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_POST)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-                .redirectUri(validatedRedirectUri(configuration.getRedirectUri()))
+                .redirectUri(validatedRedirectUri(configuration.redirectUri()))
                 .scope("openid", "profile", "email")
                 .authorizationUri(AUTHORIZATION_URI)
                 .tokenUri(TOKEN_URI)
@@ -123,13 +124,13 @@ public class GoogleOAuth2Provider implements ThirdPartyOAuth2Provider {
     /**
      * 校验Google账号资料并转换为标准身份。
      *
-     * @param user OidcUser Google OpenID Connect用户声明
+     * @param user OAuth2User Google用户声明
      * @return ThirdPartyUserIdentity 标准化第三方用户身份
      * @throws OAuth2LoginException 用户标识、已验证邮箱或资料不满足要求时抛出
      */
     @Override
-    public ThirdPartyUserIdentity resolveIdentity(OidcUser user) {
-        if (!Boolean.TRUE.equals(user.getClaims().get("email_verified"))) {
+    public ThirdPartyUserIdentity resolveIdentity(OAuth2User user) {
+        if (!Boolean.TRUE.equals(user.getAttributes().get("email_verified"))) {
             throw new OAuth2LoginException("emailUnverified", "Google账号邮箱尚未验证");
         }
         String providerUserId = requiredClaim(user, IdTokenClaimNames.SUB, "providerIdentityUnavailable", "Google用户标识缺失");
@@ -149,12 +150,12 @@ public class GoogleOAuth2Provider implements ThirdPartyOAuth2Provider {
      * 校验必要配置。
      *
      * @param value String 配置值
-     * @param environmentName String 环境变量名称
+     * @param fieldName String 配置项名称
      * @throws IllegalStateException 配置为空时抛出
      */
-    private void requireConfiguration(String value, String environmentName) {
+    private void requireConfiguration(String value, String fieldName) {
         if (!StringUtils.hasText(value)) {
-            throw new IllegalStateException("已启用Google登录，但未配置" + environmentName);
+            throw new IllegalStateException("Google登录已启用，但管理后台未配置" + fieldName);
         }
     }
 
@@ -170,12 +171,12 @@ public class GoogleOAuth2Provider implements ThirdPartyOAuth2Provider {
         try {
             redirectUri = URI.create(value.trim());
         } catch (IllegalArgumentException exception) {
-            throw new IllegalStateException("OAUTH2_GOOGLE_REDIRECT_URI不是合法地址", exception);
+            throw new IllegalStateException("Google登录回调地址不是合法地址", exception);
         }
         boolean supportedScheme = "https".equalsIgnoreCase(redirectUri.getScheme()) || "http".equalsIgnoreCase(redirectUri.getScheme());
         if (!supportedScheme || !StringUtils.hasText(redirectUri.getHost()) || !CALLBACK_PATH.equals(redirectUri.getPath())
                 || redirectUri.getQuery() != null || redirectUri.getFragment() != null) {
-            throw new IllegalStateException("OAUTH2_GOOGLE_REDIRECT_URI必须是绝对HTTP地址且路径为" + CALLBACK_PATH);
+            throw new IllegalStateException("Google登录回调地址必须是绝对HTTP地址且路径为" + CALLBACK_PATH);
         }
         return redirectUri.toString();
     }
@@ -183,14 +184,14 @@ public class GoogleOAuth2Provider implements ThirdPartyOAuth2Provider {
     /**
      * 读取必填用户声明。
      *
-     * @param user OidcUser OpenID Connect用户
+     * @param user OAuth2User 第三方用户
      * @param claimName String 声明名称
      * @param errorCode String 固定错误码
      * @param errorMessage String 中文错误信息
      * @return String 去除首尾空白后的声明值
      * @throws OAuth2LoginException 声明缺失时抛出
      */
-    private String requiredClaim(OidcUser user, String claimName, String errorCode, String errorMessage) {
+    private String requiredClaim(OAuth2User user, String claimName, String errorCode, String errorMessage) {
         String value = claim(user, claimName);
         if (!StringUtils.hasText(value)) {
             throw new OAuth2LoginException(errorCode, errorMessage);
@@ -201,12 +202,12 @@ public class GoogleOAuth2Provider implements ThirdPartyOAuth2Provider {
     /**
      * 读取字符串用户声明。
      *
-     * @param user OidcUser OpenID Connect用户
+     * @param user OAuth2User 第三方用户
      * @param claimName String 声明名称
      * @return String 字符串声明，不存在时返回空字符串
      */
-    private String claim(OidcUser user, String claimName) {
-        Object value = user.getClaims().get(claimName);
+    private String claim(OAuth2User user, String claimName) {
+        Object value = user.getAttributes().get(claimName);
         return value instanceof String stringValue ? stringValue.trim() : "";
     }
 

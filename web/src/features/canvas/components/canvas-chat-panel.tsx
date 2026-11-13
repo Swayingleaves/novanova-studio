@@ -11,10 +11,13 @@ import { Copy, PanelRightClose, Plus, Square } from "lucide-react";
 import { ThinkingBlock } from "@/features/chat";
 import type { ThinkingBlockState } from "@/features/chat/types";
 import { ModelPicker } from "@/features/settings/components/model-picker";
+import { CreationSettingsModal } from "@/features/generation/components/creation-settings-modal";
+import { ChoiceGroup } from "@/features/generation/components/creation-message-thread";
+import { ASK_USER_MODEL_CONFIG, CONTINUE_AFTER_MODEL_CONFIG, MODEL_CONFIG_CONFIRMED_MESSAGE, choicesFromAgentActionTokens, stripAgentActionTokens } from "@/features/skill-market/lib/skill-prompt-actions";
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
-import type { CanvasAssistantMessage, CanvasAssistantReference, CanvasNode } from "../types";
+import type { CanvasAssistantChoice, CanvasAssistantMessage, CanvasAssistantReference, CanvasNode } from "../types";
 import type { GenerationStyleOption } from "@/services/api/server";
 import { formatGroupedGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
@@ -45,7 +48,11 @@ type CanvasChatPanelProps = {
     config: AiConfig;
     model: string;
     onModelChange: (model: string) => void;
+    onImageModelChange: (model: string) => void;
+    onVideoModelChange: (model: string) => void;
     onMissingConfig?: () => void;
+    onUploadImage?: () => void;
+    onUploadVideo?: () => void;
     initialPrompt?: string;
     sessionId?: string | null;
 };
@@ -69,7 +76,11 @@ export function CanvasChatPanel({
     config,
     model,
     onModelChange,
+    onImageModelChange,
+    onVideoModelChange,
     onMissingConfig,
+    onUploadImage,
+    onUploadVideo,
     initialPrompt = "",
     sessionId = null,
 }: CanvasChatPanelProps) {
@@ -87,6 +98,10 @@ export function CanvasChatPanel({
     const styleCatalog = useGenerationStyles();
     const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
     const [isResizing, setIsResizing] = useState(false);
+    const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+    const [modelSettingsMessageId, setModelSettingsMessageId] = useState<string | null>(null);
+    const [modelConfigContinueMessageId, setModelConfigContinueMessageId] = useState<string | null>(null);
+    const actionableMessageId = latestUnansweredAssistantId(messages);
     const droppedNodes = nodes.filter((node) => droppedNodeIds.has(node.id));
 
     useEffect(() => {
@@ -101,6 +116,9 @@ export function CanvasChatPanel({
         setPrompt("");
         setDroppedNodeIds(new Set());
         setSelectedStyles([]);
+        setModelSettingsOpen(false);
+        setModelSettingsMessageId(null);
+        setModelConfigContinueMessageId(null);
     }, [sessionId]);
 
     const handleSend = useCallback(
@@ -110,6 +128,7 @@ export function CanvasChatPanel({
             const mentionedNodes = readCanvasAgentMentionNodeIds(agentText, nodes).map((nodeId) => nodes.find((node) => node.id === nodeId)).filter((node): node is CanvasNode => Boolean(node));
             const referenceList = [...droppedNodes, ...mentionedNodes].map(nodeToReference).filter((item): item is CanvasAssistantReference => Boolean(item));
             const references = Array.from(new Map(referenceList.map((reference) => [reference.id, reference])).values());
+            setModelConfigContinueMessageId(null);
             onSend(
                 formatCanvasAgentMentionDisplayText(agentText, nodes),
                 references,
@@ -253,13 +272,30 @@ export function CanvasChatPanel({
                         <div className="py-12 text-center text-sm" style={{ color: theme.node.placeholder }}>
                             {translate("canvas.sendAMessageToStartChatting")}</div>
                     ) : (
-                        messages.map((msg) => (
+                        messages.map((msg) => {
+                            const visibleText = msg.role === "assistant" ? stripAgentActionTokens(msg.text) : msg.text;
+                            const choices = msg.id === actionableMessageId ? messageActionChoices(msg, modelConfigContinueMessageId) : [];
+                            return (
                             <div key={msg.id} className="space-y-1.5">
-                                <ChatBubble role={msg.role as "user" | "assistant"} text={msg.text} theme={theme} onCopy={() => copyText(formatGroupedGenerationStyleMessage(msg.text, msg.generationStyles), translate("canvas.messageCopied"))} />
+                                {visibleText ? <ChatBubble role={msg.role as "user" | "assistant"} text={visibleText} theme={theme} onCopy={() => copyText(formatGroupedGenerationStyleMessage(visibleText, msg.generationStyles), translate("canvas.messageCopied"))} /> : null}
+                                {choices.length ? (
+                                    <ChoiceGroup
+                                        options={choices}
+                                        onReply={(value) => handleSend(value)}
+                                        onOpenModelSettings={() => {
+                                            setModelConfigContinueMessageId(null);
+                                            setModelSettingsMessageId(msg.id);
+                                            setModelSettingsOpen(true);
+                                        }}
+                                        onUpload={onUploadImage}
+                                        onUploadVideo={onUploadVideo}
+                                    />
+                                ) : null}
                                 {msg.generationStyles?.length ? <GenerationStyleChips styles={msg.generationStyles.map((style) => ({ ...style, coverUrl: "", category: "" }))} /> : null}
                                 {msg.references?.length ? <MessageReferences references={msg.references} theme={theme} /> : null}
                             </div>
-                        ))
+                            );
+                        })
                     )}
                     {[...completedThinkings, ...(activeThinking ? [activeThinking] : [])]
                         .filter((thinking) => thinking.text)
@@ -312,8 +348,45 @@ export function CanvasChatPanel({
                     left={<ModelPicker config={config} value={model} onChange={onModelChange} capability="text" className="h-8 max-w-full" placeholder={translate("canvas.selectTextModel")} onMissingConfig={onMissingConfig} />}
                 />
             </div>
+            <CreationSettingsModal open={modelSettingsOpen} title={translate("canvas.modelSettings")} onClose={() => {
+                setModelSettingsOpen(false);
+                setModelConfigContinueMessageId(modelSettingsMessageId);
+            }}>
+                <div className="space-y-4">
+                    <div>
+                        <label className="mb-1.5 block text-sm font-semibold">{translate("canvas.selectTextModel")}</label>
+                        <ModelPicker config={config} value={model} onChange={onModelChange} capability="text" fullWidth placeholder={translate("canvas.selectTextModel")} onMissingConfig={onMissingConfig} />
+                    </div>
+                    <div>
+                        <label className="mb-1.5 block text-sm font-semibold">{translate("canvas.imageModel")}</label>
+                        <ModelPicker config={config} value={config.imageModel} onChange={onImageModelChange} capability="image" fullWidth />
+                    </div>
+                    <div>
+                        <label className="mb-1.5 block text-sm font-semibold">{translate("canvas.videoModel")}</label>
+                        <ModelPicker config={config} value={config.videoModel} onChange={onVideoModelChange} capability="video" fullWidth />
+                    </div>
+                </div>
+            </CreationSettingsModal>
         </div>
     );
+}
+
+function latestUnansweredAssistantId(messages: CanvasAssistantMessage[]): string | null {
+    let assistantId: string | null = null;
+    for (const message of messages) {
+        if (message.role === "user") assistantId = null;
+        if (message.role === "assistant") assistantId = message.id;
+    }
+    return assistantId;
+}
+
+function messageActionChoices(message: CanvasAssistantMessage, continueMessageId: string | null): CanvasAssistantChoice[] {
+    const structured = message.action?.type === "choice" ? message.action.options || [] : [];
+    const choices = structured.length ? structured : choicesFromAgentActionTokens(message.text);
+    if (message.id !== continueMessageId) return choices;
+    return choices.map((choice) => choice.action === ASK_USER_MODEL_CONFIG
+        ? { ...choice, action: CONTINUE_AFTER_MODEL_CONFIG, value: MODEL_CONFIG_CONFIRMED_MESSAGE }
+        : choice);
 }
 
 function clampPanelWidth(width: number) {

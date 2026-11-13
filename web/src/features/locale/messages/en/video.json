@@ -51,6 +51,7 @@
     "optimizePromptWithAI": "Optimize prompt with AI",
     "assetLibrary": "Asset library",
     "moreSettings": "More settings",
+    "continueAfterSettings": "Continue",
     "imageGenerationSettings": "Image generation settings",
     "selectQualityResolutionAspectRatioAndModelBeforeConfirming": "Select quality, resolution, aspect ratio and model before confirming generation.",
     "model": "Model",

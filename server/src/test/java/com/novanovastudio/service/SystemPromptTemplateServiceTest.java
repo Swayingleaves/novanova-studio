@@ -112,6 +112,7 @@ class SystemPromptTemplateServiceTest {
         systemPrompt.setAgentStoryboardFile(templateFile(PromptTemplateType.AGENT_STORYBOARD).toUri().toString());
         systemPrompt.setAgentScriptFile(templateFile(PromptTemplateType.AGENT_SCRIPT).toUri().toString());
         systemPrompt.setAgentStoryBibleFile(templateFile(PromptTemplateType.AGENT_STORY_BIBLE).toUri().toString());
+        systemPrompt.setAgentUserActionsFile(templateFile(PromptTemplateType.AGENT_USER_ACTIONS).toUri().toString());
         systemPrompt.setImageStoryboardAssetFile(templateFile(PromptTemplateType.IMAGE_STORYBOARD_ASSET).toUri().toString());
         return properties;
     }

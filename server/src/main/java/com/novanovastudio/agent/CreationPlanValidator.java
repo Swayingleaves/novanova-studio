@@ -78,12 +78,11 @@ public class CreationPlanValidator {
                     plan.tasks(), plan.choices(), plan.workflowType());
         }
         // 普通视频生成的模式属于页面设置，不是视频技能工作流类型；模型误将模式写入该字段时纠正为空。
-        // 仅纠正服务端明确支持的模式，其他非空值仍必须通过工作流注册表校验。
-        if (CreationEntrySource.VIDEO_PAGE.equals(entrySource)
-                && VideoGenerationMode.isSupported(plan.workflowType())) {
+        // 技能工作流是否成立由 workflowId 确认，不能在这里丢掉未注册标识。
+        if (CreationEntrySource.VIDEO_PAGE.equals(entrySource) && VideoGenerationMode.isSupported(plan.workflowType())) {
             plan = new CreationPlan(plan.planId(), plan.intent(), plan.entrySource(), plan.summary(),
                     plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(),
-                    plan.tasks(), plan.choices());
+                    plan.tasks(), plan.choices(), null, plan.workflowId());
         }
         if (settings != null) {
             boolean hasStyleIds = settings.generationStyleIds() != null && !settings.generationStyleIds().isEmpty();

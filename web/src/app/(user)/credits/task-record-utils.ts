@@ -54,3 +54,23 @@ export function formatConsumedCredits(consumedCredits: CreditAmount | null | und
 export function taskRecordUserLabel(user: { nickname?: string | null; username?: string | null; email?: string | null }) {
     return user.nickname || user.username || user.email || "—";
 }
+
+/**
+ * 格式化任务从创建到完成的耗时。
+ *
+ * 不足 60 秒只显示秒；达到 60 秒显示分钟和剩余秒。任务未完成或时间无效时返回占位符。
+ *
+ * @param createdAt 任务创建时间
+ * @param completedAt 任务完成时间
+ * @return 耗时文案，例如 10s、1分10s
+ */
+export function formatTaskElapsedTime(createdAt: string | null | undefined, completedAt: string | null | undefined) {
+    if (!createdAt || !completedAt) return "—";
+    const startedAt = Date.parse(createdAt);
+    const finishedAt = Date.parse(completedAt);
+    if (!Number.isFinite(startedAt) || !Number.isFinite(finishedAt) || finishedAt < startedAt) return "—";
+    const totalSeconds = Math.floor((finishedAt - startedAt) / 1000);
+    if (totalSeconds < 60) return `${totalSeconds}s`;
+    const minutes = Math.floor(totalSeconds / 60);
+    return translate("credits.elapsedMinutes", { value0: minutes, value1: totalSeconds % 60 });
+}

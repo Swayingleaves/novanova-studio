@@ -1,5 +1,5 @@
 "use client";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Spin, Tag } from "antd";
 import { Copy, RefreshCw } from "lucide-react";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -18,12 +18,26 @@ export default function SharedWorkPage({ params }: { params: Promise<{ shareCode
     const [loading, setLoading] = useState(true);
     const [copying, setCopying] = useState(false);
     const [revision, setRevision] = useState(0);
+    const lastLoadedAt = useRef(0);
     useEffect(() => {
         const controller = new AbortController();
         setLoading(true); setError(""); setDetail(null);
+        lastLoadedAt.current = Date.now();
         void getSharedWork(shareCode, true, controller.signal).then((result) => { if (!controller.signal.aborted) setDetail(result); }).catch((failure) => { if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "作品不存在或尚未公开"); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
         return () => controller.abort();
     }, [shareCode, revision]);
+    // 分享页媒体只有临时授权，页面可见且距上次加载超过二十分钟时自动重新拉取，避免长时间停留后媒体失效。
+    useEffect(() => {
+        const refreshIfStale = () => {
+            if (document.visibilityState === "visible" && Date.now() - lastLoadedAt.current >= 20 * 60_000) setRevision((value) => value + 1);
+        };
+        const timer = window.setInterval(refreshIfStale, 20 * 60_000);
+        document.addEventListener("visibilitychange", refreshIfStale);
+        return () => {
+            window.clearInterval(timer);
+            document.removeEventListener("visibilitychange", refreshIfStale);
+        };
+    }, []);
     const copyCanvas = async () => {
         if (!user) { openAuthModal(`/share/${shareCode}`); return; }
         setCopying(true);
@@ -41,7 +55,7 @@ export default function SharedWorkPage({ params }: { params: Promise<{ shareCode
                 <Button icon={<Copy className="size-4" />} onClick={() => copyText(`${window.location.origin}/share/${shareCode}`, "公开链接已复制")}>复制链接</Button><Button icon={<RefreshCw className="size-4" />} onClick={() => setRevision((value) => value + 1)}>刷新媒体授权</Button>
             </div></header>
             <SharedContent snapshot={detail.snapshot} />
-            <p className="text-xs text-[var(--studio-muted)]">这是作者发布时的固定快照。媒体临时授权五分钟内到期，可刷新媒体授权继续查看。</p>
+            <p className="text-xs text-[var(--studio-muted)]">这是作者发布时的固定快照。媒体临时授权会过期，长期停留时页面会自动刷新，也可手动刷新媒体授权。</p>
         </> : null}
     </div></main>;
 }

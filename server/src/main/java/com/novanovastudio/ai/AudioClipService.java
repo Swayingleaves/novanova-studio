@@ -85,7 +85,7 @@ public class AudioClipService {
         String storageKey = derivedStorageKey(media.storageKey(), startMs, endMs);
         log.info("准备解析音频派生媒体: userId={}, derivedStorageKey={}, startMs={}, endMs={}",
                 userId, storageKey, startMs, endMs);
-        return persistenceService.getMediaInfoForUser(userId, storageKey)
+        return persistenceService.getMediaInfoForUser(userId, storageKey, com.novanovastudio.storage.MediaAccessService.Purpose.THIRD_PARTY)
                 .flatMap(existing -> {
                     if (!StringUtils.hasText(existing.url()) || !isHttpUrl(existing.url())) {
                         log.info("已存在的音频派生媒体地址无效，重新生成: userId={}, storageKey={}", userId, storageKey);
@@ -165,7 +165,7 @@ public class AudioClipService {
             Process process = new ProcessBuilder(command).start();
             StringBuilder error = new StringBuilder();
             Thread reader = Thread.ofVirtual().start(() -> readError(process, error));
-            boolean completed = process.waitFor(Math.max(1, composition.getExecutionTimeoutSeconds()), TimeUnit.SECONDS);
+            boolean completed = process.waitFor(Math.max(1, properties.timeoutSettings().videoCompositionExecutionTimeoutSeconds()), TimeUnit.SECONDS);
             if (!completed) {
                 process.destroyForcibly();
                 process.waitFor(5, TimeUnit.SECONDS);

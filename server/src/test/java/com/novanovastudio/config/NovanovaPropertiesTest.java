@@ -11,16 +11,25 @@ import org.junit.jupiter.api.Test;
  */
 class NovanovaPropertiesTest {
 
-    /** 验证邮箱白名单配置可以绑定，显式空值保留不限注册的语义。 */
+    /** 邮件服务快照来自管理后台，默认白名单与迁移一致，日志不能带出授权码。 */
     @Test
-    void shouldBindEmailRegistrationWhitelist() {
-        var source = new org.springframework.boot.context.properties.source.MapConfigurationPropertySource(
-                java.util.Map.of("novanova.email.allowed-suffixes", "@qq.com,gmail.com"));
-        var binder = new org.springframework.boot.context.properties.bind.Binder(source);
-        NovanovaProperties properties = binder.bind("novanova", NovanovaProperties.class).get();
-        Assertions.assertEquals("@qq.com,gmail.com", properties.getEmail().getAllowedSuffixes());
-        source.put("novanova.email.allowed-suffixes", "");
-        Assertions.assertEquals("", binder.bind("novanova", NovanovaProperties.class).get().getEmail().getAllowedSuffixes());
+    void shouldReplaceRuntimeEmailSettingsWithoutExposingPassword() {
+        NovanovaProperties properties = new NovanovaProperties();
+        Assertions.assertEquals(NovanovaProperties.RuntimeEmailSettings.DEFAULT_ALLOWED_SUFFIXES, properties.emailSettings().allowedSuffixes());
+        Assertions.assertEquals(465, properties.emailSettings().smtpPort());
+        Assertions.assertFalse(properties.emailSettings().configured());
+
+        properties.replaceEmailSettings(properties.emailSettings().withSmtpHost("smtp.example.com").withFromEmail("noreply@example.com")
+                .withAllowedSuffixes(""));
+        NovanovaProperties.RuntimeEmailSettings settings = new NovanovaProperties.RuntimeEmailSettings("smtp.example.com", 465, "user", "secret-auth", "noreply@example.com", "");
+        properties.replaceEmailSettings(settings);
+
+        Assertions.assertEquals("", properties.emailSettings().allowedSuffixes());
+        Assertions.assertTrue(properties.emailSettings().configured());
+        Assertions.assertEquals("secret-auth", properties.emailSettings().smtpPassword());
+        Assertions.assertFalse(properties.emailSettings().toString().contains("secret-auth"));
+        properties.replaceEmailSettings(null);
+        Assertions.assertEquals(NovanovaProperties.RuntimeEmailSettings.DEFAULT_ALLOWED_SUFFIXES, properties.emailSettings().allowedSuffixes());
     }
 
     /**
@@ -55,26 +64,32 @@ class NovanovaPropertiesTest {
         NovanovaProperties.ObjectStorage.TencentCos tencentCos = properties.getObjectStorage().getTencentCos();
 
         Assertions.assertEquals(3, tencentCos.getMaxErrorRetry());
-        Assertions.assertEquals(120_000, tencentCos.getSocketTimeoutMilliseconds());
 
         tencentCos.setMaxErrorRetry(5);
-        tencentCos.setSocketTimeoutMilliseconds(180_000);
 
         Assertions.assertEquals(5, tencentCos.getMaxErrorRetry());
-        Assertions.assertEquals(180_000, tencentCos.getSocketTimeoutMilliseconds());
     }
 
     /**
-     * 测试分镜Agent超时配置默认值和修改能力。
+     * 测试运行时超时快照的默认值，以及被平台设置覆盖后的读取结果。
      */
     @Test
-    void shouldConfigureStoryboardAgentTimeout() {
+    void shouldReplaceRuntimeTimeoutSettings() {
         NovanovaProperties properties = new NovanovaProperties();
+        NovanovaProperties.RuntimeTimeouts defaults = properties.timeoutSettings();
 
-        Assertions.assertEquals(90, properties.getAi().getStoryboardAgent().getTimeoutSeconds());
+        Assertions.assertEquals(60, defaults.aiRequestBodyTimeoutSeconds());
+        Assertions.assertEquals(600, defaults.storyboardAgentTimeoutSeconds());
+        Assertions.assertEquals(600, defaults.scriptAgentTimeoutSeconds());
+        Assertions.assertEquals(600, defaults.storyBibleAgentTimeoutSeconds());
+        Assertions.assertEquals(300, defaults.taskWaitTimeoutSeconds());
+        Assertions.assertEquals(900, defaults.videoTaskWaitTimeoutSeconds());
+        Assertions.assertEquals(1800, defaults.videoCompositionExecutionTimeoutSeconds());
+        Assertions.assertEquals(120_000, defaults.tencentCosSocketTimeoutMilliseconds());
 
-        properties.getAi().getStoryboardAgent().setTimeoutSeconds(180);
+        properties.replaceTimeoutSettings(new NovanovaProperties.RuntimeTimeouts(30, 180, 180, 180, 120, 600, 900, 60_000));
 
-        Assertions.assertEquals(180, properties.getAi().getStoryboardAgent().getTimeoutSeconds());
+        Assertions.assertEquals(30, properties.timeoutSettings().aiRequestBodyTimeoutSeconds());
+        Assertions.assertEquals(60_000, properties.timeoutSettings().tencentCosSocketTimeoutMilliseconds());
     }
 }

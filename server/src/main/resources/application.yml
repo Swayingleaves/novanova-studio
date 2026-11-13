@@ -1,6 +1,6 @@
 # ============================================================
 # Novanova Studio 服务端应用配置文件
-# 包含服务端口、数据库、Redis、邮件、AI 任务消费等全部配置项
+# 包含服务端口、数据库、Redis、AI 任务消费等全部配置项。邮件服务器在管理后台配置。
 # 敏感信息通过环境变量注入，默认值仅用于本地开发
 # ============================================================
 
@@ -99,36 +99,6 @@ spring:
     fail-on-missing-locations: true
 
   # ----------------------------------------------------------
-  # 邮件发送配置（SMTP）
-  # ----------------------------------------------------------
-  mail:
-    # SMTP 邮件服务器地址
-    host: ${EMAIL_SMTP_HOST:}
-    # SMTP 端口，465 为 SSL 端口
-    port: ${EMAIL_SMTP_PORT:465}
-    # SMTP 认证用户名
-    username: ${EMAIL_SMTP_USERNAME:}
-    # SMTP 认证密码
-    password: ${EMAIL_SMTP_PASSWORD:}
-    properties:
-      mail:
-        smtp:
-          # 是否开启 SMTP 认证
-          auth: true
-          ssl:
-            # 是否启用 SSL 加密连接
-            enable: true
-          starttls:
-            # 是否启用 STARTTLS（与 SSL 二选一）
-            enable: false
-          # 建立 SMTP 连接的超时时间（毫秒），避免邀请发信长期占用团队行锁
-          connectiontimeout: 5000
-          # 等待服务器响应的超时时间（毫秒）
-          timeout: 10000
-          # 写入数据到服务器的超时时间（毫秒）
-          writetimeout: 10000
-
-  # ----------------------------------------------------------
   # WebFlux 编解码器配置
   # ----------------------------------------------------------
   codec:
@@ -147,6 +117,10 @@ spring:
 # Actuator 监控端点配置
 # ============================================================
 management:
+  health:
+    mail:
+      # 邮件服务器由管理后台配置，未配置时不能把健康检查打成失败。
+      enabled: false
   endpoints:
     web:
       exposure:
@@ -188,32 +162,6 @@ novanova:
     token-expire-hours: ${TOKEN_EXPIRE_HOURS:24}
     # 可信代理地址列表，用于获取真实客户端 IP（逗号分隔）
     trusted-proxy-addresses: ${TRUSTED_PROXY_ADDRESSES:}
-  wechat:
-    # 普通商户 Native 扫码支付，使用官方 SDK 和微信支付公钥验签。
-    enabled: ${WECHAT_ENABLED:false}
-    app-id: ${WECHAT_APP_ID:}
-    merchant-id: ${WECHAT_MERCHANT_ID:}
-    private-key-path: ${WECHAT_PRIVATE_KEY_PATH:}
-    public-key-path: ${WECHAT_PUBLIC_KEY_PATH:}
-    public-key-id: ${WECHAT_PUBLIC_KEY_ID:}
-    merchant-serial-number: ${WECHAT_MERCHANT_SERIAL_NUMBER:}
-    api-v3-key: ${WECHAT_API_V3_KEY:}
-    notify-url: ${WECHAT_NOTIFY_URL:}
-  alipay:
-    # 是否启用支付宝电脑网站支付。
-    enabled: ${ALIPAY_ENABLED:false}
-    # 支付宝开放平台应用标识。
-    app-id: ${ALIPAY_APP_ID:}
-    # 应用私钥，仅从部署环境注入，不写入仓库。
-    private-key: ${ALIPAY_PRIVATE_KEY:}
-    # 支付宝公钥，仅从部署环境注入，不写入仓库。
-    public-key: ${ALIPAY_PUBLIC_KEY:}
-    # 支付宝网关地址，沙箱环境可替换为沙箱网关。
-    gateway-url: ${ALIPAY_GATEWAY_URL:https://openapi.alipay.com/gateway.do}
-    # 支付宝异步通知地址，必须是支付宝可以访问的公网地址。
-    notify-url: ${ALIPAY_NOTIFY_URL:}
-    # 支付完成后的同步跳转地址。
-    return-url: ${ALIPAY_RETURN_URL:}
   cors:
     # 允许跨域请求的来源地址模式（逗号分隔）
     allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:5555,http://127.0.0.1:5555,https://www.novanovastudio.cn}
@@ -224,11 +172,6 @@ novanova:
     initial-password: ${ADMIN_INITIAL_PASSWORD:novanovastudio@pwss}
     # 初始管理员昵称
     initial-nickname: ${ADMIN_INITIAL_NICKNAME:admin}
-  email:
-    # 发件人显示地址
-    from: ${EMAIL_SMTP_FROM:}
-    # 注册邮箱域名白名单，邮箱验证码与第三方首次注册共用；空值或独立星号表示不限制。
-    allowed-suffixes: ${EMAIL_ALLOWED_SUFFIXES:qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,foxmail.com,icloud.com,sina.com,aliyun.com,yeah.net,139.com,189.cn,sina.cn,vip.qq.com,vip.163.com,yahoo.com,live.com,msn.com,proton.me,protonmail.com}
   email-campaign:
     # 群发使用独立队列，所有服务实例共同遵守发送间隔与滚动窗口额度
     minimum-interval-seconds: ${EMAIL_CAMPAIGN_MINIMUM_INTERVAL_SECONDS:3}
@@ -240,34 +183,22 @@ novanova:
   # 对象存储配置
   # ----------------------------------------------------------
   object-storage:
+    # 是否强制要求存储桶为私有读写；切换完成后建议设为 true，未开启时只记录告警
+    require-private-bucket: ${STORAGE_REQUIRE_PRIVATE_BUCKET:false}
+    # 私有读存储桶的预签名读地址有效期，按用途分档，单位秒
+    sign-ttl:
+      # 图片、视频、音频预览与播放地址
+      preview-seconds: ${STORAGE_SIGN_PREVIEW_SECONDS:3600}
+      # 文件下载地址
+      download-seconds: ${STORAGE_SIGN_DOWNLOAD_SECONDS:300}
+      # 第三方模型拉取参考素材的地址
+      third-party-seconds: ${STORAGE_SIGN_THIRD_PARTY_SECONDS:7200}
+      # 公开分享页展示地址
+      public-page-seconds: ${STORAGE_SIGN_PUBLIC_PAGE_SECONDS:1800}
     tencent-cos:
       # 单个请求失败后的最大额外重试次数，SDK总尝试次数为该值加1
       max-error-retry: ${TENCENT_COS_MAX_ERROR_RETRY:3}
-      # 单次请求读取超时时间，跨地域上传建议不低于120秒
-      socket-timeout-milliseconds: ${TENCENT_COS_SOCKET_TIMEOUT_MILLISECONDS:120000}
-
-  # ----------------------------------------------------------
-  # OAuth2 第三方登录配置
-  # ----------------------------------------------------------
-  oauth2:
-    linux-do:
-      # 是否启用 Linux.do 登录
-      enabled: ${OAUTH2_LINUX_DO_ENABLED:false}
-      # Linux.do OAuth2 客户端 ID
-      client-id: ${OAUTH2_LINUX_DO_CLIENT_ID:}
-      # Linux.do OAuth2 客户端密钥
-      client-secret: ${OAUTH2_LINUX_DO_CLIENT_SECRET:}
-      # 登录回调地址
-      redirect-uri: ${OAUTH2_LINUX_DO_REDIRECT_URI:}
-    google:
-      # 是否启用 Google 登录
-      enabled: ${OAUTH2_GOOGLE_ENABLED:false}
-      # Google OAuth2 客户端 ID
-      client-id: ${OAUTH2_GOOGLE_CLIENT_ID:}
-      # Google OAuth2 客户端密钥
-      client-secret: ${OAUTH2_GOOGLE_CLIENT_SECRET:}
-      # 登录回调地址
-      redirect-uri: ${OAUTH2_GOOGLE_REDIRECT_URI:}
+      # 读取超时在管理后台「超时设置」中配置，不再使用环境变量
 
   # ----------------------------------------------------------
   # AI 相关配置
@@ -294,19 +225,14 @@ novanova:
       agent-script-file: ${AI_SYSTEM_PROMPT_AGENT_SCRIPT_FILE:file:./server/config/prompts/agent-script.md}
       # 故事知识库分析 Agent 系统提示词文件路径
       agent-story-bible-file: ${AI_SYSTEM_PROMPT_AGENT_STORY_BIBLE_FILE:file:./server/config/prompts/agent-story-bible.md}
+      # 对话和规划 Agent 共用的用户动作标识清单
+      agent-user-actions-file: ${AI_SYSTEM_PROMPT_AGENT_USER_ACTIONS_FILE:file:./server/config/prompts/agent-user-actions.md}
       # 分镜资产图片提示词模板文件路径
       image-storyboard-asset-file: ${AI_SYSTEM_PROMPT_IMAGE_STORYBOARD_ASSET_FILE:file:./server/config/prompts/image-storyboard-asset.md}
     storyboard-agent:
-      # 分镜 Agent 单次调用超时时间（秒）
-      timeout-seconds: ${AI_STORYBOARD_AGENT_TIMEOUT_SECONDS:90}
+      # 分镜、剧本、故事知识库 Agent 的调用超时在管理后台「超时设置」中配置
       # 批量合成镜头提示词时同时请求模型的镜头数量
       compose-concurrency: ${AI_STORYBOARD_COMPOSE_CONCURRENCY:4}
-    script-agent:
-      # 剧本 Agent 单次调用超时时间（秒）；批量归纳（人物、地点等结构化草稿）输出量大，与故事知识库保持一致
-      timeout-seconds: ${AI_SCRIPT_AGENT_TIMEOUT_SECONDS:600}
-    story-bible-agent:
-      # 故事知识库分析 Agent 单次调用超时时间（秒）
-      timeout-seconds: ${AI_STORY_BIBLE_AGENT_TIMEOUT_SECONDS:600}
     # ----------------------------------------------------------
     # 画布视频合成任务配置
     # 使用独立Redis FIFO队列，不占用AI模型并发额度。
@@ -318,8 +244,7 @@ novanova:
       maximum-input-bytes: ${AI_VIDEO_COMPOSITION_MAXIMUM_INPUT_BYTES:524288000}
       # 单次合成允许的源视频总时长，默认10分钟
       maximum-total-duration-seconds: ${AI_VIDEO_COMPOSITION_MAXIMUM_TOTAL_DURATION_SECONDS:600}
-      # 单个FFmpeg进程最长执行时间，默认30分钟
-      execution-timeout-seconds: ${AI_VIDEO_COMPOSITION_EXECUTION_TIMEOUT_SECONDS:1800}
+      # FFmpeg 执行超时在管理后台「超时设置」中配置
       # Redis活动任务租约，任务执行期间会按下方间隔自动续约
       active-lease-seconds: ${AI_VIDEO_COMPOSITION_ACTIVE_LEASE_SECONDS:180}
       # Redis活动任务租约续期间隔
@@ -349,10 +274,7 @@ novanova:
       read-block-seconds: ${AI_TASK_READ_BLOCK_SECONDS:5}
       # 异步AI任务状态轮询间隔，供应商、内部等待、视频合成恢复和前端状态查询共享，单位为秒，必须大于0
       polling-interval-seconds: ${AI_TASK_POLLING_INTERVAL_SECONDS:5}
-      # 生成任务等待超时（秒），图片等常规任务等待生成完成的最多时长，超时后前端标记生成失败
-      wait-timeout-seconds: ${AI_TASK_WAIT_TIMEOUT_SECONDS:300}
-      # 视频生成任务等待超时（秒），需覆盖自定义模型异步轮询上限（约10分钟）并留余量
-      video-wait-timeout-seconds: ${AI_TASK_VIDEO_WAIT_TIMEOUT_SECONDS:900}
+      # 图片和视频生成任务的等待超时在管理后台「超时设置」中配置
       # 任务分布式锁过期时间（秒），通过 SET NX PX 设置；超时未完成任务锁自动释放
       lock-ttl-seconds: ${AI_TASK_LOCK_TTL_SECONDS:300}
       # 任务执行期间锁自动续期间隔（秒），续期前校验锁值防止误续他人锁

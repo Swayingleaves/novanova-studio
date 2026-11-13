@@ -79,7 +79,7 @@ class ScriptAdaptationDraftBatchTest {
     void setUp() {
         service = new ScriptService(repository, currentUserProvider, TransactionalOperator.create(transactionManager),
                 Validation.buildDefaultValidatorFactory().getValidator(), comicDramaImpactService, novelAdaptationRepository,
-                scriptSourceRepository);
+                scriptSourceRepository, com.novanovastudio.MediaAccessTestSupport.echo());
         lenient().when(scriptSourceRepository.findSourceTypeByProject(anyLong(), anyString())).thenReturn(Mono.just(""));
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
         when(transactionManager.getReactiveTransaction(any())).thenReturn(Mono.just(transaction));
@@ -88,7 +88,7 @@ class ScriptAdaptationDraftBatchTest {
         when(repository.getProject(8L, "project-a")).thenReturn(Mono.fromSupplier(() ->
                 new ScriptRepository.ProjectRecord("project-a", 8L,
                         new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "", 0, 1, "", "", "", "", ""),
-                        "idea", 0, revision.get(), null, OffsetDateTime.now(), OffsetDateTime.now())));
+                        "idea", 0, revision.get(), null, OffsetDateTime.now(), OffsetDateTime.now(), "")));
         when(repository.listOutlineSections("project-a")).thenReturn(Flux.empty());
         when(repository.listStoryEvents("project-a")).thenReturn(Flux.empty());
         when(repository.listCharacters("project-a")).thenReturn(Flux.defer(() -> Flux.fromIterable(characters.get())));

@@ -15,9 +15,9 @@ import { type Key, type ReactNode, useCallback, useEffect, useMemo, useRef, useS
 import dynamic from "next/dynamic";
 import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, App, Button, Checkbox, DatePicker, Empty, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip } from "antd";
+import { Alert, App, Button, Checkbox, DatePicker, Drawer, Empty, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Edit, Image as ImageIcon, Plus, Power, Search, Send, Sparkles, Trash2, Upload, Video } from "lucide-react";
+import { Activity, Bell, BookText, Check, ChevronDown, ClipboardCheck, Coins, Edit, HardDrive, Image as ImageIcon, LayoutTemplate, Mail, Menu as MenuIcon, Palette, Plus, Power, Search, Send, Settings2, ShieldCheck, Sparkles, Tags, Ticket, Trash2, Upload, UserRound, UsersRound, Video, Wallet, X } from "lucide-react";
 
 import {
     adjustServerUserCredits,
@@ -47,6 +47,7 @@ import {
     updateAdminSkill,
     updateAdminSkillStatus,
     deleteAdminSkills,
+    reviewAdminSkill,
     listAdminHomepageShowcases,
     createAdminHomepageShowcase,
     updateAdminHomepageShowcase,
@@ -61,6 +62,8 @@ import {
     type ServerPrompt,
     type ServerGenerationStyle,
     type ServerSkill,
+    type SkillReviewStatus,
+    type SkillUsageStep,
     type SystemNotification,
 } from "@/services/api/server";
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
@@ -69,12 +72,19 @@ import { getHomepageTargetPath } from "@/features/homepage/api/homepage-showcase
 import { adminCreditFilterKey, adminCreditUserLabel } from "./admin-credit-utils";
 import { TeamContentScope } from "./components/team-content-scope";
 import { TeamManagement, CurrentTeamManagement } from "./components/team-management";
-import { SystemConfiguration } from "./components/system-configuration";
+import { ModelConfigTextArea } from "./components/model-config-textarea";
+import { SkillPromptLabel } from "@/features/skill-market/components/skill-prompt-help";
+import { SKILL_PROMPT_ACTIONS } from "@/features/skill-market/lib/skill-prompt-actions";
+import { SystemConfiguration, type ConfigurationTabKey } from "./components/system-configuration";
+import { OAuthClientManagement } from "./components/oauth-client-management";
+import { OAuthIntegrationManagement } from "./components/oauth-integration-management";
+import { StandardOAuth2Management } from "./components/standard-oauth2-management";
 import { ResetAccountPasswordModal } from "./components/reset-account-password-modal";
 import { StorageBillingManagement } from "./components/storage-billing-management";
 import { CreditCardManagement } from "./components/credit-card-management";
 import { ApiLogsManagement } from "./components/api-logs-management";
 import { EmailCampaignManagement } from "./components/email-campaign-management";
+import { PaymentSettingsManagement } from "./components/payment-settings-management";
 import { StoryBiblePricingManagement } from "./components/story-bible-pricing-management";
 import { ComicDramaFinalPromptPricingManagement } from "./components/comic-drama-final-prompt-pricing-management";
 import { EpisodeBodiesPricingManagement } from "./components/episode-bodies-pricing-management";
@@ -84,6 +94,7 @@ import { uploadImage } from "@/features/storage/services/image-storage";
 import { createCreditDirectionOptions, createCreditSourceOptions, CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactionIcon, creditTransactionTypeLabel, formatCreditChange, formatCredits, formatCreditTime, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
 import { TaskRecordPanel } from "@/app/(user)/credits/components/task-record-panel";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
+import { cn } from "@/shared/lib/utils";
 
 const PAGE_SIZE = 20;
 
@@ -100,10 +111,24 @@ const UserTrendChart = dynamic(() => import("./components/user-trend-chart").the
 
 type GenerationTypeFilter = "all" | "image" | "video";
 type TrendUnit = "day" | "month";
+/** 身份认证页签内部的标准渠道页签。 */
+type IdentityAuthTabKey = "oauth" | "standardOAuth2" | "oauthClients";
+
+/** 管理后台左侧菜单的二级菜单项：tab 为所属内容页签，sub 为页签内部的子页签。 */
+type AdminMenuLeaf = { key: string; label: string; tab: string; sub?: string };
+/** 管理后台左侧菜单的一级菜单项：带 leaves 时可折叠展开二级菜单，只带 tab 时直接切换内容。 */
+type AdminMenuItem = { key: string; label: string; icon?: ReactNode; tab?: string; leaves?: AdminMenuLeaf[] };
 
 export default function AdminSystemPage() {
     const translate = useTranslation();
     const { message, modal } = App.useApp();
+    const [activeTabKey, setActiveTabKey] = useState("configuration");
+    const [configurationTabKey, setConfigurationTabKey] = useState<ConfigurationTabKey>("channels");
+    const [pricingTabKey, setPricingTabKey] = useState("storyBible");
+    const [identityAuthTabKey, setIdentityAuthTabKey] = useState<IdentityAuthTabKey>("oauth");
+    const [expandedMenuKeys, setExpandedMenuKeys] = useState<string[]>(["configuration"]);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const pageRef = useRef<HTMLElement>(null);
     const currentUser = useUserStore((state) => state.user);
     const isAdmin = canManageCurrentSpace();
     const team = useTeamStore((state) => state.team);
@@ -119,44 +144,200 @@ export default function AdminSystemPage() {
         );
     }
 
+    // 左侧菜单：配置与用户偏好、创作定价是一级可折叠菜单，其余为一级菜单项；点击菜单同时切换内容区页签和页签内部的子页签。
+    const menuItems: AdminMenuItem[] = [
+        {
+            key: "configuration",
+            label: translate("appShell.configurationPreferences"),
+            icon: <Settings2 className="size-4" />,
+            leaves: [
+                { key: "configuration:channels", label: translate("appShell.myChannels"), tab: "configuration", sub: "channels" },
+                { key: "configuration:models", label: translate("appShell.myModels"), tab: "configuration", sub: "models" },
+                { key: "configuration:credits", label: translate("appShell.creditSettings"), tab: "configuration", sub: "credits" },
+                { key: "configuration:creditProducts", label: translate("credits.creditProducts"), tab: "configuration", sub: "creditProducts" },
+                { key: "configuration:invitationReward", label: translate("appShell.referralReward"), tab: "configuration", sub: "invitationReward" },
+                { key: "configuration:checkIn", label: translate("appShell.checkInCredits"), tab: "configuration", sub: "checkIn" },
+                { key: "configuration:firstPurchaseBonus", label: translate("appShell.firstPurchaseBonus"), tab: "configuration", sub: "firstPurchaseBonus" },
+                { key: "configuration:objectStorage", label: translate("appShell.objectStorage_2caed1"), tab: "configuration", sub: "objectStorage" },
+                ...(!team ? [{ key: "configuration:timeouts", label: translate("administration.timeoutSettings"), tab: "configuration", sub: "timeouts" }] : []),
+                { key: "configuration:community", label: translate("administration.communityConfig"), tab: "configuration", sub: "community" },
+            ],
+        },
+        ...(!team ? [{ key: "identityAuth", label: translate("administration.identityAuthentication"), icon: <ShieldCheck className="size-4" />, leaves: [
+            { key: "identityAuth:oauth", label: translate("administration.oauthIntegration"), tab: "identityAuth", sub: "oauth" },
+            { key: "identityAuth:standardOAuth2", label: translate("administration.standardOAuth2"), tab: "identityAuth", sub: "standardOAuth2" },
+            { key: "identityAuth:oauthClients", label: translate("administration.oauthClients"), tab: "identityAuth", sub: "oauthClients" },
+        ] }] : []),
+        { key: "team", label: "团队管理", icon: <UsersRound className="size-4" />, tab: team ? "team" : "teams" },
+        ...(!team ? [{ key: "users", label: translate("administration.userManagement"), icon: <UserRound className="size-4" />, tab: "users" }] : []),
+        ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), icon: <Coins className="size-4" />, tab: "credits" }] : []),
+        ...(!team ? [{ key: "creditCards", label: translate("administration.redemptionCodes"), icon: <Ticket className="size-4" />, tab: "creditCards" }] : []),
+        ...(!team ? [{ key: "emailCampaigns", label: "邮件群发", icon: <Mail className="size-4" />, tab: "emailCampaigns" }] : []),
+        ...(!team ? [{ key: "paymentSettings", label: "支付配置", icon: <Wallet className="size-4" />, tab: "paymentSettings" }] : []),
+        { key: "notifications", label: translate("administration.messageManagement"), icon: <Bell className="size-4" />, tab: "notifications" },
+        { key: "prompts", label: translate("administration.promptLibrary"), icon: <BookText className="size-4" />, tab: "prompts" },
+        { key: "styles", label: translate("administration.styleManagement"), icon: <Palette className="size-4" />, tab: "styles" },
+        { key: "skills", label: translate("administration.skillManagement"), icon: <Sparkles className="size-4" />, tab: "skills" },
+        { key: "homepage", label: translate("administration.homepageShowcase"), icon: <LayoutTemplate className="size-4" />, tab: "homepage" },
+        { key: "sharedWorks", label: "投稿审核", icon: <ClipboardCheck className="size-4" />, tab: "sharedWorks" },
+        {
+            key: "scriptPricing",
+            label: translate("administration.creationPricing"),
+            icon: <Tags className="size-4" />,
+            leaves: [
+                { key: "scriptPricing:storyBible", label: translate("administration.scriptStoryBiblePricing"), tab: "scriptPricing", sub: "storyBible" },
+                { key: "scriptPricing:episodeBodies", label: translate("administration.scriptEpisodeBodiesPricing"), tab: "scriptPricing", sub: "episodeBodies" },
+                { key: "scriptPricing:aiActions", label: translate("administration.scriptAiActionPricing"), tab: "scriptPricing", sub: "aiActions" },
+                { key: "scriptPricing:comicDramaFinalPrompt", label: translate("administration.comicDramaFinalPromptPricing"), tab: "scriptPricing", sub: "comicDramaFinalPrompt" },
+            ],
+        },
+        { key: "storageBilling", label: translate("storage.capacityManagement"), icon: <HardDrive className="size-4" />, tab: "storageBilling" },
+        ...(!team ? [{ key: "apiLogs", label: translate("administration.aPIRecords"), icon: <Activity className="size-4" />, tab: "apiLogs" }] : []),
+    ];
+
+    // 内容区仍交给 antd Tabs 管理，保留首次访问才挂载、切回不丢表单草稿的行为，左侧菜单只负责切换。
+    const tabItems = [
+        { key: "configuration", label: translate("appShell.configurationPreferences"), children: <SystemConfiguration activeTab={configurationTabKey} onTabChange={setConfigurationTabKey} /> },
+        ...(!team ? [{ key: "identityAuth", label: translate("administration.identityAuthentication"), children: <Tabs
+            activeKey={identityAuthTabKey}
+            onChange={(tabKey) => setIdentityAuthTabKey(tabKey as IdentityAuthTabKey)}
+            destroyOnHidden={false}
+            className="[&>.ant-tabs-nav]:hidden!"
+            items={[
+                { key: "oauth", label: translate("administration.oauthIntegration"), children: <OAuthIntegrationManagement /> },
+                { key: "standardOAuth2", label: translate("administration.standardOAuth2"), children: <StandardOAuth2Management /> },
+                { key: "oauthClients", label: translate("administration.oauthClients"), children: <OAuthClientManagement /> },
+            ]}
+        /> }] : []),
+        ...(team ? [{ key: "team", label: "团队管理", children: <CurrentTeamManagement /> }] : [{ key: "teams", label: "团队管理", children: <TeamManagement /> }]),
+        ...(!team ? [{ key: "users", label: translate("administration.userManagement"), children: <UserManagement /> }] : []),
+        ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), children: <CreditConsumptionManagement /> }] : []),
+        ...(!team ? [{ key: "creditCards", label: translate("administration.redemptionCodes"), children: <CreditCardManagement /> }] : []),
+        ...(!team ? [{ key: "emailCampaigns", label: "邮件群发", children: <EmailCampaignManagement /> }] : []),
+        ...(!team ? [{ key: "paymentSettings", label: "支付配置", children: <PaymentSettingsManagement /> }] : []),
+        { key: "notifications", label: translate("administration.messageManagement"), children: <TeamContentScope moduleName="notifications"><NotificationManagement /></TeamContentScope> },
+        { key: "prompts", label: translate("administration.promptLibrary"), children: <TeamContentScope moduleName="prompts"><PromptManagement /></TeamContentScope> },
+        { key: "styles", label: translate("administration.styleManagement"), children: <TeamContentScope moduleName="styles"><GenerationStyleManagement /></TeamContentScope> },
+        { key: "skills", label: translate("administration.skillManagement"), children: <TeamContentScope moduleName="skills"><SkillManagement /></TeamContentScope> },
+        { key: "homepage", label: translate("administration.homepageShowcase"), children: <TeamContentScope moduleName="homepage"><HomepageShowcaseManagement /></TeamContentScope> },
+        { key: "sharedWorks", label: "投稿审核", children: <SharedWorkList review /> },
+        {
+            key: "scriptPricing", label: translate("administration.creationPricing"), children: <Tabs
+                activeKey={pricingTabKey}
+                onChange={setPricingTabKey}
+                destroyOnHidden={false}
+                className="[&>.ant-tabs-nav]:hidden!"
+                items={[
+                    { key: "storyBible", label: translate("administration.scriptStoryBiblePricing"), children: <StoryBiblePricingManagement /> },
+                    { key: "episodeBodies", label: translate("administration.scriptEpisodeBodiesPricing"), children: <EpisodeBodiesPricingManagement /> },
+                    { key: "aiActions", label: translate("administration.scriptAiActionPricing"), children: <ScriptAiActionPricingManagement /> },
+                    { key: "comicDramaFinalPrompt", label: translate("administration.comicDramaFinalPromptPricing"), children: <ComicDramaFinalPromptPricingManagement /> },
+                ]}
+            />,
+        },
+        { key: "storageBilling", label: translate("storage.capacityManagement"), children: <StorageBillingManagement /> },
+        ...(!team ? [{ key: "apiLogs", label: translate("administration.aPIRecords"), children: <ApiLogsManagement /> }] : []),
+    ];
+    const currentTabKey = tabItems.some((item) => item.key === activeTabKey) ? activeTabKey : tabItems[0].key;
+    const activeMenuLeafKey = currentTabKey === "configuration" ? `configuration:${configurationTabKey}` : currentTabKey === "scriptPricing" ? `scriptPricing:${pricingTabKey}` : currentTabKey === "identityAuth" ? `identityAuth:${identityAuthTabKey}` : currentTabKey;
+
+    const selectMenu = (tab: string, sub?: string) => {
+        setActiveTabKey(tab);
+        if (tab === "configuration" && sub) setConfigurationTabKey(sub as ConfigurationTabKey);
+        if (tab === "scriptPricing" && sub) setPricingTabKey(sub);
+        if (tab === "identityAuth" && sub) setIdentityAuthTabKey(sub as IdentityAuthTabKey);
+        setMobileMenuOpen(false);
+        pageRef.current?.scrollTo({ top: 0 });
+    };
+
+    const toggleMenuGroup = (key: string) => {
+        setExpandedMenuKeys((current) => (current.includes(key) ? current.filter((expandedKey) => expandedKey !== key) : [...current, key]));
+    };
+
+    const menuButtonClass = "w-full rounded-md px-3 text-left text-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]";
+
+    const renderMenu = () => (
+        <div className="flex flex-col gap-0.5">
+            {menuItems.map((item) => {
+                if (!item.leaves) {
+                    const active = item.tab === currentTabKey;
+                    return (
+                        <button
+                            key={item.key}
+                            type="button"
+                            aria-current={active ? "page" : undefined}
+                            className={cn(menuButtonClass, "flex items-center gap-2 py-2", active ? "bg-[var(--studio-sidebar-active)] font-medium text-[var(--studio-ink)]" : "text-[var(--studio-text)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]")}
+                            onClick={() => selectMenu(item.tab ?? item.key)}
+                        >
+                            <span className="shrink-0">{item.icon}</span>
+                            <span className="min-w-0">{item.label}</span>
+                        </button>
+                    );
+                }
+
+                const expanded = expandedMenuKeys.includes(item.key);
+                return (
+                    <div key={item.key}>
+                        <button
+                            type="button"
+                            aria-expanded={expanded}
+                            className={cn(menuButtonClass, "flex items-center justify-between gap-2 py-2 text-[var(--studio-text)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]")}
+                            onClick={() => toggleMenuGroup(item.key)}
+                        >
+                            <span className="flex min-w-0 items-center gap-2">
+                                <span className="shrink-0">{item.icon}</span>
+                                <span className="min-w-0">{item.label}</span>
+                            </span>
+                            <ChevronDown aria-hidden="true" className={cn("size-4 shrink-0 text-[var(--studio-faint)] transition-transform", !expanded && "-rotate-90")} />
+                        </button>
+                        {expanded ? (
+                            <div className="mt-0.5 ml-8 flex flex-col gap-0.5 border-l border-[var(--studio-line)] pl-2">
+                                {item.leaves.map((leaf) => {
+                                    const active = leaf.key === activeMenuLeafKey;
+                                    return (
+                                        <button
+                                            key={leaf.key}
+                                            type="button"
+                                            aria-current={active ? "page" : undefined}
+                                            className={cn(menuButtonClass, "py-1.5", active ? "bg-[var(--studio-sidebar-active)] font-medium text-[var(--studio-ink)]" : "text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]")}
+                                            onClick={() => selectMenu(leaf.tab, leaf.sub)}
+                                        >
+                                            {leaf.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        ) : null}
+                    </div>
+                );
+            })}
+        </div>
+    );
+
     return (
-        <main className="studio-page h-full overflow-auto">
-            <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6">
+        <main ref={pageRef} className="studio-page h-full overflow-auto">
+            <div className="flex w-full max-w-[1920px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
                 <header className="border-b border-[var(--studio-line)] pb-5">
                     <h1 className="studio-title text-2xl font-semibold">{translate("administration.systemManagement")}</h1>
                     <p className="studio-subtitle mt-2 text-sm">{translate("administration.operationsConsoleForUsersAnnouncementsAndPrompts")}</p>
                 </header>
-                <Tabs
-                    key={team?.id ?? 0}
-                    defaultActiveKey="configuration"
-                    destroyOnHidden={false}
-                    items={[
-                        { key: "configuration", label: translate("appShell.configurationPreferences"), children: <SystemConfiguration /> },
-                        ...(team ? [{ key: "team", label: "团队管理", children: <CurrentTeamManagement /> }] : [{ key: "teams", label: "团队管理", children: <TeamManagement /> }]),
-                        ...(!team ? [{ key: "users", label: translate("administration.userManagement"), children: <UserManagement /> }] : []),
-                        ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), children: <CreditConsumptionManagement /> }] : []),
-                        ...(!team ? [{ key: "creditCards", label: translate("administration.redemptionCodes"), children: <CreditCardManagement /> }] : []),
-                        ...(!team ? [{ key: "emailCampaigns", label: "邮件群发", children: <EmailCampaignManagement /> }] : []),
-                        { key: "notifications", label: translate("administration.messageManagement"), children: <TeamContentScope moduleName="notifications"><NotificationManagement /></TeamContentScope> },
-                        { key: "prompts", label: translate("administration.promptLibrary"), children: <TeamContentScope moduleName="prompts"><PromptManagement /></TeamContentScope> },
-                        { key: "styles", label: translate("administration.styleManagement"), children: <TeamContentScope moduleName="styles"><GenerationStyleManagement /></TeamContentScope> },
-                        { key: "skills", label: translate("administration.skillManagement"), children: <TeamContentScope moduleName="skills"><SkillManagement /></TeamContentScope> },
-                        { key: "homepage", label: translate("administration.homepageShowcase"), children: <TeamContentScope moduleName="homepage"><HomepageShowcaseManagement /></TeamContentScope> },
-                        { key: "sharedWorks", label: "投稿审核", children: <SharedWorkList review /> },
-                        {
-                            key: "scriptPricing", label: translate("administration.creationPricing"), children: <Tabs
-                                items={[
-                                    { key: "storyBible", label: translate("administration.scriptStoryBiblePricing"), children: <StoryBiblePricingManagement /> },
-                                    { key: "episodeBodies", label: translate("administration.scriptEpisodeBodiesPricing"), children: <EpisodeBodiesPricingManagement /> },
-                                    { key: "aiActions", label: translate("administration.scriptAiActionPricing"), children: <ScriptAiActionPricingManagement /> },
-                                    { key: "comicDramaFinalPrompt", label: translate("administration.comicDramaFinalPromptPricing"), children: <ComicDramaFinalPromptPricingManagement /> },
-                                ]}
-                            />,
-                        },
-                        { key: "storageBilling", label: translate("storage.capacityManagement"), children: <StorageBillingManagement /> },
-                        ...(!team ? [{ key: "apiLogs", label: translate("administration.aPIRecords"), children: <ApiLogsManagement /> }] : []),
-                    ]}
-                />
+
+                {/* 窄屏下菜单收进抽屉，避免左侧菜单挤压内容区。 */}
+                <div className="lg:hidden">
+                    <Button icon={<MenuIcon className="size-4" />} onClick={() => setMobileMenuOpen(true)}>菜单</Button>
+                </div>
+                <Drawer open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} placement="left" size={288} title={translate("administration.systemManagement")}>
+                    {renderMenu()}
+                </Drawer>
+
+                <div className="flex min-w-0 flex-col gap-6 lg:flex-row lg:items-start">
+                    <nav aria-label={translate("administration.systemManagement")} className="thin-scrollbar hidden lg:sticky lg:top-0 lg:block lg:max-h-[calc(100dvh-2rem)] lg:w-56 lg:shrink-0 lg:overflow-y-auto">
+                        {renderMenu()}
+                    </nav>
+                    <div className="min-w-0 flex-1">
+                        <Tabs key={team?.id ?? 0} activeKey={currentTabKey} destroyOnHidden={false} className="[&>.ant-tabs-nav]:hidden!" items={tabItems} />
+                    </div>
+                </div>
             </div>
         </main>
     );
@@ -1871,7 +2052,23 @@ type SkillFormValues = {
     coverUrl?: string;
     sortOrder?: number;
     status?: number;
+    category?: string;
+    subtitle?: string;
+    audience?: string;
+    usageSteps?: SkillUsageStep[];
+    workflowId: string;
 };
+
+const skillReviewLabels: Record<SkillReviewStatus, string> = {
+    private: "skillMarket.private",
+    pending: "skillMarket.pending",
+    published: "skillMarket.published",
+    rejected: "skillMarket.rejected",
+};
+
+function emptySkillSteps(): SkillUsageStep[] {
+    return [{ title: "", detail: "" }, { title: "", detail: "" }, { title: "", detail: "" }];
+}
 
 function SkillManagement() {
     const translate = useTranslation();
@@ -1881,16 +2078,23 @@ function SkillManagement() {
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
     const [keyword, setKeyword] = useState("");
-    const [targetType, setTargetType] = useState<"all" | "image" | "video" | "canvasSettingGraph">("all");
+    const [targetType, setTargetType] = useState<"image" | "video" | "canvasSettingGraph">("image");
     const [status, setStatus] = useState<number | undefined>();
+    const [reviewStatus, setReviewStatus] = useState<"all" | SkillReviewStatus>("all");
+    const [rejecting, setRejecting] = useState<ServerSkill | null>(null);
+    const [rejectReason, setRejectReason] = useState("");
     const [loading, setLoading] = useState(false);
     const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
     const [editOpen, setEditOpen] = useState(false);
     const [editingSkill, setEditingSkill] = useState<ServerSkill | null>(null);
     const [coverUploading, setCoverUploading] = useState(false);
+    const [coverFile, setCoverFile] = useState<File | null>(null);
+    const [coverPreview, setCoverPreview] = useState("");
     const coverInputRef = useRef<HTMLInputElement>(null);
     const coverUrl = Form.useWatch("coverUrl", form) || "";
+    const shownCover = coverPreview || coverUrl;
     const coverName = Form.useWatch("name", form) || translate("administration.skillCover");
+    const editingTargetType = Form.useWatch("targetType", form);
 
     const loadSkills = useCallback(
         async (nextPage = page) => {
@@ -1902,6 +2106,7 @@ function SkillManagement() {
                     keyword: keyword || undefined,
                     targetType,
                     status,
+                    reviewStatus,
                 });
                 setSkills(result.skills);
                 setTotal(result.total);
@@ -1912,7 +2117,7 @@ function SkillManagement() {
                 setLoading(false);
             }
         },
-        [keyword, message, page, status, targetType],
+        [keyword, message, page, reviewStatus, status, targetType],
     );
 
     useEffect(() => {
@@ -1921,12 +2126,14 @@ function SkillManagement() {
 
     const openCreate = () => {
         setEditingSkill(null);
-        form.setFieldsValue({ name: "", targetType: "image", description: "", systemPrompt: "", aspectRatio: "16:9", coverUrl: "", sortOrder: 1000, status: 1 });
+        clearCoverFile();
+        form.setFieldsValue({ name: "", targetType, description: "", systemPrompt: "", aspectRatio: "16:9", coverUrl: "", sortOrder: 1000, status: 1, category: targetType === "canvasSettingGraph" ? undefined : targetType, subtitle: "", audience: "", usageSteps: emptySkillSteps(), workflowId: "" });
         setEditOpen(true);
     };
 
     const openEdit = (skill: ServerSkill) => {
         setEditingSkill(skill);
+        clearCoverFile();
         form.setFieldsValue({
             name: skill.name,
             targetType: skill.targetType,
@@ -1936,22 +2143,40 @@ function SkillManagement() {
             coverUrl: skill.coverUrl || "",
             sortOrder: skill.sortOrder ?? 1000,
             status: skill.status ?? 1,
+            category: skill.category || undefined,
+            subtitle: skill.subtitle || "",
+            audience: skill.audience || "",
+            usageSteps: [...(skill.usageSteps || []), ...emptySkillSteps()].slice(0, 3),
+            workflowId: skill.workflowId || "",
         });
         setEditOpen(true);
     };
 
     const saveSkill = async () => {
+        let values: SkillFormValues;
         try {
-            const values = await form.validateFields();
+            values = await form.validateFields();
+        } catch {
+            return;
+        }
+        setCoverUploading(true);
+        try {
+            let cover = (values.coverUrl || "").trim();
+            if (coverFile) cover = (await uploadImage(coverFile, { compress: true })).url;
             const input = {
                 name: values.name.trim(),
                 targetType: values.targetType,
                 description: (values.description || "").trim(),
                 systemPrompt: values.systemPrompt.trim(),
                 aspectRatio: values.aspectRatio || "16:9",
-                coverUrl: (values.coverUrl || "").trim(),
+                coverUrl: cover,
                 sortOrder: values.sortOrder ?? 1000,
                 status: values.status ?? 1,
+                category: values.targetType === "canvasSettingGraph" ? null : values.category || null,
+                subtitle: values.subtitle?.trim() || "",
+                audience: values.audience?.trim() || "",
+                usageSteps: (values.usageSteps || []).map((step) => ({ title: step?.title?.trim() || "", detail: step?.detail?.trim() || "" })),
+                workflowId: values.workflowId.trim(),
             };
             if (editingSkill) {
                 await updateAdminSkill({ id: editingSkill.id, ...input });
@@ -1960,30 +2185,36 @@ function SkillManagement() {
                 await createAdminSkill(input);
                 message.success(translate("administration.skillCreated"));
             }
+            clearCoverFile();
             setEditOpen(false);
             await loadSkills(editingSkill ? page : 1);
             if (!editingSkill) setPage(1);
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
+        } finally {
+            setCoverUploading(false);
         }
     };
 
-    const uploadCover = async (file: File | undefined) => {
+    const clearCoverFile = () => {
+        setCoverFile(null);
+        setCoverPreview((current) => {
+            if (current.startsWith("blob:")) URL.revokeObjectURL(current);
+            return "";
+        });
+    };
+
+    const selectCover = (file: File | undefined) => {
         if (!file) return;
         if (!file.type.startsWith("image/")) {
             message.error(translate("administration.selectAnImageFile"));
             return;
         }
-        setCoverUploading(true);
-        try {
-            const uploaded = await uploadImage(file);
-            form.setFieldValue("coverUrl", uploaded.url);
-            message.success(translate("administration.coverUploaded"));
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : translate("administration.failedToUploadCover"));
-        } finally {
-            setCoverUploading(false);
-        }
+        setCoverFile(file);
+        setCoverPreview((current) => {
+            if (current.startsWith("blob:")) URL.revokeObjectURL(current);
+            return URL.createObjectURL(file);
+        });
     };
 
     const changeStatus = (skill: ServerSkill) => {
@@ -2027,73 +2258,39 @@ function SkillManagement() {
         });
     };
 
-    const columns: ColumnsType<ServerSkill> = [
-        {
-            title: translate("administration.skillName"),
-            dataIndex: "name",
-            render: (name: string, skill) => (
-                <div className="flex min-w-0 items-center gap-2">
-                    <Sparkles className="size-3.5 shrink-0 text-[var(--studio-action)]" />
-                    <span className="truncate font-medium text-[var(--studio-ink)]" title={name}>
-                        {name}
-                    </span>
-                </div>
-            ),
-        },
-        {
-            title: translate("administration.type"),
-            dataIndex: "targetType",
-            width: 110,
-            render: (value: string) => <Tag>{value === "video" ? translate("administration.video") : translate("administration.image")}</Tag>,
-        },
-        {
-            title: translate("administration.introduction"),
-            dataIndex: "description",
-            ellipsis: true,
-            render: (description: string) => (description ? <span className="text-[var(--studio-muted)]">{description}</span> : <span className="text-[var(--studio-faint)]">—</span>),
-        },
-        {
-            title: translate("administration.defaultAspectRatio"),
-            dataIndex: "aspectRatio",
-            width: 100,
-            render: (value: string) => <span className="tabular-nums text-[var(--studio-muted)]">{value || "16:9"}</span>,
-        },
-        {
-            title: translate("administration.status"),
-            dataIndex: "status",
-            width: 80,
-            render: (value: number) =>
-                value === 1 ? (
-                    <span className="text-[var(--studio-success)]">{translate("administration.enable")}</span>
-                ) : (
-                    <span className="text-[var(--studio-muted)]">{translate("administration.disable_4e6fd0")}</span>
-                ),
-        },
-        {
-            title: translate("administration.sort"),
-            dataIndex: "sortOrder",
-            width: 80,
-            render: (value: number) => <span className="tabular-nums text-[var(--studio-muted)]">{value}</span>,
-        },
-        {
-            title: translate("administration.actions"),
-            key: "actions",
-            width: 110,
-            render: (_, skill) => (
-                <Space size={0}>
-                    <Tooltip title={translate("administration.edit")}>
-                        <Button type="text" size="small" shape="circle" icon={<Edit className="size-3.5" />} onClick={() => openEdit(skill)} aria-label={translate("administration.editSkill", { value0: skill.name })} />
-                    </Tooltip>
-                    <Tooltip title={skill.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable")}>
-                        <Button type="text" size="small" shape="circle" icon={<Power className="size-3.5" />} onClick={() => changeStatus(skill)} aria-label={translate("administration.skill", { value0: skill.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable"), value1: skill.name })} />
-                    </Tooltip>
-                </Space>
-            ),
-        },
-    ];
+    const reviewSkill = async (skill: ServerSkill, approved: boolean, reason = "") => {
+        try {
+            await reviewAdminSkill({ id: skill.id, approved, reason });
+            message.success(approved ? translate("administration.skillApproved") : translate("administration.skillRejected"));
+            setRejecting(null);
+            setRejectReason("");
+            await loadSkills(page);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("administration.failedToUpdateSkillStatus"));
+        }
+    };
+
+    const reviewLabel = (skill: ServerSkill) => {
+        if (skill.revisionStatus === "pending") return translate("skillMarket.updatePending");
+        if (!skill.ownerUserId) return translate("skillMarket.official");
+        return translate(skillReviewLabels[skill.reviewStatus || "published"] || "skillMarket.published");
+    };
 
     return (
         <div>
+            <Tabs
+                activeKey={targetType}
+                items={[
+                    { key: "image", label: translate("administration.image") },
+                    { key: "video", label: translate("administration.video") },
+                    { key: "canvasSettingGraph", label: translate("administration.canvasReferenceSheet") },
+                ]}
+                onChange={(value) => {
+                    setTargetType(value as "image" | "video" | "canvasSettingGraph");
+                    setSelectedRowKeys([]);
+                    setPage(1);
+                }}
+            />
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <Space wrap>
                     <Input.Search
@@ -2104,19 +2301,6 @@ function SkillManagement() {
                         onSearch={() => {
                             setPage(1);
                             void loadSkills(1);
-                        }}
-                    />
-                    <Select
-                        value={targetType}
-                        options={[
-                            { label: translate("administration.allTypes"), value: "all" },
-                            { label: translate("administration.image"), value: "image" },
-                            { label: translate("administration.video"), value: "video" },
-                            { label: translate("administration.canvasReferenceSheet"), value: "canvasSettingGraph" },
-                        ]}
-                        onChange={(value) => {
-                            setTargetType(value);
-                            setPage(1);
                         }}
                     />
                     <Select
@@ -2132,6 +2316,20 @@ function SkillManagement() {
                             setPage(1);
                         }}
                     />
+                    <Select
+                        value={reviewStatus}
+                        options={[
+                            { label: translate("administration.reviewFilter"), value: "all" },
+                            { label: translate("skillMarket.pending"), value: "pending" },
+                            { label: translate("skillMarket.published"), value: "published" },
+                            { label: translate("skillMarket.rejected"), value: "rejected" },
+                            { label: translate("skillMarket.private"), value: "private" },
+                        ]}
+                        onChange={(value) => {
+                            setReviewStatus(value);
+                            setPage(1);
+                        }}
+                    />
                 </Space>
                 <Space>
                     {selectedRowKeys.length ? (
@@ -2142,25 +2340,74 @@ function SkillManagement() {
                         {translate("administration.addSkill")}</Button>
                 </Space>
             </div>
-            <Table<ServerSkill>
-                rowKey="id"
-                columns={columns}
-                dataSource={skills}
-                loading={loading}
-                pagination={{
-                    current: page,
-                    pageSize: PAGE_SIZE,
-                    total,
-                    showSizeChanger: false,
-                    onChange: setPage,
-                }}
-                rowSelection={{
-                    selectedRowKeys,
-                    onChange: setSelectedRowKeys,
-                }}
-                locale={{ emptyText: <Empty description={translate("administration.noSkills")} /> }}
-            />
-            <Modal title={editingSkill ? translate("administration.editSkill_149fb4") : translate("administration.addSkill")} open={editOpen} onOk={saveSkill} onCancel={() => setEditOpen(false)} okText={translate("administration.save")} cancelText={translate("administration.cancel")} width={640} confirmLoading={coverUploading}>
+            {loading ? (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                    {Array.from({ length: 10 }, (_, index) => (
+                        <Skeleton.Image key={index} active className="!h-auto !w-full [&_.ant-skeleton-image]:aspect-[3/4] [&_.ant-skeleton-image]:h-auto [&_.ant-skeleton-image]:w-full" />
+                    ))}
+                </div>
+            ) : skills.length ? (
+                <>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                        {skills.map((skill) => {
+                            const selected = selectedRowKeys.includes(skill.id);
+                            const needsReview = (skill.reviewStatus === "pending" || skill.revisionStatus === "pending") && Boolean(skill.ownerUserId);
+                            return (
+                                <article
+                                    key={skill.id}
+                                    className={`group relative overflow-hidden rounded-md border bg-[var(--studio-surface)] transition ${selected ? "border-[var(--studio-action)] ring-1 ring-[var(--studio-action)]" : "border-[var(--studio-line)] hover:border-[var(--studio-line-strong)]"}`}
+                                >
+                                    <div className="relative aspect-[3/4] overflow-hidden bg-[var(--studio-surface-raised)]">
+                                        <GenerationStyleCover key={skill.coverUrl} style={{ name: skill.name, coverUrl: skill.coverUrl }} className="size-full transition duration-200 group-hover:scale-[1.02] motion-reduce:transform-none" />
+                                        <span className="absolute left-2 top-2">
+                                            <Checkbox
+                                                checked={selected}
+                                                aria-label={skill.name}
+                                                onChange={(event) => setSelectedRowKeys((current) => (event.target.checked ? [...new Set([...current, skill.id])] : current.filter((id) => id !== skill.id)))}
+                                            />
+                                        </span>
+                                        <span className={`absolute right-2 top-2 rounded-sm border px-1.5 py-0.5 text-[11px] ${skill.status === 1 ? "border-[var(--studio-success)] text-[var(--studio-success)]" : "border-[var(--studio-line-strong)] text-[var(--studio-muted)]"}`}>
+                                            {skill.status === 1 ? translate("administration.enable") : translate("administration.disable_4e6fd0")}
+                                        </span>
+                                        <span className="absolute bottom-2 left-2 max-w-[calc(100%-16px)] truncate rounded-sm bg-[var(--studio-surface)] px-1.5 py-0.5 text-[11px] text-[var(--studio-muted)]">{reviewLabel(skill)}</span>
+                                    </div>
+                                    <div className="min-w-0 border-t border-[var(--studio-line)] p-2.5">
+                                        <div className="flex min-w-0 items-center justify-between gap-2">
+                                            <span className="truncate text-sm font-medium text-[var(--studio-ink)]" title={skill.name}>{skill.name}</span>
+                                            <span className="shrink-0 text-[11px] text-[var(--studio-muted)]">{skill.aspectRatio || "16:9"}</span>
+                                        </div>
+                                        <p className="mt-1 truncate text-xs text-[var(--studio-muted)]">{skill.subtitle || skill.description || (skill.category ? translate(`skillMarket.${skill.category}`) : translate("administration.uncategorized"))}</p>
+                                        <div className="mt-2 flex items-center justify-end gap-1">
+                                            <Tooltip title={translate("administration.edit")}>
+                                                <Button type="text" size="small" shape="circle" icon={<Edit className="size-3.5" />} onClick={() => openEdit(skill)} aria-label={translate("administration.editSkill", { value0: skill.name })} />
+                                            </Tooltip>
+                                            {needsReview ? (
+                                                <>
+                                                    <Tooltip title={translate("administration.approve")}>
+                                                        <Button type="text" size="small" shape="circle" icon={<Check className="size-3.5" />} onClick={() => void reviewSkill(skill, true)} aria-label={translate("administration.approve")} />
+                                                    </Tooltip>
+                                                    <Tooltip title={translate("administration.reject")}>
+                                                        <Button type="text" size="small" shape="circle" icon={<X className="size-3.5" />} onClick={() => { setRejecting(skill); setRejectReason(""); }} aria-label={translate("administration.reject")} />
+                                                    </Tooltip>
+                                                </>
+                                            ) : null}
+                                            <Tooltip title={skill.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable")}>
+                                                <Button type="text" size="small" shape="circle" icon={<Power className="size-3.5" />} onClick={() => changeStatus(skill)} aria-label={translate("administration.skill", { value0: skill.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable"), value1: skill.name })} />
+                                            </Tooltip>
+                                        </div>
+                                    </div>
+                                </article>
+                            );
+                        })}
+                    </div>
+                    <div className="mt-5 flex justify-end">
+                        <Pagination current={page} pageSize={PAGE_SIZE} total={total} showSizeChanger={false} onChange={setPage} />
+                    </div>
+                </>
+            ) : (
+                <Empty description={translate("administration.noSkills")} className="border border-dashed border-[var(--studio-line)] py-12" />
+            )}
+            <Modal title={editingSkill ? translate("administration.editSkill_149fb4") : translate("administration.addSkill")} open={editOpen} onOk={saveSkill} onCancel={() => { clearCoverFile(); setEditOpen(false); }} okText={translate("administration.save")} cancelText={translate("administration.cancel")} width={640} confirmLoading={coverUploading}>
                 <Form form={form} layout="vertical">
                     <div className="grid grid-cols-3 gap-3">
                         <Form.Item name="name" label={translate("administration.skillName")} rules={[{ required: true, message: translate("administration.enterSkillName") }]} className="col-span-2">
@@ -2173,14 +2420,60 @@ function SkillManagement() {
                                     { label: translate("administration.video"), value: "video" },
                                     { label: translate("administration.canvasReferenceSheet"), value: "canvasSettingGraph" },
                                 ]}
+                                onChange={(value) => {
+                                    if (value === "canvasSettingGraph") form.setFieldValue("category", undefined);
+                                }}
                             />
                         </Form.Item>
                     </div>
-                    <Form.Item name="description" label={translate("administration.skillIntroduction")}>
-                        <Input.TextArea rows={2} maxLength={500} placeholder={translate("administration.introductionShownInTheSkillSelector")} />
+                    <Form.Item
+                        name="workflowId"
+                        label={translate("administration.workflowId")}
+                        extra={translate("administration.workflowIdHint")}
+                        rules={[
+                            { required: true, message: translate("administration.workflowIdRequired") },
+                            { pattern: /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/, message: translate("administration.workflowIdInvalid") },
+                        ]}
+                    >
+                        <Input maxLength={64} placeholder="fight-storyboard" />
                     </Form.Item>
+                        <Form.Item name="description" label={translate("administration.skillIntroduction")}>
+                        <Input.TextArea rows={2} maxLength={4000} placeholder={translate("administration.introductionShownInTheSkillSelector")} />
+                    </Form.Item>
+                    <div className="grid grid-cols-2 gap-3">
+                        <Form.Item name="category" label={translate("administration.skillCategory")}>
+                            <Select
+                                allowClear
+                                disabled={editingTargetType === "canvasSettingGraph"}
+                                options={[
+                                    { label: translate("skillMarket.image"), value: "image" },
+                                    { label: translate("skillMarket.video"), value: "video" },
+                                    { label: translate("skillMarket.ecommerce"), value: "ecommerce" },
+                                    { label: translate("skillMarket.portrait"), value: "portrait" },
+                                    { label: translate("skillMarket.viralReplica"), value: "viralReplica" },
+                                ]}
+                            />
+                        </Form.Item>
+                        <Form.Item name="subtitle" label={translate("administration.oneLineIntro")}>
+                            <Input maxLength={200} />
+                        </Form.Item>
+                    </div>
+                    <Form.Item name="audience" label={translate("administration.suitableFor")}>
+                        <Input.TextArea rows={2} maxLength={1000} />
+                    </Form.Item>
+                    <div className="mb-2 text-sm text-[var(--studio-ink)]">{translate("administration.usageSteps")}</div>
+                    {[0, 1, 2].map((index) => (
+                        <div key={index} className="grid grid-cols-[160px_minmax(0,1fr)] gap-3">
+                            <Form.Item name={["usageSteps", index, "title"]} label={`${index + 1}. ${translate("administration.stepTitle")}`}>
+                                <Input maxLength={40} />
+                            </Form.Item>
+                            <Form.Item name={["usageSteps", index, "detail"]} label={translate("administration.stepDetail")}>
+                                <Input maxLength={300} />
+                            </Form.Item>
+                        </div>
+                    ))}
                     <Form.Item name="coverUrl" label={translate("administration.cover")}>
-                        <Input placeholder={translate("administration.httpsOptional")} />
+                        <Input placeholder={translate("administration.httpsOptional")} onChange={() => { if (coverFile) clearCoverFile(); }} />
                     </Form.Item>
                     <Form.Item name="aspectRatio" label={translate("administration.defaultAspectRatio")} rules={[{ required: true, message: translate("administration.selectDefaultAspectRatio") }]}>
                         <Select
@@ -2195,7 +2488,7 @@ function SkillManagement() {
                     </Form.Item>
                     <div className="mb-4 flex items-start gap-3">
                         <div className="h-28 w-[84px] shrink-0 overflow-hidden rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface-raised)]">
-                            <GenerationStyleCover key={coverUrl} style={{ name: coverName, coverUrl }} className="size-full" />
+                            <GenerationStyleCover key={shownCover} style={{ name: coverName, coverUrl: shownCover }} className="size-full" />
                         </div>
                         <div className="min-w-0">
                             <input
@@ -2204,19 +2497,22 @@ function SkillManagement() {
                                 type="file"
                                 accept="image/*"
                                 onChange={(event) => {
-                                    void uploadCover(event.target.files?.[0]);
+                                    selectCover(event.target.files?.[0]);
                                     event.target.value = "";
                                 }}
                             />
-                            <Button icon={<Upload className="size-3.5" />} loading={coverUploading} onClick={() => coverInputRef.current?.click()}>
+                            <Button icon={<Upload className="size-3.5" />} onClick={() => coverInputRef.current?.click()}>
                                 {translate("administration.uploadCover")}</Button>
                             <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("administration.publicStorageURLIsSavedAndShownInThe")}</p>
                         </div>
                     </div>
-                    <Form.Item name="systemPrompt" label={translate("administration.workflowPrompt")} rules={[{ required: true, message: translate("administration.enterWorkflowPrompt") }]}>
-                        <Input.TextArea
-                            rows={12}
+                    <Form.Item name="systemPrompt" label={<SkillPromptLabel text={translate("administration.workflowPrompt")} />} rules={[{ required: true, message: translate("administration.enterWorkflowPrompt") }]}>
+                        <ModelConfigTextArea
+                            title={translate("administration.workflowPrompt")}
                             placeholder={translate("administration.builtInGenerationInstructionsGuideAgentStepByStep")}
+                            minRows={8}
+                            maxRows={12}
+                            mentions={SKILL_PROMPT_ACTIONS.map((action) => ({ label: translate(`skillMarket.${action.labelKey}`), token: action.token }))}
                         />
                     </Form.Item>
                     <div className="grid grid-cols-3 gap-3">
@@ -2233,6 +2529,16 @@ function SkillManagement() {
                         </Form.Item>
                     </div>
                 </Form>
+            </Modal>
+            <Modal
+                title={translate("administration.reject")}
+                open={Boolean(rejecting)}
+                okText={translate("administration.reject")}
+                cancelText={translate("administration.cancel")}
+                onCancel={() => setRejecting(null)}
+                onOk={() => rejecting && reviewSkill(rejecting, false, rejectReason.trim())}
+            >
+                <Input.TextArea rows={3} maxLength={500} value={rejectReason} placeholder={translate("administration.enterRejectReason")} onChange={(event) => setRejectReason(event.target.value)} />
             </Modal>
         </div>
     );

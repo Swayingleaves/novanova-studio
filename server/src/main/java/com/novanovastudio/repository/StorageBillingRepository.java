@@ -270,7 +270,7 @@ public class StorageBillingRepository {
      */
     public Mono<Void> requestMediaDeletion(long userId, java.util.List<String> keys) {
         if (keys.isEmpty()) return Mono.empty();
-        return databaseClient.sql("UPDATE storage_objects objects SET deletion_requested_at = CURRENT_TIMESTAMP FROM media_files media WHERE media.user_id = :userId AND media.storage_key IN (:keys) AND media.team_id = current_team_id() AND objects.team_id = media.team_id AND objects.user_id = media.user_id AND objects.storage_id = media.object_storage_config_id AND objects.object_key = media.object_storage_key AND objects.deleted_at IS NULL")
+        return databaseClient.sql("UPDATE storage_objects objects SET deletion_requested_at = CURRENT_TIMESTAMP FROM media_files media WHERE media.user_id = :userId AND media.storage_key IN (:keys) AND media.team_id = current_team_id() AND objects.team_id = media.team_id AND objects.user_id = media.user_id AND objects.storage_id = media.object_storage_config_id AND objects.deleted_at IS NULL AND (objects.object_key = media.object_storage_key OR objects.object_key = NULLIF(media.metadata->>'coverObjectKey', ''))")
                 .bind("userId", userId).bind("keys", keys).fetch().rowsUpdated().then();
     }
 

@@ -82,4 +82,17 @@ public final class ObjectStorageUrlBuilder {
                 .reduce((left, right) -> left + "/" + right)
                 .orElse("");
     }
+
+    /**
+     * 对公开访问地址中的对象键按路径片段解码，用于把历史公开地址还原成对象键后重新签名。
+     *
+     * @param path String 地址路径中位于基础地址之后的部分
+     * @return String 解码后的对象键
+     */
+    public static String decodeKeyPath(String path) {
+        return Arrays.stream(path.split("/"))
+                .map(segment -> java.net.URLDecoder.decode(segment.replace("+", "%2B"), StandardCharsets.UTF_8))
+                .reduce((left, right) -> left + "/" + right)
+                .orElse("");
+    }
 }

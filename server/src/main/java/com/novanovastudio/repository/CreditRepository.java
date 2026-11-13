@@ -1098,6 +1098,12 @@ public class CreditRepository {
                             WHEN jsonb_typeof(tasks.result_data -> 'item') = 'object'
                                  THEN COALESCE(jsonb_path_query_array(tasks.result_data, '$.item.url'), '[]'::jsonb)
                             ELSE '[]'::jsonb END::text AS result_urls,
+                       CASE WHEN jsonb_typeof(tasks.result_data -> 'items') = 'array'
+                                 THEN COALESCE((SELECT jsonb_agg(COALESCE(entries.value ->> 'storageKey', '') ORDER BY entries.ordinality)
+                                                FROM jsonb_array_elements(tasks.result_data -> 'items') WITH ORDINALITY AS entries(value, ordinality)), '[]'::jsonb)
+                            WHEN jsonb_typeof(tasks.result_data -> 'item') = 'object'
+                                 THEN jsonb_build_array(COALESCE(tasks.result_data -> 'item' ->> 'storageKey', ''))
+                            ELSE '[]'::jsonb END::text AS result_storage_keys,
                        tasks.created_at,
                        tasks.completed_at
                 """ + taskRecordQuery(query) + """
@@ -1120,6 +1126,8 @@ public class CreditRepository {
                             row.get("seconds", String.class),
                             row.get("consumed_credits", BigDecimal.class),
                             parseStringArray(RowMappers.jsonText(row, "result_urls")),
+                            parseAlignedStringArray(RowMappers.jsonText(row, "result_storage_keys")),
+                            List.of(),
                             row.get("error_message", String.class),
                             row.get("created_at", OffsetDateTime.class).toString(),
                             completedAt == null ? null : completedAt.toString());
@@ -1154,6 +1162,12 @@ public class CreditRepository {
                             WHEN jsonb_typeof(tasks.result_data -> 'item') = 'object'
                                  THEN COALESCE(jsonb_path_query_array(tasks.result_data, '$.item.url'), '[]'::jsonb)
                             ELSE '[]'::jsonb END::text AS result_urls,
+                       CASE WHEN jsonb_typeof(tasks.result_data -> 'items') = 'array'
+                                 THEN COALESCE((SELECT jsonb_agg(COALESCE(entries.value ->> 'storageKey', '') ORDER BY entries.ordinality)
+                                                FROM jsonb_array_elements(tasks.result_data -> 'items') WITH ORDINALITY AS entries(value, ordinality)), '[]'::jsonb)
+                            WHEN jsonb_typeof(tasks.result_data -> 'item') = 'object'
+                                 THEN jsonb_build_array(COALESCE(tasks.result_data -> 'item' ->> 'storageKey', ''))
+                            ELSE '[]'::jsonb END::text AS result_storage_keys,
                        tasks.created_at,
                        tasks.completed_at,
                        tasks.user_id AS user_id,
@@ -1180,6 +1194,8 @@ public class CreditRepository {
                             row.get("seconds", String.class),
                             row.get("consumed_credits", BigDecimal.class),
                             parseStringArray(RowMappers.jsonText(row, "result_urls")),
+                            parseAlignedStringArray(RowMappers.jsonText(row, "result_storage_keys")),
+                            List.of(),
                             row.get("error_message", String.class),
                             row.get("created_at", OffsetDateTime.class).toString(),
                             completedAt == null ? null : completedAt.toString(),
@@ -1235,5 +1251,21 @@ public class CreditRepository {
         }
         List<String> values = com.alibaba.fastjson2.JSON.parseArray(json, String.class);
         return values == null ? List.of() : values.stream().filter(value -> value != null && !value.isBlank()).toList();
+    }
+
+    /**
+     * 解析数据库返回的JSON字符串数组并保留空位。
+     * <p>
+     * 存储键需要和结果地址按下标一一对应，不能像地址那样过滤空值，否则缩略图会错位到别的结果上。
+     *
+     * @param json String JSON数组文本
+     * @return List<String> 与结果地址同长度的存储键，缺失位置为空串
+     */
+    private static List<String> parseAlignedStringArray(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        List<String> values = com.alibaba.fastjson2.JSON.parseArray(json, String.class);
+        return values == null ? List.of() : values.stream().map(value -> value == null ? "" : value).toList();
     }
 }

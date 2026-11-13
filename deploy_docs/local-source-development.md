@@ -73,13 +73,10 @@ if (!(Test-Path -LiteralPath .env)) {
 | `POSTGRES_ADMINISTRATOR_DATABASE` | 自动创建目标数据库时连接的管理数据库。 |
 | `REDIS_HOST` / `REDIS_PORT` | 本机 Redis 的地址和端口。 |
 | `REDIS_PASSWORD` / `REDIS_DATABASE` | Redis 密码和逻辑数据库编号；默认 Compose Redis 不启用认证，密码留空。连接自行启用认证的 Redis 时填写其密码。 |
-| `ALIPAY_ENABLED` | 可选，设为 `true` 才启用支付宝电脑网站支付。 |
-| `ALIPAY_APP_ID` / `ALIPAY_PRIVATE_KEY` / `ALIPAY_PUBLIC_KEY` | 支付宝沙箱应用标识、应用私钥和支付宝公钥；私钥只通过本机环境变量注入。 |
-| `ALIPAY_GATEWAY_URL` | 支付宝网关地址；沙箱环境使用支付宝开放平台提供的沙箱网关。 |
-| `ALIPAY_NOTIFY_URL` / `ALIPAY_RETURN_URL` | 异步通知和同步回跳地址；通知地址必须能被支付宝服务器公网访问。 |
+| 支付配置 | 支付宝和微信支付在管理后台「支付配置」中维护，不再从本机环境变量读取。 |
 | `AI_TASK_POLLING_INTERVAL_SECONDS` | 所有 AI 异步任务状态轮询间隔（服务端渠道、内部等待、视频合成恢复和前端状态查询），单位为秒，必须大于 0，默认 `3`。 |
 
-支付宝电脑网站支付的本地联调需要配置完整的沙箱密钥。`ALIPAY_NOTIFY_URL` 不能使用 `localhost` 或内网地址，必须通过公网域名或受信任的公网隧道转发到 `/api/v1/payment/alipay/notify`；`ALIPAY_RETURN_URL` 指向 `/api/v1/payment/alipay/return`。同步回跳不会直接入账，服务端只有在异步通知验签或交易查询核对应用标识、订单号、金额和交易状态后才会发放平台积分。生产环境不要把应用私钥提交到 Git 或写入日志。
+支付宝电脑网站支付的本地联调在管理后台「支付配置」填写完整的沙箱密钥。通知地址不能使用 `localhost` 或内网地址，必须通过公网域名或受信任的公网隧道转发到 `/api/v1/payment/alipay/notify`；同步回跳指向 `/api/v1/payment/alipay/return`。同步回跳不会直接入账，服务端只有在异步通知验签或交易查询核对应用标识、订单号、金额和交易状态后才会发放平台积分。生产环境不要把应用私钥提交到 Git 或写入日志。
 
 ### 生成 `APP_SECRET_KEY`
 

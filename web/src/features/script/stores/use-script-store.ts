@@ -18,6 +18,7 @@ import {
     saveScriptOutline,
     saveScriptOverview,
     saveScriptWorld,
+    updateScriptCover,
     reorderScriptEpisodes,
 } from "@/services/api/script";
 
@@ -66,6 +67,7 @@ type ScriptStore = {
     /** 丢弃本地未保存的修改：清空保存队列并重载云端版本。 */
     discardUnsaved: () => void;
     updateOverview: (overview: ScriptOverview) => void;
+    updateCover: (coverUrl: string) => Promise<void>;
     updateOutline: (sections: OutlineSection[], events: StoryEvent[]) => void;
     updateCharacters: (characters: ScriptCharacter[], relations: CharacterRelation[]) => void;
     deleteCharacters: (characterIds: string[]) => Promise<void>;
@@ -202,6 +204,14 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
                 set({ error: translate("script.couldNotLoadSupportingScriptDataCount", { value0: message }) });
             }
             throw error;
+        }
+    },
+    updateCover: async (coverUrl) => {
+        const project = get().project;
+        if (!project) throw new Error(translate("script.theScriptProjectIsNotLoadedYet"));
+        const saved = await updateScriptCover(project.id, coverUrl);
+        if (get().project?.id === project.id) {
+            set((state) => state.project ? { project: { ...state.project, coverUrl: saved.coverUrl } } : {});
         }
     },
     updateOverview: (overview) => {

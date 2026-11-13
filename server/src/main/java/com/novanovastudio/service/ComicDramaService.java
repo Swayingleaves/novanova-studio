@@ -1,6 +1,7 @@
 package com.novanovastudio.service;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.common.BusinessException;
@@ -14,8 +15,10 @@ import com.novanovastudio.dto.ScriptDtos;
 import com.novanovastudio.dto.StoryboardDtos;
 import com.novanovastudio.repository.ComicDramaRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.storage.MediaAccessService;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -72,6 +75,9 @@ public class ComicDramaService {
     /** 应用配置，用于读取提示词合成并发度。 */
     private final NovanovaProperties properties;
 
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
+
     /**
      * 分页查询当前用户漫剧项目。
      *
@@ -84,9 +90,24 @@ public class ComicDramaService {
         int normalizedPage = Math.max(page, 1);
         int normalizedPageSize = Math.min(Math.max(pageSize, 1), 100);
         return currentUserProvider.currentUserId().flatMap(userId -> Mono.zip(
-                repository.listProjects(userId, text(keyword), (normalizedPage - 1) * normalizedPageSize, normalizedPageSize).collectList(),
+                repository.listProjects(userId, text(keyword), (normalizedPage - 1) * normalizedPageSize, normalizedPageSize)
+                        .concatMap(this::signedProjectSummary).collectList(),
                 repository.countProjects(userId, text(keyword)),
                 (projects, total) -> new ComicDramaDtos.ProjectListResponse(projects, total, normalizedPage, normalizedPageSize)));
+    }
+
+    /**
+     * 批量删除当前用户的漫剧生产项目，共享剧本保留。
+     *
+     * @param projects 待删除项目及期望修订号
+     * @return 已删除的项目ID
+     */
+    public Mono<List<String>> deleteProjects(List<ComicDramaDtos.ProjectDeletion> projects) {
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                        Flux.fromIterable(projects).concatMap(project -> repository.deleteProject(
+                                        userId, project.projectId(), project.expectedRevision())
+                                .switchIfEmpty(conflict())).collectList())
+                .doOnSuccess(deleted -> log.info("漫剧项目删除完成: userId={}, projectCount={}", userId, deleted.size())));
     }
 
     /**
@@ -197,13 +218,15 @@ public class ComicDramaService {
      * @return 资产版本列表
      */
     public Mono<List<ComicDramaDtos.AssetVersion>> listAssetVersions(ComicDramaDtos.ListAssetVersionsRequest request) {
-        return withProject(request.projectId(), () -> repository.listAssetVersions(request.projectId(), request.assetId()).collectList());
+        return withProject(request.projectId(), () -> repository.listAssetVersions(request.projectId(), request.assetId()).collectList())
+                .flatMap(versions -> Flux.fromIterable(versions).concatMap(this::signedAssetVersion).collectList());
     }
 
     /** 按版本标识批量查询当前项目内的资产版本。 */
     public Mono<List<ComicDramaDtos.AssetVersion>> listAssetVersionsByIds(ComicDramaDtos.ListAssetVersionsByIdsRequest request) {
         List<String> versionIds = request.versionIds().stream().distinct().toList();
-        return withProject(request.projectId(), () -> repository.listAssetVersionsByIds(request.projectId(), versionIds).collectList());
+        return withProject(request.projectId(), () -> repository.listAssetVersionsByIds(request.projectId(), versionIds).collectList())
+                .flatMap(versions -> Flux.fromIterable(versions).concatMap(this::signedAssetVersion).collectList());
     }
 
     /**
@@ -219,7 +242,7 @@ public class ComicDramaService {
                         .then(repository.saveAssetVersion(request.version()).switchIfEmpty(conflict()))
                         .then(repository.markUpstreamChanges(request.projectId(), "assetVersion", List.of(request.version().id()), "视觉资产版本发生变化"))
                         .then(advance(userId, request.projectId(), request.expectedRevision()))
-                        .then(repository.getAssetVersion(request.projectId(), request.version().id()))));
+                        .then(repository.getAssetVersion(request.projectId(), request.version().id()))).flatMap(this::signedAssetVersion));
     }
 
     /**
@@ -252,12 +275,11 @@ public class ComicDramaService {
                             if (!StringUtils.hasText(source.scriptContent())) {
                                 return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "所选范围没有可用剧本正文"));
                             }
-                            // 预计镜头数量可以不填：不填时由模型按剧本内容自行判断，填了就必须按填的数量来。
+                            // 预计镜头数量可以不填：不填时按正文体量和单镜头时长估算，填了就必须按填的数量来。
                             // 创作重点同样可选，没填就不带这一段，避免指令里留下空的「创作重点：」。
-                            String instruction = (request.shotCount() == null
-                                    ? "请根据剧本正文的场次、动作与对白自行判断合适的镜头数量"
-                                    : "请拆分为约" + request.shotCount() + "个镜头")
+                            String instruction = shotPlanInstruction(request.shotCount(), request.shotDuration(), source.scriptContent())
                                     + "。节奏：" + text(request.rhythm())
+                                    + "。单镜头时长：" + shotDurationInstruction(request.shotDuration())
                                     + (StringUtils.hasText(request.focus()) ? "。创作重点：" + request.focus().trim() : "");
                             Mono<String> sourceEpisode = StringUtils.hasText(request.sceneId())
                                     ? repository.getSceneEpisodeId(request.projectId(), request.sceneId())
@@ -266,7 +288,7 @@ public class ComicDramaService {
                                     new StoryboardDtos.GenerateStoryboardRequest(source.scriptContent(), instruction,
                                             source.visualStyle(), request.model()))
                                     .flatMap(response -> {
-                                        JSONObject data = (JSONObject) JSON.toJSON(response);
+                                        JSONObject data = (JSONObject) JSON.toJSON(alignShotDurations(response, request.shotDuration()));
                                         data.put("sourceScriptExcerpt", source.scriptContent());
                                         data.put("sourceEpisodeId", resolvedEpisodeId);
                                         data.put("sourceSceneId", text(request.sceneId()));
@@ -709,7 +731,8 @@ public class ComicDramaService {
                         .thenMany(Flux.fromIterable(plans)
                                 .concatMap(plan -> executeSingleGeneration(request, plan, mediaType)))
                         .collectList()
-                        .map(results -> new ComicDramaDtos.GenerationTaskResult(results, results.size())))));
+                        .flatMap(results -> Flux.fromIterable(results).concatMap(this::signedMediaResult).collectList()
+                                .map(items -> new ComicDramaDtos.GenerationTaskResult(items, items.size()))))));
     }
 
     /** 查询项目媒体任务与结果。 */
@@ -732,7 +755,7 @@ public class ComicDramaService {
         return repository.listMedia(projectId, shotId, assetId).collectList()
                 .flatMapMany(Flux::fromIterable)
                 .concatMap(media -> syncOneMediaStatus(userId, projectId, media))
-                .thenMany(repository.listMedia(projectId, shotId, assetId))
+                .thenMany(repository.listMedia(projectId, shotId, assetId).concatMap(this::signedMediaResult))
                 .collectList();
     }
 
@@ -751,6 +774,43 @@ public class ComicDramaService {
                     .then(repository.refreshBatchTaskProgress(projectId))
                     .then(repository.refreshProjectProductionStatus(projectId)).thenReturn(media);
         });
+    }
+
+    /** 媒体结果中的输入快照和结果快照按预览用途重新签名。 */
+    private Mono<ComicDramaDtos.MediaResult> signedMediaResult(ComicDramaDtos.MediaResult media) {
+        return Mono.zip(
+                        signedJson(media.inputSnapshot()).map(Optional::of).defaultIfEmpty(Optional.empty()),
+                        signedJson(media.resultData()).map(Optional::of).defaultIfEmpty(Optional.empty()))
+                .map(snapshots -> new ComicDramaDtos.MediaResult(media.id(), media.targetType(), media.targetId(), media.mediaType(),
+                        media.taskId(), snapshots.getT1().orElse(null), snapshots.getT2().orElse(null), media.status(), media.adopted(),
+                        media.failureReason(), media.createdAt(), media.updatedAt()));
+    }
+
+    /** 视觉资产版本中的参考媒体数组按预览用途重新签名。 */
+    private Mono<ComicDramaDtos.AssetVersion> signedAssetVersion(ComicDramaDtos.AssetVersion version) {
+        JSONArray references = new JSONArray(version.referenceMedia() == null ? List.of() : version.referenceMedia());
+        return mediaAccessService.signJsonArray(references, MediaAccessService.Purpose.PREVIEW)
+                .defaultIfEmpty(references)
+                .map(media -> new ComicDramaDtos.AssetVersion(version.id(), version.assetId(), version.versionName(),
+                        version.variantType(), version.appearanceDescription(), media.toJavaList(JSONObject.class),
+                        version.attributes(), version.status(), version.revision(), version.createdAt(), version.updatedAt()));
+    }
+
+    /** 漫剧项目列表封面按预览用途现签。 */
+    private Mono<ComicDramaDtos.ProjectSummary> signedProjectSummary(ComicDramaDtos.ProjectSummary project) {
+        return mediaAccessService.signUrl(project.coverUrl() == null ? "" : project.coverUrl(), MediaAccessService.Purpose.PREVIEW)
+                .map(coverUrl -> new ComicDramaDtos.ProjectSummary(project.projectId(), project.scriptProjectId(), project.title(),
+                        project.projectType(), project.stage(), project.completionRate(), project.assetCount(), project.shotCount(),
+                        project.completedShotCount(), project.pendingUpdateCount(), project.runningTaskCount(), project.readiness(),
+                        project.revision(), project.updatedAt(), coverUrl));
+    }
+
+    /** 现有快照中的本系统媒体地址按预览用途现签，null 保持为空信号。 */
+    private Mono<JSONObject> signedJson(JSONObject json) {
+        if (json == null) {
+            return Mono.empty();
+        }
+        return mediaAccessService.signJson(json, MediaAccessService.Purpose.PREVIEW).switchIfEmpty(Mono.just(json));
     }
 
     /** 采用一个生成媒体版本。 */
@@ -1067,6 +1127,79 @@ public class ComicDramaService {
                                 .then(repository.refreshProjectProductionStatus(request.projectId())).thenReturn(saved))));
     }
 
+    /** 单次资产图生成最多引用的已有资产图数量。 */
+    static final int MAX_REFERENCE_ASSET_IMAGES = 8;
+
+    /**
+     * 读取生成设置里的参考资产版本，并保持用户选择的顺序。
+     *
+     * @param settings 生成设置
+     * @return 资产版本标识；未选择时为空
+     */
+    static List<String> referenceAssetVersionIds(JSONObject settings) {
+        if (settings == null || !settings.containsKey("referenceAssetVersionIds")) {
+            return List.of();
+        }
+        Object raw = settings.get("referenceAssetVersionIds");
+        if (raw == null) {
+            return List.of();
+        }
+        JSONArray array;
+        if (raw instanceof JSONArray jsonArray) {
+            array = jsonArray;
+        } else if (raw instanceof List<?> list) {
+            array = new JSONArray(list);
+        } else {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "参考资产图格式不正确");
+        }
+        if (array.isEmpty()) {
+            return List.of();
+        }
+        if (array.size() > MAX_REFERENCE_ASSET_IMAGES) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "参考资产图最多 " + MAX_REFERENCE_ASSET_IMAGES + " 张");
+        }
+        List<String> versionIds = new ArrayList<>();
+        for (int index = 0; index < array.size(); index++) {
+            String versionId = array.getString(index);
+            if (versionId == null || !versionId.equals(versionId.trim()) || versionId.isEmpty() || versionId.length() > 64) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "参考资产图标识不合法");
+            }
+            if (versionIds.contains(versionId)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "参考资产图不能重复");
+            }
+            versionIds.add(versionId);
+        }
+        return List.copyOf(versionIds);
+    }
+
+    /**
+     * 按选择顺序解析当前项目内已完成的资产图。
+     *
+     * @param projectId 漫剧项目标识
+     * @param versionIds 用户选择的资产版本
+     * @return 可提交的参考图
+     */
+    private Mono<List<AiTaskDtos.AiTaskMediaReference>> generatedAssetImageReferences(String projectId, List<String> versionIds) {
+        if (versionIds.isEmpty()) {
+            return Mono.just(List.of());
+        }
+        return repository.listGeneratedAssetImages(projectId, versionIds).collectList().map(found -> {
+            Map<String, AiTaskDtos.AiTaskMediaReference> referencesByVersionId = new LinkedHashMap<>();
+            for (AiTaskDtos.AiTaskMediaReference reference : found) {
+                referencesByVersionId.putIfAbsent(reference.id(), reference);
+            }
+            List<AiTaskDtos.AiTaskMediaReference> ordered = new ArrayList<>();
+            for (String versionId : versionIds) {
+                AiTaskDtos.AiTaskMediaReference reference = referencesByVersionId.get(versionId);
+                if (reference == null) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "所选资产图不存在或还没有可用图片");
+                }
+                ordered.add(reference);
+            }
+            return List.copyOf(ordered);
+        });
+    }
+
     /** 在发生计费前校验生成目标并构建可追踪的媒体计划。 */
     private Mono<GenerationPlan> prepareSingleGeneration(ComicDramaDtos.CreateGenerationTaskRequest request,
                                                           String targetId, String mediaType) {
@@ -1097,9 +1230,12 @@ public class ComicDramaService {
                                 videoSeconds);
                     });
         } else if ("assetVersion".equals(request.targetType())) {
+            List<String> referenceVersionIds = "image".equals(mediaType) ? referenceAssetVersionIds(request.settings()) : List.of();
             return repository.getAssetVersion(request.projectId(), targetId).switchIfEmpty(notFound("资产版本不存在"))
-                    .map(version -> generationPlan(request, targetId, mediaType,
-                            version.versionName() + "\n" + text(version.appearanceDescription()), List.of(), new JSONObject(), null));
+                    .flatMap(version -> generatedAssetImageReferences(request.projectId(), referenceVersionIds)
+                            .flatMap(references -> (references.isEmpty() ? Mono.<Void>empty() : aiTaskService.requireImageToImage(request.model()))
+                                    .thenReturn(generationPlan(request, targetId, mediaType,
+                                            version.versionName() + "\n" + text(version.appearanceDescription()), references, new JSONObject(), null))));
         } else {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成目标仅支持shot或assetVersion"));
         }
@@ -1215,7 +1351,7 @@ public class ComicDramaService {
                                             ? request.settings().getString("visualStyle") : tuple.getT2().visualStyle(),
                                     request.model(), new StoryboardDtos.AssetImageSettings(
                                     request.settings().getString("quality"), request.settings().getString("resolution"),
-                                    request.settings().getString("size"))), attachTask)));
+                                    request.settings().getString("size"))), references, attachTask)));
         } else {
             task = aiTaskService.createTask(generationTaskRequest(request, plan, mediaType), attachTask);
         }
@@ -1395,6 +1531,146 @@ public class ComicDramaService {
     /** 创建稳定标识。 */
     private String id() {
         return UUID.randomUUID().toString();
+    }
+
+    /**
+     * 把模型返回的单镜头秒数收进所选时长档。
+     *
+     * @param response 分镜生成结果
+     * @param shotDuration 时长档位：short、medium、long
+     * @return 时长已对齐的生成结果
+     */
+    private StoryboardDtos.GenerateStoryboardResponse alignShotDurations(
+            StoryboardDtos.GenerateStoryboardResponse response, String shotDuration) {
+        return new StoryboardDtos.GenerateStoryboardResponse(response.shots().stream()
+                .map(shot -> new StoryboardDtos.StoryboardShot(shot.id(), shot.shotNumber(),
+                        alignShotDuration(shotDuration, shot.durationSeconds()), shot.visualDescription(), shot.shotSize(),
+                        shot.lightingAtmosphere(), shot.dialogueVoiceover(), shot.soundEffect(), shot.cameraMovement(),
+                        shot.finalPrompt(), shot.assetIds()))
+                .toList(), response.assets(), response.chargedCredits());
+    }
+
+    /**
+     * 生成镜头数量要求。未指定数量时，用正文体量除以该档位的单镜头时长。
+     *
+     * @param shotCount 用户指定的镜头数量，未填时为 null
+     * @param shotDuration 时长档位：short、medium、long
+     * @param scriptContent 本次拆分的剧本正文
+     * @return 镜头数量要求
+     */
+    static String shotPlanInstruction(Integer shotCount, String shotDuration, String scriptContent) {
+        if (shotCount != null) {
+            return "请拆分为约" + shotCount + "个镜头";
+        }
+        int count = estimateShotCount(shotDuration, scriptContent);
+        return "请结合正文体量拆分为约" + count
+                + "个镜头，把能在单镜头时长内演完的连续动作、对白和反应合并进同一镜头，只在场景、时间或叙事段落切换，或内容超出单镜头时长上限时才切下一镜";
+    }
+
+    /**
+     * 按正文体量和单镜头时长估算镜头数量。
+     * <p>
+     * 中文对白大约每秒 4 个字，动作描述按同样密度折成画面时间。简短按 5 秒、中等按 7 秒、超长按 12 秒，
+     * 所以同一段正文在超长档的镜头数更少，在简短档更多。
+     *
+     * @param shotDuration 时长档位：short、medium、long
+     * @param scriptContent 本次拆分的剧本正文
+     * @return 至少为 1 的镜头数量
+     */
+    static int estimateShotCount(String shotDuration, String scriptContent) {
+        int units = countScriptUnits(scriptContent);
+        int unitsPerShot = preferredShotSeconds(shotDuration) * 4;
+        if (units == 0) {
+            return 1;
+        }
+        return Math.max(1, (units + unitsPerShot / 2) / unitsPerShot);
+    }
+
+    /**
+     * 统计会占用画面时间的正文字数，不计空白和标点。
+     *
+     * @param scriptContent 剧本正文
+     * @return 字数
+     */
+    static int countScriptUnits(String scriptContent) {
+        if (!StringUtils.hasText(scriptContent)) {
+            return 0;
+        }
+        int count = 0;
+        for (int offset = 0; offset < scriptContent.length(); ) {
+            int codePoint = scriptContent.codePointAt(offset);
+            offset += Character.charCount(codePoint);
+            if (Character.isWhitespace(codePoint)) {
+                continue;
+            }
+            int type = Character.getType(codePoint);
+            if (type == Character.CONNECTOR_PUNCTUATION || type == Character.DASH_PUNCTUATION
+                    || type == Character.START_PUNCTUATION || type == Character.END_PUNCTUATION
+                    || type == Character.INITIAL_QUOTE_PUNCTUATION || type == Character.FINAL_QUOTE_PUNCTUATION
+                    || type == Character.OTHER_PUNCTUATION) {
+                continue;
+            }
+            count++;
+        }
+        return count;
+    }
+
+    /**
+     * 各时长档用于估算镜头数量的代表秒数。
+     *
+     * @param shotDuration 时长档位：short、medium、long
+     * @return 代表秒数
+     */
+    private static int preferredShotSeconds(String shotDuration) {
+        return switch (shotDuration) {
+            case "short" -> 5;
+            case "medium" -> 7;
+            case "long" -> 12;
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "分镜头时长档位无效");
+        };
+    }
+
+    /**
+     * 生成传给分镜模型的单镜头时长要求。
+     *
+     * @param shotDuration 时长档位：short、medium、long
+     * @return 时长要求
+     */
+    static String shotDurationInstruction(String shotDuration) {
+        return switch (shotDuration) {
+            case "short" -> "每个镜头时长控制在 5 秒左右，只使用 4、5 或 6 秒，并以 5 秒为主";
+            case "medium" -> "每个镜头时长控制在 5 到 8 秒";
+            case "long" -> "每个镜头时长控制在 10 到 15 秒，不要短于 10 秒，也不要超过 15 秒";
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "分镜头时长档位无效");
+        };
+    }
+
+    /**
+     * 将单镜头秒数限制在所选档位内。
+     *
+     * @param shotDuration 时长档位：short、medium、long
+     * @param seconds 模型返回的秒数
+     * @return 落在该档区间内的秒数
+     */
+    static int alignShotDuration(String shotDuration, int seconds) {
+        int minimum;
+        int maximum;
+        switch (shotDuration) {
+            case "short" -> {
+                minimum = 4;
+                maximum = 6;
+            }
+            case "medium" -> {
+                minimum = 5;
+                maximum = 8;
+            }
+            case "long" -> {
+                minimum = 10;
+                maximum = 15;
+            }
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "分镜头时长档位无效");
+        }
+        return Math.min(maximum, Math.max(minimum, seconds));
     }
 
     /** 标准化可选文本。 */

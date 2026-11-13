@@ -11,6 +11,8 @@ import com.novanovastudio.dto.HomepageShowcaseDtos;
 import com.novanovastudio.entity.HomepageShowcaseRecords;
 import com.novanovastudio.repository.HomepageShowcaseRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.storage.MediaAccessService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -35,8 +37,17 @@ class HomepageShowcaseServiceTest {
     @Mock
     private CurrentUserProvider currentUserProvider;
 
+    @Mock
+    private MediaAccessService mediaAccessService;
+
     @InjectMocks
     private HomepageShowcaseService service;
+
+    /** 初始化按原地址返回的签名服务替身。 */
+    @BeforeEach
+    void setUp() {
+        com.novanovastudio.MediaAccessTestSupport.stubEcho(mediaAccessService);
+    }
 
     /**
      * 验证创建内容时持久化分类和创作者信息。

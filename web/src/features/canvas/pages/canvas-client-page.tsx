@@ -23,7 +23,8 @@ import { saveAs } from "file-saver";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/features/generation/api/image";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/features/generation/api/video";
 import { composeStoryboardPrompts, createStoryboardAssetImageTask, generateStoryboard, readStoryboardAssetImage } from "@/services/api/storyboard";
-import { cancelAiTask, createAiTask, getAiTaskInfo, readAiTaskError, subscribeAiTaskDeltas, waitAiTask, type AiTaskErrorDetails, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
+import { cancelAiTasksWithRefundPolicy, isSubmittedMediaTask, runCancelWithProviderRequestPolicy } from "@/features/generation/lib/cancel-provider-generation";
+import { cancelAiTask, createAiTask, getAiTaskInfo, markGenerationCancelForfeit, readAiTaskError, subscribeAiTaskDeltas, waitAiTask, type AiTaskErrorDetails, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
 import { cancelCompositionTask, composeVideo, waitVideoCompositionTask, type VideoCompositionTask } from "@/services/api/video-composition";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { normalizeImageGenerationCount } from "@/features/generation/components/image-settings-panel";
@@ -166,6 +167,7 @@ import {
     type CanvasDirectorDeskNode,
     type CanvasDirectorDeskExportSource,
     type CanvasDirectorDeskProject,
+    type CanvasAssistantAction,
     type CanvasAssistantMessage,
     type CanvasAssistantSession,
     type CanvasConnection,
@@ -496,7 +498,7 @@ function CanvasWorkspacePage() {
         setNavigationPanelTab("nodes");
         setPreviewAsset(null);
     }, [projectId]);
-    const { start: startGenerationRequest, finish: finishGenerationRequest, stopByRunningId: stopRegisteredGenerationRequests, isRunning: isGenerationRunning } = useCanvasGenerationRequests();
+    const { start: startGenerationRequest, finish: finishGenerationRequest, stopByRunningId: stopRegisteredGenerationRequests, listTargetNodeIds: listGenerationTargetNodeIds, isRunning: isGenerationRunning } = useCanvasGenerationRequests();
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
@@ -584,16 +586,35 @@ function CanvasWorkspacePage() {
 
     const confirmStopGeneration = useCallback(
         (nodeId: string) => {
-            modal.confirm({
-                title: translate("canvas.stopGeneration_9f2951"),
-                content: translate("canvas.theCurrentGenerationRequestWillStopCompletedContentWill"),
-                okText: translate("canvas.stop"),
-                cancelText: translate("canvas.continueGenerating"),
-                okButtonProps: { danger: true },
-                onOk: () => stopGenerationByRunningId(nodeId),
-            });
+            void (async () => {
+                const targetIds = listGenerationTargetNodeIds(nodeId);
+                const nodesById = new Map(nodesRef.current.map((node) => [node.id, node]));
+                const taskIds = [...new Set(targetIds.flatMap((id) => {
+                    const taskId = nodesById.get(id)?.execution.taskId;
+                    return taskId ? [taskId] : [];
+                }))];
+                const tasks = await Promise.all(taskIds.map((taskId) => getAiTaskInfo(taskId).catch(() => null)));
+                const sent = tasks.some((task) => task && isSubmittedMediaTask(task));
+                modal.confirm({
+                    title: sent ? translate("generation.cancelWithoutRefund") : translate("canvas.stopGeneration_9f2951"),
+                    content: sent ? translate("generation.requestAlreadySentCancelKeepsTheCharge") : translate("canvas.theCurrentGenerationRequestWillStopCompletedContentWill"),
+                    okText: sent ? translate("generation.cancelWithoutRefundConfirm") : translate("canvas.stop"),
+                    cancelText: translate("canvas.continueGenerating"),
+                    okButtonProps: { danger: true },
+                    onOk: async () => {
+                        if (sent) {
+                            markGenerationCancelForfeit(taskIds);
+                            await Promise.all(taskIds.map((taskId) => cancelAiTask(taskId, { forfeitRefund: true })));
+                        } else {
+                            const outcome = await cancelAiTasksWithRefundPolicy(taskIds, modal);
+                            if (outcome === "declined") return;
+                        }
+                        stopGenerationByRunningId(nodeId);
+                    },
+                });
+            })().catch((error) => message.error(error instanceof Error ? error.message : translate("canvas.failedToStop")));
         },
-        [modal, stopGenerationByRunningId],
+        [listGenerationTargetNodeIds, message, modal, stopGenerationByRunningId],
     );
 
     const confirmUploadReferenceImages = useCallback(
@@ -3295,14 +3316,14 @@ function CanvasWorkspacePage() {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyCanvasNodeAttributes(node, { fontSize }) : node)));
     }, []);
 
-    const handleUploadRequest = useCallback((nodeId?: string, position?: CanvasPoint) => {
+    const handleUploadRequest = useCallback((nodeId?: string, position?: CanvasPoint, accept?: string) => {
         if (nodeId && useCanvasUiStore.getState().uploadingNodeIds.has(nodeId)) return;
         const input = imageInputRef.current;
         const scope = mediaUploadScopeRef.current;
         if (!input || !scope || scope.controller.signal.aborted) return;
         uploadTargetRef.current = { nodeId, position: position || getCanvasCenter(), scope };
         input.multiple = !nodeId;
-        input.accept = nodeId && nodesRef.current.some((node) => node.id === nodeId && isAudioNode(node)) ? ".mp3,.wav,audio/mpeg,audio/wav" : "image/*,video/*,.mp3,.wav,audio/mpeg,audio/wav";
+        input.accept = accept || (nodeId && nodesRef.current.some((node) => node.id === nodeId && isAudioNode(node)) ? ".mp3,.wav,audio/mpeg,audio/wav" : "image/*,video/*,.mp3,.wav,audio/mpeg,audio/wav");
         input.click();
     }, [getCanvasCenter]);
 
@@ -3427,14 +3448,17 @@ function CanvasWorkspacePage() {
         [updateAssistantSession],
     );
 
+    const assistantActionsRef = useRef(new Map<string, CanvasAssistantAction>());
     const upsertAssistantMessage = useCallback(
         (sessionId: string, messageId: string, text: string) => {
+            const action = assistantActionsRef.current.get(messageId);
             updateAssistantSession(sessionId, (session) => {
                 const exists = session.messages.some((item) => item.id === messageId);
+                const assistantMessage: CanvasAssistantMessage = { id: messageId, role: "assistant", text, ...(action ? { action } : {}) };
                 return {
                     ...session,
                     title: session.messages.length ? session.title : text.slice(0, 18) || translate("canvas.newConversation"),
-                    messages: exists ? session.messages.map((item) => (item.id === messageId ? { ...item, role: "assistant" as const, text } : item)) : [...session.messages, { id: messageId, role: "assistant" as const, text }],
+                    messages: exists ? session.messages.map((item) => (item.id === messageId ? { ...item, ...assistantMessage } : item)) : [...session.messages, assistantMessage],
                     updatedAt: new Date().toISOString(),
                 };
             });
@@ -3490,12 +3514,15 @@ function CanvasWorkspacePage() {
         },
         onThoughtDelta,
         onThoughtComplete,
-        onTaskComplete: (_messageId, text) => {
+        onTaskComplete: (_messageId, text, action) => {
             resetThinkings();
             const sessionId = activeAgentSessionIdRef.current;
             if (!sessionId) return;
             const displayMessageId = activeAgentAssistantMessageIdRef.current || nanoid();
             activeAgentAssistantMessageIdRef.current = displayMessageId;
+            if (action?.type === "choice" && action.options?.length) {
+                assistantActionsRef.current.set(displayMessageId, { type: action.type, options: action.options });
+            }
             completeTextMessage(sessionId, displayMessageId, text);
         },
         onCanceled: () => {
@@ -5530,13 +5557,15 @@ function CanvasWorkspacePage() {
             {assistantMounted ? (
                 <CanvasChatPanel
                     onCollapse={closeAgent}
+                    onUploadImage={() => handleUploadRequest(undefined, undefined, "image/*")}
+                    onUploadVideo={() => handleUploadRequest(undefined, undefined, "video/mp4,video/quicktime,video/*")}
                     nodes={nodes}
                     onNodeDropRef={onNodeDropRef}
                     messages={activeSessionMessages}
                     completedThinkings={completedThinkings}
                     activeThinking={activeThinking}
                     onNewSession={handleCreateAgentSession}
-                    onStop={() => void cancelAgentMessage().catch((error) => message.error(error instanceof Error ? error.message : translate("canvas.failedToStop")))}
+                    onStop={() => void runCancelWithProviderRequestPolicy(modal, (forfeit) => cancelAgentMessage(forfeit)).catch((error) => message.error(error instanceof Error ? error.message : translate("canvas.failedToStop")))}
                     initialPrompt={initialPrompt}
                     sessionId={activeChatId}
                     onSend={async (text, references = [], generationStyleIds = [], generationStyles = [], agentText = text) => {
@@ -5603,6 +5632,8 @@ function CanvasWorkspacePage() {
                     config={config}
                     model={config.agentModel}
                     onModelChange={(model) => updateConfig("agentModel", model)}
+                    onImageModelChange={(model) => updateConfig("imageModel", model)}
+                    onVideoModelChange={(model) => updateConfig("videoModel", model)}
                     onMissingConfig={() => showMissingAiConfig("text")}
                 />
             ) : null}

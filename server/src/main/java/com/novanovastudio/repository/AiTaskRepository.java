@@ -63,7 +63,7 @@ public class AiTaskRepository {
     public Mono<AiGenerationTask> getTask(Long userId, String taskId) {
         // 前端查询任务时限定用户ID，避免跨用户读取。
         return databaseClient.sql("""
-                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
+                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, provider_request_sent, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE user_id = :userId AND id = :taskId AND NOT data_purged
@@ -83,7 +83,7 @@ public class AiTaskRepository {
     public Mono<AiGenerationTask> getTaskById(String taskId) {
         // 异步执行线程按任务ID读取任务，不依赖请求上下文。
         return databaseClient.sql("""
-                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
+                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, provider_request_sent, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE id = :taskId AND NOT data_purged
@@ -103,7 +103,7 @@ public class AiTaskRepository {
     public Flux<AiGenerationTask> listTasks(Long userId, List<String> statuses) {
         // 基础查询限定用户ID。
         String sql = """
-                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
+                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, provider_request_sent, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE user_id = :userId AND NOT data_purged
@@ -223,7 +223,7 @@ public class AiTaskRepository {
     public Flux<AiGenerationTask> listRecoverableTasks(OffsetDateTime runningRecoverBefore) {
         // 恢复时需要保留模型配置ID，才能返回对应的模型并发队列。
         return databaseClient.sql("""
-                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
+                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, provider_request_sent, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE status = 'pending'
@@ -311,5 +311,73 @@ public class AiTaskRepository {
             return spec.bindNull(name, Object.class);
         }
         return spec.bind(name, value);
+    }
+
+    /**
+     * 标记图片或视频生成请求已经发往供应商。
+     *
+     * @param taskId String 任务ID
+     * @return Mono<Boolean> 是否从尚未发出变为已发出
+     */
+    public Mono<Boolean> markProviderRequestSent(String taskId) {
+        return databaseClient.sql("""
+                UPDATE ai_generation_tasks
+                SET provider_request_sent = TRUE, updated_at = CURRENT_TIMESTAMP
+                WHERE id = :taskId AND NOT data_purged AND NOT provider_request_sent AND status IN ('pending', 'running')
+                """)
+                .bind("taskId", taskId)
+                .fetch()
+                .rowsUpdated()
+                .map(rows -> rows > 0);
+    }
+
+    /**
+     * 查询未结束且已经发往供应商的图片或视频任务。
+     *
+     * @param taskIds List<String> 任务ID
+     * @return Mono<Boolean> 是否存在已发送请求的任务
+     */
+    public Mono<Boolean> hasSubmittedMediaTask(List<String> taskIds) {
+        if (taskIds == null || taskIds.isEmpty()) {
+            return Mono.just(false);
+        }
+        String sql = """
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM ai_generation_tasks
+                    WHERE id IN (%s)
+                      AND task_type IN ('image', 'video')
+                      AND provider_request_sent
+                      AND status IN ('pending', 'running')
+                      AND NOT data_purged
+                ) AS submitted
+                """.formatted(R2dbcBindings.namedPlaceholders("taskId", taskIds.size()));
+        return R2dbcBindings.bindList(databaseClient.sql(sql), "taskId", taskIds)
+                .map((row, metadata) -> Boolean.TRUE.equals(row.get("submitted", Boolean.class)))
+                .one()
+                .defaultIfEmpty(false);
+    }
+
+    /**
+     * 取消仍在执行的任务。请求已发出时，只有确认放弃退款才允许取消。
+     *
+     * @param taskId String 任务ID
+     * @param values Map<String, Object> 终态字段
+     * @param forfeitRefund boolean 是否允许取消已发送的请求且不退款
+     * @return Mono<Boolean> 被取消任务的请求是否已发出；没有更新时为空
+     */
+    public Mono<Boolean> cancelActiveTask(String taskId, Map<String, Object> values, boolean forfeitRefund) {
+        StringBuilder sql = new StringBuilder("UPDATE ai_generation_tasks SET updated_at = CURRENT_TIMESTAMP");
+        values.keySet().forEach(column -> sql.append(", ").append(column).append(" = ").append("error_message_arguments".equals(column) ? "CAST(:error_message_arguments AS jsonb)" : ":" + column));
+        sql.append(" WHERE id = :taskId AND NOT data_purged AND status IN ('pending', 'running')");
+        if (!forfeitRefund) {
+            sql.append(" AND NOT provider_request_sent");
+        }
+        sql.append(" RETURNING provider_request_sent");
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(sql.toString()).bind("taskId", taskId);
+        for (Map.Entry<String, Object> entry : values.entrySet()) {
+            spec = bindDynamicValue(spec, entry.getKey(), entry.getValue());
+        }
+        return spec.map((row, metadata) -> Boolean.TRUE.equals(row.get("provider_request_sent", Boolean.class))).one();
     }
 }

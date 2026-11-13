@@ -1,7 +1,7 @@
 package com.novanovastudio.security.oauth2;
 
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
-import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 
 /**
  * 第三方OAuth2认证渠道扩展接口
@@ -42,9 +42,9 @@ public interface ThirdPartyOAuth2Provider {
     /**
      * 校验并标准化第三方用户身份。
      *
-     * @param user OidcUser OpenID Connect用户声明
+     * @param user OAuth2User 第三方用户声明
      * @return ThirdPartyUserIdentity 标准化第三方用户身份
      * @throws OAuth2LoginException 第三方账号不满足登录条件时抛出
      */
-    ThirdPartyUserIdentity resolveIdentity(OidcUser user);
+    ThirdPartyUserIdentity resolveIdentity(OAuth2User user);
 }

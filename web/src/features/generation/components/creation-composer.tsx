@@ -36,6 +36,7 @@ export function CreationComposer({
     actions,
     creationMode,
     onCreationModeChange,
+    chatModeLocked = false,
     running,
     queued = false,
     canSubmit,
@@ -353,17 +354,20 @@ export function CreationComposer({
                             {toolbarActions.map(renderAction)}
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
-                            <Tooltip title={requestActive ? translate("generation.modeSwitchLocked") : chatMode ? translate("generation.switchToAgentMode") : translate("generation.switchToChatMode")}>
+                            <Tooltip title={requestActive ? translate("generation.modeSwitchLocked") : chatModeLocked ? translate("generation.skillMarketAgentOnly") : chatMode ? translate("generation.switchToAgentMode") : translate("generation.switchToChatMode")}>
                                 <span className="inline-flex h-9 items-center" data-tour="composer-mode">
                                     <Segmented
                                         className="creation-composer-mode"
-                                        value={chatMode ? "chat" : "agent"}
+                                        value={chatMode && !chatModeLocked ? "chat" : "agent"}
                                         options={[
                                             { label: translate("generation.agentModeShort"), value: "agent" },
-                                            { label: translate("generation.chatModeShort"), value: "chat" },
+                                            { label: translate("generation.chatModeShort"), value: "chat", disabled: chatModeLocked },
                                         ]}
                                         disabled={requestActive}
-                                        onChange={(value) => onCreationModeChange?.(value as CreationMode)}
+                                        onChange={(value) => {
+                                            if (chatModeLocked && value === "chat") return;
+                                            onCreationModeChange?.(value as CreationMode);
+                                        }}
                                     />
                                 </span>
                             </Tooltip>

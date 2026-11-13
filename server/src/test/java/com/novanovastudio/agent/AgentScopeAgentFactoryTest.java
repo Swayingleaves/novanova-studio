@@ -30,6 +30,7 @@ class AgentScopeAgentFactoryTest {
     void shouldIsolatePromptsAndKeepBusinessToolkitEmpty() throws ReflectiveOperationException {
         SystemPromptTemplateService promptService = mock(SystemPromptTemplateService.class);
         when(promptService.get(PromptTemplateType.AGENT_MAIN)).thenReturn("主Agent模板");
+        when(promptService.get(PromptTemplateType.AGENT_USER_ACTIONS)).thenReturn("用户动作标识");
         when(promptService.get(PromptTemplateType.AGENT_RECOVERY)).thenReturn("恢复Agent模板");
         when(promptService.get(PromptTemplateType.AGENT_IMAGE)).thenReturn("图片Agent模板");
         when(promptService.get(PromptTemplateType.AGENT_VIDEO)).thenReturn("视频Agent模板");
@@ -43,6 +44,7 @@ class AgentScopeAgentFactoryTest {
              ReActAgent imageAgent = factory.imageAgent(model);
              ReActAgent videoAgent = factory.videoAgent(model)) {
             Assertions.assertTrue(mainAgent.getSysPrompt().contains("主Agent模板"));
+            Assertions.assertTrue(mainAgent.getSysPrompt().contains("用户动作标识"));
             Assertions.assertTrue(recoveryAgent.getSysPrompt().contains("恢复Agent模板"));
             Assertions.assertTrue(imageAgent.getSysPrompt().contains("图片Agent模板"));
             Assertions.assertTrue(videoAgent.getSysPrompt().contains("视频Agent模板"));

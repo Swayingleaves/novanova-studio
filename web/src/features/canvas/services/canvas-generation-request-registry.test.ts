@@ -16,6 +16,16 @@ test("启动同一目标的新请求会中止旧请求", () => {
     assert.equal(registry.isRunning("running"), false);
 });
 
+test("列出运行节点不会中止请求", () => {
+    const registry = createCanvasGenerationRequestRegistry();
+    const controller = new AbortController();
+    registry.start("child", "origin", "running", controller);
+
+    assert.deepEqual(registry.listTargetNodeIds("running").sort(), ["child", "origin"]);
+    assert.equal(controller.signal.aborted, false);
+    assert.equal(registry.isRunning("running"), true);
+});
+
 test("按运行节点停止会返回全部受影响节点", () => {
     const registry = createCanvasGenerationRequestRegistry();
     registry.start("child", "origin", "running", new AbortController());

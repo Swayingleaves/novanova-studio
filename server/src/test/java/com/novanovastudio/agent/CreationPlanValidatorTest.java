@@ -3,6 +3,7 @@ package com.novanovastudio.agent;
 import com.novanovastudio.agent.dto.CreationPlan;
 import com.novanovastudio.agent.dto.CreationSettings;
 import com.novanovastudio.agent.dto.CreationTask;
+import com.novanovastudio.agent.workflow.VideoWorkflowRegistry;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.dto.GenerationStyleDtos;
 import java.util.List;
@@ -312,6 +313,20 @@ class CreationPlanValidatorTest {
 
         Assertions.assertNull(result.workflowType());
         Assertions.assertEquals(1, result.tasks().size());
+    }
+
+    /**
+     * 未经过技能 workflowId 确认的工作流类型，不能当作普通计划放行。
+     */
+    @Test
+    void shouldRejectUnregisteredWorkflowTypeWithoutSkillConfirmation() {
+        validator.setVideoWorkflowRegistry(new VideoWorkflowRegistry(List.of()));
+        CreationPlan plan = new CreationPlan("fight-storyboard-step2", "打斗分镜技能-收集战斗类型",
+                CreationEntrySource.VIDEO_PAGE, "已收到点子", "这段打斗按哪种战斗类型来定？", false, null,
+                List.of(), List.of(), "fight_storyboard_skill");
+
+        Assertions.assertThrows(BusinessException.class,
+                () -> validator.validate(plan, CreationEntrySource.VIDEO_PAGE, videoSettings()));
     }
 
     /**

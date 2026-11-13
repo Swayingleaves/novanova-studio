@@ -8,7 +8,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { useEffect, useMemo, useState } from "react";
 import { App, Button, Card, Checkbox, Drawer, Empty, Form, Image, Input, Modal, Radio, Select, Skeleton, Space, Tabs, Tag } from "antd";
-import { Bot, Check, Copy, ExternalLink, ImagePlus, Layers, Plus, RefreshCw, Sparkles, Trash2, User, Video } from "lucide-react";
+import { Bot, Check, Copy, ExternalLink, ImagePlus, Layers, Plus, RefreshCw, Sparkles, Trash2, User, Video, X } from "lucide-react";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
@@ -119,6 +119,39 @@ function assetHasRunningImage(versions: ComicDramaAssetVersion[], media: ComicDr
     return versions.some((version) => versionHasRunningImage(version.id, media));
 }
 
+/** 单次生成最多引用的已有资产图数量，与服务端限制一致。 */
+const MAX_REFERENCE_ASSET_IMAGES = 8;
+
+/** 已经生成出图片、可以作为图生图参考的资产版本。 */
+type ReferenceAssetImage = {
+    versionId: string;
+    name: string;
+    assetType: ComicDramaAssetType;
+    url: string;
+};
+
+/** 按资产当前顺序收集各版本最新一张已完成图片。 */
+function listReferenceAssetImages(
+    assets: ComicDramaAsset[],
+    versionsByAsset: Record<string, ComicDramaAssetVersion[]>,
+    media: ComicDramaMediaResult[],
+): ReferenceAssetImage[] {
+    const images: ReferenceAssetImage[] = [];
+    for (const asset of assets) {
+        for (const version of versionsByAsset[asset.id] || []) {
+            const url = resolveVersionImageUrl(version.id, media);
+            if (!url) continue;
+            images.push({
+                versionId: version.id,
+                name: `${asset.name} · ${version.versionName}`,
+                assetType: asset.assetType,
+                url,
+            });
+        }
+    }
+    return images;
+}
+
 /** 视觉资产与多版本管理阶段视图。 */
 export function StageAssets() {
     const translate = useTranslation();
@@ -155,6 +188,11 @@ export function StageAssets() {
     const [estimating, setEstimating] = useState(false);
     const [generating, setGenerating] = useState(false);
     const [estimatedCredits, setEstimatedCredits] = useState<CreditAmount | null>(null);
+    const [useReferenceAssets, setUseReferenceAssets] = useState(false);
+    const [referenceVersionIds, setReferenceVersionIds] = useState<string[]>([]);
+    const [referencePickerOpen, setReferencePickerOpen] = useState(false);
+    const [referencePickerIds, setReferencePickerIds] = useState<string[]>([]);
+    const [referenceKeyword, setReferenceKeyword] = useState("");
 
     // 真实资产版本与媒体状态同步
     const [versionsByAsset, setVersionsByAsset] = useState<Record<string, ComicDramaAssetVersion[]>>({});
@@ -174,6 +212,7 @@ export function StageAssets() {
 
     const assets = useMemo(() => workspace?.assets || [], [workspace]);
     const mediaList = useMemo(() => workspace?.media || [], [workspace]);
+    const shots = workspace?.shots;
     const scriptProject = workspace?.scriptProject;
     const workspaceId = workspace?.projectId;
 
@@ -200,13 +239,50 @@ export function StageAssets() {
         };
     }, [workspaceId, assets, message]);
 
+    // 同一镜头引用同一资产的多个版本只计一次，与卡片上的「引用 N 镜头」一致
+    const shotReferenceCounts = useMemo(() => {
+        const assetIdByVersionId = new Map<string, string>();
+        for (const [assetId, versions] of Object.entries(versionsByAsset)) {
+            for (const version of versions) assetIdByVersionId.set(version.id, assetId);
+        }
+        const counts = new Map<string, number>();
+        for (const shot of shots ?? []) {
+            const referencedAssetIds = new Set<string>();
+            for (const versionId of shot.assetVersionIds) {
+                const assetId = assetIdByVersionId.get(versionId);
+                if (assetId) referencedAssetIds.add(assetId);
+            }
+            for (const assetId of referencedAssetIds) {
+                counts.set(assetId, (counts.get(assetId) ?? 0) + 1);
+            }
+        }
+        return counts;
+    }, [versionsByAsset, shots]);
+
     const filteredAssets = useMemo(() => {
-        return assets.filter((asset) => {
-            const matchesType = typeFilter === "all" || asset.assetType === typeFilter;
-            const matchesSearch = !searchKeyword.trim() || asset.name.toLowerCase().includes(searchKeyword.toLowerCase()) || asset.description.toLowerCase().includes(searchKeyword.toLowerCase());
-            return matchesType && matchesSearch;
-        });
-    }, [assets, typeFilter, searchKeyword]);
+        return assets
+            .filter((asset) => {
+                const matchesType = typeFilter === "all" || asset.assetType === typeFilter;
+                const matchesSearch = !searchKeyword.trim() || asset.name.toLowerCase().includes(searchKeyword.toLowerCase()) || asset.description.toLowerCase().includes(searchKeyword.toLowerCase());
+                return matchesType && matchesSearch;
+            })
+            .sort((left, right) => (shotReferenceCounts.get(right.id) ?? 0) - (shotReferenceCounts.get(left.id) ?? 0));
+    }, [assets, typeFilter, searchKeyword, shotReferenceCounts]);
+
+    const referenceAssetImages = useMemo(
+        () => listReferenceAssetImages(assets, versionsByAsset, mediaList),
+        [assets, versionsByAsset, mediaList],
+    );
+    const selectedReferenceVersionIds = useReferenceAssets
+        ? referenceVersionIds.filter((versionId) => referenceAssetImages.some((image) => image.versionId === versionId))
+        : [];
+    const assetImageSettings = {
+        mediaType: "image",
+        quality: genQuality,
+        resolution: genResolution,
+        size: genSize,
+        ...(selectedReferenceVersionIds.length > 0 ? { referenceAssetVersionIds: selectedReferenceVersionIds } : {}),
+    };
 
     if (!workspace) return null;
 
@@ -315,6 +391,9 @@ export function StageAssets() {
         setGenResolution(config.imageResolution || "2K");
         setGenSize(defaultAssetGenSize([asset.assetType], workspace.settings.aspectRatio));
         setEstimatedCredits(null);
+        setUseReferenceAssets(false);
+        setReferenceVersionIds([]);
+        setReferencePickerOpen(false);
         setGenModalOpen(true);
     };
 
@@ -325,6 +404,10 @@ export function StageAssets() {
             message.warning(translate("comicDrama.selectAGenerationModelFirst"));
             return;
         }
+        if (useReferenceAssets && selectedReferenceVersionIds.length === 0) {
+            message.warning(translate("comicDrama.selectReferenceAssetImages"));
+            return;
+        }
         setEstimating(true);
         try {
             const res = await estimateComicDramaGeneration({
@@ -332,12 +415,7 @@ export function StageAssets() {
                 targetType: "assetVersion",
                 targetIds: [targetVersion.id],
                 model: genModel,
-                settings: {
-                    mediaType: "image",
-                    quality: genQuality,
-                    resolution: genResolution,
-                    size: genSize,
-                },
+                settings: assetImageSettings,
             });
             setEstimatedCredits(res.estimatedCredits);
             message.info(translate("comicDrama.estimatedCostCountCredits", { value0: res.estimatedCredits }));
@@ -360,18 +438,17 @@ export function StageAssets() {
             message.warning(translate("comicDrama.selectAGenerationModelFirst"));
             return;
         }
+        if (useReferenceAssets && selectedReferenceVersionIds.length === 0) {
+            message.warning(translate("comicDrama.selectReferenceAssetImages"));
+            return;
+        }
         setGenerating(true);
         try {
             await createGenerationTask({
                 targetType: "assetVersion",
                 targetIds: [targetVersion.id],
                 model: genModel,
-                settings: {
-                    mediaType: "image",
-                    quality: genQuality,
-                    resolution: genResolution,
-                    size: genSize,
-                },
+                settings: assetImageSettings,
             });
             message.success(translate("comicDrama.assetImageTaskCreatedCheckProgressOnTheRightOr"));
             setGenModalOpen(false);
@@ -523,6 +600,22 @@ export function StageAssets() {
         }
     };
 
+    const pickerImages = referenceAssetImages.filter((image) => {
+        const keyword = referenceKeyword.trim().toLowerCase();
+        return !keyword || image.name.toLowerCase().includes(keyword);
+    });
+    const toggleReferencePicker = (versionId: string) => {
+        if (referencePickerIds.includes(versionId)) {
+            setReferencePickerIds((current) => current.filter((id) => id !== versionId));
+            return;
+        }
+        if (referencePickerIds.length >= MAX_REFERENCE_ASSET_IMAGES) {
+            message.warning(translate("comicDrama.atMostCountReferenceAssetImages", { value0: MAX_REFERENCE_ASSET_IMAGES }));
+            return;
+        }
+        setReferencePickerIds((current) => [...current, versionId]);
+    };
+
     return (
         <div className="flex flex-col gap-6">
             <header className="flex flex-col gap-2 border-b border-[var(--studio-line)] pb-4 sm:flex-row sm:items-center sm:justify-between">
@@ -600,10 +693,7 @@ export function StageAssets() {
                         const assetImageUrl = resolveAssetImageUrl(versions, mediaList);
                         // 该资产任一版本正在生成时按钮保持 loading，任务结束后才能再次发起
                         const imageGenerating = assetHasRunningImage(versions, mediaList);
-                        // Find how many shots reference this asset's versions
-                        const shotCount = workspace.shots.filter((shot) =>
-                            shot.assetVersionIds.some((vId) => versions.some((version) => version.id === vId))
-                        ).length;
+                        const shotCount = shotReferenceCounts.get(asset.id) ?? 0;
 
                         return (
                             <div
@@ -857,7 +947,10 @@ export function StageAssets() {
             <Modal
                 title={translate("comicDrama.aiAssetImageGeneration")}
                 open={genModalOpen}
-                onCancel={() => setGenModalOpen(false)}
+                onCancel={() => {
+                    setGenModalOpen(false);
+                    setReferencePickerOpen(false);
+                }}
                 footer={null}
                 width={600}
             >
@@ -918,6 +1011,60 @@ export function StageAssets() {
                             </div>
                         </div>
 
+                        <div>
+                            <Checkbox
+                                checked={useReferenceAssets}
+                                onChange={(event) => {
+                                    setUseReferenceAssets(event.target.checked);
+                                    setEstimatedCredits(null);
+                                    if (!event.target.checked) setReferenceVersionIds([]);
+                                }}
+                            >
+                                {translate("comicDrama.useExistingAssetImages")}
+                            </Checkbox>
+                            {useReferenceAssets ? (
+                                <div className="mt-2">
+                                    <p className="text-xs leading-5 text-[var(--studio-muted)]">{translate("comicDrama.existingAssetImageReferenceHint")}</p>
+                                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                                        {selectedReferenceVersionIds.map((versionId) => {
+                                            const image = referenceAssetImages.find((item) => item.versionId === versionId);
+                                            if (!image) return null;
+                                            return (
+                                                <div key={versionId} className="relative size-16">
+                                                    <Image
+                                                        src={image.url}
+                                                        alt={image.name}
+                                                        className="size-16 rounded-md object-cover"
+                                                        classNames={{ root: "size-16 overflow-hidden rounded-md" }}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        className="absolute -right-1 -top-1 z-10 flex size-5 items-center justify-center rounded-full bg-[var(--studio-ink)] text-[var(--studio-panel-solid)]"
+                                                        aria-label={translate("comicDrama.removeReferenceAssetImage")}
+                                                        onClick={() => setReferenceVersionIds((current) => current.filter((id) => id !== versionId))}
+                                                    >
+                                                        <X className="size-3" />
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                        <button
+                                            type="button"
+                                            className="flex size-16 items-center justify-center rounded-md border border-dashed border-[var(--studio-line)] text-[var(--studio-muted)] transition-colors hover:border-[var(--studio-line-strong)] hover:text-[var(--studio-ink)]"
+                                            aria-label={translate("comicDrama.addReferenceAssetImage")}
+                                            onClick={() => {
+                                                setReferencePickerIds(selectedReferenceVersionIds);
+                                                setReferenceKeyword("");
+                                                setReferencePickerOpen(true);
+                                            }}
+                                        >
+                                            <Plus className="size-5" />
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : null}
+                        </div>
+
                         <div className="rounded-lg bg-[var(--studio-panel-solid)] p-3 text-xs leading-5 text-[var(--studio-muted)]">{translate("comicDrama.theServerBuildsPromptsFromAssetAndVersionNames_bcf6cd", { value0: workspace.settings.visualStyle || translate("comicDrama.notSet_55a04b"), value1: assetImageShapeHint([targetAsset.assetType], translate) })}</div>
 
                         <div className="mt-2 flex items-center justify-between border-t border-[var(--studio-line)] pt-3">
@@ -930,7 +1077,10 @@ export function StageAssets() {
                                 )}
                             </div>
                             <Space>
-                                <Button onClick={() => setGenModalOpen(false)}>{translate("comicDrama.cancel")}</Button>
+                                <Button onClick={() => {
+                                    setGenModalOpen(false);
+                                    setReferencePickerOpen(false);
+                                }}>{translate("comicDrama.cancel")}</Button>
                                 <Button
                                     type="primary"
                                     loading={generating}
@@ -942,6 +1092,71 @@ export function StageAssets() {
                         </div>
                     </div>
                 )}
+            </Modal>
+
+            <Modal
+                title={translate("comicDrama.chooseExistingAssetImages")}
+                open={referencePickerOpen}
+                onCancel={() => setReferencePickerOpen(false)}
+                width={720}
+                footer={(
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.selectedReferenceCount", { value0: referencePickerIds.length })}</span>
+                        <Space>
+                            <Button onClick={() => setReferencePickerOpen(false)}>{translate("comicDrama.cancel")}</Button>
+                            <Button
+                                type="primary"
+                                onClick={() => {
+                                    setReferenceVersionIds(referencePickerIds);
+                                    setEstimatedCredits(null);
+                                    setReferencePickerOpen(false);
+                                }}
+                            >
+                                {translate("comicDrama.confirmSelection")}
+                            </Button>
+                        </Space>
+                    </div>
+                )}
+            >
+                <div className="flex flex-col gap-3">
+                    <Input.Search
+                        allowClear
+                        placeholder={translate("comicDrama.searchAssetImages")}
+                        value={referenceKeyword}
+                        onChange={(event) => setReferenceKeyword(event.target.value)}
+                    />
+                    {pickerImages.length === 0 ? (
+                        <Empty description={translate("comicDrama.noGeneratedAssetImages")} />
+                    ) : (
+                        <div className="grid max-h-96 grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-4">
+                            {pickerImages.map((image) => {
+                                const selected = referencePickerIds.includes(image.versionId);
+                                const typeInfo = getAssetTypeConfig(translate)[image.assetType] || getAssetTypeConfig(translate).character;
+                                return (
+                                    <button
+                                        key={image.versionId}
+                                        type="button"
+                                        className={`overflow-hidden rounded-lg border bg-[var(--studio-panel-solid)] text-left ${selected ? "border-[var(--studio-ink)]" : "border-[var(--studio-line)]"}`}
+                                        onClick={() => toggleReferencePicker(image.versionId)}
+                                    >
+                                        <span className="relative block aspect-square">
+                                            <img src={image.url} alt="" className="size-full object-cover" />
+                                            {selected ? (
+                                                <span className="absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-[var(--studio-ink)] text-[var(--studio-panel-solid)]">
+                                                    <Check className="size-3" />
+                                                </span>
+                                            ) : null}
+                                        </span>
+                                        <span className="flex flex-col gap-1 p-2">
+                                            <span className="line-clamp-2 text-xs font-medium text-[var(--studio-ink)]">{image.name}</span>
+                                            <Tag className="w-fit" color={typeInfo.color}>{typeInfo.label}</Tag>
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
             </Modal>
 
             {/* Batch Asset Image Generation Modal */}

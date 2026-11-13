@@ -5,11 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.novanovastudio.config.NovanovaProperties;
+import com.novanovastudio.service.OAuthProviderConfigService;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 
 /**
  * linux.do认证渠道测试
@@ -25,8 +27,8 @@ class LinuxDoOAuth2ProviderTest {
     @Test
     @DisplayName("正常linux.do账号可以解析且不限制信任等级")
     void shouldResolveActiveIdentityWithoutTrustLevelRestriction() {
-        LinuxDoOAuth2Provider provider = new LinuxDoOAuth2Provider(new NovanovaProperties());
-        OidcUser user = oidcUser(Map.of(
+        LinuxDoOAuth2Provider provider = provider("https://studio.example.com/api/v1/auth/oauth/callback/linuxDo");
+        OAuth2User user = oauth2User(Map.of(
                 "sub", "12345",
                 "active", true,
                 "trust_level", 0,
@@ -49,8 +51,8 @@ class LinuxDoOAuth2ProviderTest {
     @Test
     @DisplayName("非活动linux.do账号不能登录")
     void shouldRejectInactiveIdentity() {
-        LinuxDoOAuth2Provider provider = new LinuxDoOAuth2Provider(new NovanovaProperties());
-        OidcUser user = oidcUser(Map.of("sub", "12345", "active", false, "email", "user@example.com"));
+        LinuxDoOAuth2Provider provider = provider("https://studio.example.com/api/v1/auth/oauth/callback/linuxDo");
+        OAuth2User user = oauth2User(Map.of("sub", "12345", "active", false, "email", "user@example.com"));
 
         OAuth2LoginException exception = assertThrows(OAuth2LoginException.class, () -> provider.resolveIdentity(user));
 
@@ -63,12 +65,24 @@ class LinuxDoOAuth2ProviderTest {
     @Test
     @DisplayName("缺少邮箱的linux.do账号不能登录")
     void shouldRejectIdentityWithoutEmail() {
-        LinuxDoOAuth2Provider provider = new LinuxDoOAuth2Provider(new NovanovaProperties());
-        OidcUser user = oidcUser(Map.of("sub", "12345", "active", true));
+        LinuxDoOAuth2Provider provider = provider("https://studio.example.com/api/v1/auth/oauth/callback/linuxDo");
+        OAuth2User user = oauth2User(Map.of("sub", "12345", "active", true));
 
         OAuth2LoginException exception = assertThrows(OAuth2LoginException.class, () -> provider.resolveIdentity(user));
 
         assertEquals("emailUnavailable", exception.getErrorCode());
+    }
+
+    /**
+     * 验证正确配置会生成linux.do客户端注册信息。
+     */
+    @Test
+    @DisplayName("正确linux.do配置可以生成客户端注册信息")
+    void shouldCreateLinuxDoClientRegistration() {
+        LinuxDoOAuth2Provider provider = provider("https://studio.example.com/api/v1/auth/oauth/callback/linuxDo");
+
+        assertEquals("linuxDo", provider.clientRegistration().getRegistrationId());
+        assertEquals(ClientAuthenticationMethod.CLIENT_SECRET_BASIC, provider.clientRegistration().getClientAuthenticationMethod());
     }
 
     /**
@@ -77,26 +91,34 @@ class LinuxDoOAuth2ProviderTest {
     @Test
     @DisplayName("linux.do回调地址配置错误时拒绝启动")
     void shouldRejectInvalidRedirectUri() {
-        NovanovaProperties properties = new NovanovaProperties();
-        NovanovaProperties.OAuth2.LinuxDo configuration = properties.getOauth2().getLinuxDo();
-        configuration.setClientId("client-id");
-        configuration.setClientSecret("client-secret");
-        configuration.setRedirectUri("https://studio.example.com/api/v1/auth/oauth/callback/linuxDo?source=invalid");
-        LinuxDoOAuth2Provider provider = new LinuxDoOAuth2Provider(properties);
+        LinuxDoOAuth2Provider provider = provider(
+                "https://studio.example.com/api/v1/auth/oauth/callback/linuxDo?source=invalid");
 
         assertThrows(IllegalStateException.class, provider::clientRegistration);
     }
 
     /**
-     * 创建携带指定声明的OpenID Connect用户桩对象。
+     * 创建启用且完整的linux.do认证渠道。
      *
-     * @param claims Map<String, Object> 用户声明
-     * @return OidcUser OpenID Connect用户桩对象
+     * @param redirectUri String OAuth2回调地址
+     * @return LinuxDoOAuth2Provider linux.do认证渠道
      */
-    private OidcUser oidcUser(Map<String, Object> claims) {
-        OidcUser user = mock(OidcUser.class);
-        when(user.getClaims()).thenReturn(claims);
-        when(user.getClaim("active")).thenReturn(claims.get("active"));
+    private LinuxDoOAuth2Provider provider(String redirectUri) {
+        OAuthProviderConfigService service = mock(OAuthProviderConfigService.class);
+        when(service.find("linuxDo")).thenReturn(Optional.of(new ThirdPartyOAuth2Configuration(
+                "linuxDo", true, "linuxdo-client-id", "linuxdo-client-secret", redirectUri)));
+        return new LinuxDoOAuth2Provider(service);
+    }
+
+    /**
+     * 创建携带指定属性的用户桩对象。
+     *
+     * @param attributes Map<String, Object> 用户属性
+     * @return OAuth2User 用户桩对象
+     */
+    private OAuth2User oauth2User(Map<String, Object> attributes) {
+        OAuth2User user = mock(OAuth2User.class);
+        when(user.getAttributes()).thenReturn(attributes);
         return user;
     }
 }

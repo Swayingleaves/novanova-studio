@@ -300,7 +300,7 @@ public class CreationAgentOrchestrator {
         if (!StringUtils.hasText(message) && !StringUtils.hasText(reply)) {
             return Mono.empty();
         }
-        return resolveSkillSnapshot(request)
+        return resolveSkillSnapshot(request, userId)
                 .flatMap(skill -> {
                     JSONObject round = new JSONObject();
                     round.put("id", UUID.randomUUID().toString());
@@ -347,7 +347,7 @@ public class CreationAgentOrchestrator {
      * @param request AgentChatRequest 原始请求
      * @return Mono<Map<String, Object>> 技能快照或空Map
      */
-    private Mono<Map<String, Object>> resolveSkillSnapshot(AgentChatRequest request) {
+    private Mono<Map<String, Object>> resolveSkillSnapshot(AgentChatRequest request, Long userId) {
         if (request == null || !StringUtils.hasText(request.skillId())) {
             return Mono.just(readCanvasSettingGraphSnapshot(request));
         }
@@ -357,7 +357,7 @@ public class CreationAgentOrchestrator {
         } catch (NumberFormatException exception) {
             return Mono.just(readCanvasSettingGraphSnapshot(request));
         }
-        return skillService.findEnabledSkill(skillId)
+        return skillService.findUsableSkill(skillId, userId)
                 .map(skill -> {
                     Map<String, Object> snapshot = new LinkedHashMap<>();
                     snapshot.put("id", skill.getId());
@@ -365,8 +365,13 @@ public class CreationAgentOrchestrator {
                     snapshot.put("targetType", skill.getTargetType());
                     snapshot.put("systemPrompt", skill.getSystemPrompt());
                     snapshot.put("aspectRatio", skill.getAspectRatio() == null ? "16:9" : skill.getAspectRatio());
-                    if (CreationEntrySource.VIDEO_PAGE.equals(request.entrySource()) && videoWorkflowRegistry != null) {
-                        videoWorkflowRegistry.resolveWorkflowType(skill.getSystemPrompt()).ifPresent(type -> snapshot.put("workflowType", type));
+                    if (CreationEntrySource.VIDEO_PAGE.equals(request.entrySource()) && videoWorkflowRegistry != null
+                            && StringUtils.hasText(skill.getWorkflowId())
+                            && videoWorkflowRegistry.isRegistered(skill.getWorkflowId())) {
+                        snapshot.put("workflowType", skill.getWorkflowId().trim().toLowerCase(java.util.Locale.ROOT));
+                    }
+                    if (StringUtils.hasText(skill.getWorkflowId())) {
+                        snapshot.put("workflowId", skill.getWorkflowId());
                     }
                     return snapshot;
                 })
@@ -412,9 +417,33 @@ public class CreationAgentOrchestrator {
      * @return Mono<Void> 取消完成信号
      */
     public Mono<Void> cancelChat(Long userId, String requestId) {
+        return cancelChat(userId, requestId, false);
+    }
+
+    /**
+     * 按请求ID精确停止主Agent请求及其关联的生成任务。
+     *
+     * @param userId Long 用户ID
+     * @param requestId String 主Agent请求ID
+     * @param forfeitSubmittedGeneration boolean 已发送的图片或视频请求是否确认取消且不退款
+     * @return Mono<Void> 取消完成信号
+     */
+    public Mono<Void> cancelChat(Long userId, String requestId, boolean forfeitSubmittedGeneration) {
         return requestRepository.findByIdForUser(userId, requestId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.agentRequestNotFound"))))
-                .flatMap(request -> cancelRequest(userId, request));
+                .flatMap(request -> {
+                    List<String> taskIds = requestTaskIds(request);
+                    Mono<Boolean> submitted = taskIds.isEmpty()
+                            ? Mono.just(false)
+                            : aiTaskService.hasSubmittedMediaTask(taskIds);
+                    return submitted.flatMap(alreadySent -> {
+                        if (Boolean.TRUE.equals(alreadySent) && !forfeitSubmittedGeneration) {
+                            log.info("拒绝取消已发送供应商请求的主Agent任务: requestId={}, userId={}", requestId, userId);
+                            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.providerRequestAlreadySentCannotCancel")));
+                        }
+                        return cancelRequest(userId, request, forfeitSubmittedGeneration);
+                    });
+                });
     }
 
     /**
@@ -474,6 +503,17 @@ public class CreationAgentOrchestrator {
      * @return Mono<Void> 停止执行完成信号
      */
     public Mono<Void> stopClaimedExecution(String requestId) {
+        return stopClaimedExecution(requestId, false);
+    }
+
+    /**
+     * 终止当前实例已领取的运行请求，不会影响其他请求。
+     *
+     * @param requestId String 主Agent请求ID
+     * @param forfeitSubmittedGeneration boolean 已发送的图片或视频请求是否取消且不退款
+     * @return Mono<Void> 停止执行完成信号
+     */
+    public Mono<Void> stopClaimedExecution(String requestId, boolean forfeitSubmittedGeneration) {
         ActiveRequestExecution active = activeRequests.get(requestId);
         if (active == null) {
             // 请求已被调度器领取但尚未建立执行上下文时，也必须终止订阅，触发调度器释放名额并补位。
@@ -490,7 +530,7 @@ public class CreationAgentOrchestrator {
         AgentExecutionRegistry.AgentCancellation cancellation = executionRegistry.requestCancellation(active.userId(), active.sessionId());
         String planId = active.planId().get();
         return reactor.core.publisher.Flux.fromIterable(cancellation.tasks())
-                .flatMap(task -> aiTaskService.cancelTaskForUser(active.userId(), task.taskId())
+                .flatMap(task -> aiTaskService.cancelTaskForUser(active.userId(), task.taskId(), forfeitSubmittedGeneration)
                         .onErrorResume(exception -> {
                             log.error("取消主Agent关联任务失败: requestId={}, taskId={}", requestId, task.taskId(), exception);
                             return Mono.empty();
@@ -533,11 +573,40 @@ public class CreationAgentOrchestrator {
                         ? Mono.empty()
                         : sessionService.appendUserMessage(session.id(), userMessageId, request.message())
                                 .then(isRequestCancellationRequested(active))
-                                .flatMap(canceledAfterAppend -> Boolean.TRUE.equals(canceledAfterAppend)
-                                        ? Mono.empty()
-                                        : request.chatMode()
-                                        ? executeChatGeneration(userId, session, request, active)
-                                        : createAndExecutePlan(userId, session, request, active)));
+                                .flatMap(canceledAfterAppend -> {
+                                    if (Boolean.TRUE.equals(canceledAfterAppend)) {
+                                        return Mono.empty();
+                                    }
+                                    Mono<Void> mismatchedDuration = rejectMismatchedVideoDuration(userId, session, request);
+                                    if (mismatchedDuration != null) {
+                                        return mismatchedDuration;
+                                    }
+                                    return request.chatMode()
+                                            ? executeChatGeneration(userId, session, request, active)
+                                            : createAndExecutePlan(userId, session, request, active);
+                                }));
+    }
+
+    /**
+     * 用户在对话里要求的视频时长和页面配置不一致时，先提示修改配置，不进入规划或生成。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 会话
+     * @param request AgentChatRequest 对话请求
+     * @return Mono<Void> 已拦截时的完成信号；无需拦截时返回 null
+     */
+    private Mono<Void> rejectMismatchedVideoDuration(Long userId, AgentSession session, AgentChatRequest request) {
+        if (request == null || !CreationEntrySource.VIDEO_PAGE.equals(request.entrySource()) || request.creationSettings() == null) {
+            return null;
+        }
+        VideoDurationRequest.Mismatch mismatch = VideoDurationRequest.mismatch(request.message(), request.creationSettings().seconds());
+        if (mismatch == null) {
+            return null;
+        }
+        SystemMessage message = SystemMessage.of("system.videoDurationMismatch", mismatch.requestedSeconds(), mismatch.configuredSeconds());
+        List<AgentChoice> choices = List.of(new AgentChoice("确认", String.valueOf(mismatch.requestedSeconds()), false, "adjust_video_duration"));
+        return saveClarificationRound(userId, session, request, message.diagnostic(), choices)
+                .then(completeWithMessage(userId, session.id(), message, AgentAction.choice(choices)));
     }
 
     /**
@@ -644,7 +713,7 @@ public class CreationAgentOrchestrator {
                 : request != null && request.creationSettings() != null
                 ? request.creationSettings() : candidate == null ? null : candidate.creationSettings();
         try {
-            return planValidator.validate(candidate, request.entrySource(), settings);
+            return planValidator.validate(SkillPromptActions.normalize(candidate), request.entrySource(), settings);
         } catch (BusinessException exception) {
             // 校验失败时记录模型原始计划，便于区分模型标注错误与服务端约束缺陷。
             log.warn("主Agent候选计划校验失败: entrySource={}, plan={}",
@@ -934,36 +1003,36 @@ public class CreationAgentOrchestrator {
         } catch (NumberFormatException exception) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidSkillID")));
         }
-        return skillService.findEnabledSkill(skillId).flatMap(skill -> {
+        return skillService.findUsableSkill(skillId, userId).flatMap(skill -> {
             if (!"video".equals(skill.getTargetType())) {
                 return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.thisSkillDoesNotSupportTheVideoPage")));
             }
-            return Mono.justOrEmpty(videoWorkflowRegistry.resolveWorkflowType(skill.getSystemPrompt())
-                    .map(workflowType -> {
-                        VideoWorkflowDefinition definition = videoWorkflowRegistry.require(workflowType);
-                        Map<String, Object> skillSnapshot = new LinkedHashMap<>();
-                        skillSnapshot.put("id", skill.getId());
-                        skillSnapshot.put("name", skill.getName());
-                        skillSnapshot.put("targetType", skill.getTargetType());
-                        skillSnapshot.put("systemPrompt", skill.getSystemPrompt());
-                        skillSnapshot.put("workflowType", workflowType);
-                        VideoWorkflowContext context = new VideoWorkflowContext(UUID.randomUUID().toString(), workflowType,
-                                skillSnapshot, request.message(), definition.clarificationQuestion(), List.of(), Map.of(),
-                                Map.of(), request.creationSettings(), "clarifying", 1);
-                        return context;
-                    }))
-                    .flatMap(context -> videoWorkflowContextRepository.create(userId, session.id(), context)
+            String workflowId = skill.getWorkflowId() == null ? "" : skill.getWorkflowId().trim().toLowerCase(java.util.Locale.ROOT);
+            if (!videoWorkflowRegistry.isRegistered(workflowId)) {
+                return Mono.empty();
+            }
+            VideoWorkflowDefinition definition = videoWorkflowRegistry.require(workflowId);
+            Map<String, Object> skillSnapshot = new LinkedHashMap<>();
+            skillSnapshot.put("id", skill.getId());
+            skillSnapshot.put("name", skill.getName());
+            skillSnapshot.put("targetType", skill.getTargetType());
+            skillSnapshot.put("systemPrompt", skill.getSystemPrompt());
+            skillSnapshot.put("workflowId", workflowId);
+            skillSnapshot.put("workflowType", workflowId);
+            VideoWorkflowContext context = new VideoWorkflowContext(UUID.randomUUID().toString(), workflowId,
+                    skillSnapshot, request.message(), definition.clarificationQuestion(), List.of(), Map.of(),
+                    Map.of(), request.creationSettings(), "clarifying", 1);
+            return videoWorkflowContextRepository.create(userId, session.id(), context)
                             .then(callWorkflowConversationAgent(userId, session, request, model,
                                     videoWorkflowRegistry.require(context.workflowType()), context, "clarifying"))
                             .flatMap(turn -> {
-                                VideoWorkflowDefinition definition = videoWorkflowRegistry.require(context.workflowType());
                                 if (turn.isDraft() && definition.isDraftComplete(turn.prompts())) {
                                     return videoWorkflowContextRepository.saveDrafts(context, turn.prompts())
                                             .map(updated -> workflowClarificationPlan(updated, definition,
                                                     definition.draftDisplayMessage(turn.message(), updated.draftedPrompts()), turn.choices()));
                                 }
                                 return Mono.just(workflowClarificationPlan(context, definition, turn.message(), turn.choices()));
-                            }));
+                            });
         });
     }
 
@@ -984,6 +1053,7 @@ public class CreationAgentOrchestrator {
                                                                               VideoWorkflowDefinition definition,
                                                                               VideoWorkflowContext context, String phase) {
         Map<String, Object> input = new LinkedHashMap<>();
+        input.put("workflowId", context.workflowType());
         input.put("workflowType", context.workflowType());
         input.put("phase", phase);
         input.put("originalRequest", context.originalRequest());
@@ -1152,10 +1222,16 @@ public class CreationAgentOrchestrator {
     private CreationPlan workflowClarificationPlan(VideoWorkflowContext context, VideoWorkflowDefinition definition,
                                                    String replyMessage, List<AgentChoice> turnChoices) {
         String message = StringUtils.hasText(replyMessage) ? replyMessage : definition.clarificationQuestion();
-        List<AgentChoice> choices = context.hasDraftedPrompts() ? List.of(
-                new AgentChoice("确认生成", "确认生成", null, null),
-                new AgentChoice("调整提示词", "我想调整提示词", null, null))
-                : turnChoices == null ? List.of() : turnChoices;
+        List<AgentChoice> choices;
+        if (context.hasDraftedPrompts()) {
+            List<AgentChoice> draftChoices = new ArrayList<>();
+            draftChoices.add(new AgentChoice("确认生成", "确认生成", null, null));
+            draftChoices.add(new AgentChoice("调整提示词", "我想调整提示词", null, null));
+            draftChoices.addAll(SkillPromptActions.userActions(turnChoices));
+            choices = draftChoices;
+        } else {
+            choices = turnChoices == null ? List.of() : turnChoices;
+        }
         return new CreationPlan("", "视频技能工作流", CreationEntrySource.VIDEO_PAGE,
                 "正在补充工作流信息", message, false, context.creationSettings(), List.of(), choices, context.workflowType());
     }
@@ -1432,18 +1508,26 @@ public class CreationAgentOrchestrator {
                 } catch (NumberFormatException exception) {
                     return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidSkillID")));
                 }
-                return skillService.findEnabledSkill(skillId)
+                return skillService.findUsableSkill(skillId, userId)
                         .filter(skill -> ("canvas".equals(request.entrySource()) && "canvasSettingGraph".equals(skill.getTargetType()))
                                 || (("imagePage".equals(request.entrySource()) || "videoPage".equals(request.entrySource()))
                                 && !"canvasSettingGraph".equals(skill.getTargetType())))
                         .onErrorResume(exception -> Mono.empty())
-                        .map(skill -> {
+                        .flatMap(skill -> {
+                            Map<String, Object> skillInput = new java.util.LinkedHashMap<>();
+                            skillInput.put("name", skill.getName());
+                            skillInput.put("targetType", skill.getTargetType());
+                            skillInput.put("workflowId", skill.getWorkflowId() == null ? "" : skill.getWorkflowId());
+                            skillInput.put("instructions", skill.getSystemPrompt());
                             input.put("skillId", request.skillId());
-                            input.put("skill", Map.of(
-                                    "name", skill.getName(),
-                                    "targetType", skill.getTargetType(),
-                                    "instructions", skill.getSystemPrompt()));
-                            return agentFactory.mainAgent(model, skill.getSystemPrompt());
+                            input.put("skill", skillInput);
+                            String workflowInstruction = StringUtils.hasText(skill.getWorkflowId())
+                                    ? "\n\n工作流标识：CreationPlan 的 workflowId 必须填写为「" + skill.getWorkflowId()
+                                    + "」，与技能声明完全一致，不得留空或改写。workflowType 必须留空，由服务端根据 workflowId 确认工作流。"
+                                    : "";
+                            String prompt = skill.getSystemPrompt() == null ? "" : skill.getSystemPrompt();
+                            return callMainAgentWith(agentFactory.mainAgent(model, prompt + workflowInstruction), userId, session, input)
+                                    .map(plan -> SkillWorkflowConfirmation.confirm(plan, skill.getWorkflowId(), videoWorkflowRegistry));
                         })
                         .switchIfEmpty(Mono.defer(() -> {
                             Map<String, Object> snapshot = readCanvasSettingGraphSnapshot(request);
@@ -1452,9 +1536,8 @@ public class CreationAgentOrchestrator {
                             }
                             input.put("skillId", request.skillId());
                             input.put("skill", Map.of("name", snapshot.get("name"), "targetType", snapshot.get("targetType"), "instructions", snapshot.get("systemPrompt")));
-                            return Mono.just(agentFactory.mainAgent(model, String.valueOf(snapshot.get("systemPrompt"))));
-                        }))
-                        .flatMap(skillAgent -> callMainAgentWith(skillAgent, userId, session, input));
+                            return callMainAgentWith(agentFactory.mainAgent(model, String.valueOf(snapshot.get("systemPrompt"))), userId, session, input);
+                        }));
             }
             agent = agentFactory.mainAgent(model);
             return callMainAgentWith(agent, userId, session, input);
@@ -1941,10 +2024,10 @@ public class CreationAgentOrchestrator {
      * @param request CreationAgentRequest 请求实体
      * @return Mono<Void> 取消完成信号
      */
-    private Mono<Void> cancelRequest(Long userId, CreationAgentRequest request) {
+    private Mono<Void> cancelRequest(Long userId, CreationAgentRequest request, boolean forfeitSubmittedGeneration) {
         return switch (request.getStatus()) {
-            case "queued" -> cancelQueuedRequest(userId, request);
-            case "running" -> cancelRunningRequest(userId, request);
+            case "queued" -> cancelQueuedRequest(userId, request, forfeitSubmittedGeneration);
+            case "running" -> cancelRunningRequest(userId, request, forfeitSubmittedGeneration);
             // 请求已进入终态，无需再取消；幂等返回成功，避免前端因竞态停在「生成中」无法解锁。
             default -> Mono.empty();
         };
@@ -1957,7 +2040,7 @@ public class CreationAgentOrchestrator {
      * @param request CreationAgentRequest 请求实体
      * @return Mono<Void> 取消完成信号
      */
-    private Mono<Void> cancelQueuedRequest(Long userId, CreationAgentRequest request) {
+    private Mono<Void> cancelQueuedRequest(Long userId, CreationAgentRequest request, boolean forfeitSubmittedGeneration) {
         return requestRepository.cancelQueuedIfQueued(userId, request.getId(), "已停止生成")
                 .flatMap(canceled -> {
                     if (Boolean.TRUE.equals(canceled)) {
@@ -1972,7 +2055,7 @@ public class CreationAgentOrchestrator {
                     return requestRepository.findByIdForUser(userId, request.getId())
                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.agentRequestNotFound"))))
                             .flatMap(current -> "running".equals(current.getStatus())
-                                    ? cancelRunningRequest(userId, current)
+                                    ? cancelRunningRequest(userId, current, forfeitSubmittedGeneration)
                                     : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.agentRequestHasEnded"))));
                 });
     }
@@ -1984,14 +2067,14 @@ public class CreationAgentOrchestrator {
      * @param request CreationAgentRequest 请求实体
      * @return Mono<Void> 取消完成信号
      */
-    private Mono<Void> cancelRunningRequest(Long userId, CreationAgentRequest request) {
+    private Mono<Void> cancelRunningRequest(Long userId, CreationAgentRequest request, boolean forfeitSubmittedGeneration) {
         return requestRepository.cancelRunningIfRunning(userId, request.getId(), "已停止生成")
                 .filter(Boolean::booleanValue)
                 .switchIfEmpty(Mono.empty())
                 .then(requestQueue.markCancelRequested(request.getId()))
-                .then(stopClaimedExecution(request.getId()))
+                .then(stopClaimedExecution(request.getId(), forfeitSubmittedGeneration))
                 .then(requestRepository.findByIdForUser(userId, request.getId()))
-                .flatMap(this::cancelPersistedRequestTasks)
+                .flatMap(current -> cancelPersistedRequestTasks(current, forfeitSubmittedGeneration))
                 .doOnSuccess(ignored -> eventEmitter.emit(userId, AgentEvent.canceled(request.getSessionId(),
                         "已停止生成").withRequestId(request.getId())));
     }
@@ -2002,12 +2085,13 @@ public class CreationAgentOrchestrator {
      * @param request CreationAgentRequest 请求实体
      * @return Mono<Void> 取消完成信号
      */
-    private Mono<Void> cancelPersistedRequestTasks(CreationAgentRequest request) {
+    private Mono<Void> cancelPersistedRequestTasks(CreationAgentRequest request, boolean forfeitSubmittedGeneration) {
         Mono<Void> cancelPlan = StringUtils.hasText(request.getPlanId())
                 ? planRepository.cancelPlan(request.getPlanId())
                 : Mono.empty();
-        return reactor.core.publisher.Flux.fromIterable(requestRepository.taskIds(request))
-                .concatMap(taskId -> aiTaskService.cancelTaskForUser(request.getUserId(), taskId)
+        List<String> taskIds = requestRepository.taskIds(request);
+        return reactor.core.publisher.Flux.fromIterable(taskIds == null ? List.of() : taskIds)
+                .concatMap(taskId -> aiTaskService.cancelTaskForUser(request.getUserId(), taskId, forfeitSubmittedGeneration)
                         .onErrorResume(exception -> {
                             log.error("取消已持久化主Agent任务失败: requestId={}, taskId={}", request.getId(), taskId, exception);
                             return Mono.empty();
@@ -2022,6 +2106,25 @@ public class CreationAgentOrchestrator {
      * @param message String 中断说明
      * @return Mono<Void> 收尾完成信号
      */
+    /**
+     * 汇总请求已持久化和当前实例已登记的任务，供取消前判断供应商请求是否发出。
+     *
+     * @param request CreationAgentRequest 请求实体
+     * @return List<String> 任务ID
+     */
+    private List<String> requestTaskIds(CreationAgentRequest request) {
+        LinkedHashSet<String> taskIds = new LinkedHashSet<>();
+        List<String> persisted = requestRepository.taskIds(request);
+        if (persisted != null) {
+            taskIds.addAll(persisted);
+        }
+        ActiveRequestExecution active = activeRequests.get(request.getId());
+        if (active != null) {
+            taskIds.addAll(executionRegistry.activeTaskIds(active.sessionId()));
+        }
+        return List.copyOf(taskIds);
+    }
+
     private Mono<Void> interruptPersistedRequest(CreationAgentRequest request, String message) {
         ActiveRequestExecution active = activeRequests.get(request.getId());
         AgentExecutionRegistry.AgentCancellation cancellation = active == null

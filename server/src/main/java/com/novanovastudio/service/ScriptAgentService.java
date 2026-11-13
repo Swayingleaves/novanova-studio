@@ -427,7 +427,7 @@ public class ScriptAgentService {
                             JSON.toJSONString(agent.getSysPrompt()), requestBody);
                     return agent.call(requestBody, resultType, RuntimeContext.builder()
                                     .sessionId("script:" + operationId).userId(String.valueOf(userId)).build())
-                            .timeout(Duration.ofSeconds(properties.getAi().getScriptAgent().getTimeoutSeconds()))
+                            .timeout(Duration.ofSeconds(properties.timeoutSettings().scriptAgentTimeoutSeconds()))
                             .map(message -> message.getStructuredData(resultType))
                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
                                     "剧本Agent未返回结构化结果")))

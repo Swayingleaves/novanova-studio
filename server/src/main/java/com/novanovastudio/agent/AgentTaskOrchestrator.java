@@ -12,6 +12,7 @@ import com.novanovastudio.common.SystemMessage;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import com.novanovastudio.agent.dto.AgentAction;
 import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.agent.dto.AgentMessage;
@@ -493,8 +494,9 @@ public class AgentTaskOrchestrator {
         return callAiApi(textModel, profile, messages, step == 1, textDeltaConsumer)
             .flatMap(response -> {
                 if (response.toolCalls().isEmpty()) {
-                    eventEmitter.emit(userId, AgentEvent.taskComplete(sessionId, assistantId, response.text()));
-                    return sessionService.appendAssistantMessage(sessionId, assistantId, response.text());
+                    SkillPromptActions.NormalizedReply reply = SkillPromptActions.normalizeReply(response.text());
+                    emitUserVisibleReply(userId, sessionId, assistantId, reply);
+                    return sessionService.appendAssistantMessage(sessionId, assistantId, reply.text());
                 }
 
                 return executeToolCalls(sessionId, userId, profile, textModel, messages, attachments, response, step, assistantId);
@@ -508,6 +510,21 @@ public class AgentTaskOrchestrator {
                 eventEmitter.emit(userId, AgentEvent.error(sessionId, e.getMessage()).withSystemMessage(SystemMessage.fromThrowable(e)));
                 return Mono.empty();
             });
+    }
+
+    /**
+     * 把用户可见回复发给前端。回复里的动作标识会变成选项按钮，正文不再保留标识。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param assistantId String 助手消息ID
+     * @param reply SkillPromptActions.NormalizedReply 已去掉标识的回复
+     */
+    private void emitUserVisibleReply(Long userId, String sessionId, String assistantId, SkillPromptActions.NormalizedReply reply) {
+        String text = reply == null ? "" : reply.text();
+        AgentAction action = reply == null || reply.choices() == null || reply.choices().isEmpty()
+                ? null : AgentAction.choice(reply.choices());
+        eventEmitter.emit(userId, AgentEvent.taskComplete(sessionId, assistantId, text, action));
     }
 
     /**
@@ -533,13 +550,14 @@ public class AgentTaskOrchestrator {
                         .allMatch(tc -> profile.isTerminalTool(tc.function().name()));
                 if (allTerminal) {
                     // 全部是终态工具：保存生成记录，发送 task-complete，结束循环
-                    String summary = buildToolResultSummary(results, effectiveResponse.text());
+                    SkillPromptActions.NormalizedReply summary = SkillPromptActions.normalizeReply(
+                            buildToolResultSummary(results, effectiveResponse.text()));
                     // task-complete 事件必须在保存完成后才发送，否则前端 refreshConversations 会读到旧数据
                     return saveGenerationRound(sessionId, userId, effectiveResponse, results, attachments)
-                            .doOnSuccess(v -> eventEmitter.emit(userId, AgentEvent.taskComplete(sessionId, assistantId, summary)))
+                            .doOnSuccess(v -> emitUserVisibleReply(userId, sessionId, assistantId, summary))
                             .onErrorResume(e -> {
                                 log.warn("保存生成记录失败: sessionId={}", sessionId, e);
-                                eventEmitter.emit(userId, AgentEvent.taskComplete(sessionId, assistantId, summary));
+                                emitUserVisibleReply(userId, sessionId, assistantId, summary);
                                 return Mono.empty();
                             })
                             .then(persistToolMessages(sessionId, assistantId, effectiveResponse, results, channel.apiFormat()));

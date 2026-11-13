@@ -9,6 +9,7 @@ import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.service.PersistenceService;
+import com.novanovastudio.storage.MediaAccessService;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URLConnection;
@@ -16,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -44,19 +46,29 @@ public class AiMediaSupport {
     /** 音频裁剪派生服务 */
     private final AudioClipService audioClipService;
 
+    /** 私有存储桶读地址签发，测试环境下允许为空 */
+    private final ObjectProvider<MediaAccessService> mediaAccessServiceProvider;
+
     /** 注入媒体解析和音频派生依赖。 */
     @Autowired
     public AiMediaSupport(AiHttpClient aiHttpClient, PersistenceService persistenceService, NovanovaProperties properties,
-                          AudioClipService audioClipService) {
+                          AudioClipService audioClipService, ObjectProvider<MediaAccessService> mediaAccessServiceProvider) {
         this.aiHttpClient = aiHttpClient;
         this.persistenceService = persistenceService;
         this.properties = properties;
         this.audioClipService = audioClipService;
+        this.mediaAccessServiceProvider = mediaAccessServiceProvider;
+    }
+
+    /** 保留不依赖私有存储的构造方式，供单元测试直接使用。 */
+    public AiMediaSupport(AiHttpClient aiHttpClient, PersistenceService persistenceService, NovanovaProperties properties,
+                          AudioClipService audioClipService) {
+        this(aiHttpClient, persistenceService, properties, audioClipService, null);
     }
 
     /** 保留原有测试和内部调用方的三参数构造方式。 */
     public AiMediaSupport(AiHttpClient aiHttpClient, PersistenceService persistenceService, NovanovaProperties properties) {
-        this(aiHttpClient, persistenceService, properties, new AudioClipService(aiHttpClient, persistenceService, properties));
+        this(aiHttpClient, persistenceService, properties, new AudioClipService(aiHttpClient, persistenceService, properties), null);
     }
 
     /**
@@ -119,18 +131,32 @@ public class AiMediaSupport {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceMediaIsRequired")));
         }
         if (StringUtils.hasText(reference.storageKey())) {
-            return persistenceService.getMediaInfoForUser(userId, reference.storageKey().trim())
+            return persistenceService.getMediaInfoForUser(userId, reference.storageKey().trim(), MediaAccessService.Purpose.THIRD_PARTY)
                     .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.referenceMediaNotFoundOrOwnedByAnotherUser"))))
                     .flatMap(media -> audioClipService.resolveReferenceUrl(userId, reference, media))
+                    .flatMap(this::signOwnedUrl)
                     .flatMap(this::validateReferenceUrl);
         }
         if (StringUtils.hasText(reference.url())) {
             if (reference.trimStartMs() != null || reference.trimEndMs() != null) {
                 return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.trimmedAudioReferencesRequireStorageKey")));
             }
-            return validateReferenceUrl(reference.url().trim());
+            return signOwnedUrl(reference.url().trim()).flatMap(this::validateReferenceUrl);
         }
         return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceMediaNeedsStorageKeyOrUrl")));
+    }
+
+    /**
+     * 把本系统对象存储的历史公开地址换成预签名地址，外部地址原样返回。
+     *
+     * @param url String 参考媒体地址
+     * @return Mono<String> 可用地址
+     */
+    private Mono<String> signOwnedUrl(String url) {
+        if (mediaAccessServiceProvider == null) {
+            return Mono.just(url);
+        }
+        return mediaAccessServiceProvider.getObject().signUrl(url, MediaAccessService.Purpose.THIRD_PARTY);
     }
 
     /**

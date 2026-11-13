@@ -2,7 +2,7 @@
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { ChevronDown, ChevronRight, Brain } from "lucide-react";
+import { ChevronDown, ChevronRight, Brain, LoaderCircle } from "lucide-react";
 import { useState, useEffect } from "react";
 import type { ThinkingBlockState } from "./types";
 
@@ -39,9 +39,9 @@ export function ThinkingBlock({ block, streaming = false, appearance }: Props) {
         className="flex items-center gap-1.5 text-xs text-[var(--studio-muted)] transition-colors hover:text-[var(--studio-ink)]"
         style={appearance ? { color: appearance.muted } : undefined}
       >
-        <Brain className="size-3.5" />
+        {streaming ? <LoaderCircle className="size-3.5 animate-spin" /> : <Brain className="size-3.5" />}
         {streaming ? (
-          <span className="animate-pulse">{translate("chat.thinking")}</span>
+          <span>{translate("chat.thinking")}</span>
         ) : (
           <span>{translate("chat.thinking_548b0e")}{formatMs(block.durationMs)})</span>
         )}

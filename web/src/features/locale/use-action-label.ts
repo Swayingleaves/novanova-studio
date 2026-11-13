@@ -14,7 +14,14 @@ const systemChoiceMessageKeys: Record<string, string> = {
 /** 内置Agent操作按显示语言即时翻译，模型选项和业务值保持原文。 */
 export function useActionLabel() {
     const translate = useTranslation();
-    return (item: { label: string; value?: string; labelMessage?: ServerSystemMessage | null }) => {
+    return (item: { label: string; value?: string; action?: string; labelMessage?: ServerSystemMessage | null }) => {
+        if (item.action === "adjust_video_duration") return translate("agentActions.confirmDurationSettings");
+        if (item.action === "continue_after_duration") return translate("video.continueAfterSettings");
+        if (item.action === "ask_user_model_config") return translate("agentActions.askUserModelConfig");
+        if (item.action === "ask_user_confirm") return translate("agentActions.askUserConfirm");
+        if (item.action === "ask_user_upload_image") return translate("agentActions.askUserUploadImage");
+        if (item.action === "ask_user_upload_video") return translate("agentActions.askUserUploadVideo");
+        if (item.action === "continue_after_model_config") return translate("agentActions.continueAfterModelConfig");
         const key = item.labelMessage?.key.slice("business.".length) ?? (item.value ? systemChoiceMessageKeys[item.value] : undefined);
         return key ? translate(`agentActions.${key}`) : item.label;
     };

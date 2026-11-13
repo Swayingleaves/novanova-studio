@@ -11,6 +11,7 @@ import { formatBytes, formatDuration } from "@/features/generation/lib/image-uti
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceVideo } from "@/features/generation/types/media";
 import { ShareResultButton } from "@/features/shared-work/components/share-result-button";
+import { useMediaUrl } from "@/shared/hooks/use-media-url";
 
 /** 详情弹窗左侧展示的媒体信息 */
 export type ResultDetailMedia = {
@@ -49,11 +50,23 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
     const [detailsCollapsed, setDetailsCollapsed] = useState(false);
     const [originalSize, setOriginalSize] = useState(false);
     const detailsId = useId();
+    // 有存储键时通过接口换取当前临时地址，弹窗长时间停留后地址过期可自动续签。
+    const resolvedMedia = useMediaUrl({
+        storageKey: detail?.media.storageKey,
+        url: detail?.media.url,
+        kind: detail?.media.kind === "image" ? "image" : "media",
+    });
     // 生成结果地址过期或加载失败时回落到默认占位图
-    const mediaFallback = useMediaFallback(detail?.media.url);
+    const mediaFallback = useMediaFallback(resolvedMedia.url || detail?.media.url);
     if (!detail) return null;
 
     const { media } = detail;
+    const displayUrl = resolvedMedia.url || media.url;
+    /** 地址加载失败时先让 hook 续签一次，仍不可用时回落到占位图。 */
+    const handleMediaError = () => {
+        resolvedMedia.onError();
+        mediaFallback.onError();
+    };
     const downloadKey = `${media.kind}:${media.url}`;
     const isDownloading = downloadingMedia.has(downloadKey);
     const hasSize = (media.width || 0) > 0 && (media.height || 0) > 0;
@@ -115,9 +128,10 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
                 <div className="min-w-0 space-y-2.5">
                     {media.kind === "image" ? (
                         <Image
-                            key={media.url}
-                            src={media.url}
+                            key={displayUrl}
+                            src={displayUrl}
                             alt={translate("generation.imageGeneratedClickToEnlarge")}
+                            onError={handleMediaError}
                             styles={{ root: { width: "100%", height: mediaHeight }, image: { width: "100%", height: "100%", objectFit: "contain" } }}
                             classNames={{ root: "overflow-hidden rounded-lg bg-[var(--studio-media)]" }}
                             preview={{
@@ -146,7 +160,7 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
                     ) : mediaFallback.missing ? (
                         <img src={mediaFallback.displaySrc} alt={translate("generation.generatedVideoCannotBeLoaded")} className="w-full rounded-lg bg-[var(--studio-media)] object-contain" style={{ height: mediaHeight }} />
                     ) : (
-                        <video src={media.url} controls autoPlay className="w-full rounded-lg bg-[var(--studio-media)] object-contain" style={{ height: mediaHeight }} onError={mediaFallback.onError} />
+                        <video src={displayUrl} controls autoPlay className="w-full rounded-lg bg-[var(--studio-media)] object-contain" style={{ height: mediaHeight }} onError={handleMediaError} />
                     )}
                     <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
                         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-[var(--studio-muted)]">

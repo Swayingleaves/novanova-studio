@@ -50,8 +50,32 @@ export type CreateEmailCampaign = {
     recipientFilter?: EmailRecipientFilter;
 };
 
+export type EmailServiceSettings = {
+    smtpHost: string;
+    smtpPort: number;
+    smtpUsername: string;
+    passwordConfigured: boolean;
+    fromEmail: string;
+    allowedSuffixes: string;
+};
+
+export type UpdateEmailServiceSettings = {
+    smtpHost: string;
+    smtpPort: number;
+    smtpUsername: string;
+    smtpPassword: string;
+    fromEmail: string;
+    allowedSuffixes: string;
+};
+
 /** 读取群发限制与邮件配置状态。 */
 export const getEmailCampaignSettings = () => serverGet<EmailCampaignSettings>("/admin/email/getSettings");
+
+/** 读取 SMTP、发件人和注册邮箱后缀。响应不包含授权码。 */
+export const getEmailServiceSettings = () => serverGet<EmailServiceSettings>("/admin/email/getEmailServiceSettings");
+
+/** 保存邮件服务配置。授权码留空表示不修改。 */
+export const updateEmailServiceSettings = (settings: UpdateEmailServiceSettings) => serverPost<EmailServiceSettings>("/admin/email/updateEmailServiceSettings", settings);
 
 /** 使用服务端的安全清理及最终发送排版预览邮件。 */
 export const previewEmailCampaignContent = (bodyHtml: string) => serverPost<{ documentHtml: string }>("/admin/email/previewContent", { bodyHtml });

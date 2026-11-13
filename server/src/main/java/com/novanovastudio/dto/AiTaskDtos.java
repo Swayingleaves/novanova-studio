@@ -128,8 +128,17 @@ public final class AiTaskDtos {
      * AI任务ID请求
      *
      * @param taskId String 任务ID
+     * @param forfeitRefund Boolean 请求已发出时是否确认取消且不退款
      */
-    public record AiTaskIdRequest(@NotBlank(message = "business.taskIDIsRequired") String taskId) {
+    public record AiTaskIdRequest(@NotBlank(message = "business.taskIDIsRequired") String taskId, Boolean forfeitRefund) {
+        /**
+         * 保持只传任务ID的调用，默认仍按可退款规则取消。
+         *
+         * @param taskId String 任务ID
+         */
+        public AiTaskIdRequest(String taskId) {
+            this(taskId, false);
+        }
     }
 
     /**
@@ -149,6 +158,7 @@ public final class AiTaskDtos {
      * @param completedAt String 完成时间
      * @param createdAt String 创建时间
      * @param updatedAt String 更新时间
+     * @param providerRequestSent Boolean 图片或视频生成请求是否已经发往供应商
      */
     public record AiGenerationTaskResponse(String id,
                                            String taskType,
@@ -163,14 +173,24 @@ public final class AiTaskDtos {
                                            String startedAt,
                                            String completedAt,
                                            String createdAt,
-                                           String updatedAt) {
+                                           String updatedAt,
+                                           Boolean providerRequestSent) {
+        /**
+         * 保持尚未返回供应商请求标记的调用，默认视为尚未发出。
+         */
+        public AiGenerationTaskResponse(String id, String taskType, String model, String provider, String status, Integer progress,
+                                        JSONObject requestData, JSONObject resultData, String errorMessage, SystemMessage systemMessage,
+                                        String startedAt, String completedAt, String createdAt, String updatedAt) {
+            this(id, taskType, model, provider, status, progress, requestData, resultData, errorMessage, systemMessage, startedAt, completedAt, createdAt, updatedAt, false);
+        }
+
         /**
          * 按当前请求语言显示系统错误，原始结果内容保持原样。
          * @param locale java.util.Locale 当前请求语言
          * @return AiGenerationTaskResponse 当前语言任务快照
          */
         public AiGenerationTaskResponse withLocale(java.util.Locale locale) {
-            return new AiGenerationTaskResponse(id, taskType, model, provider, status, progress, requestData, resultData, systemMessage == null ? errorMessage : systemMessage.render(locale), systemMessage, startedAt, completedAt, createdAt, updatedAt);
+            return new AiGenerationTaskResponse(id, taskType, model, provider, status, progress, requestData, resultData, systemMessage == null ? errorMessage : systemMessage.render(locale), systemMessage, startedAt, completedAt, createdAt, updatedAt, providerRequestSent);
         }
     }
 

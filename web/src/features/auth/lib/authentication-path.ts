@@ -10,6 +10,7 @@ export function resolveAuthenticationRedirect(value: string | null | undefined, 
     catch { throw new Error("登录跳转地址无效"); }
     if (url.origin !== "https://novanova.invalid" || /%2f|%5c/i.test(url.pathname) || /[\\\u0000-\u001f\u007f]/.test(decodedPathname) || decodedPathname.includes("//")) throw new Error("登录跳转地址无效");
     if (isAuthenticationPath(decodedPathname)) throw new Error("登录后不能跳转到认证页面");
+    if (/^\/oauth(?:\/|$)/.test(decodedPathname)) return `${url.pathname}${url.search}${url.hash}`;
     const target = parseSpacePath(decodedPathname);
     if (teamSlug && target.teamSlug && target.teamSlug !== teamSlug) throw new Error("团队登录不能跳转到其他团队");
     const destination = `${url.pathname}${url.search}${url.hash}`;

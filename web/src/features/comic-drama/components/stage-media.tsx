@@ -18,7 +18,6 @@ import {
     Image,
     Input,
     Modal,
-    Popconfirm,
     Progress,
     Radio,
     Select,
@@ -48,7 +47,7 @@ import { VideoSettingsPanel, sizeFromAspectRatio } from "@/features/generation/c
 import { readVideoGenerationConstraintIssue } from "@/features/generation/lib/video-generation-constraints";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { estimateComicDramaGeneration, listComicDramaAssetVersions, readComicDramaMediaUrl } from "@/services/api/comic-drama";
-import { cancelAiTask } from "@/services/api/server";
+import { cancelAiTasksWithRefundPolicy } from "@/features/generation/lib/cancel-provider-generation";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { useMediaAutoRefresh } from "../hooks/use-media-auto-refresh";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
@@ -110,7 +109,7 @@ function mediaTargetLabel(media: ComicDramaMediaResult, shots: ComicDramaShot[],
 /** 媒体生成中心阶段视图。 */
 export function StageMedia() {
     const translate = useTranslation();
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const config = useEffectiveConfig();
     const workspace = useComicDramaStore((state) => state.workspace);
     const createGenerationTask = useComicDramaStore((state) => state.createGenerationTask);
@@ -375,14 +374,15 @@ export function StageMedia() {
         }
     };
 
-    // 停止排队或生成中的任务：取消底层AI任务（服务端会自动退款），再同步一次状态
+    // 停止排队或生成中的任务。请求尚未发出时退款；已经发出时确认后取消且不退款。
     const handleCancelMedia = async (media: ComicDramaMediaResult) => {
         if (!media.taskId) return;
         setCancelingMediaId(media.id);
         try {
-            await cancelAiTask(media.taskId);
+            const outcome = await cancelAiTasksWithRefundPolicy([media.taskId], modal);
+            if (outcome === "declined" || outcome === "empty") return;
             await syncNow();
-            message.success(translate("comicDrama.generationStoppedChargedCreditsWillBeRefundedAutomatically"));
+            message.success(translate(outcome === "forfeited" ? "generation.generationStoppedWithoutRefund" : "generation.generationStoppedCreditsRefunded"));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
         } finally {
@@ -552,21 +552,14 @@ export function StageMedia() {
                                         )}
 
                                         {(media.status === "queued" || media.status === "processing") && media.taskId && (
-                                            <Popconfirm
-                                                title={translate("comicDrama.stopThisGenerationTask")}
-                                                description={translate("comicDrama.chargedCreditsWillBeRefundedAutomatically")}
-                                                okText={translate("comicDrama.stop")}
-                                                cancelText={translate("comicDrama.cancel")}
-                                                onConfirm={() => handleCancelMedia(media)}
+                                            <Button
+                                                size="small"
+                                                danger
+                                                loading={cancelingMediaId === media.id}
+                                                icon={<Square className="size-3" />}
+                                                onClick={() => void handleCancelMedia(media)}
                                             >
-                                                <Button
-                                                    size="small"
-                                                    danger
-                                                    loading={cancelingMediaId === media.id}
-                                                    icon={<Square className="size-3" />}
-                                                >
-                                                    {translate("comicDrama.stop")}</Button>
-                                            </Popconfirm>
+                                                {translate("comicDrama.stop")}</Button>
                                         )}
 
                                         {media.status === "failed" && targetShot && (

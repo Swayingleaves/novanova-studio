@@ -17,6 +17,7 @@ web/out
 artifacts
 volume
 logs
+videos
 .codegraph
 .workbuddy
 .agents

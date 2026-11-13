@@ -10,7 +10,7 @@ import com.novanovastudio.security.oauth2.ThirdPartyUserIdentity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;
@@ -51,25 +51,25 @@ public class ThirdPartyAuthenticationService {
      * 校验第三方身份并解析本地用户。
      *
      * @param providerId String 第三方认证渠道标识
-     * @param oidcUser OidcUser OpenID Connect用户
+     * @param oauth2User OAuth2User 第三方用户
      * @return Mono<User> 已绑定或新创建的本地用户
      */
-    public Mono<User> authenticate(String providerId, OidcUser oidcUser) {
-        return authenticate(providerId, oidcUser, null);
+    public Mono<User> authenticate(String providerId, OAuth2User oauth2User) {
+        return authenticate(providerId, oauth2User, null);
     }
 
     /**
      * 校验第三方身份并解析本地用户，可在首次创建本地用户时记录邀请关系。
      *
      * @param providerId 第三方认证渠道标识
-     * @param oidcUser OpenID Connect用户
+     * @param oauth2User 第三方用户
      * @param inviterUserId 可选邀请人用户ID
      * @return 已绑定或新创建的本地用户
      */
-    public Mono<User> authenticate(String providerId, OidcUser oidcUser, Long inviterUserId) {
+    public Mono<User> authenticate(String providerId, OAuth2User oauth2User, Long inviterUserId) {
         return Mono.defer(() -> {
             ThirdPartyOAuth2Provider provider = providerRegistry.requireEnabled(providerId);
-            ThirdPartyUserIdentity identity = provider.resolveIdentity(oidcUser);
+            ThirdPartyUserIdentity identity = provider.resolveIdentity(oauth2User);
             return identityRepository.findBinding(identity.providerId(), identity.providerUserId())
                     .flatMap(binding -> identityRepository.updateBindingProfile(binding.getId(), identity)
                             .then(userRepository.findById(binding.getUserId())

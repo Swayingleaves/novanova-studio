@@ -48,6 +48,8 @@ export type ServerMediaInput = {
     height?: number;
     durationMs?: number;
     metadata?: unknown;
+    /** 为 true 时服务端按高质量策略压缩图片，技能封面上传使用。 */
+    compress?: boolean;
 };
 
 export type ServerMediaInfo = {
@@ -60,6 +62,14 @@ export type ServerMediaInfo = {
     height?: number;
     durationMs?: number;
     objectStorage?: ObjectStorageFile;
+    /** 私有存储桶预签名地址的到期时间，公开地址或远程链接为空 */
+    expiresAt?: string;
+};
+
+export type ServerMediaAccessItem = {
+    storageKey: string;
+    url: string;
+    expiresAt?: string;
 };
 
 export type ServerAiTaskType = "image" | "video" | "text";
@@ -94,6 +104,7 @@ export type ServerAiTask = {
     provider: string;
     status: ServerAiTaskStatus;
     progress: number;
+    providerRequestSent?: boolean;
     requestData: unknown;
     resultData?: unknown;
     errorMessage?: string;
@@ -317,6 +328,122 @@ export type ServerChannelModelList = {
     models: string[];
 };
 
+/** 平台 OAuth 渠道配置，配置由管理后台维护，替代 .env 中的固定配置。 */
+export type OAuthProviderInfo = {
+    /** 渠道标识，例如 google、linuxDo。 */
+    provider: string;
+    /** 渠道展示名称。 */
+    displayName: string;
+    /** 是否启用该渠道登录。 */
+    enabled: boolean;
+    /** OAuth 客户端 ID。 */
+    clientId: string;
+    /** OAuth 客户端密钥，保存后由服务端按需返回。 */
+    clientSecret: string;
+    /** OAuth 回调地址，需要与第三方平台登记地址一致。 */
+    redirectUri: string;
+    /** 服务端回调路径，用于按当前域名拼出默认回调地址。 */
+    callbackPath: string;
+};
+
+/** OAuth 渠道列表响应。 */
+export type OAuthProviderListResponse = {
+    providers: OAuthProviderInfo[];
+};
+
+/** 更新 OAuth 渠道配置的请求体。 */
+export type OAuthProviderUpdateInput = Pick<OAuthProviderInfo, "provider" | "enabled" | "clientId" | "clientSecret" | "redirectUri">;
+
+/** 平台标准 OAuth2 登录渠道配置，由管理后台维护并支持多渠道路由。 */
+export type StandardOAuthProviderInfo = {
+    /** 渠道标识，由管理后台创建时生成，创建后不可修改。 */
+    provider: string;
+    /** 渠道展示名称，展示在管理后台与登录页。 */
+    displayName: string;
+    /** 是否启用该登录渠道。 */
+    enabled: boolean;
+    /** OAuth2 客户端 ID。 */
+    clientId: string;
+    /** OAuth2 客户端密钥明文，仅管理员接口返回。 */
+    clientSecret: string;
+    /** 完整回调地址，路径必须是该渠道的回调路径。 */
+    redirectUri: string;
+    /** 服务端回调路径，由渠道标识拼接，只读展示。 */
+    callbackPath: string;
+    /** OAuth2 授权端点。 */
+    authorizationUri: string;
+    /** OAuth2 令牌端点。 */
+    tokenUri: string;
+    /** OAuth2 用户信息端点。 */
+    userInfoUri: string;
+    /** 授权范围，空格分隔，不支持 openid。 */
+    scopes: string;
+    /** 令牌端点的客户端认证方式。 */
+    clientAuthenticationMethod: "client_secret_basic" | "client_secret_post";
+    /** 用户信息接口中的用户标识字段名。 */
+    userNameAttribute: string;
+    /** 用户信息接口中的邮箱字段名。 */
+    emailAttribute: string;
+    /** 用户信息接口中的昵称字段名。 */
+    nicknameAttribute: string;
+    /** 用户信息接口中的头像字段名。 */
+    avatarAttribute: string;
+};
+
+/** 新增或更新标准 OAuth2 渠道的请求体，callbackPath 由服务端生成。 */
+export type StandardOAuthProviderInput = Omit<StandardOAuthProviderInfo, "callbackPath">;
+
+/** 标准 OAuth2 渠道列表响应。 */
+export type StandardOAuthProviderListResponse = {
+    providers: StandardOAuthProviderInfo[];
+};
+
+/** 对外 OAuth2 授权客户端，供其他系统使用本站账号登录。 */
+export type OAuthClientInfo = {
+    /** 服务端生成的客户端标识。 */
+    clientId: string;
+    /** 应用名称。 */
+    displayName: string;
+    /** 是否允许该客户端发起授权。 */
+    enabled: boolean;
+    /** 客户端密钥明文，仅管理员接口返回。 */
+    clientSecret: string;
+    /** 允许的回调地址。 */
+    redirectUris: string[];
+    /** 应用图标读地址，未配置时为空。 */
+    logoUrl: string;
+    /** 应用图标的媒体存储键，未配置时为空。 */
+    logoStorageKey: string;
+    /** 授权页展示文字，未配置时为空。 */
+    displayContent: string;
+};
+
+/** 对外授权客户端列表响应。 */
+export type OAuthClientListResponse = {
+    clients: OAuthClientInfo[];
+};
+
+/** 新增对外授权客户端的请求体。 */
+export type OAuthClientCreateInput = Pick<OAuthClientInfo, "displayName" | "enabled" | "redirectUris" | "logoStorageKey" | "displayContent">;
+
+/** 更新对外授权客户端的请求体。 */
+export type OAuthClientUpdateInput = Pick<OAuthClientInfo, "clientId" | "displayName" | "enabled" | "redirectUris" | "logoStorageKey" | "displayContent">;
+
+/** 授权确认页展示的应用信息。 */
+export type OAuthAuthorizationRequestView = {
+    displayName: string;
+    scope: string;
+    /** 应用图标读地址，未配置时为空。 */
+    logoUrl: string;
+    /** 授权页展示文字，未配置时为空。 */
+    displayContent: string;
+};
+
+/** 同意或拒绝授权后的外部回调地址。 */
+export type OAuthAuthorizationDecision = {
+    redirectUrl: string;
+};
+
 export type ServerModelConfig = {
     id: string;
     channelId: string;
@@ -346,6 +473,17 @@ export type ServerModelConfig = {
 
 export type CreditSettings = {
     initialCredits: CreditAmount;
+};
+
+export type TimeoutSettings = {
+    aiRequestBodyTimeoutSeconds: number;
+    storyboardAgentTimeoutSeconds: number;
+    scriptAgentTimeoutSeconds: number;
+    storyBibleAgentTimeoutSeconds: number;
+    taskWaitTimeoutSeconds: number;
+    videoTaskWaitTimeoutSeconds: number;
+    videoCompositionExecutionTimeoutSeconds: number;
+    tencentCosSocketTimeoutMilliseconds: number;
 };
 
 export type FirstPurchaseBonusSettings = {
@@ -469,6 +607,10 @@ export type ServerTaskRecord = {
     seconds: string | null;
     consumedCredits: CreditAmount;
     resultUrls: string[];
+    /** 生成结果的媒体存储键，与 resultUrls 一一对应，取不到时为空串。 */
+    storageKeys: string[];
+    /** 列表缩略图地址，与 resultUrls 一一对应，图片取读取时缩放的小图、视频取封面，取不到时为空串。 */
+    thumbnailUrls: string[];
     errorMessage: string | null;
     createdAt: string;
     completedAt: string | null;
@@ -885,6 +1027,82 @@ export function listSkills(targetType: SkillType) {
     return serverGet<SkillOptionListResponse>(`/skill/listSkills?targetType=${encodeURIComponent(targetType)}`);
 }
 
+export type SkillMarketCategory = "image" | "video" | "ecommerce" | "portrait" | "viralReplica";
+
+export type SkillReviewStatus = "private" | "pending" | "published" | "rejected";
+
+export type SkillUsageStep = {
+    title: string;
+    detail: string;
+};
+
+export type SkillMarketCard = {
+    id: number;
+    name: string;
+    subtitle: string;
+    description: string;
+    category: SkillMarketCategory;
+    targetType: "image" | "video";
+    coverUrl: string;
+    aspectRatio?: string;
+    workflowType?: string | null;
+    authorName: string;
+    official: boolean;
+    favorited: boolean;
+};
+
+export type SkillPendingRevision = {
+    name: string;
+    subtitle: string;
+    description: string;
+    category: SkillMarketCategory;
+    targetType: "image" | "video";
+    coverUrl: string;
+    aspectRatio: string;
+    audience: string;
+    usageSteps: SkillUsageStep[];
+    systemPrompt: string;
+    workflowId: string;
+};
+
+export type SkillMarketDetail = SkillMarketCard & {
+    audience: string;
+    usageSteps: SkillUsageStep[];
+    status: number;
+    reviewStatus: SkillReviewStatus;
+    rejectReason: string;
+    systemPrompt?: string | null;
+    owned: boolean;
+    related: SkillMarketCard[];
+    workflowId?: string | null;
+    revisionStatus?: string;
+    revisionRejectReason?: string;
+    pendingRevision?: SkillPendingRevision | null;
+};
+
+export type SkillMineCard = SkillMarketCard & {
+    status: number;
+    reviewStatus: SkillReviewStatus;
+    rejectReason: string;
+    owned: boolean;
+    revisionStatus?: string;
+};
+
+export type SaveUserSkillInput = {
+    id?: number;
+    name: string;
+    subtitle?: string;
+    description?: string;
+    category: SkillMarketCategory;
+    targetType: "image" | "video";
+    systemPrompt: string;
+    aspectRatio?: string;
+    coverUrl?: string;
+    audience?: string;
+    usageSteps?: SkillUsageStep[];
+    workflowId: string;
+};
+
 export type ServerSkill = {
     id: number;
     name: string;
@@ -897,6 +1115,16 @@ export type ServerSkill = {
     sortOrder: number;
     createdAt: string;
     updatedAt: string;
+    category?: string | null;
+    subtitle?: string;
+    audience?: string;
+    usageSteps?: SkillUsageStep[];
+    ownerUserId?: number | null;
+    reviewStatus?: SkillReviewStatus;
+    revisionStatus?: string;
+    rejectReason?: string;
+    authorName?: string;
+    workflowId?: string | null;
 };
 
 export type ServerSkillListResponse = {
@@ -908,6 +1136,7 @@ export type ServerSkillListParams = {
     keyword?: string;
     targetType?: "all" | SkillType;
     status?: number;
+    reviewStatus?: "all" | SkillReviewStatus;
     page?: number;
     pageSize?: number;
 };
@@ -917,6 +1146,7 @@ function skillQuery(params: ServerSkillListParams = {}) {
     if (params.keyword) query.set("keyword", params.keyword);
     if (params.targetType) query.set("targetType", params.targetType);
     if (params.status !== undefined) query.set("status", String(params.status));
+    if (params.reviewStatus) query.set("reviewStatus", params.reviewStatus);
     return `?${query.toString()}`;
 }
 
@@ -934,6 +1164,11 @@ export type ServerSkillInput = {
     coverUrl?: string;
     status?: number;
     sortOrder?: number;
+    category?: string | null;
+    subtitle?: string;
+    audience?: string;
+    usageSteps?: SkillUsageStep[];
+    workflowId: string;
 };
 
 export function createAdminSkill(input: Omit<ServerSkillInput, "id">) {
@@ -950,6 +1185,58 @@ export function updateAdminSkillStatus(id: number, status: number) {
 
 export function deleteAdminSkills(ids: number[]) {
     return serverPost("/admin/skill/deleteSkills", { ids });
+}
+
+export function reviewAdminSkill(input: { id: number; approved: boolean; reason?: string }) {
+    return serverPost("/admin/skill/reviewSkill", input);
+}
+
+function skillMarketQuery(params: { category?: string; keyword?: string; tab?: string; page?: number; pageSize?: number } = {}) {
+    const query = new URLSearchParams({ page: String(params.page || 1), pageSize: String(params.pageSize || 12) });
+    if (params.category) query.set("category", params.category);
+    if (params.keyword) query.set("keyword", params.keyword);
+    if (params.tab) query.set("tab", params.tab);
+    return `?${query.toString()}`;
+}
+
+export function listMarketSkills(params: { category?: string; keyword?: string; page?: number; pageSize?: number } = {}) {
+    return serverGet<{ skills: SkillMarketCard[]; total: number }>(`/skill/listMarketSkills${skillMarketQuery(params)}`);
+}
+
+export function getSkillDetail(id: number) {
+    return serverGet<SkillMarketDetail>(`/skill/getSkillDetail?id=${id}`);
+}
+
+export function listMySkills(params: { tab: "created" | "favorite"; keyword?: string; page?: number; pageSize?: number }) {
+    return serverGet<{ skills: SkillMineCard[]; total: number }>(`/skill/listMySkills${skillMarketQuery(params)}`);
+}
+
+export function createUserSkill(input: SaveUserSkillInput) {
+    return serverPost("/skill/createSkill", input);
+}
+
+export function updateUserSkill(input: SaveUserSkillInput & { id: number }) {
+    return serverPost("/skill/updateSkill", input);
+}
+
+export function deleteUserSkill(id: number) {
+    return serverPost("/skill/deleteSkill", { id });
+}
+
+export function submitSkillReview(id: number) {
+    return serverPost("/skill/submitSkillReview", { id });
+}
+
+export function withdrawSkill(id: number) {
+    return serverPost("/skill/withdrawSkill", { id });
+}
+
+export function favoriteSkill(id: number) {
+    return serverPost("/skill/favoriteSkill", { id });
+}
+
+export function unfavoriteSkill(id: number) {
+    return serverPost("/skill/unfavoriteSkill", { id });
 }
 
 export type ServerGenerationStyleListParams = {
@@ -1100,6 +1387,21 @@ export function getServerMediaInfo(storageKey: string) {
     return serverPost<ServerMediaInfo>("/media/getMediaInfo", { storageKey });
 }
 
+/** 批量换取媒体临时读地址，避免画布和列表逐个请求。 */
+export function batchGetServerMediaAccess(storageKeys: string[]) {
+    return serverPost<{ items: ServerMediaAccessItem[] }>("/media/batchAccess", { storageKeys });
+}
+
+/** 批量换取任务列表缩略图地址。支持的对象存储会在读取时把长边缩到 160 像素。 */
+export function batchGetServerListThumbnailAccess(storageKeys: string[]) {
+    return serverPost<{ items: ServerMediaAccessItem[] }>("/media/batchListThumbnailAccess", { storageKeys });
+}
+
+/** 批量换取视频生成结果的封面地址。历史视频没有封面时地址为空。 */
+export function batchGetServerVideoCoverAccess(storageKeys: string[]) {
+    return serverPost<{ items: ServerMediaAccessItem[] }>("/media/batchVideoCoverAccess", { storageKeys });
+}
+
 export async function downloadServerMedia(storageKey: string) {
     const response = await requestServer("/media/downloadMedia", {
         method: "POST",
@@ -1147,6 +1449,7 @@ export function uploadServerMedia(file: Blob, input: ServerMediaInput, fileName 
     appendFormValue(formData, "width", input.width);
     appendFormValue(formData, "height", input.height);
     appendFormValue(formData, "durationMs", input.durationMs);
+    if (input.compress) formData.set("compress", "true");
     if (input.metadata !== undefined) formData.set("metadata", JSON.stringify(input.metadata));
     return serverFetch<ServerMediaInfo>("/media/uploadMedia", { method: "POST", body: formData });
 }
@@ -1203,8 +1506,26 @@ export async function getAiTaskPollingIntervalMilliseconds(): Promise<number> {
     return seconds * 1000;
 }
 
-export function cancelAiTask(taskId: string) {
-    return serverPost<ServerAiTask>("/ai/task/cancelTask", { taskId });
+const generationCancelForfeitTaskIds = new Set<string>();
+
+/** 记录用户已确认放弃退款的任务，供等待中的中止路径沿用。 */
+export function markGenerationCancelForfeit(taskIds: string[]) {
+    taskIds.forEach((taskId) => generationCancelForfeitTaskIds.add(taskId));
+}
+
+export function cancelAiTask(taskId: string, options: { forfeitRefund?: boolean } = {}) {
+    return serverPost<ServerAiTask>("/ai/task/cancelTask", { taskId, forfeitRefund: options.forfeitRefund === true });
+}
+
+/** 生成请求已经发往供应商，普通取消会被服务端拒绝。 */
+export function isProviderRequestAlreadySentError(error: unknown) {
+    return error instanceof ServerApiError && error.messageKey === "business.providerRequestAlreadySentCannotCancel";
+}
+
+function cancelAiTaskForWait(taskId: string) {
+    const forfeitRefund = generationCancelForfeitTaskIds.has(taskId);
+    generationCancelForfeitTaskIds.delete(taskId);
+    return cancelAiTask(taskId, { forfeitRefund });
 }
 
 export function listServerAiModels() {
@@ -1217,6 +1538,62 @@ export function listChannels() {
 
 export function listObjectStorages() {
     return serverGet<ServerObjectStorageList>("/config/objectStorage/listObjectStorages");
+}
+
+export function listOAuthProviders() {
+    return serverGet<OAuthProviderListResponse>("/config/oauth/listOAuthProviders");
+}
+
+export function updateOAuthProvider(input: OAuthProviderUpdateInput) {
+    return serverPost<OAuthProviderInfo>("/config/oauth/updateOAuthProvider", input);
+}
+
+export function listStandardOAuthProviders() {
+    return serverGet<StandardOAuthProviderListResponse>("/config/oauth/listStandardOAuthProviders");
+}
+
+export function createStandardOAuthProvider(input: StandardOAuthProviderInput) {
+    return serverPost<StandardOAuthProviderInfo>("/config/oauth/createStandardOAuthProvider", input);
+}
+
+export function updateStandardOAuthProvider(input: StandardOAuthProviderInput) {
+    return serverPost<StandardOAuthProviderInfo>("/config/oauth/updateStandardOAuthProvider", input);
+}
+
+export function deleteStandardOAuthProvider(provider: string) {
+    return serverPost("/config/oauth/deleteStandardOAuthProvider", { provider });
+}
+
+export function listOAuthClients() {
+    return serverGet<OAuthClientListResponse>("/config/oauth/listOAuthClients");
+}
+
+export function createOAuthClient(input: OAuthClientCreateInput) {
+    return serverPost<OAuthClientInfo>("/config/oauth/createOAuthClient", input);
+}
+
+export function updateOAuthClient(input: OAuthClientUpdateInput) {
+    return serverPost<OAuthClientInfo>("/config/oauth/updateOAuthClient", input);
+}
+
+export function resetOAuthClientSecret(clientId: string) {
+    return serverPost<OAuthClientInfo>("/config/oauth/resetOAuthClientSecret", { clientId });
+}
+
+export function deleteOAuthClient(clientId: string) {
+    return serverPost("/config/oauth/deleteOAuthClient", { clientId });
+}
+
+export function getOAuthAuthorizationRequest(requestId: string) {
+    return serverGet<OAuthAuthorizationRequestView>(`/oauth/getAuthorizationRequest?requestId=${encodeURIComponent(requestId)}`, { auth: false, scope: "platform" });
+}
+
+export function approveOAuthAuthorization(requestId: string) {
+    return serverPost<OAuthAuthorizationDecision>("/oauth/approveAuthorization", { requestId }, { scope: "platform" });
+}
+
+export function denyOAuthAuthorization(requestId: string) {
+    return serverPost<OAuthAuthorizationDecision>("/oauth/denyAuthorization", { requestId }, { scope: "platform" });
 }
 
 export function createChannel(channel: ServerChannel) {
@@ -1280,6 +1657,14 @@ export function getCreditSettings() {
 
 export function updateCreditSettings(initialCredits: CreditAmount) {
     return serverPost<CreditSettings>("/config/credit/updateCreditSettings", { initialCredits });
+}
+
+export function getTimeoutSettings() {
+    return serverGet<TimeoutSettings>("/config/timeout/getTimeoutSettings");
+}
+
+export function updateTimeoutSettings(settings: TimeoutSettings) {
+    return serverPost<TimeoutSettings>("/config/timeout/updateTimeoutSettings", settings);
 }
 
 export function getFirstPurchaseBonusSettings() {
@@ -1493,12 +1878,12 @@ export function setDefaultObjectStorage(storageId: string) {
 export async function waitAiTask(taskId: string, options: { signal?: AbortSignal; onProgress?: (task: ServerAiTask) => void } = {}) {
     const creditPromptScope = useInsufficientCreditsStore.getState().scope;
     if (options.signal?.aborted) {
-        void cancelAiTask(taskId).catch(() => {});
+        void cancelAiTaskForWait(taskId).catch(() => {});
         throw new DOMException("Aborted", "AbortError");
     }
     const initial = await getAiTaskInfo(taskId);
     if (options.signal?.aborted) {
-        void cancelAiTask(taskId).catch(() => {});
+        void cancelAiTaskForWait(taskId).catch(() => {});
         throw new DOMException("Aborted", "AbortError");
     }
     if (isFinalAiTaskStatus(initial.status)) return completedAiTask(initial, creditPromptScope);
@@ -1535,7 +1920,7 @@ export async function waitAiTask(taskId: string, options: { signal?: AbortSignal
         cleanupFns.push(() => window.clearInterval(pollTimer));
         if (options.signal) {
             const onAbort = () => {
-                void cancelAiTask(taskId).catch(() => {});
+                void cancelAiTaskForWait(taskId).catch(() => {});
                 finish(() => reject(new DOMException("Aborted", "AbortError")));
             };
             if (options.signal.aborted) {

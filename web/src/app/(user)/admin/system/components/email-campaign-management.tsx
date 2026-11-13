@@ -4,13 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Checkbox, Descriptions, Drawer, Form, Input, InputNumber, Modal, Radio, Select, Skeleton, Table, Tabs, Tag, type TableProps } from "antd";
-import { Copy, MailPlus, RefreshCw, Send } from "lucide-react";
+import { Copy, MailPlus, RefreshCw, Send, Settings } from "lucide-react";
 import { useCopyRichText } from "@/shared/hooks/use-copy-rich-text";
 import { uploadImage } from "@/features/storage/services/image-storage";
 import {
     cancelEmailCampaign, createEmailCampaign, getEmailCampaign, getEmailCampaignDetail, getEmailCampaignSettings,
-    listEmailCampaigns, listEmailDeliveries, listEmailRecipientUsers, listEmailDomains, previewEmailCampaignContent,
-    type CreateEmailCampaign, type EmailCampaign, type EmailDelivery, type EmailDeliveryStatus, type EmailRecipientUser,
+    getEmailServiceSettings, listEmailCampaigns, listEmailDeliveries, listEmailRecipientUsers, listEmailDomains, previewEmailCampaignContent,
+    updateEmailServiceSettings,
+    type CreateEmailCampaign, type EmailCampaign, type EmailDelivery, type EmailDeliveryStatus, type EmailRecipientUser, type UpdateEmailServiceSettings,
 } from "@/services/api/email-campaigns";
 
 const EmailBodyEditor = dynamic(() => import("./email-body-editor").then(module => module.EmailBodyEditor), {
@@ -22,6 +23,7 @@ const deliveryLabels: Record<EmailDeliveryStatus, string> = {
 };
 const campaignLabels: Record<EmailCampaign["status"], string> = { queued: "排队中", running: "发送中", completed: "处理完成", cancelled: "已取消" };
 type ComposeValues = Omit<CreateEmailCampaign, "requestId" | "userIds" | "recipientFilter">;
+type EmailServiceForm = UpdateEmailServiceSettings;
 
 /** 格式化发送记录时间。 */
 function formatTime(value: string | null) { return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—"; }
@@ -40,7 +42,10 @@ export function EmailCampaignManagement() {
     const copyRichText = useCopyRichText();
     const queryClient = useQueryClient();
     const [form] = Form.useForm<ComposeValues>();
+    const [serviceForm] = Form.useForm<EmailServiceForm>();
     const [composeOpen, setComposeOpen] = useState(false);
+    const [serviceOpen, setServiceOpen] = useState(false);
+    const [savingService, setSavingService] = useState(false);
     const [contentTab, setContentTab] = useState("edit");
     const [previewBodyHtml, setPreviewBodyHtml] = useState("");
     const [sending, setSending] = useState(false);
@@ -66,6 +71,7 @@ export function EmailCampaignManagement() {
     });
 
     const settingsQuery = useQuery({ queryKey: ["email-campaign-settings"], queryFn: getEmailCampaignSettings });
+    const serviceQuery = useQuery({ queryKey: ["email-service-settings"], queryFn: getEmailServiceSettings, enabled: serviceOpen, refetchOnWindowFocus: false });
     const settings = settingsQuery.data;
     const campaignsQuery = useQuery({
         queryKey: ["email-campaigns", page], queryFn: () => listEmailCampaigns(page),
@@ -107,12 +113,36 @@ export function EmailCampaignManagement() {
         if (summaryQuery.data && !hasPendingMail(summaryQuery.data)) void queryClient.invalidateQueries({ queryKey: ["email-deliveries", selectedCampaignId] });
     }, [queryClient, selectedCampaignId, summaryQuery.data]);
 
+    useEffect(() => {
+        if (!serviceOpen || !serviceQuery.data) return;
+        serviceForm.setFieldsValue({ ...serviceQuery.data, smtpPassword: "" });
+    }, [serviceForm, serviceOpen, serviceQuery.data]);
+
     /** 刷新列表与打开的详情，保留当前筛选条件。 */
     const refresh = () => {
         void queryClient.invalidateQueries({ queryKey: ["email-campaigns"] });
         void queryClient.invalidateQueries({ queryKey: ["email-campaign-detail"] });
         void queryClient.invalidateQueries({ queryKey: ["email-deliveries"] });
         void queryClient.invalidateQueries({ queryKey: ["email-campaign-summary"] });
+    };
+
+    /** 保存 SMTP、发件人和注册后缀。授权码留空时由服务端保留原值。 */
+    const saveServiceSettings = async (values: EmailServiceForm) => {
+        setSavingService(true);
+        try {
+            await updateEmailServiceSettings({
+                smtpHost: values.smtpHost?.trim() || "", smtpPort: values.smtpPort, smtpUsername: values.smtpUsername?.trim() || "",
+                smtpPassword: values.smtpPassword?.trim() || "", fromEmail: values.fromEmail?.trim() || "", allowedSuffixes: values.allowedSuffixes?.trim() || "",
+            });
+            message.success("邮件配置已保存");
+            setServiceOpen(false);
+            void queryClient.invalidateQueries({ queryKey: ["email-service-settings"] });
+            void queryClient.invalidateQueries({ queryKey: ["email-campaign-settings"] });
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "保存邮件配置失败");
+        } finally {
+            setSavingService(false);
+        }
     };
 
     /** 打开图文编辑表单，明确以指定用户为初始收件范围。 */
@@ -221,15 +251,43 @@ export function EmailCampaignManagement() {
         <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm text-[var(--studio-muted)]">编辑图文邮件，向全体有邮箱用户或指定用户逐封发送。</p>
-                <div className="flex gap-2"><Button icon={<RefreshCw size={16} aria-hidden="true" />} onClick={refresh} loading={campaignsQuery.isFetching}>刷新</Button><Button type="primary" icon={<MailPlus size={16} aria-hidden="true" />} disabled={!settings?.configured} onClick={openCompose}>新建邮件</Button></div>
+                <div className="flex gap-2"><Button icon={<Settings size={16} aria-hidden="true" />} onClick={() => setServiceOpen(true)}>邮件配置</Button><Button icon={<RefreshCw size={16} aria-hidden="true" />} onClick={refresh} loading={campaignsQuery.isFetching}>刷新</Button><Button type="primary" icon={<MailPlus size={16} aria-hidden="true" />} disabled={!settings?.configured} onClick={openCompose}>新建邮件</Button></div>
             </div>
             {settingsQuery.isError && <Alert type="error" showIcon title="群发配置加载失败" action={<Button onClick={() => void settingsQuery.refetch()}>重试</Button>} />}
-            {settings && <Alert showIcon type={settings.configured ? "info" : "warning"} title={settings.configured ? `发件人：${settings.fromEmail}` : "尚未配置邮件服务器与发件人地址"}
+            {settings && <Alert showIcon type={settings.configured ? "info" : "warning"} title={settings.configured ? `发件人：${settings.fromEmail}` : "尚未配置邮件服务器与发件人地址，请先点击「邮件配置」"}
                 description={`发送间隔至少${settings.minimumIntervalSeconds}秒，连续一分钟最多${settings.maximumPerMinute}封，连续一小时最多${settings.maximumPerHour}封。额度由所有群发任务共享，达到上限后继续排队。`} />}
             {campaignsQuery.isError && <Alert type="error" showIcon title="发送记录加载失败" action={<Button onClick={() => void campaignsQuery.refetch()}>重试</Button>} />}
             <Table<EmailCampaign> rowKey="id" columns={columns} dataSource={campaignsQuery.data?.campaigns || []} loading={campaignsQuery.isPending} scroll={{ x: 1100 }}
                 locale={{ emptyText: "暂无邮件发送记录" }} pagination={{ current: page, pageSize: 20, total: campaignsQuery.data?.total || 0, showSizeChanger: false, onChange: setPage }} />
             <p className="text-xs text-[var(--studio-muted)]">“已提交邮件服务器”表示邮件服务已接收发送请求，实际投递与阅读情况以邮件服务商记录为准。发送失败或结果不确定的邮件不会自动重发。</p>
+
+            <Modal title="邮件配置" open={serviceOpen} width={640} mask={{ closable: false }} confirmLoading={savingService}
+                okText="保存" cancelText="取消" okButtonProps={{ disabled: !serviceQuery.data || serviceQuery.isError }}
+                closable={!savingService} keyboard={!savingService}
+                onCancel={() => { if (!savingService) setServiceOpen(false); }} onOk={() => serviceForm.submit()}>
+                {serviceQuery.isPending ? <Skeleton active paragraph={{ rows: 6 }} /> : serviceQuery.isError
+                    ? <Alert type="error" showIcon title="邮件配置加载失败" action={<Button onClick={() => void serviceQuery.refetch()}>重试</Button>} />
+                    : <Form<EmailServiceForm> form={serviceForm} layout="vertical" onFinish={values => void saveServiceSettings(values)} disabled={savingService}>
+                        <Form.Item name="smtpHost" label="SMTP 服务地址" extra="验证码、密码重置、团队邀请和邮件群发共用。连接固定使用 SSL，端口一般填 465。">
+                            <Input maxLength={255} placeholder="例如 smtp.qq.com" />
+                        </Form.Item>
+                        <Form.Item name="smtpPort" label="SMTP 端口" rules={[{ required: true, type: "number", min: 1, max: 65535, message: "SMTP 端口必须在 1 到 65535 之间" }]}>
+                            <InputNumber min={1} max={65535} precision={0} className="w-full!" />
+                        </Form.Item>
+                        <Form.Item name="smtpUsername" label="SMTP 登录用户名">
+                            <Input maxLength={320} placeholder="通常是发信邮箱" autoComplete="off" />
+                        </Form.Item>
+                        <Form.Item name="smtpPassword" label="SMTP 登录密码或授权码" extra={serviceQuery.data?.passwordConfigured ? "已保存授权码。留空则不修改，填写后会覆盖。" : "QQ 邮箱等需要使用授权码，不是邮箱登录密码。"}>
+                            <Input.Password maxLength={512} autoComplete="new-password" placeholder={serviceQuery.data?.passwordConfigured ? "已保存，留空则不修改" : "填写授权码"} />
+                        </Form.Item>
+                        <Form.Item name="fromEmail" label="发件人邮箱" rules={[{ validator: async (_, value: string) => { if (!value?.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())) return; throw new Error("请输入有效的发件人邮箱"); } }]}>
+                            <Input maxLength={320} placeholder="name@example.com" />
+                        </Form.Item>
+                        <Form.Item name="allowedSuffixes" label="允许注册的邮箱后缀" extra="多个后缀用英文逗号、中文逗号或换行分隔，支持 qq.com 或 @qq.com。留空或包含 * 表示不限制。已有账号登录和绑定不受影响。">
+                            <Input.TextArea rows={4} maxLength={4000} showCount />
+                        </Form.Item>
+                    </Form>}
+            </Modal>
 
             <Modal title="新建群发邮件" open={composeOpen} width={960} onCancel={() => { if (!sending && !uploading) setComposeOpen(false); }}
                 mask={{ closable: false }} keyboard={!sending && !uploading} closable={!sending && !uploading} footer={null} styles={{ body: { maxHeight: "75vh", overflowY: "auto", paddingRight: 8 } }}>

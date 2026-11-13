@@ -7,6 +7,7 @@ import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.common.auth.DefaultCredentialProvider;
 import com.aliyun.oss.common.comm.SignVersion;
+import com.aliyun.oss.model.CannedAccessControlList;
 import com.aliyun.oss.model.ObjectMetadata;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -51,6 +52,40 @@ public class AliyunOssObjectStorageProviderAdapter implements ObjectStorageProvi
      */
     @Override
     public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        return presign(config, key, fileName, mimeType, download, expiresAt, null);
+    }
+
+    /**
+     * 签发带图片处理的读取地址，长边不超过指定像素，不放大小图。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @param edge 缩放后的长边像素
+     * @return 带 image/resize 的临时 GET 地址
+     */
+    @Override
+    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge) {
+        int size = Math.max(1, edge);
+        return presign(config, key, fileName, mimeType, download, expiresAt, "image/resize,m_lfit,w_" + size + ",h_" + size);
+    }
+
+    /**
+     * 用阿里云 SDK 签发临时 GET 地址。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @param process 图片处理参数，原图读取时为空
+     * @return 临时 GET 地址
+     */
+    private String presign(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, String process) {
         validate(config);
         ClientBuilderConfiguration clientConfiguration = new ClientBuilderConfiguration();
         clientConfiguration.setSignatureVersion(SignVersion.V4);
@@ -59,13 +94,43 @@ public class AliyunOssObjectStorageProviderAdapter implements ObjectStorageProvi
         try {
             var request = new com.aliyun.oss.model.GeneratePresignedUrlRequest(config.bucket(), key, com.aliyun.oss.HttpMethod.GET);
             request.setExpiration(java.util.Date.from(expiresAt));
+            if (org.springframework.util.StringUtils.hasText(process)) {
+                request.setProcess(process);
+            }
             var headers = new com.aliyun.oss.model.ResponseHeaderOverrides();
-            headers.setContentDisposition(org.springframework.http.ContentDisposition.builder(download ? "attachment" : "inline")
-                    .filename(fileName, java.nio.charset.StandardCharsets.UTF_8).build().toString());
-            headers.setContentType(mimeType);
+            if (org.springframework.util.StringUtils.hasText(fileName)) {
+                headers.setContentDisposition(org.springframework.http.ContentDisposition.builder(download ? "attachment" : "inline")
+                        .filename(fileName, java.nio.charset.StandardCharsets.UTF_8).build().toString());
+            }
+            if (org.springframework.util.StringUtils.hasText(mimeType)) {
+                headers.setContentType(mimeType);
+            }
             request.setResponseHeaders(headers);
             return client.generatePresignedUrl(request).toString();
         } finally { client.shutdown(); }
+    }
+
+    /**
+     * 读取存储空间 ACL 确认匿名读取已关闭。
+     *
+     * @param config ObjectStorageConfig 对象存储配置
+     * @return boolean 是否已确认空间私有
+     */
+    @Override
+    public boolean verifyPrivateBucket(PersistenceDtos.ObjectStorageConfig config) {
+        validate(config);
+        ClientBuilderConfiguration clientConfiguration = new ClientBuilderConfiguration();
+        clientConfiguration.setSignatureVersion(SignVersion.V4);
+        OSS client = OSSClientBuilder.create().credentialsProvider(new DefaultCredentialProvider(config.accessKey(), config.secretKey()))
+                .clientConfiguration(clientConfiguration).region(config.region()).endpoint(config.endpoint()).build();
+        try {
+            return client.getBucketAcl(config.bucket()).getCannedACL() == CannedAccessControlList.Private;
+        } catch (RuntimeException exception) {
+            log.error("验证阿里云OSS私有空间失败: bucket={}", config.bucket(), exception);
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "无法验证阿里云OSS私有访问，请检查对象存储配置");
+        } finally {
+            client.shutdown();
+        }
     }
 
     /**

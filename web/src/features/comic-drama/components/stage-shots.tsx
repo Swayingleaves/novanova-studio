@@ -23,6 +23,7 @@ import {
     Modal,
     Popconfirm,
     Select,
+    Slider,
     Space,
     Table,
     Tag,
@@ -43,7 +44,7 @@ import {
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
-import { readComicDramaMediaUrl } from "@/services/api/comic-drama";
+import { readComicDramaMediaUrl, type ComicDramaShotDurationLevel } from "@/services/api/comic-drama";
 import { getScriptEpisode } from "@/services/api/script";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { useFinalPromptPricing } from "../hooks/use-final-prompt-pricing";
@@ -132,6 +133,7 @@ export function StageShots() {
     // 预计镜头数量默认留空，由模型按剧本内容自行判断；填了才按填的数量拆分。
     const [splitShotCount, setSplitShotCount] = useState<number | null>(null);
     const [splitRhythm, setSplitRhythm] = useState<string>("紧凑利落");
+    const [splitDuration, setSplitDuration] = useState<ComicDramaShotDurationLevel>("medium");
     // 创作重点不预填，改成输入框里的帮助提示，避免每次都要先删掉默认文案。
     const [splitFocus, setSplitFocus] = useState<string>("");
     const [splitModel, setSplitModel] = useState<string>("");
@@ -255,6 +257,7 @@ export function StageShots() {
                 shotCount: splitShotCount ?? undefined,
                 rhythm: splitRhythm,
                 focus: splitFocus,
+                shotDuration: splitDuration,
                 model: splitModel,
             });
             message.success(translate("comicDrama.shotBreakdownDraftGeneratedReviewAndAdjustIt"));
@@ -850,6 +853,8 @@ export function StageShots() {
                         </div>
                     </div>
 
+                    <ShotDurationSlider value={splitDuration} onChange={setSplitDuration} />
+
                     <div>
                         <label className="block text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.creativeFocus")}</label>
                         <Input
@@ -1028,6 +1033,48 @@ export function StageShots() {
                     setTargetShotForDelete(null);
                 }}
             />
+        </div>
+    );
+}
+
+/** 自动拆分镜头弹窗里的三档单镜头时长。 */
+const SHOT_DURATION_LEVELS: ComicDramaShotDurationLevel[] = ["short", "medium", "long"];
+
+/**
+ * 用三档滑块选择单个分镜头的时长，并提示当前档位对应的大致区间。
+ *
+ * @param props 当前档位与变更回调
+ * @return 时长滑块
+ */
+function ShotDurationSlider({ value, onChange }: { value: ComicDramaShotDurationLevel; onChange: (value: ComicDramaShotDurationLevel) => void }) {
+    const translate = useTranslation();
+    const labels = {
+        short: translate("comicDrama.shotDurationShort"),
+        medium: translate("comicDrama.shotDurationMedium"),
+        long: translate("comicDrama.shotDurationLong"),
+    };
+    const hints = {
+        short: translate("comicDrama.shotDurationShortHint"),
+        medium: translate("comicDrama.shotDurationMediumHint"),
+        long: translate("comicDrama.shotDurationLongHint"),
+    };
+    const index = Math.max(0, SHOT_DURATION_LEVELS.indexOf(value));
+    return (
+        <div>
+            <label htmlFor="shot-duration-level" className="block text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.shotDuration")}</label>
+            <Slider
+                id="shot-duration-level"
+                className="mx-1 mt-1"
+                min={0}
+                max={SHOT_DURATION_LEVELS.length - 1}
+                step={1}
+                dots
+                marks={{ 0: labels.short, 1: labels.medium, 2: labels.long }}
+                value={index}
+                tooltip={{ formatter: (current) => hints[SHOT_DURATION_LEVELS[current ?? index]] }}
+                onChange={(next) => onChange(SHOT_DURATION_LEVELS[next])}
+            />
+            <p className="text-xs text-[var(--studio-muted)]">{hints[value]}</p>
         </div>
     );
 }

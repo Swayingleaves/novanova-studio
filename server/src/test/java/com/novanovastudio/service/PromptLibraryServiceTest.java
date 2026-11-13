@@ -47,8 +47,7 @@ class PromptLibraryServiceTest {
      */
     @BeforeEach
     void setUp() {
-        service = new PromptLibraryService(repository, currentUserProvider);
-    }
+        service = new PromptLibraryService(repository, currentUserProvider, com.novanovastudio.MediaAccessTestSupport.echo());    }
 
     /**
      * 创建提示词时应拒绝空标题。

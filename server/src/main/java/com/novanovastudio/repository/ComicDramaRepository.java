@@ -52,7 +52,7 @@ public class ComicDramaRepository {
      */
     public Flux<ComicDramaDtos.ProjectSummary> listProjects(Long userId, String keyword, int offset, int limit) {
         return databaseClient.sql("""
-                SELECT c.script_project_id, s.title, st.project_type, c.production_status stage, c.revision, c.updated_at,
+                SELECT c.script_project_id, s.title, s.cover_url, st.project_type, c.production_status stage, c.revision, c.updated_at,
                        assets.asset_count,shots.shot_count,shots.completed_count,impacts.impact_count,media.running_count,
                        CASE WHEN assets.asset_count+shots.shot_count=0 THEN 0 ELSE
                            ((assets.ready_count+shots.completed_count)*100/(assets.asset_count+shots.shot_count))::INTEGER
@@ -86,7 +86,8 @@ public class ComicDramaRepository {
                         value(row, "asset_count", Integer.class, 0), value(row, "shot_count", Integer.class, 0),
                         value(row, "completed_count", Integer.class, 0), value(row, "impact_count", Integer.class, 0),
                         value(row, "running_count", Integer.class, 0), row.get("readiness", String.class),
-                        value(row, "revision", Long.class, 0L), row.get("updated_at", OffsetDateTime.class))).all();
+                        value(row, "revision", Long.class, 0L), row.get("updated_at", OffsetDateTime.class),
+                        text(row.get("cover_url", String.class)))).all();
     }
 
     /**
@@ -148,6 +149,23 @@ public class ComicDramaRepository {
                         row.get("production_status", String.class), value(row, "revision", Long.class, 0L),
                         value(row, "text_track_count", Integer.class, 1),
                         row.get("created_at", OffsetDateTime.class), row.get("updated_at", OffsetDateTime.class))).one();
+    }
+
+    /**
+     * 按项目乐观锁删除漫剧生产数据，共享剧本保持不变。
+     *
+     * @param userId 当前用户ID
+     * @param projectId 项目ID
+     * @param expectedRevision 期望修订号
+     * @return 已删除的项目ID，修订号不一致或项目不存在时为空
+     */
+    public Mono<String> deleteProject(Long userId, String projectId, long expectedRevision) {
+        return databaseClient.sql("""
+                DELETE FROM comic_drama_projects
+                WHERE script_project_id=:projectId AND user_id=:userId AND revision=:expectedRevision
+                RETURNING script_project_id
+                """).bind("projectId", projectId).bind("userId", userId).bind("expectedRevision", expectedRevision)
+                .map((row, metadata) -> row.get("script_project_id", String.class)).one();
     }
 
     /**
@@ -289,6 +307,44 @@ public class ComicDramaRepository {
                 WHERE a.script_project_id=:projectId AND v.id IN (:versionIds) ORDER BY v.id
                 """).bind("projectId", projectId).bind("versionIds", versionIds)
                 .map((row, metadata) -> mapAssetVersion(row)).all();
+    }
+
+    /**
+     * 查询指定资产版本最新一张已完成图片。没有可用图片的版本不会出现在结果里。
+     *
+     * @param projectId 漫剧项目标识
+     * @param versionIds 资产版本标识
+     * @return 可提交给图生图的参考图
+     */
+    public Flux<AiTaskDtos.AiTaskMediaReference> listGeneratedAssetImages(String projectId, List<String> versionIds) {
+        if (versionIds == null || versionIds.isEmpty()) {
+            return Flux.empty();
+        }
+        return databaseClient.sql("""
+                SELECT v.id AS version_id,
+                       a.name || '-' || v.version_name AS name,
+                       m.result_data
+                FROM comic_drama_asset_versions v
+                JOIN comic_drama_assets a ON a.id = v.asset_id
+                JOIN LATERAL (
+                    SELECT mr.result_data
+                    FROM comic_drama_media_results mr
+                    WHERE mr.script_project_id = :projectId
+                      AND mr.target_type = 'assetVersion'
+                      AND mr.target_id = v.id
+                      AND mr.media_type = 'image'
+                      AND mr.status IN ('completed', 'needsUpdate')
+                    ORDER BY mr.adopted DESC, mr.created_at DESC, mr.id
+                    LIMIT 1
+                ) m ON TRUE
+                WHERE a.script_project_id = :projectId
+                  AND v.id IN (:versionIds)
+                """).bind("projectId", projectId).bind("versionIds", versionIds)
+                .map((row, metadata) -> {
+                    AiTaskDtos.AiTaskMediaReference reference = extractMediaReference(
+                            row.get("version_id", String.class), row.get("name", String.class), "subject", object(row, "result_data"), null);
+                    return Optional.ofNullable(reference);
+                }).all().filter(Optional::isPresent).map(Optional::get);
     }
 
     /** 查询单个资产版本。 */

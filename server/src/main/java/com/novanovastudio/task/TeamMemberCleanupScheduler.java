@@ -111,7 +111,7 @@ public class TeamMemberCleanupScheduler {
     private Mono<Void> cleanMember(JSONObject job) {
         long teamId = job.getLongValue("teamId"), userId = job.getLongValue("userId");
         return repository.query("SELECT id FROM ai_generation_tasks WHERE team_id = :team AND user_id = :user AND status IN ('pending','queued','running')", Map.of("team", teamId, "user", userId))
-                .concatMap(task -> aiTaskServiceProvider.getObject().cancelTaskForUser(userId, task.getString("id")))
+                .concatMap(task -> aiTaskServiceProvider.getObject().cancelTaskForUser(userId, task.getString("id"), true))
                 .then(cancelOtherTasks(teamId, userId, false))
                 .then(databaseClient.sql("UPDATE storage_objects SET deletion_requested_at = COALESCE(deletion_requested_at, CURRENT_TIMESTAMP) WHERE team_id = :team AND user_id = :user AND deleted_at IS NULL")
                         .bind("team", teamId).bind("user", userId).fetch().rowsUpdated())
@@ -153,7 +153,7 @@ public class TeamMemberCleanupScheduler {
                 .thenMany(repository.query("SELECT id FROM video_composition_tasks WHERE team_id = :team AND user_id = :user AND " + (onlyQueued ? "status = 'pending'" : "status IN ('queued','running','pending')"), parameters)
                         .concatMap(task -> videoCompositionTaskService.getObject().cancelTask(task.getString("id"))))
                 .thenMany(repository.query("SELECT id FROM creation_agent_request WHERE team_id = :team AND user_id = :user AND " + (onlyQueued ? "status = 'queued'" : "status IN ('queued','running')"), parameters)
-                        .concatMap(task -> creationAgentOrchestrator.getObject().cancelChat(userId, task.getString("id"))))
+                        .concatMap(task -> creationAgentOrchestrator.getObject().cancelChat(userId, task.getString("id"), true)))
                 .then(databaseClient.sql("UPDATE script_source_import_tasks tasks SET status = 'failed', error_message = '成员已移除' FROM script_source_documents documents WHERE tasks.document_id = documents.id AND tasks.team_id = :team AND documents.user_id = :user AND " + (onlyQueued ? "tasks.status = 'queued'" : "tasks.status IN ('queued','running')"))
                         .bind("team", teamId).bind("user", userId).fetch().rowsUpdated()).then();
     }

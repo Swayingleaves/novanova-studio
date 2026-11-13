@@ -1,5 +1,73 @@
 # 后端数据库说明（已实现）
 
+## 平台 OAuth2 登录渠道配置（企业版 V83 / 社区版 V84）
+
+OAuth2 第三方登录（Google、linux.do）的启用状态与凭据从 `.env` 迁移到数据库，管理后台「系统管理 · 身份认证 · OAuth 集成」可直接维护。渠道标识、展示名称和回调路径属于代码固定值（`OAuth2ProviderCatalog`），表中只保存可运营的配置项。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `provider` | `VARCHAR(32)` | 主键，内置渠道标识：`google`、`linuxDo` |
+| `enabled` | `BOOLEAN` | 是否启用该登录渠道，默认 `false` |
+| `client_id` | `VARCHAR(255)` | 第三方应用客户端 ID |
+| `client_secret_encrypted` | `VARCHAR(1024)` | 应用密钥的 AES-GCM 密文，空字符串表示未配置 |
+| `redirect_uri` | `VARCHAR(512)` | 完整回调地址，必须是绝对 HTTP(S) 地址且路径等于该渠道固定回调路径 |
+| `updated_at` | `TIMESTAMPTZ` | 配置最后更新时间 |
+
+首次部署写入 `google`、`linuxDo` 两行空配置。密钥使用 `SensitiveDataCrypto`（`APP_SECRET_KEY`）加密，管理接口只对管理员返回明文用于回填；保存时密钥留空表示清空已保存的密钥。保存成功后立即刷新内存缓存，登录流程按 `registrationId` 实时构建 Spring Security 客户端注册信息，不需要重启服务。
+
+管理接口为 `/api/v1/config/oauth/listOAuthProviders`、`updateOAuthProvider`；登录入口仍为 `/api/v1/auth/oauth/listProviders`、`/api/v1/auth/oauth/authorize/{registrationId}`。原 `.env` 的 `OAUTH2_*`、`application.yml` 的 `oauth2` 与 `NovanovaProperties.OAuth2` 已删除。
+
+## 平台标准 OAuth2 自定义登录渠道（企业版 V84 / 社区版 V85）
+
+管理后台「系统管理 · 身份认证 · 标准 OAuth2」支持维护多个自定义标准 OAuth2 登录渠道，使用授权码流程并通过 UserInfo 接口读取账号资料，不支持 OIDC 的 `openid` 作用域、id_token、issuer 与 JWK。渠道标识由前端创建时生成（`c` + 20 位小写十六进制，创建后不可修改），回调路径固定为 `/api/v1/auth/oauth/callback/{provider}`；登录页会自动展示所有已启用渠道。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `provider` | `VARCHAR(30)` | 主键，渠道标识，格式为 `c` 加 10 到 29 位小写字母或数字 |
+| `display_name` | `VARCHAR(50)` | 渠道名称，展示在管理后台与登录页 |
+| `enabled` | `BOOLEAN` | 是否启用该登录渠道，默认 `false` |
+| `client_id` | `VARCHAR(255)` | OAuth2 客户端 ID |
+| `client_secret_encrypted` | `VARCHAR(1024)` | 客户端密钥的 AES-GCM 密文，空字符串表示未配置 |
+| `redirect_uri` | `VARCHAR(512)` | 完整回调地址，必须是绝对 HTTP(S) 地址且路径等于渠道回调路径 |
+| `authorization_uri` | `VARCHAR(512)` | 授权端点，必须是绝对 HTTP(S) 地址 |
+| `token_uri` | `VARCHAR(512)` | 令牌端点，必须是绝对 HTTP(S) 地址 |
+| `user_info_uri` | `VARCHAR(512)` | 用户信息端点，必须是绝对 HTTP(S) 地址 |
+| `scopes` | `VARCHAR(255)` | 授权范围，空格分隔，默认 `profile email`，不允许包含 `openid` |
+| `client_authentication_method` | `VARCHAR(32)` | 令牌端点客户端认证方式：`client_secret_basic` 或 `client_secret_post` |
+| `user_name_attribute` | `VARCHAR(64)` | 用户信息 JSON 中的用户标识字段名，默认 `sub` |
+| `email_attribute` | `VARCHAR(64)` | 用户信息 JSON 中的邮箱字段名，默认 `email` |
+| `nickname_attribute` | `VARCHAR(64)` | 用户信息 JSON 中的昵称字段名，默认 `name` |
+| `avatar_attribute` | `VARCHAR(64)` | 用户信息 JSON 中的头像字段名，默认 `picture` |
+| `created_at` | `TIMESTAMPTZ` | 创建时间 |
+| `updated_at` | `TIMESTAMPTZ` | 配置最后更新时间 |
+
+保存时始终校验渠道标识格式、名称、端点 URI、回调路径、作用域和字段名；启用时还要求 Client ID、Client Secret、回调地址、三个端点、作用域、用户标识字段和邮箱字段全部填写。密钥使用 `SensitiveDataCrypto`（`APP_SECRET_KEY`）加密，管理接口只对管理员返回明文用于回填，保存时密钥留空表示清空。已存在 `user_identity_bindings` 绑定的渠道不允许删除，应改为停用；渠道返回的邮箱会被当作可信邮箱用于创建或绑定本地账号，管理员需要确认该渠道会校验邮箱归属。UserInfo 仅支持顶层 JSON 字段。
+
+管理接口为 `/api/v1/config/oauth/listStandardOAuthProviders`、`createStandardOAuthProvider`、`updateStandardOAuthProvider`、`deleteStandardOAuthProvider`；登录入口复用 `/api/v1/auth/oauth/listProviders`、`/api/v1/auth/oauth/authorize/{registrationId}`。
+
+## 对外 OAuth2 授权客户端（企业版 V87、V88 / 社区版 V88、V89）
+
+本站作为 OAuth2 授权方，让 NewAPI 等外部系统用授权码登录本站账号。管理后台「系统管理 · 身份认证 · 对外授权」可维护多个客户端。不签发 `id_token`，也不提供 OIDC Discovery。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `client_id` | `VARCHAR(64)` | 主键，服务端生成，格式为 `nv` 加 32 位小写十六进制，创建后不可修改 |
+| `display_name` | `VARCHAR(50)` | 应用名称，展示在授权确认页 |
+| `enabled` | `BOOLEAN` | 是否允许该客户端发起授权，默认 `false` |
+| `client_secret_encrypted` | `VARCHAR(1024)` | 客户端密钥的 AES-GCM 密文 |
+| `redirect_uris` | `TEXT` | 回调地址 JSON 数组，每项必须是绝对 HTTP(S) 地址，授权与换令牌时全字匹配 |
+| `logo_storage_key` | `VARCHAR(128)` | 应用图标的媒体存储键，可空，用来识别管理员上传的图片 |
+| `logo_storage_id` | `VARCHAR(64)` | 应用图标所在的对象存储配置，可空 |
+| `logo_object_key` | `VARCHAR(512)` | 应用图标对象键，可空；授权确认页按此签发读地址，不依赖上传者所在团队 |
+| `logo_mime_type` | `VARCHAR(128)` | 应用图标的媒体类型，可空 |
+| `display_content` | `VARCHAR(500)` | 授权确认页展示的说明文字，可空；为空时只显示默认授权说明 |
+| `created_at` | `TIMESTAMPTZ` | 创建时间 |
+| `updated_at` | `TIMESTAMPTZ` | 配置最后更新时间 |
+
+密钥使用 `SensitiveDataCrypto`（`APP_SECRET_KEY`）加密。管理接口对管理员返回明文，便于复制到外部系统；重新生成密钥会立即替换旧密钥。应用图标沿用现有图片上传。保存时确认图片属于当前管理员，并把对象存储配置和对象键记到客户端上；授权确认页和管理列表按对象键签发读地址，不随访问者的团队变化。展示文字原样显示，不解析 HTML。授权码和访问令牌只放在 Redis，不落库。授权码一次性、约 60 秒；访问令牌约 10 分钟，且不能当作本站登录令牌。
+
+管理接口为 `/api/v1/config/oauth/listOAuthClients`、`createOAuthClient`、`updateOAuthClient`、`resetOAuthClientSecret`、`deleteOAuthClient`。授权协议接口为 `GET /api/v1/oauth/authorize`、`POST /api/v1/oauth/token`、`GET /api/v1/oauth/userinfo`。令牌和用户信息响应是 OAuth 原文，不是 `{ code, data, msg }`。
+
 ## 生成结果分享（企业版 V81 / 社区版 V82）
 
 分享业务使用独立表，不在管理员精选内容表中保存投稿状态。所有媒体均复制为私有对象，通过现有容量预占、对象台账与异步删除队列计量；源记录、源对象后续变化不会改变分享快照。
@@ -82,7 +150,7 @@
 
 订单创建接口为 `GET /api/v1/payment/credit/listProducts`、`POST /api/v1/payment/credit/createOrder` 和 `GET /api/v1/payment/credit/getOrderStatus`。支付宝回调接口为 `POST /api/v1/payment/alipay/notify` 和 `GET /api/v1/payment/alipay/return`；微信 Native 回调为 `POST /api/v1/payment/wechat/notify`。同步回跳只重定向到前端购买页，到账必须以验签后的异步通知或渠道查单为准；服务端核对支付渠道、应用标识、商户订单号、金额和成功状态（支付宝 `TRADE_SUCCESS`/`TRADE_FINISHED`、微信 `SUCCESS`），微信额外核对商户号、人民币币种和 Native 交易类型，在事务内更新订单、余额和 `credit_purchase` 流水，并发布积分余额事件。微信待支付订单由后台每 30 秒分页查单，新增 `idx_credit_purchase_orders_wechat_pending` 部分索引（索引键 `id`，限定平台钱包的微信待支付订单）；超时订单先查单、关单，再更新本地状态。新商户订单号统一为 32 位随机标识。微信部署要求见 [微信支付接入说明](wechatpay/接入说明.md)。
 
-商品管理接口位于 `/api/v1/config/creditProduct/`，仅平台管理员可用。支付宝密钥和网关配置只通过部署环境注入，异步通知地址必须可以被支付宝公网访问。
+商品管理接口位于 `/api/v1/config/creditProduct/`，仅平台管理员可用。支付宝和微信支付的密钥、网关与通知地址在管理后台「支付配置」维护，见「支付配置」。异步通知地址必须可以被对应支付渠道公网访问。
 
 ## 首充赠送（V77、V79）
 
@@ -114,7 +182,7 @@
 
 任务状态为 `queued`（排队）、`running`（发送中）、`completed`（所有收件人均已处理）和 `cancelled`（剩余任务已取消）。逐封状态为 `queued`、`sending`、`sent`（邮件服务器已接受）、`failed`（明确未发送成功）、`unknown`（结果不确定）和 `cancelled`。`completed` 不代表全部投递成功，须结合逐封数量判断。
 
-派发使用全局串行队列，间隔从上一封处理完成时计算。连续一分钟、一小时窗口按 `started_at` 统计尝试次数，失败也占用额度；达到额度后保留排队。默认最小间隔3秒、每分钟20封、每小时200封，最多20个活动任务，可用 `EMAIL_CAMPAIGN_*` 环境变量调整。事务不跨越图片下载或 SMTP 网络请求。
+派发使用全局串行队列，间隔从上一封处理完成时计算。连续一分钟、一小时窗口按 `started_at` 统计尝试次数，失败也占用额度；达到额度后保留排队。默认最小间隔3秒、每分钟20封、每小时200封，最多20个活动任务，可用 `EMAIL_CAMPAIGN_*` 环境变量调整。事务不跨越图片下载或 SMTP 网络请求。SMTP 服务器、发件人和注册邮箱白名单不在环境变量中配置，见「邮件服务配置」。
 
 发送结果不确定或服务中断后在途超过5分钟的记录标为 `unknown`，不自动重发；尚未领取的记录重启后继续排队。发件服务器认证失败（包括 SMTP 535）时，当前邮件记为 `failed`，同一事务内将该任务及剩余待发送邮件记为 `cancelled`，保留已发送结果，重启后也不自动恢复；管理员检查发件账号与授权码后可重新创建任务。普通收件地址或内容错误只影响当前一封。取消只终止 `queued` 记录，已经发送中的邮件保留实际结果。正文经 jsoup 白名单清理，图片按现有媒体归属校验读取后保存独立快照，避免临时签名链接过期。四张表均限制平台空间访问，接口还要求平台管理员身份，团队管理员不可使用。
 
@@ -124,7 +192,7 @@
 
 | 表 | 作用 | 关键索引或约束 |
 | --- | --- | --- |
-| `script_projects` | 项目概览、阶段、完成度、软删除与修订号 | `(user_id, status, updated_at DESC, id)`、用户+阶段、用户+内容形式 |
+| `script_projects` | 项目概览、封面、阶段、完成度、软删除与修订号 | `(user_id, status, updated_at DESC, id)`、用户+阶段、用户+内容形式 |
 | `script_templates`、`script_template_sections` | 16 个内置模板及可编辑大纲骨架 | 启用状态+顺序、模板+结构段顺序 |
 | `script_outline_sections`、`script_story_events` | 大纲结构段与关键剧情事件 | 项目+顺序；事件按分集、场次定位 |
 | `script_characters`、`script_character_relations` | 人物文字设定与人物关系 | 项目+顺序；关系起点、终点索引 |
@@ -138,6 +206,8 @@
 正式实体使用不超过 64 字符的稳定标识。人物和地点仍被场次或对白引用时禁止删除；场次和正文块保存采用稳定标识更新，只有请求中明确缺失的实体才会删除。
 
 V39 移除 `script_projects` 的 `selling_points` 和 `target_audience` 字段，故事概览不再收集核心卖点和目标受众。
+
+企业版 V85 / 社区版 V86 为 `script_projects` 增加 `cover_url`，保存封面图片的公开访问地址，空字符串表示未设置。剧本创作和漫剧创作共用这一字段：漫剧项目与剧本一对一，承接已有剧本时直接读到同一封面；任一侧更换都写回该字段。封面不进入故事概览，保存时不推进 `revision`，版本恢复和漫剧下游变更标记也不会改动它。接口为 `POST /api/v1/script/updateCover`，创建项目时也可以带上 `coverUrl`。
 
 V52 为 `script_blocks` 增加 `origin` 字段（`original` 原著事实 / `adapted` AI 改编创作）。此前提示词要求把「【改编创作】」写在正文 `content` 里，标记会随正文流入分集工作台与后续配音、成片链路，且实测半数以上正文块都被标注而失去区分度；改为结构化字段承载，迁移同时摘除了存量正文里的标记并把来源记为 `adapted`。
 
@@ -304,6 +374,7 @@ flowchart TB
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `model_config_id` | `VARCHAR(64)` | 创建任务使用的全站模型配置业务 ID，用于任务恢复时进入正确的模型队列。 |
+| `provider_request_sent` | `BOOLEAN` | 图片或视频生成请求是否已经发往供应商。发出后用户取消不退积分，默认 `false`。企业版 V86 / 社区版 V87。 |
 | `error_message_key` | `VARCHAR(180)` | 与语言无关的系统消息键，空值表示无系统提示。 |
 | `error_message_arguments` | `JSONB` | 消息插值参数数组；原始诊断保留在 `error_message` 中。 |
 
@@ -432,6 +503,13 @@ COMMENT ON COLUMN generation_styles.category IS '风格分类';
 | `cover_url` | `TEXT` | 技能封面公开访问地址。 |
 | `status` | `INTEGER` | 状态：`1` 启用，`0` 停用。 |
 | `sort_order` | `INTEGER` | 排序值，越小越靠前。 |
+| `category` | `VARCHAR(32)` | 市场分类：`image` 图片、`video` 视频、`ecommerce` 电商、`portrait` 人像、`viralReplica` 爆款复刻。画布设定图为空，不进市场。 |
+| `subtitle` | `VARCHAR(200)` | 一句话介绍。 |
+| `audience` | `TEXT` | 适合人群。 |
+| `usage_steps` | `TEXT` | 使用步骤 JSON，最多三步，每步包含 `title` 与 `detail`。 |
+| `owner_user_id` | `BIGINT` | 作者用户 ID。空表示官方技能。 |
+| `review_status` | `VARCHAR(20)` | 审核状态：`private` 未发布、`pending` 审核中、`published` 已发布、`rejected` 已驳回。 |
+| `reject_reason` | `TEXT` | 审核驳回原因。 |
 | `created_at` | `TIMESTAMPTZ` | 创建时间。 |
 | `updated_at` | `TIMESTAMPTZ` | 更新时间。 |
 | `deleted_at` | `TIMESTAMPTZ` | 软删除时间。 |
@@ -447,12 +525,21 @@ CREATE TABLE skills (
     cover_url TEXT NOT NULL DEFAULT '',
     status INTEGER NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 1000,
+    category VARCHAR(32),
+    subtitle VARCHAR(200) NOT NULL DEFAULT '',
+    audience TEXT NOT NULL DEFAULT '',
+    usage_steps TEXT NOT NULL DEFAULT '[]',
+    owner_user_id BIGINT REFERENCES users(id),
+    review_status VARCHAR(20) NOT NULL DEFAULT 'published',
+    reject_reason TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMPTZ,
     CONSTRAINT ck_skills_target_type CHECK (target_type IN ('image', 'video', 'canvasSettingGraph')),
     CONSTRAINT ck_skills_status CHECK (status IN (0, 1)),
-    CONSTRAINT ck_skills_aspect_ratio CHECK (aspect_ratio ~ '^[0-9]+:[0-9]+$')
+    CONSTRAINT ck_skills_aspect_ratio CHECK (aspect_ratio ~ '^[0-9]+:[0-9]+$'),
+    CONSTRAINT ck_skills_category CHECK (category IS NULL OR category IN ('image', 'video', 'ecommerce', 'portrait', 'viralReplica')),
+    CONSTRAINT ck_skills_review_status CHECK (review_status IN ('private', 'pending', 'published', 'rejected'))
 );
 
 COMMENT ON TABLE skills IS '图片、视频和画布设定图生成技能表';
@@ -465,6 +552,13 @@ COMMENT ON COLUMN skills.aspect_ratio IS '技能默认生成比例，例如16:9�
 COMMENT ON COLUMN skills.cover_url IS '技能封面公开访问地址';
 COMMENT ON COLUMN skills.status IS '状态：1启用，0停用';
 COMMENT ON COLUMN skills.sort_order IS '排序值，越小越靠前';
+COMMENT ON COLUMN skills.category IS '市场分类：image图片，video视频，ecommerce电商，portrait人像，viralReplica爆款复刻；画布设定图为空';
+COMMENT ON COLUMN skills.subtitle IS '一句话介绍';
+COMMENT ON COLUMN skills.audience IS '适合人群';
+COMMENT ON COLUMN skills.usage_steps IS '使用步骤JSON，最多三步，每步包含title和detail';
+COMMENT ON COLUMN skills.owner_user_id IS '作者用户ID，空表示官方技能';
+COMMENT ON COLUMN skills.review_status IS '审核状态：private未发布，pending审核中，published已发布，rejected已驳回';
+COMMENT ON COLUMN skills.reject_reason IS '审核驳回原因';
 COMMENT ON COLUMN skills.created_at IS '创建时间';
 COMMENT ON COLUMN skills.updated_at IS '更新时间';
 COMMENT ON COLUMN skills.deleted_at IS '软删除时间';
@@ -474,7 +568,25 @@ CREATE INDEX idx_skills_type_status_sort
     WHERE deleted_at IS NULL;
 CREATE INDEX idx_skills_deleted_at
     ON skills(deleted_at);
+CREATE INDEX idx_skills_market
+    ON skills(category, sort_order, id)
+    WHERE deleted_at IS NULL AND status = 1 AND review_status = 'published' AND category IS NOT NULL;
+CREATE INDEX idx_skills_owner
+    ON skills(owner_user_id, updated_at DESC, id)
+    WHERE deleted_at IS NULL AND owner_user_id IS NOT NULL;
 ```
+
+企业版 `V92__Add_Skill_Market.sql`、社区版 `V93__Add_Skill_Market.sql` 增加市场分类、介绍、适合人群、使用步骤、作者和审核状态。已有技能视为官方已发布；名称为「电商商品图片制作」的图片技能补充分类 `ecommerce`。画布设定图 `category` 为空，不出现在市场。用户新建技能默认 `private`，提交后进入 `pending`，管理员通过后才为 `published`。作者修改已发布技能会退回 `pending`。
+
+### `skill_favorites`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `user_id` | `BIGINT` | 收藏用户 ID，与 `skill_id` 组成主键。 |
+| `skill_id` | `BIGINT` | 技能 ID。 |
+| `created_at` | `TIMESTAMPTZ` | 收藏时间。 |
+
+只允许收藏已发布且启用的市场技能。取消收藏直接删除该行。
 
 迁移 `V24__Add_Canvas_Setting_Graph_Skills.sql` 会初始化四条启用的 `canvasSettingGraph` 技能：**角色脸部三视图、角色设定图、角色三视图、场景设定图**。迁移 `V25__Add_Skill_Aspect_Ratio.sql` 为技能增加 `aspect_ratio`，默认值为 `16:9`；节点或图片/视频页面选择技能后，优先使用该比例。迁移 `V26__Update_Character_Three_View_Skill.sql` 同步更新四条画布设定图技能的提示词：**角色三视图**按正面、左侧面、背面生成全身正交三视图，**场景设定图、角色设定图、角色脸部三视图**分别强化场景、角色设计板和脸部三视图要求，并统一保留用户原始描述、上游引用、尺寸询问与现有节点生成约束。每条技能的 `system_prompt` 保存中文多步骤流程、缺项询问规则、提示词组装要求及最终必须调用 `canvas_run_generation` 的约束，节点创建时会将其快照持久化。
 
@@ -658,6 +770,7 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 ### V33 漫剧接口
 
 - 项目与设置：`GET /api/v1/comicDrama/listProjects`、`POST /api/v1/comicDrama/getWorkspace`、`initializeProject`、`updateSettings`、`getReadiness`。
+- 项目删除：`POST /api/v1/comicDrama/deleteProjects` 按项目修订号批量删除漫剧生产数据，级联清理资产、镜头、分镜、媒体等下游记录，共享 `script_projects` 剧本项目保留。
 - 视觉资产：`listAssets`、`saveAsset`、`listAssetVersions`、`saveAssetVersion`。
 - 镜头与提示词：`generateShotDraft`、`confirmShotDraft`、`listShots`、`saveShot`、`reorderShots`、`deleteShot`、`composePrompt`、`savePrompt`。
 - 媒体生产：`estimateGeneration`、`createGenerationTask`、`listMedia`、`adoptMedia`。
@@ -939,3 +1052,41 @@ V61 按空间、用户、原配置和对象键精确关联已有媒体及原文�
 社群配置是平台级单份列表，不归属任何团队，也不保存创建人。公开读取走 `GET /api/v1/community/listCommunityConfigs`，只返回 `name`、`imageUrl`、`sortOrder`，按 `sort_order` 升序；平台管理员整批保存走 `POST /api/v1/admin/community/saveCommunityConfigs`，请求中的数组顺序即展示顺序，服务端重算排序值。
 
 保存时先在事务内用咨询锁 `hashtext('platform-community-configs')` 串行化，再删除旧行并按序重新插入，任何一条校验失败或写入失败都整批回滚，数据库不会留下部分更新。团队作用域一律拒绝写入，只有平台空间的全局管理员可以修改；图片地址不做下载校验，上传复用媒体上传接口，删除配置不会删除已上传的媒体文件。
+
+## 平台超时设置（V89）
+
+新增单行表 `platform_timeout_settings`（`id` 固定为 1）。后台入口为「配置与用户偏好 · 超时设置」，接口为 `GET/POST /api/v1/config/timeout/getTimeoutSettings`、`updateTimeoutSettings`，仅平台空间的全局管理员可读写。服务端启动后读取该行，并每 5 秒刷新；保存后当前实例立即生效。这些时间不再通过环境变量配置。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `ai_request_body_timeout_seconds` | 60 | AI 构造请求体，以及从响应提取媒体地址 |
+| `storyboard_agent_timeout_seconds` | 600 | 分镜 Agent 单次调用 |
+| `script_agent_timeout_seconds` | 600 | 剧本 Agent 单次调用 |
+| `story_bible_agent_timeout_seconds` | 600 | 故事知识库 Agent 单次调用 |
+| `task_wait_timeout_seconds` | 300 | 图片等常规生成任务等待完成 |
+| `video_task_wait_timeout_seconds` | 900 | 视频生成任务等待完成 |
+| `video_composition_execution_timeout_seconds` | 1800 | 视频合成和音频裁剪进程 |
+| `tencent_cos_socket_timeout_milliseconds` | 120000 | 腾讯云 COS 单次读取 |
+
+以秒为单位的字段取值 `1`–`86400`，毫秒字段取值 `1`–`3600000`。进行中的任务仍使用开始时读到的超时。
+
+## 邮件服务配置（企业版 V90、社区版 V91）
+
+新增单行表 `platform_email_settings`（`id` 固定为 1）。后台入口为「邮件群发 · 邮件配置」，接口为 `GET/POST /api/v1/admin/email/getEmailServiceSettings`、`updateEmailServiceSettings`，仅平台空间的全局管理员可读写。服务端启动后读取该行，并每 5 秒刷新；保存后当前实例立即生效，下一次发信即使用新的 SMTP 连接。这些配置不再通过环境变量注入。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `smtp_host` | 空 | SMTP 服务地址 |
+| `smtp_port` | 465 | SMTP 端口，取值 `1`–`65535`。连接固定启用 SSL |
+| `smtp_username` | 空 | SMTP 登录用户名 |
+| `smtp_password` | 空 | SMTP 登录密码或授权码。使用应用密钥加密后保存，接口只返回是否已设置；保存时留空表示不修改 |
+| `from_email` | 空 | 发件人邮箱。与 `smtp_host` 同时非空时，验证码、密码重置、团队邀请和群发才视为已配置 |
+| `allowed_suffixes` | 常见邮箱域名 | 注册邮箱白名单，逗号分隔，支持 `qq.com` 或 `@qq.com`。空值或包含独立 `*` 表示不限制。邮箱验证码和第三方首次注册共用；已有账号登录和绑定不受影响 |
+
+授权码依赖 `APP_SECRET_KEY` 加解密。更换应用密钥后，已保存的授权码无法解密，需要在后台重新填写。未配置邮件服务器时，Actuator 不检查 SMTP 连通性。
+
+## 支付配置（企业版 V91、社区版 V92）
+
+新增单行表 `platform_payment_settings`（`id` 固定为 1）。后台入口为「支付配置」，支付宝和微信支付分成两个页签。接口为 `GET /api/v1/admin/payment/getPaymentSettings`、`POST /api/v1/admin/payment/updateAlipaySettings` 和 `POST /api/v1/admin/payment/updateWechatSettings`，仅平台空间的全局管理员可读写。服务端启动后读取该行，并每 5 秒刷新；保存后当前实例立即生效。这些配置不再通过环境变量或证书目录注入。
+
+支付宝保存应用标识、应用私钥、支付宝公钥、网关、异步通知地址和同步回跳地址。微信 Native 支付保存应用标识、商户号、商户 API 证书序列号、商户私钥 PEM、32 字节 APIv3 密钥、微信支付公钥 PEM、公钥 ID 和通知地址。应用私钥、商户私钥和 APIv3 密钥使用 `APP_SECRET_KEY` 加密；支付宝公钥和微信支付公钥按原文保存，但接口都不返回密钥正文，只返回是否已设置。保存时对应密钥留空表示不修改。启用某一渠道时，该渠道的必填项必须已经齐全。更换应用密钥后，已加密的密钥无法解密，需要重新填写。未启用微信支付时，后台不扫描微信待支付订单。

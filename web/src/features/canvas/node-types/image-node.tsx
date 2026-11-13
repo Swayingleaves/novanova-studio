@@ -9,6 +9,7 @@ import type { CanvasImageNode } from "../types";
 import { type BatchImagePreview, useNodeActions } from "./node-action-context";
 import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface, NodeMediaUnavailable } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
+import { useMediaUrl } from "@/shared/hooks/use-media-url";
 
 const BATCH_COLLAPSE_TRANSITION_MS = 260;
 
@@ -30,7 +31,10 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
     const [showCollapsedBatchStack, setShowCollapsedBatchStack] = useState(() => !data.grouping.expanded);
     // 记录加载失败的媒体地址，地址变化（重新生成/替换）后自动恢复显示。
     const [failedSource, setFailedSource] = useState<string | null>(null);
-    const isMediaUnavailable = hasContent && failedSource === data.content.source;
+    // 有存储键时通过接口换取当前临时地址，地址过期后由渲染错误触发续签。
+    const media = useMediaUrl({ storageKey: data.content.storageKey, url: data.content.source, objectStorage: data.content.objectStorage, kind: "image" });
+    const displaySource = media.url || data.content.source;
+    const isMediaUnavailable = hasContent && (failedSource === data.content.source || (Boolean(data.content.storageKey) && media.failed));
 
     useLayoutEffect(() => {
         const wasExpanded = previousBatchExpandedRef.current;
@@ -230,7 +234,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                             <NodeMediaUnavailable kind="image" />
                         ) : hasContent ? (
                             <div className="relative h-full w-full">
-                                <img src={data.content.source} alt={data.title || ""} className="h-full w-full object-contain" draggable={false} onError={() => setFailedSource(data.content.source)} />
+                                <img src={displaySource} alt={data.title || ""} className="h-full w-full object-contain" draggable={false} onError={() => { if (data.content.storageKey) media.onError(); else setFailedSource(data.content.source); }} />
                             </div>
                         ) : (
                             <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-sm" style={{ color: theme.node.placeholder }}>

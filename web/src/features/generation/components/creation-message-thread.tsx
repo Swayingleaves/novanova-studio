@@ -1,10 +1,11 @@
 "use client";
 import { useTranslation } from "@/features/locale/use-translation";
+import { ASK_USER_CONFIRM, ASK_USER_MODEL_CONFIG, ASK_USER_UPLOAD_IMAGE, ASK_USER_UPLOAD_VIDEO, CONTINUE_AFTER_MODEL_CONFIG, SKILL_CONFIRM_MESSAGE } from "@/features/skill-market/lib/skill-prompt-actions";
 import { useActionLabel } from "@/features/locale/use-action-label";
 
 
 import { Button, Input, Modal, Tooltip } from "antd";
-import { ArrowRight, Copy, PenLine } from "lucide-react";
+import { ArrowRight, Copy, LoaderCircle, PenLine } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "@/shared/lib/team-navigation";
@@ -19,7 +20,7 @@ import { storeInitialPromptForNavigation } from "@/shared/lib/initial-prompt";
 // 若阈值太小，滚到底展开输入框后会因差值超限被误判为“未到底”而缩回（震荡）。
 const AT_BOTTOM_THRESHOLD = 180;
 
-export function CreationMessageThread({ sections, emptyState, onAtBottomChange, onActionReply, onPromptEdit, onUploadImage }: CreationMessageThreadProps) {
+export function CreationMessageThread({ sections, emptyState, onAtBottomChange, onActionReply, onPromptEdit, onUploadImage, onUploadVideo, onAdjustDuration, onOpenModelSettings }: CreationMessageThreadProps) {
     const translate = useTranslation();
     const actionLabel = useActionLabel();
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -99,6 +100,12 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                             {round.thinkings?.map((thinking) => (
                                                 <ThinkingBlock key={thinking.id} block={thinking} streaming={round.activeThinkingId === thinking.id} />
                                             ))}
+                                            {round.awaitingReply ? (
+                                                <div className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
+                                                    <LoaderCircle className="size-3.5 animate-spin" />
+                                                    <span>{translate("generation.waitingForReply")}</span>
+                                                </div>
+                                            ) : null}
                                             {round.activities?.length ? <AgentActivityTimeline activities={round.activities} /> : null}
                                             {round.statusText ? <div className="text-xs font-medium text-[var(--studio-muted)]">{round.statusText}</div> : null}
                                             {round.assistantText ? (
@@ -138,6 +145,9 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                                     onReply={(value) => onActionReply?.(value)}
                                                     onPromptEdit={onPromptEdit}
                                                     onUpload={onUploadImage}
+                                                    onUploadVideo={onUploadVideo}
+                                                    onAdjustDuration={onAdjustDuration}
+                                                    onOpenModelSettings={onOpenModelSettings}
                                                     disabledReasons={round.choiceDisabledReasons}
                                                 />
                                             ) : null}
@@ -156,14 +166,17 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
     );
 }
 
-/** 选项按钮组：单选点击即发；multiple 标记整组多选（勾选后确认提交，多个 value 用顿号拼接）；action=upload_image 的选项点击触发参考图上传；均支持自定义输入。 */
-function ChoiceGroup({
+/** 选项按钮组：单选点击即发；multiple 标记整组多选（勾选后确认提交，多个 value 用顿号拼接）；action=upload_image 触发参考图上传；action=adjust_video_duration 只打开时长设置，不发送消息。 */
+export function ChoiceGroup({
     options,
     assistantText,
     draftedPrompts,
     onReply,
     onPromptEdit,
     onUpload,
+    onUploadVideo,
+    onAdjustDuration,
+    onOpenModelSettings,
     disabledReasons,
 }: {
     options: { label: string; value: string; multiple?: boolean; action?: string }[];
@@ -172,6 +185,9 @@ function ChoiceGroup({
     draftedPrompts?: Record<string, string>;
     onPromptEdit?: (value: string, assistantText?: string, draftedPrompts?: Record<string, string>) => void;
     onUpload?: () => void;
+    onUploadVideo?: () => void;
+    onAdjustDuration?: (seconds: string) => void;
+    onOpenModelSettings?: () => void;
     /** 需要禁用的选项及禁用原因，key 为选项 value。 */
     disabledReasons?: Record<string, string>;
 }) {
@@ -182,14 +198,34 @@ function ChoiceGroup({
     const [customOpen, setCustomOpen] = useState(false);
     const [customValue, setCustomValue] = useState("");
 
-    /** 识别"上传图片"类选项：优先 action=upload_image，兜底按按钮文案（label）以"上传"开头判定；
+    /** 上传视频要先于“上传”开头的文案判断，否则「上传视频」会被当成图片上传。 */
+    const isVideoUploadOption = (option: { label: string; action?: string }) => option.action === ASK_USER_UPLOAD_VIDEO || /^(上传视频|upload video)/i.test(option.label);
+    /** 识别"上传图片"类选项：优先专用 action，兜底按按钮文案（label）以"上传"开头判定；
      *  不能用 value 判断——"确认生成"按钮的 value 是完整提示词，可能包含"上传"字样（如"以用户上传的产品图片为基准"）。 */
-    const isUploadOption = (option: { label: string; value: string; multiple?: boolean; action?: string }) => option.action === "upload_image" || /^(上传|upload\b)/i.test(option.label);
+    const isImageUploadOption = (option: { label: string; value: string; multiple?: boolean; action?: string }) => option.action === "upload_image" || option.action === ASK_USER_UPLOAD_IMAGE || (!isVideoUploadOption(option) && /^(上传|upload\b)/i.test(option.label));
 
-    /** 点击选项：上传类选项直接触发参考图上传；否则单选发送或多选切换选中。 */
+    /** 点击选项：上传类选项直接打开文件选择；否则单选发送或多选切换选中。 */
+    const reservedAction = (action?: string) => action === "adjust_video_duration" || action === "continue_after_duration" || action === ASK_USER_MODEL_CONFIG || action === CONTINUE_AFTER_MODEL_CONFIG || action === ASK_USER_CONFIRM || action === ASK_USER_UPLOAD_IMAGE || action === ASK_USER_UPLOAD_VIDEO;
+    const durationAdjustment = options.every((option) => reservedAction(option.action));
     const handleOptionClick = (option: { label: string; value: string; multiple?: boolean; action?: string }) => {
         if (disabledReasons?.[option.value]) return;
-        if (isUploadOption(option)) {
+        if (option.action === "adjust_video_duration") {
+            onAdjustDuration?.(option.value);
+            return;
+        }
+        if (option.action === ASK_USER_MODEL_CONFIG) {
+            onOpenModelSettings?.();
+            return;
+        }
+        if (option.action === ASK_USER_CONFIRM) {
+            onReply(SKILL_CONFIRM_MESSAGE);
+            return;
+        }
+        if (isVideoUploadOption(option)) {
+            onUploadVideo?.();
+            return;
+        }
+        if (isImageUploadOption(option)) {
             onUpload?.();
             return;
         }
@@ -257,8 +293,8 @@ function ChoiceGroup({
                         button
                     );
                 })}
-                {customButton}
-                {customModal}
+                {durationAdjustment ? null : customButton}
+                {durationAdjustment ? null : customModal}
             </div>
         );
     }
@@ -298,16 +334,19 @@ function ChoiceGroup({
     );
 }
 
-/** 历史记录中的只读选项条：展示该轮系统给出的选项，不可再点击。 */
-export function ChoiceHistoryBar({ choices }: { choices: { label: string; value: string; multiple?: boolean; action?: string }[] }) {
+/** 历史记录中的选项条：普通选项只读；时长不一致的确认项在提供回调时仍可点击。 */
+export function ChoiceHistoryBar({ choices, onSelect }: { choices: { label: string; value: string; multiple?: boolean; action?: string }[]; onSelect?: (choice: { label: string; value: string; multiple?: boolean; action?: string }) => void }) {
     const actionLabel = useActionLabel();
     return (
         <div className="flex flex-wrap items-center gap-2.5 pt-2">
-            {choices.map((choice) => (
-                <Button key={choice.value} className="creation-choice-button creation-choice-readonly" disabled>
-                    {actionLabel(choice)}
-                </Button>
-            ))}
+            {choices.map((choice) => {
+                const interactive = Boolean(onSelect) && choice.action === "adjust_video_duration";
+                return (
+                    <Button key={`${choice.action || "choice"}-${choice.value}`} className={interactive ? "creation-choice-button" : "creation-choice-button creation-choice-readonly"} disabled={!interactive} onClick={interactive ? () => onSelect?.(choice) : undefined}>
+                        {actionLabel(choice)}
+                    </Button>
+                );
+            })}
         </div>
     );
 }

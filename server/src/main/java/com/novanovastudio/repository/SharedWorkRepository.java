@@ -107,10 +107,26 @@ public class SharedWorkRepository {
      * @return 完成信号
      */
     public Mono<Void> addMedia(String code, JSONObject asset) {
-        return databaseClient.sql("INSERT INTO shared_work_media(share_code, asset_id, storage_id, object_key, file_name, mime_type, file_bytes) VALUES (:code, :asset, :storage, :key, :name, :mime, :bytes)")
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("INSERT INTO shared_work_media(share_code, asset_id, storage_id, object_key, file_name, mime_type, file_bytes, cover_object_key, cover_mime_type) VALUES (:code, :asset, :storage, :key, :name, :mime, :bytes, :cover, :coverMime)")
                 .bind("code", code).bind("asset", asset.getString("assetId")).bind("storage", asset.getString("storageId"))
                 .bind("key", asset.getString("objectKey")).bind("name", asset.getString("fileName"))
-                .bind("mime", asset.getString("mimeType")).bind("bytes", asset.getLongValue("fileBytes"))
+                .bind("mime", asset.getString("mimeType")).bind("bytes", asset.getLongValue("fileBytes"));
+        spec = R2dbcBindings.bindNullable(spec, "cover", asset.getString("coverObjectKey"), String.class);
+        spec = R2dbcBindings.bindNullable(spec, "coverMime", asset.getString("coverMimeType"), String.class);
+        return spec.fetch().rowsUpdated().then();
+    }
+
+    /**
+     * 回填媒体副本的封面对象键。
+     * @param code 分享标识
+     * @param assetId 媒体标识
+     * @param coverObjectKey 封面对象键
+     * @param coverMimeType 封面媒体类型
+     * @return 完成信号
+     */
+    public Mono<Void> updateMediaCover(String code, String assetId, String coverObjectKey, String coverMimeType) {
+        return databaseClient.sql("UPDATE shared_work_media SET cover_object_key = :cover, cover_mime_type = :mime WHERE share_code = :code AND asset_id = :asset")
+                .bind("cover", coverObjectKey).bind("mime", coverMimeType).bind("code", code).bind("asset", assetId)
                 .fetch().rowsUpdated().then();
     }
 

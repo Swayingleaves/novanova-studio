@@ -35,11 +35,19 @@ public final class ComicDramaDtos {
     public record ProjectSummary(String projectId, String scriptProjectId, String title, String projectType,
                                  String stage, int completionRate, int assetCount, int shotCount,
                                  int completedShotCount, int pendingUpdateCount, int runningTaskCount,
-                                 String readiness, long revision, OffsetDateTime updatedAt) {
+                                 String readiness, long revision, OffsetDateTime updatedAt, String coverUrl) {
     }
 
     /** 漫剧项目分页结果。 */
     public record ProjectListResponse(List<ProjectSummary> projects, long total, int page, int pageSize) {
+    }
+
+    /** 单个漫剧项目删除请求，期望修订号防止删除期间项目被其他操作修改。 */
+    public record ProjectDeletion(@NotBlank @Size(max = 64) String projectId, @Min(0) long expectedRevision) {
+    }
+
+    /** 批量删除漫剧生产项目请求，共享剧本不受影响。 */
+    public record DeleteProjectsRequest(@NotEmpty @Size(max = 100) List<@NotNull @Valid ProjectDeletion> projects) {
     }
 
     /** 项目级生产设置。 */
@@ -229,11 +237,15 @@ public final class ComicDramaDtos {
                                           @NotNull @Valid AssetVersion version) {
     }
 
-    /** 生成镜头草稿请求。 */
+    /**
+     * 生成镜头草稿请求。
+     * <p>shotDuration 是单镜头时长档位：short 约 5 秒，medium 为 5 到 8 秒，long 为 10 到 15 秒。</p>
+     */
     public record GenerateShotDraftRequest(@NotBlank @Size(max = 64) String projectId,
                                            @Size(max = 64) String episodeId, @Size(max = 64) String sceneId,
                                            @Min(1) Integer shotCount, @Size(max = 120) String rhythm,
                                            @Size(max = 8000) String focus,
+                                           @NotBlank @Pattern(regexp = "short|medium|long") String shotDuration,
                                            @NotBlank @Size(max = 256) String model,
                                            @AssertTrue(message = "生成镜头草稿前必须明确确认费用") boolean confirmed) {
     }

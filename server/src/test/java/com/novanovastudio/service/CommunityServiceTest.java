@@ -58,7 +58,8 @@ class CommunityServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(repository.lockForReplace()).thenReturn(Mono.empty());
         when(repository.replaceAll(anyList())).thenReturn(Mono.empty());
-        service = new CommunityService(repository, currentUserProvider, transactionalOperator);
+        service = new CommunityService(repository, currentUserProvider, transactionalOperator,
+                com.novanovastudio.MediaAccessTestSupport.echo());
     }
 
     /** 公开列表只输出名称、图片地址与排序值。 */

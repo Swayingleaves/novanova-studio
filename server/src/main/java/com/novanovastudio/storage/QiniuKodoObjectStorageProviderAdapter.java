@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 /**
  * 七牛云Kodo对象存储适配器。
@@ -52,10 +53,68 @@ public class QiniuKodoObjectStorageProviderAdapter implements ObjectStorageProvi
      */
     @Override
     public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        return presign(config, key, fileName, download, expiresAt, 0);
+    }
+
+    /**
+     * 签发图片处理地址，宽度不超过指定像素，并纳入私有空间签名。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @param edge 缩放后的长边像素
+     * @return 带 imageView2 的临时只读地址
+     */
+    @Override
+    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge) {
+        return presign(config, key, fileName, download, expiresAt, Math.max(1, edge));
+    }
+
+    /**
+     * 用七牛 SDK 签发临时只读地址。处理参数必须写进地址后再签名。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @param thumbnailEdge 附加图片处理时的宽度像素，0 表示读取原图
+     * @return 临时只读地址
+     */
+    private String presign(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, boolean download, java.time.Instant expiresAt, int thumbnailEdge) {
         validate(config);
         String url = ObjectStorageUrlBuilder.buildPublicUrl(config.publicBaseUrl(), key);
-        if (download) url += "?attname=" + java.net.URLEncoder.encode(fileName, java.nio.charset.StandardCharsets.UTF_8);
+        String separator = "?";
+        if (thumbnailEdge > 0) {
+            url += separator + "imageView2/2/w/" + thumbnailEdge;
+            separator = "&";
+        }
+        if (download && StringUtils.hasText(fileName)) {
+            url += separator + "attname=" + java.net.URLEncoder.encode(fileName, java.nio.charset.StandardCharsets.UTF_8);
+        }
         return Auth.create(config.accessKey(), config.secretKey()).privateDownloadUrlWithDeadline(url, expiresAt.getEpochSecond());
+    }
+
+    /**
+     * 读取空间信息确认七牛云空间为私有。
+     *
+     * @param config ObjectStorageConfig 对象存储配置
+     * @return boolean 是否已确认空间私有
+     */
+    @Override
+    public boolean verifyPrivateBucket(PersistenceDtos.ObjectStorageConfig config) {
+        validate(config);
+        try {
+            Auth auth = Auth.create(config.accessKey().trim(), config.secretKey().trim());
+            Configuration configuration = Configuration.create(Region.createWithRegionId(config.region().trim()));
+            return new com.qiniu.storage.BucketManager(auth, configuration).getBucketInfo(config.bucket()).getPrivate() == 1;
+        } catch (QiniuException exception) {
+            log.error("验证七牛云Kodo私有空间失败: bucket={}", config.bucket(), exception);
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "无法验证七牛云Kodo私有访问，请检查存储配置");
+        }
     }
 
     /**

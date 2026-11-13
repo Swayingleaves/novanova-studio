@@ -60,7 +60,7 @@ public class ApiAccessLogWebFilter implements WebFilter {
     private static final Set<String> SENSITIVE_QUERY_FIELDS = Set.of("code", "cardcode", "state", "logincode", "token", "access_token", "refresh_token", "id_token", "error_description", "session_state");
 
     /** JSON 正文中的敏感字段 */
-    private static final Set<String> SENSITIVE_BODY_FIELDS = Set.of("password", "currentpassword", "newpassword", "code", "cardcode", "logincode", "clientsecret", "client_secret", "token", "access_token", "refresh_token");
+    private static final Set<String> SENSITIVE_BODY_FIELDS = Set.of("password", "currentpassword", "newpassword", "smtppassword", "privatekey", "publickey", "apiv3key", "code", "cardcode", "logincode", "clientsecret", "client_secret", "token", "access_token", "refresh_token");
 
     /** SSE 订阅接口路径（长连接流式响应，不能缓冲） */
     private static final String SSE_TASK_SUBSCRIBE_PATH = "/api/v1/ai/task/subscribe";
@@ -328,6 +328,9 @@ public class ApiAccessLogWebFilter implements WebFilter {
      * @return String 脱敏后的请求正文
      */
     private String sanitizeBody(String body, MediaType contentType) {
+        if (contentType != null && MediaType.APPLICATION_FORM_URLENCODED.includes(contentType)) {
+            return FormLogSanitizer.sanitize(body, SENSITIVE_BODY_FIELDS, MASKED_VALUE);
+        }
         if (contentType == null || !contentType.toString().toLowerCase(Locale.ROOT).contains("json")) {
             return body;
         }

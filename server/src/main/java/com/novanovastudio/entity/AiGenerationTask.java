@@ -36,6 +36,9 @@ public class AiGenerationTask {
     /** 任务进度 */
     private Integer progress;
 
+    /** 图片或视频生成请求是否已经发往供应商 */
+    private Boolean providerRequestSent;
+
     /** 请求数据JSON */
     private String requestData;
 

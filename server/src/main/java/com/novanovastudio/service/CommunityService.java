@@ -9,6 +9,7 @@ import com.novanovastudio.repository.CommunityConfigRepository;
 import com.novanovastudio.security.CurrentUser;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.TeamScope;
+import com.novanovastudio.storage.MediaAccessService;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -44,6 +45,8 @@ public class CommunityService {
     private final CommunityConfigRepository repository;
     private final CurrentUserProvider currentUserProvider;
     private final TransactionalOperator transactionalOperator;
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
 
     /**
      * 读取按排序值排列的公开社群配置。
@@ -52,8 +55,10 @@ public class CommunityService {
      */
     public Mono<List<CommunityDtos.CommunityConfig>> listConfigs() {
         return repository.listOrdered()
-                .map(record -> new CommunityDtos.CommunityConfig(record.getName(), record.getImageUrl(),
-                        record.getSortOrder() == null ? 0 : record.getSortOrder()))
+                .concatMap(record -> mediaAccessService
+                        .signUrl(record.getImageUrl() == null ? "" : record.getImageUrl(), MediaAccessService.Purpose.PREVIEW)
+                        .map(url -> new CommunityDtos.CommunityConfig(record.getName(), url,
+                                record.getSortOrder() == null ? 0 : record.getSortOrder())))
                 .collectList();
     }
 

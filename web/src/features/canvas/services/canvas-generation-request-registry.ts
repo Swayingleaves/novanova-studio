@@ -9,6 +9,7 @@ export interface CanvasGenerationRequestRegistry {
     start(targetNodeId: string, originNodeId: string, runningNodeId: string, controller: AbortController): AbortController;
     finish(targetNodeId: string, controller: AbortController): boolean;
     stopByRunningId(runningNodeId: string): Set<string>;
+    listTargetNodeIds(runningNodeId: string): string[];
     stopAll(): void;
     isRunning(runningNodeId: string): boolean;
 }
@@ -37,6 +38,15 @@ export function createCanvasGenerationRequestRegistry(): CanvasGenerationRequest
                 affectedNodeIds.add(request.originNodeId);
             });
             return affectedNodeIds;
+        },
+        listTargetNodeIds(runningNodeId) {
+            const nodeIds = new Set<string>();
+            requests.forEach((request) => {
+                if (request.runningNodeId !== runningNodeId) return;
+                nodeIds.add(request.targetNodeId);
+                nodeIds.add(request.originNodeId);
+            });
+            return [...nodeIds];
         },
         stopAll() {
             requests.forEach((request) => request.controller.abort());

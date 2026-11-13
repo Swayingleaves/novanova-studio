@@ -12,6 +12,7 @@ import { BookOpenText, Clock3, FilePlus2, Search, Trash2, Upload } from "lucide-
 
 import { createScriptProject, deleteScriptProjects, listScriptTemplates } from "@/services/api/script";
 import { ScriptSourceUploadModal } from "./components/script-source-upload-modal";
+import { ProjectCoverField } from "@/features/script/components/project-cover-field";
 import { useScriptStore } from "@/features/script/stores/use-script-store";
 import type { ScriptContentType, ScriptStage, ScriptTemplate } from "@/features/script/types";
 
@@ -55,6 +56,8 @@ export default function ScriptPage() {
     const [logline, setLogline] = useState("");
     const [templateKey, setTemplateKey] = useState("");
     const [newContentType, setNewContentType] = useState<ScriptContentType>("comicDrama");
+    const [coverUrl, setCoverUrl] = useState("");
+    const [coverUploading, setCoverUploading] = useState(false);
     const permissionDenied = error.includes("无权限") || error.includes("权限不足") || error.includes("403");
 
     const query = useMemo(() => ({ page, pageSize: 12, keyword: searchKeyword, stage, contentType }), [contentType, page, searchKeyword, stage]);
@@ -64,6 +67,8 @@ export default function ScriptPage() {
     useEffect(() => { setSelectedIds((current) => current.filter((id) => projects.some((project) => project.id === id))); }, [projects]);
 
     const openCreate = async () => {
+        setCoverUrl("");
+        setCoverUploading(false);
         setCreateOpen(true);
         if (!templates.length) {
             try {
@@ -87,7 +92,7 @@ export default function ScriptPage() {
         }
         setCreating(true);
         try {
-            const project = await createScriptProject({ title: title.trim(), templateKey: templateKey || undefined, contentType: newContentType, logline: logline.trim() });
+            const project = await createScriptProject({ title: title.trim(), templateKey: templateKey || undefined, contentType: newContentType, logline: logline.trim(), coverUrl: coverUrl || undefined });
             message.success(translate("script.scriptProjectCreated"));
             setCreateOpen(false);
             /* 刷新项目库列表，避免进入工作台后返回时看到旧列表 */
@@ -157,6 +162,7 @@ export default function ScriptPage() {
                                 <article key={project.id} className="group relative rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-5 transition-colors hover:border-[var(--studio-primary-line)]">
                                     <Checkbox aria-label={translate("script.selectProjectCount", { value0: project.title })} checked={selectedIds.includes(project.id)} className="absolute right-4 top-4" onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id))} />
                                     <button type="button" className="w-full pr-8 text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--studio-primary)]" onClick={() => router.push(`/script/${project.id}`)}>
+                                        {project.coverUrl ? <img src={project.coverUrl} alt="" className="mb-4 aspect-video w-full rounded-lg object-cover" /> : null}
                                         <div className="flex items-center gap-2"><BookOpenText className="size-5 text-[var(--studio-primary)]" aria-hidden="true" /><h2 className="truncate text-base font-semibold text-[var(--studio-ink)]">{project.title}</h2></div>
                                         <div className="mt-3 flex flex-wrap gap-2"><Tag>{getContentTypes(translate).find((item) => item.value === project.contentType)?.label || project.contentType}</Tag><Tag>{project.genre || translate("script.genreNotSet")}</Tag><Tag color={project.stage === "production" ? "purple" : project.stage === "completed" ? "green" : "blue"}>{getStages(translate).find((item) => item.value === project.stage)?.label}</Tag></div>
                                         <p className="mt-4 line-clamp-2 min-h-11 text-sm leading-6 text-[var(--studio-muted)]">{project.logline || translate("script.noLoglineYetOpenTheWorkspaceToDevelopYourIdea")}</p>
@@ -173,8 +179,9 @@ export default function ScriptPage() {
                 {total > 12 ? <Pagination current={page} pageSize={12} total={total} showSizeChanger={false} onChange={setPage} className="self-center" /> : null}
             </div>
 
-            <Modal title={translate("script.newScriptProject")} open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => void submitCreate()} confirmLoading={creating} okText={translate("script.createAndOpen")} cancelText={translate("script.cancel")} destroyOnHidden>
+            <Modal title={translate("script.newScriptProject")} open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => void submitCreate()} confirmLoading={creating} okButtonProps={{ disabled: coverUploading }} okText={translate("script.createAndOpen")} cancelText={translate("script.cancel")} destroyOnHidden>
                 <div className="flex flex-col gap-4 pt-2">
+                    <ProjectCoverField namespace="script" coverUrl={coverUrl} onChange={setCoverUrl} onUploadingChange={setCoverUploading} />
                     <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">{translate("script.projectName")}<Input value={title} maxLength={120} showCount onChange={(event) => setTitle(event.target.value)} placeholder={translate("script.exampleEchoesInTheRain")} /></label>
                     <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">{translate("script.creationMethod")}<Select value={templateKey || "blank"} onChange={(value) => selectTemplate(value === "blank" ? "" : value)} options={[{ value: "blank", label: translate("script.blankProject") }, ...templates.map((template) => ({ value: template.templateKey, label: scriptTemplateLabel(template, translate) }))]} /></label>
                     <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">{translate("script.contentFormat")}<Select value={newContentType} options={getContentTypes(translate)} onChange={setNewContentType} /></label>

@@ -29,7 +29,7 @@ public class ScriptRepository {
     /** 剧本项目数据库记录。 */
     public record ProjectRecord(String id, Long userId, ScriptDtos.ProjectOverview overview, String stage,
                                 int completionRate, long revision, OffsetDateTime productionStartedAt,
-                                OffsetDateTime createdAt, OffsetDateTime updatedAt) {
+                                OffsetDateTime createdAt, OffsetDateTime updatedAt, String coverUrl) {
     }
 
     /** 场次与所属分集数据库记录。 */
@@ -51,7 +51,7 @@ public class ScriptRepository {
                                                         String contentType, int offset, int limit) {
         String filter = projectFilter();
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                SELECT p.id, p.title, p.content_type, p.genre, p.logline, p.stage, p.completion_rate,
+                SELECT p.id, p.title, p.content_type, p.genre, p.logline, p.cover_url, p.stage, p.completion_rate,
                        p.target_episode_count, p.production_started_at, p.revision, p.updated_at,
                        COUNT(e.id)::INTEGER AS episode_count
                 FROM script_projects p
@@ -65,7 +65,8 @@ public class ScriptRepository {
         spec = bindProjectFilter(spec, keyword, stage, contentType);
         return spec.map((row, metadata) -> new ScriptDtos.ProjectSummary(
                 row.get("id", String.class), row.get("title", String.class), row.get("content_type", String.class),
-                row.get("genre", String.class), row.get("logline", String.class), row.get("stage", String.class),
+                row.get("genre", String.class), row.get("logline", String.class), text(row.get("cover_url", String.class)),
+                row.get("stage", String.class),
                 value(row, "completion_rate", Integer.class, 0), value(row, "episode_count", Integer.class, 0),
                 value(row, "target_episode_count", Integer.class, 1), row.get("production_started_at", OffsetDateTime.class) != null,
                 value(row, "revision", Long.class, 0L), row.get("updated_at", OffsetDateTime.class))).all();
@@ -148,17 +149,18 @@ public class ScriptRepository {
         return databaseClient.sql("""
                 INSERT INTO script_projects(id, user_id, title, content_type, genre, logline, synopsis,
                     target_duration_seconds, target_episode_count,
-                    narrative_style, theme, main_plot, main_conflict, ending_direction)
+                    narrative_style, theme, main_plot, main_conflict, ending_direction, cover_url)
                 VALUES (:id, :userId, :title, :contentType, :genre, :logline, :synopsis,
                     :targetDurationSeconds, :targetEpisodeCount, :narrativeStyle,
-                    :theme, :mainPlot, :mainConflict, :endingDirection)
+                    :theme, :mainPlot, :mainConflict, :endingDirection, :coverUrl)
                 """).bind("id", project.id()).bind("userId", project.userId()).bind("title", overview.title())
                 .bind("contentType", overview.contentType()).bind("genre", text(overview.genre()))
                 .bind("logline", text(overview.logline())).bind("synopsis", text(overview.synopsis()))
                 .bind("targetDurationSeconds", overview.targetDurationSeconds()).bind("targetEpisodeCount", overview.targetEpisodeCount())
                 .bind("narrativeStyle", text(overview.narrativeStyle())).bind("theme", text(overview.theme()))
                 .bind("mainPlot", text(overview.mainPlot())).bind("mainConflict", text(overview.mainConflict()))
-                .bind("endingDirection", text(overview.endingDirection())).fetch().rowsUpdated().then();
+                .bind("endingDirection", text(overview.endingDirection())).bind("coverUrl", text(project.coverUrl()))
+                .fetch().rowsUpdated().then();
     }
 
     /**
@@ -218,6 +220,22 @@ public class ScriptRepository {
                 .bind("mainConflict", text(overview.mainConflict())).bind("endingDirection", text(overview.endingDirection()))
                 .bind("projectId", projectId).bind("userId", userId).bind("expectedRevision", expectedRevision)
                 .fetch().rowsUpdated();
+    }
+
+    /**
+     * 更新项目封面，不推进修订号，也不改动故事概览。
+     *
+     * @param userId 当前用户标识
+     * @param projectId 剧本项目标识
+     * @param coverUrl 封面公开访问地址，空字符串表示移除
+     * @return 是否更新到当前用户的项目
+     */
+    public Mono<Boolean> updateCover(Long userId, String projectId, String coverUrl) {
+        return databaseClient.sql("""
+                UPDATE script_projects SET cover_url=:coverUrl, updated_at=CURRENT_TIMESTAMP
+                WHERE id=:projectId AND user_id=:userId AND status=1
+                """).bind("coverUrl", text(coverUrl)).bind("projectId", projectId).bind("userId", userId)
+                .fetch().rowsUpdated().map(updated -> updated == 1);
     }
 
     /**
@@ -1188,7 +1206,8 @@ public class ScriptRepository {
         return new ProjectRecord(row.get("id", String.class), row.get("user_id", Long.class), overview,
                 row.get("stage", String.class), value(row, "completion_rate", Integer.class, 0),
                 value(row, "revision", Long.class, 0L), row.get("production_started_at", OffsetDateTime.class),
-                row.get("created_at", OffsetDateTime.class), row.get("updated_at", OffsetDateTime.class));
+                row.get("created_at", OffsetDateTime.class), row.get("updated_at", OffsetDateTime.class),
+                text(row.get("cover_url", String.class)));
     }
 
     /**

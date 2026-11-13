@@ -4,5 +4,11 @@
     "generateVideoWithTheseImages": "用这些图片生成视频",
     "adjustPrompt": "调整提示词",
     "editPromptAndRegenerate": "修改提示词重新生成",
-    "confirmGeneration": "确认生成"
+    "confirmGeneration": "确认生成",
+    "confirmDurationSettings": "确认",
+    "askUserModelConfig": "设置模型",
+    "askUserConfirm": "确认",
+    "askUserUploadImage": "上传图片",
+    "askUserUploadVideo": "上传视频",
+    "continueAfterModelConfig": "继续"
 }

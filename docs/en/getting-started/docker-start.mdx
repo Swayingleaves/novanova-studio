@@ -70,7 +70,7 @@ FRONTEND_BASE_URL=http://127.0.0.1:5554
 - The main Compose file publishes PostgreSQL and Redis only on host `127.0.0.1`. Containers connect by service name; use an SSH tunnel for remote administration.
 - `NGINX_PORT`: entry port for the full application in the main configuration, default `5554`. Update `FRONTEND_BASE_URL` whenever this changes.
 - `TOKEN_EXPIRE_HOURS`, `LOG_LEVEL`, `TENCENT_COS_*`, and `AI_*` (polling interval, timeouts, prompt file paths): defaults are fine.
-- Email (`EMAIL_SMTP_*`) and linux.do / Google sign-in (`OAUTH2_*`): optional features, off unless configured.
+- Email (`EMAIL_SMTP_*`): optional, and stays off until configured. linux.do and Google sign-in are configured in Admin, under System, Identity, OAuth integration.
 - AI channel keys and object storage credentials do **not** belong in `.env`; you enter them in System configuration after signing in — see [System configuration](../using-studio/system-configuration).
 
 ### Note: `NEXT_PUBLIC_*` variables are build-time

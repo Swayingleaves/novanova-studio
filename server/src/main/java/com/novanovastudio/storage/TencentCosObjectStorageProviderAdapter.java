@@ -68,15 +68,55 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
      */
     @Override
     public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        return presign(config, key, fileName, mimeType, download, expiresAt, 0);
+    }
+
+    /**
+     * 签发数据万象图片处理地址，长边不超过指定像素。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @param edge 缩放后的长边像素
+     * @return 带 imageMogr2 的临时 GET 地址
+     */
+    @Override
+    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge) {
+        return presign(config, key, fileName, mimeType, download, expiresAt, Math.max(1, edge));
+    }
+
+    /**
+     * 用腾讯云 SDK 签发临时 GET 地址。
+     *
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @param thumbnailEdge 附加图片处理时的长边像素，0 表示读取原图
+     * @return 临时 GET 地址
+     */
+    private String presign(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int thumbnailEdge) {
         validate(config);
         COSClient client = createClient(config);
         try {
             var request = new com.qcloud.cos.model.GeneratePresignedUrlRequest(config.bucket(), key, com.qcloud.cos.http.HttpMethodName.GET);
             request.setExpiration(java.util.Date.from(expiresAt));
+            if (thumbnailEdge > 0) {
+                request.addRequestParameter("imageMogr2/thumbnail/" + thumbnailEdge + "x", null);
+            }
             var headers = new com.qcloud.cos.model.ResponseHeaderOverrides();
-            headers.setContentDisposition(org.springframework.http.ContentDisposition.builder(download ? "attachment" : "inline")
-                    .filename(fileName, java.nio.charset.StandardCharsets.UTF_8).build().toString());
-            headers.setContentType(mimeType);
+            if (StringUtils.hasText(fileName)) {
+                headers.setContentDisposition(org.springframework.http.ContentDisposition.builder(download ? "attachment" : "inline")
+                        .filename(fileName, java.nio.charset.StandardCharsets.UTF_8).build().toString());
+            }
+            if (StringUtils.hasText(mimeType)) {
+                headers.setContentType(mimeType);
+            }
             request.setResponseHeaders(headers);
             return client.generatePresignedUrl(request).toString();
         } finally { client.shutdown(); }
@@ -134,10 +174,12 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
     }
 
     /**
-     * 使用无敏感内容的探针确认存储桶拒绝匿名读取。
+     * 使用继承桶权限的探针确认存储桶拒绝匿名读取，并验证预签名地址可读。
+     * <p>
+     * 探针对象不能再单独设置私有 ACL，否则公有读桶也会返回 403，无法证明桶级权限。
      *
      * @param config ObjectStorageConfig 对象存储配置
-     * @return boolean 是否确认匿名读取被拒绝
+     * @return boolean 是否确认匿名读取被拒绝且签名读取可用
      */
     @Override
     public boolean verifyPrivateBucket(PersistenceDtos.ObjectStorageConfig config) {
@@ -145,17 +187,24 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
         String key = "script-source/private-probe/" + UUID.randomUUID();
         COSClient client = createClient(config);
         try {
+            var acl = client.getBucketAcl(config.bucket().trim());
+            if (acl.getCannedAccessControl() != null && acl.getCannedAccessControl() != CannedAccessControlList.Private) {
+                return false;
+            }
             byte[] marker = "private-probe".getBytes(java.nio.charset.StandardCharsets.UTF_8);
             ObjectMetadata metadata = new ObjectMetadata();
             metadata.setContentLength(marker.length);
-            var upload = new com.qcloud.cos.model.PutObjectRequest(config.bucket().trim(), key, new ByteArrayInputStream(marker), metadata);
-            upload.setCannedAcl(CannedAccessControlList.Private);
-            client.putObject(upload);
-            String base = StringUtils.hasText(config.publicBaseUrl()) ? config.publicBaseUrl().replaceAll("/+$", "")
-                    : "https://" + config.bucket().trim() + ".cos." + config.region().trim() + ".myqcloud.com";
-            HttpRequest request = HttpRequest.newBuilder(URI.create(base + "/" + key)).timeout(Duration.ofSeconds(10)).method("HEAD", HttpRequest.BodyPublishers.noBody()).build();
-            int status = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
-            return status == 403;
+            client.putObject(config.bucket().trim(), key, new ByteArrayInputStream(marker), metadata);
+            String bucketBase = "https://" + config.bucket().trim() + ".cos." + config.region().trim() + ".myqcloud.com";
+            HttpRequest request = HttpRequest.newBuilder(URI.create(bucketBase + "/" + key)).timeout(Duration.ofSeconds(10)).method("HEAD", HttpRequest.BodyPublishers.noBody()).build();
+            int anonymousStatus = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
+            if (anonymousStatus != 403) {
+                return false;
+            }
+            String signed = createReadUrl(config, key, "private-probe.txt", "text/plain", false, java.time.Instant.now().plusSeconds(60));
+            HttpRequest signedRequest = HttpRequest.newBuilder(URI.create(signed)).timeout(Duration.ofSeconds(10)).GET().build();
+            int signedStatus = HttpClient.newHttpClient().send(signedRequest, HttpResponse.BodyHandlers.discarding()).statusCode();
+            return signedStatus == 200;
         } catch (Exception exception) {
             log.error("验证原文存储桶私有访问失败: bucket={}", config.bucket(), exception);
             throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "无法验证存储桶私有访问，请检查对象存储配置");
@@ -253,10 +302,9 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
      * @return ClientConfig COS客户端配置
      */
     private ClientConfig createClientConfig(String region) {
-        NovanovaProperties.ObjectStorage.TencentCos tencentCos = properties.getObjectStorage().getTencentCos();
         ClientConfig clientConfig = new ClientConfig(new Region(region));
-        clientConfig.setMaxErrorRetry(tencentCos.getMaxErrorRetry());
-        clientConfig.setSocketTimeout(tencentCos.getSocketTimeoutMilliseconds());
+        clientConfig.setMaxErrorRetry(properties.getObjectStorage().getTencentCos().getMaxErrorRetry());
+        clientConfig.setSocketTimeout(properties.timeoutSettings().tencentCosSocketTimeoutMilliseconds());
         return clientConfig;
     }
 }

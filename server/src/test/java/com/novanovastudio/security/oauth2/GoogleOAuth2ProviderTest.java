@@ -5,12 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.novanovastudio.config.NovanovaProperties;
+import com.novanovastudio.service.OAuthProviderConfigService;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
-import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 
 /**
  * Google认证渠道测试
@@ -26,8 +27,8 @@ class GoogleOAuth2ProviderTest {
     @Test
     @DisplayName("已验证邮箱的Google账号可以解析")
     void shouldResolveVerifiedGoogleIdentity() {
-        GoogleOAuth2Provider provider = new GoogleOAuth2Provider(new NovanovaProperties());
-        OidcUser user = oidcUser(Map.of(
+        GoogleOAuth2Provider provider = provider("https://studio.example.com/api/v1/auth/oauth/callback/google");
+        OAuth2User user = oauth2User(Map.of(
                 "sub", "google-user-123",
                 "email", "USER@EXAMPLE.COM",
                 "email_verified", true,
@@ -50,10 +51,10 @@ class GoogleOAuth2ProviderTest {
     @Test
     @DisplayName("未验证邮箱的Google账号不能登录")
     void shouldRejectUnverifiedEmail() {
-        GoogleOAuth2Provider provider = new GoogleOAuth2Provider(new NovanovaProperties());
+        GoogleOAuth2Provider provider = provider("https://studio.example.com/api/v1/auth/oauth/callback/google");
 
         OAuth2LoginException exception = assertThrows(OAuth2LoginException.class,
-                () -> provider.resolveIdentity(oidcUser(Map.of("sub", "google-user-123", "email", "user@example.com", "email_verified", false))));
+                () -> provider.resolveIdentity(oauth2User(Map.of("sub", "google-user-123", "email", "user@example.com", "email_verified", false))));
 
         assertEquals("emailUnverified", exception.getErrorCode());
     }
@@ -64,12 +65,12 @@ class GoogleOAuth2ProviderTest {
     @Test
     @DisplayName("Google账号缺少或返回无效邮箱时不能登录")
     void shouldRejectMissingOrInvalidEmail() {
-        GoogleOAuth2Provider provider = new GoogleOAuth2Provider(new NovanovaProperties());
+        GoogleOAuth2Provider provider = provider("https://studio.example.com/api/v1/auth/oauth/callback/google");
 
         OAuth2LoginException missingEmailException = assertThrows(OAuth2LoginException.class,
-                () -> provider.resolveIdentity(oidcUser(Map.of("sub", "google-user-123", "email_verified", true))));
+                () -> provider.resolveIdentity(oauth2User(Map.of("sub", "google-user-123", "email_verified", true))));
         OAuth2LoginException invalidEmailException = assertThrows(OAuth2LoginException.class,
-                () -> provider.resolveIdentity(oidcUser(Map.of("sub", "google-user-123", "email", "invalid-email", "email_verified", true))));
+                () -> provider.resolveIdentity(oauth2User(Map.of("sub", "google-user-123", "email", "invalid-email", "email_verified", true))));
 
         assertEquals("emailUnavailable", missingEmailException.getErrorCode());
         assertEquals("emailUnavailable", invalidEmailException.getErrorCode());
@@ -81,10 +82,10 @@ class GoogleOAuth2ProviderTest {
     @Test
     @DisplayName("Google账号缺少用户标识时不能登录")
     void shouldRejectMissingProviderUserId() {
-        GoogleOAuth2Provider provider = new GoogleOAuth2Provider(new NovanovaProperties());
+        GoogleOAuth2Provider provider = provider("https://studio.example.com/api/v1/auth/oauth/callback/google");
 
         OAuth2LoginException exception = assertThrows(OAuth2LoginException.class,
-                () -> provider.resolveIdentity(oidcUser(Map.of("email", "user@example.com", "email_verified", true))));
+                () -> provider.resolveIdentity(oauth2User(Map.of("email", "user@example.com", "email_verified", true))));
 
         assertEquals("providerIdentityUnavailable", exception.getErrorCode());
     }
@@ -95,8 +96,8 @@ class GoogleOAuth2ProviderTest {
     @Test
     @DisplayName("Google头像地址过长时不能登录")
     void shouldRejectOversizedProfile() {
-        GoogleOAuth2Provider provider = new GoogleOAuth2Provider(new NovanovaProperties());
-        OidcUser user = oidcUser(Map.of(
+        GoogleOAuth2Provider provider = provider("https://studio.example.com/api/v1/auth/oauth/callback/google");
+        OAuth2User user = oauth2User(Map.of(
                 "sub", "google-user-123",
                 "email", "user@example.com",
                 "email_verified", true,
@@ -114,8 +115,7 @@ class GoogleOAuth2ProviderTest {
     @Test
     @DisplayName("正确Google配置可以生成客户端注册信息")
     void shouldCreateGoogleClientRegistration() {
-        NovanovaProperties properties = configuredProperties("https://studio.example.com/api/v1/auth/oauth/callback/google");
-        GoogleOAuth2Provider provider = new GoogleOAuth2Provider(properties);
+        GoogleOAuth2Provider provider = provider("https://studio.example.com/api/v1/auth/oauth/callback/google");
 
         assertEquals("google", provider.clientRegistration().getRegistrationId());
         assertEquals(ClientAuthenticationMethod.CLIENT_SECRET_POST, provider.clientRegistration().getClientAuthenticationMethod());
@@ -127,41 +127,43 @@ class GoogleOAuth2ProviderTest {
     @Test
     @DisplayName("Google回调地址或客户端配置错误时拒绝启动")
     void shouldRejectInvalidRedirectUriOrMissingConfiguration() {
-        GoogleOAuth2Provider invalidRedirectProvider = new GoogleOAuth2Provider(configuredProperties(
-                "https://studio.example.com/api/v1/auth/oauth/callback/google?source=invalid"));
-        NovanovaProperties missingClientIdProperties = configuredProperties("https://studio.example.com/api/v1/auth/oauth/callback/google");
-        missingClientIdProperties.getOauth2().getGoogle().setClientId("");
-        GoogleOAuth2Provider missingClientIdProvider = new GoogleOAuth2Provider(missingClientIdProperties);
+        GoogleOAuth2Provider invalidRedirectProvider = provider(
+                "https://studio.example.com/api/v1/auth/oauth/callback/google?source=invalid");
+        OAuthProviderConfigService missingClientIdService = mock(OAuthProviderConfigService.class);
+        when(missingClientIdService.find("google")).thenReturn(Optional.of(new ThirdPartyOAuth2Configuration(
+                "google", true, "", "google-client-secret", "https://studio.example.com/api/v1/auth/oauth/callback/google")));
+        GoogleOAuth2Provider missingClientIdProvider = new GoogleOAuth2Provider(missingClientIdService);
+        OAuthProviderConfigService missingConfigService = mock(OAuthProviderConfigService.class);
+        when(missingConfigService.find("google")).thenReturn(Optional.empty());
+        GoogleOAuth2Provider missingConfigProvider = new GoogleOAuth2Provider(missingConfigService);
 
         assertThrows(IllegalStateException.class, invalidRedirectProvider::clientRegistration);
         assertThrows(IllegalStateException.class, missingClientIdProvider::clientRegistration);
+        assertThrows(IllegalStateException.class, missingConfigProvider::clientRegistration);
     }
 
     /**
-     * 创建启用且完整的Google认证配置。
+     * 创建启用且完整的Google认证渠道。
      *
      * @param redirectUri String OAuth2回调地址
-     * @return NovanovaProperties 服务配置
+     * @return GoogleOAuth2Provider Google认证渠道
      */
-    private NovanovaProperties configuredProperties(String redirectUri) {
-        NovanovaProperties properties = new NovanovaProperties();
-        NovanovaProperties.OAuth2.Google configuration = properties.getOauth2().getGoogle();
-        configuration.setEnabled(true);
-        configuration.setClientId("google-client-id");
-        configuration.setClientSecret("google-client-secret");
-        configuration.setRedirectUri(redirectUri);
-        return properties;
+    private GoogleOAuth2Provider provider(String redirectUri) {
+        OAuthProviderConfigService service = mock(OAuthProviderConfigService.class);
+        when(service.find("google")).thenReturn(Optional.of(new ThirdPartyOAuth2Configuration(
+                "google", true, "google-client-id", "google-client-secret", redirectUri)));
+        return new GoogleOAuth2Provider(service);
     }
 
     /**
-     * 创建携带指定声明的OpenID Connect用户桩对象。
+     * 创建携带指定属性的用户桩对象。
      *
-     * @param claims Map<String, Object> 用户声明
-     * @return OidcUser OpenID Connect用户桩对象
+     * @param attributes Map<String, Object> 用户属性
+     * @return OAuth2User 用户桩对象
      */
-    private OidcUser oidcUser(Map<String, Object> claims) {
-        OidcUser user = mock(OidcUser.class);
-        when(user.getClaims()).thenReturn(claims);
+    private OAuth2User oauth2User(Map<String, Object> attributes) {
+        OAuth2User user = mock(OAuth2User.class);
+        when(user.getAttributes()).thenReturn(attributes);
         return user;
     }
 }

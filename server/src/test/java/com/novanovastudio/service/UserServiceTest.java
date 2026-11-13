@@ -61,7 +61,7 @@ class UserServiceTest {
     @org.junit.jupiter.params.provider.ValueSource(strings = {"a56fv43@vn-v55.com", "881txi4@kuailejianfei8.com", "user@qq.com.evil.com"})
     void shouldRejectUnsupportedEmailBeforeRegistration(String email) {
         TestContext context = testContext();
-        context.properties.getEmail().setAllowedSuffixes("qq.com,gmail.com");
+        context.properties.replaceEmailSettings(context.properties.emailSettings().withAllowedSuffixes("qq.com,gmail.com"));
 
         StepVerifier.create(Mono.defer(() -> context.service.sendEmailCode(new UserDtos.SendEmailCodeRequest(email))))
                 .expectErrorMatches(error -> error instanceof BusinessException businessException
@@ -80,7 +80,7 @@ class UserServiceTest {
     @Test
     void shouldSendRegistrationCodeForAllowedEmail() {
         TestContext context = testContext();
-        context.properties.getEmail().setAllowedSuffixes("@QQ.COM");
+        context.properties.replaceEmailSettings(context.properties.emailSettings().withAllowedSuffixes("@QQ.COM"));
         when(context.userRepository.findByEmail("user@qq.com")).thenReturn(Mono.empty());
         when(context.passwordEncoder.encode(any())).thenReturn("code-hash");
         when(context.userRepository.createEmailCode(any())).thenReturn(Mono.just(3L));
@@ -155,7 +155,7 @@ class UserServiceTest {
         TestContext context = testContext();
         User user = normalUser(8L);
         context.properties.getApp().setFrontendBaseUrl("https://www.novanovastudio.cn");
-        context.properties.getEmail().setFrom("noreply@novanovastudio.cn");
+        context.properties.replaceEmailSettings(context.properties.emailSettings().withFromEmail("noreply@novanovastudio.cn"));
         when(context.userRepository.findByEmail("user@example.com")).thenReturn(Mono.just(user));
         when(context.userRepository.upsertPasswordResetToken(argThat(token -> token.getUserId().equals(8L)
                 && token.getTokenHash().length() == 64))).thenReturn(Mono.empty());
@@ -727,8 +727,8 @@ class UserServiceTest {
         PasswordLoginLockService passwordLoginLockService = mock(PasswordLoginLockService.class);
         NovanovaProperties properties = new NovanovaProperties();
         properties.getApp().setFrontendBaseUrl("https://www.novanovastudio.cn");
-        properties.getEmail().setFrom("noreply@novanovastudio.cn");
-        properties.getEmail().setAllowedSuffixes("example.com");
+        properties.replaceEmailSettings(NovanovaProperties.RuntimeEmailSettings.defaults()
+                .withSmtpHost("smtp.example.com").withFromEmail("noreply@novanovastudio.cn").withAllowedSuffixes("example.com"));
         JavaMailSender mailSender = mock(JavaMailSender.class);
         CreditService creditService = mock(CreditService.class);
         InvitationService invitationService = mock(InvitationService.class);
@@ -736,7 +736,9 @@ class UserServiceTest {
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        UserService service = new UserService(userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, properties, new EmailRegistrationPolicy(properties), mailSender, creditService, invitationService, eventPublisher, transactionalOperator);
+        UserService service = new UserService(userRepository, passwordEncoder, tokenService, currentUserProvider,
+                com.novanovastudio.MediaAccessTestSupport.echo(), passwordLoginLockService, properties, new EmailRegistrationPolicy(properties),
+                mailSender, creditService, invitationService, eventPublisher, transactionalOperator);
         return new TestContext(service, userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, properties, mailSender, creditService, invitationService, eventPublisher);
     }
 

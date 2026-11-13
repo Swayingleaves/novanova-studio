@@ -454,6 +454,32 @@ public final class PersistenceDtos {
     }
 
     /**
+     * 批量换取媒体读地址请求。
+     *
+     * @param storageKeys List&lt;String&gt; 媒体存储键列表
+     */
+    public record MediaAccessRequest(@NotEmpty(message = "business.mediaStorageKeyIsRequired") List<String> storageKeys) {
+    }
+
+    /**
+     * 媒体读地址明细。
+     *
+     * @param storageKey String 媒体存储键
+     * @param url String 临时读地址，文件不存在时为空
+     * @param expiresAt String 到期时间
+     */
+    public record MediaAccessItem(String storageKey, String url, String expiresAt) {
+    }
+
+    /**
+     * 批量换取媒体读地址响应。
+     *
+     * @param items List&lt;MediaAccessItem&gt; 读地址明细
+     */
+    public record MediaAccessResponse(List<MediaAccessItem> items) {
+    }
+
+    /**
      * 删除媒体请求
      *
      * @param storageKeys List<String> 媒体存储键列表
@@ -480,7 +506,7 @@ public final class PersistenceDtos {
      * 上传媒体响应
      *
      * @param storageKey String 媒体存储键
-     * @param url String 可访问URL，转存成功时为云存储链接
+     * @param url String 可访问URL，私有存储桶为预签名地址
      * @param bytes Long 文件大小
      * @param mimeType String MIME类型
      * @param width Integer 宽度
@@ -488,12 +514,18 @@ public final class PersistenceDtos {
      * @param durationMs Integer 时长毫秒
      * @param objectStorage ObjectStorageFile 对象存储信息
      * @param sourceUrl String 上游返回的原始链接，base64或二进制结果时为null
+     * @param expiresAt String 预签名地址到期时间，公开地址或远程链接为空
      */
-    public record UploadedMediaResponse(String storageKey, String url, Long bytes, String mimeType, Integer width, Integer height, Integer durationMs, ObjectStorageFile objectStorage, String sourceUrl) {
+    public record UploadedMediaResponse(String storageKey, String url, Long bytes, String mimeType, Integer width, Integer height, Integer durationMs, ObjectStorageFile objectStorage, String sourceUrl, String expiresAt) {
 
         /** 保持旧调用方只传入8个参数，base64或二进制结果没有原始第三方链接。 */
         public UploadedMediaResponse(String storageKey, String url, Long bytes, String mimeType, Integer width, Integer height, Integer durationMs, ObjectStorageFile objectStorage) {
-            this(storageKey, url, bytes, mimeType, width, height, durationMs, objectStorage, null);
+            this(storageKey, url, bytes, mimeType, width, height, durationMs, objectStorage, null, null);
+        }
+
+        /** 保持旧调用方只传入9个参数，兼容没有预签名到期时间的远程媒体。 */
+        public UploadedMediaResponse(String storageKey, String url, Long bytes, String mimeType, Integer width, Integer height, Integer durationMs, ObjectStorageFile objectStorage, String sourceUrl) {
+            this(storageKey, url, bytes, mimeType, width, height, durationMs, objectStorage, sourceUrl, null);
         }
     }
 

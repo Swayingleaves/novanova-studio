@@ -12,6 +12,7 @@ import type { CanvasVideoCompositionNode, CanvasVideoNode } from "../types";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { useNodeActions } from "./node-action-context";
 import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface } from "./shared";
+import { useMediaUrl } from "@/shared/hooks/use-media-url";
 
 /** 画布视频合成节点。 */
 export const VideoCompositionNode = memo(function VideoCompositionNode({ data, selected }: NodeProps<Node<CanvasVideoCompositionNode>>) {
@@ -164,6 +165,8 @@ function VideoInputRow({
 }) {
     const translate = useTranslation();
     const theme = useCanvasTheme();
+    // 输入视频封面：有存储键时换取当前临时地址，过期后自动续签。
+    const media = useMediaUrl({ storageKey: video.content.storageKey, url: video.content.source, objectStorage: video.content.objectStorage, kind: "media" });
     const status = videoStatus(video);
     return (
         <div
@@ -196,7 +199,7 @@ function VideoInputRow({
                     onPreview();
                 }}
             >
-                {video.content.source ? <video src={video.content.source} className="pointer-events-none h-full w-full object-cover" muted preload="metadata" playsInline /> : <Video className="absolute inset-0 m-auto size-4 text-white/65" />}
+                {video.content.source ? <video src={media.url || video.content.source} className="pointer-events-none h-full w-full object-cover" muted preload="metadata" playsInline onError={media.onError} /> : <Video className="absolute inset-0 m-auto size-4 text-white/65" />}
                 <Play className="pointer-events-none absolute inset-0 m-auto size-3.5 text-white drop-shadow" />
             </button>
             <div className="min-w-0 flex-1">

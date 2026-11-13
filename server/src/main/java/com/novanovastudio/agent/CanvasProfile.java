@@ -106,7 +106,8 @@ public class CanvasProfile implements AgentLoopProfile {
     @Override
     public Mono<List<AiMessage>> buildMessages(Long userId, AgentSession session, AgentChatRequest request) {
         List<AiMessage> messages = new ArrayList<>();
-        messages.add(new AiMessage("system", systemPromptTemplateService.get(PromptTemplateType.AGENT_CANVAS)));
+        messages.add(new AiMessage("system", systemPromptTemplateService.get(PromptTemplateType.AGENT_CANVAS)
+                + "\n\n" + systemPromptTemplateService.get(PromptTemplateType.AGENT_USER_ACTIONS)));
         if (request.history() != null && !request.history().isEmpty()) {
             // 前端历史只包含用户和助手的自然语言消息，避免持久化工具JSON干扰多轮补参语义。
             for (AgentChatRequest.HistoryMessage historyMessage : request.history()) {

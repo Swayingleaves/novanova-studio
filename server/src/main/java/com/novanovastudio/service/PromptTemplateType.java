@@ -28,6 +28,8 @@ public enum PromptTemplateType {
     AGENT_SCRIPT,
     /** 故事知识库分析Agent模板 */
     AGENT_STORY_BIBLE,
+    /** 对话和规划 Agent 共用的用户动作标识清单 */
+    AGENT_USER_ACTIONS,
     /** 分镜资产图片提示词模板 */
     IMAGE_STORYBOARD_ASSET
 }

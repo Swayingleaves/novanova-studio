@@ -29,9 +29,26 @@ type ReusableImage = {
     objectStorage?: ObjectStorageFile;
 };
 
-const resolvedUrls = new Map<string, string>();
+const resolvedUrls = new Map<string, { url: string; expiresAt?: number }>();
 
-export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
+/** 预签名地址提前一分钟视为过期，避免页面拿到即将失效的地址。 */
+const URL_REUSE_MARGIN_MS = 60_000;
+
+function readCachedUrl(storageKey: string) {
+    const cached = resolvedUrls.get(storageKey);
+    if (!cached) return "";
+    if (cached.expiresAt && cached.expiresAt - URL_REUSE_MARGIN_MS <= Date.now()) {
+        resolvedUrls.delete(storageKey);
+        return "";
+    }
+    return cached.url;
+}
+
+function writeCachedUrl(storageKey: string, url: string, expiresAt?: string) {
+    resolvedUrls.set(storageKey, { url, expiresAt: expiresAt ? Date.parse(expiresAt) : undefined });
+}
+
+export async function uploadImage(input: string | Blob, options?: { compress?: boolean }): Promise<UploadedImage> {
     if (typeof input === "string" && /^https?:\/\//i.test(input)) {
         const meta = await readImageMeta(input);
         const media = await registerRemoteMedia({ kind: "image", sourceUrl: input, mimeType: meta.mimeType, width: meta.width, height: meta.height });
@@ -51,10 +68,11 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
             mimeType: blob.type || meta.mimeType,
             width: meta.width,
             height: meta.height,
+            compress: options?.compress,
         },
         input instanceof File ? input.name : "image.png",
     );
-    resolvedUrls.set(media.storageKey, media.url);
+    writeCachedUrl(media.storageKey, media.url, media.expiresAt);
     return { url: media.url, storageKey: media.storageKey, width: media.width || meta.width, height: media.height || meta.height, bytes: media.bytes || blob.size, mimeType: media.mimeType || blob.type || meta.mimeType, objectStorage: media.objectStorage };
 }
 
@@ -65,7 +83,7 @@ export async function reuseOrUploadImage(input: ReusableImage): Promise<Uploaded
     const hasHeight = isPositiveDimension(height);
     const meta = hasWidth && hasHeight && input.mimeType ? undefined : await readImageMeta(input.dataUrl);
     const image: UploadedImage = {
-        url: input.dataUrl,
+        url: await resolveImageUrl(input.storageKey, input.dataUrl),
         storageKey: input.storageKey,
         width: hasWidth ? width : meta!.width,
         height: hasHeight ? height : meta!.height,
@@ -73,18 +91,19 @@ export async function reuseOrUploadImage(input: ReusableImage): Promise<Uploaded
         mimeType: input.mimeType || meta!.mimeType,
         ...(input.objectStorage ? { objectStorage: input.objectStorage } : {}),
     };
-    resolvedUrls.set(image.storageKey, image.url);
     return image;
 }
 
-export async function resolveImageUrl(storageKey?: string, fallback = "") {
+export async function resolveImageUrl(storageKey?: string, fallback = "", forceRefresh = false) {
     if (!storageKey) return fallback;
-    const cached = resolvedUrls.get(storageKey);
-    if (cached) return cached;
+    if (!forceRefresh) {
+        const cached = readCachedUrl(storageKey);
+        if (cached) return cached;
+    }
     try {
         const media = await getServerMediaInfo(storageKey);
         if (!media.url) return fallback;
-        resolvedUrls.set(storageKey, media.url);
+        writeCachedUrl(storageKey, media.url, media.expiresAt);
         return media.url;
     } catch {
         return fallback;
@@ -95,7 +114,7 @@ export async function resolveImageStorageInfo(storageKey?: string, fallbackUrl =
     if (!storageKey) return mergeMediaStorageInfo(fallbackUrl, fallbackObjectStorage);
     try {
         const media = await getServerMediaInfo(storageKey);
-        if (media.url) resolvedUrls.set(storageKey, media.url);
+        if (media.url) writeCachedUrl(storageKey, media.url, media.expiresAt);
         return mergeMediaStorageInfo(fallbackUrl, fallbackObjectStorage, media);
     } catch {
         return mergeMediaStorageInfo(fallbackUrl, fallbackObjectStorage);
@@ -112,7 +131,7 @@ export async function setImageBlob(storageKey: string, blob: Blob) {
     const meta = await readImageMeta(localUrl);
     URL.revokeObjectURL(localUrl);
     const media = await uploadServerMedia(blob, { kind: "image", storageKey, mimeType: blob.type || meta.mimeType, width: meta.width, height: meta.height }, "image.png");
-    resolvedUrls.set(storageKey, media.url);
+    writeCachedUrl(storageKey, media.url, media.expiresAt);
     return media.url;
 }
 

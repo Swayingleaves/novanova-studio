@@ -12,6 +12,6 @@ export function isAuthenticationPath(value: string) {
 
 /** 将业务路径放入指定空间，已指定空间及平台独立入口保持原样。 */
 export function pathInSpace(path: string, teamSlug: string | null) {
-    if (!teamSlug || !path.startsWith("/") || path.startsWith("//") || /^\/(team|teams|api|docs)(?:\/|[?#]|$)/.test(path)) return path;
+    if (!teamSlug || !path.startsWith("/") || path.startsWith("//") || /^\/(team|teams|api|docs|oauth)(?:\/|[?#]|$)/.test(path)) return path;
     return `/team/${teamSlug}${path === "/" ? "" : path}`;
 }

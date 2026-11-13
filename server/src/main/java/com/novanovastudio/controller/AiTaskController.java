@@ -79,7 +79,7 @@ public class AiTaskController {
      */
     @PostMapping("/task/cancelTask")
     public Mono<ApiResponse<AiTaskDtos.AiGenerationTaskResponse>> cancelTask(@Valid @RequestBody AiTaskDtos.AiTaskIdRequest request) {
-        return aiTaskService.cancelTask(request.taskId()).flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
+        return aiTaskService.cancelTask(request.taskId(), Boolean.TRUE.equals(request.forfeitRefund())).flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
     }
 
     /**

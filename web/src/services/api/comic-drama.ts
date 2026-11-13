@@ -42,6 +42,11 @@ export function listComicDramaProjects(params: { page: number; pageSize: number;
     return serverGet<ComicDramaProjectList>(`${COMIC_DRAMA_PATH}/listProjects?${query}`);
 }
 
+/** 批量删除漫剧生产项目，共享剧本保留。 */
+export function deleteComicDramaProjects(projects: Array<{ projectId: string; expectedRevision: number }>) {
+    return serverPost<string[]>(`${COMIC_DRAMA_PATH}/deleteProjects`, { projects });
+}
+
 export function getComicDramaWorkspace(projectId: string) {
     return serverPost<ComicDramaWorkspace>(`${COMIC_DRAMA_PATH}/getWorkspace`, { projectId });
 }
@@ -79,7 +84,9 @@ export function getComicDramaReadiness(projectId: string) {
     return serverPost<ComicDramaWorkspace["readiness"]>(`${COMIC_DRAMA_PATH}/getReadiness`, { projectId });
 }
 
-export function generateComicDramaShotDraft(input: { projectId: string; episodeId?: string; sceneId?: string; shotCount?: number; rhythm: string; focus: string; model: string; confirmed: true }) {
+export type ComicDramaShotDurationLevel = "short" | "medium" | "long";
+
+export function generateComicDramaShotDraft(input: { projectId: string; episodeId?: string; sceneId?: string; shotCount?: number; rhythm: string; focus: string; shotDuration: ComicDramaShotDurationLevel; model: string; confirmed: true }) {
     return serverPost<ComicDramaShotDraft>(`${COMIC_DRAMA_PATH}/generateShotDraft`, input);
 }
 

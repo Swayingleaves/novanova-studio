@@ -70,7 +70,7 @@ class VideoCompositionTaskServiceTest {
         taskDispatcher = mock(VideoCompositionTaskDispatcher.class);
         cancellation = mock(VideoCompositionTaskCancellation.class);
         properties = new NovanovaProperties();
-        taskService = new VideoCompositionTaskService(com.novanovastudio.TeamTestSupport.taskScope(), repository, currentUserProvider, persistenceService, mock(VideoCompositionMediaProcessor.class), mock(StoryboardVideoExportProcessor.class), mock(ComicDramaRepository.class), mock(ScriptService.class), mock(ComicDramaService.class), taskDispatcher, mock(VideoCompositionTaskQueue.class), cancellation, properties);
+        taskService = new VideoCompositionTaskService(com.novanovastudio.TeamTestSupport.taskScope(), repository, currentUserProvider, persistenceService, mock(VideoCompositionMediaProcessor.class), mock(StoryboardVideoExportProcessor.class), mock(ComicDramaRepository.class), mock(ScriptService.class), mock(ComicDramaService.class), taskDispatcher, mock(VideoCompositionTaskQueue.class), cancellation, properties, com.novanovastudio.MediaAccessTestSupport.echo());
     }
 
     /**

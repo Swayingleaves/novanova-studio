@@ -30,19 +30,15 @@ export async function downloadMedia(media: { storageKey?: string; dataUrl?: stri
     }
     const sourceUrl = media.url?.trim() || "";
     if (/^https?:\/\//i.test(sourceUrl)) {
-        downloadRemoteMedia(sourceUrl, fileName);
+        // 只有地址时也先取回 Blob 再保存，避免把已过期的临时地址直接交给浏览器下载。
+        const blob = await fetch(sourceUrl)
+            .then((response) => (response.ok ? response.blob() : null))
+            .catch(() => null);
+        if (!blob?.size) {
+            throw new Error(translate("storage.fileAccessFailed"));
+        }
+        saveAs(blob, fileName);
         return;
     }
     throw new Error(translate("storage.mediaHasNoStorageIDOrAccessibleURL"));
-}
-
-function downloadRemoteMedia(sourceUrl: string, fileName: string) {
-    const link = document.createElement("a");
-    link.href = sourceUrl;
-    link.download = fileName;
-    link.target = "_blank";
-    link.rel = "noreferrer";
-    document.body.append(link);
-    link.click();
-    link.remove();
 }

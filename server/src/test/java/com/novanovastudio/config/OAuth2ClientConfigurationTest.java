@@ -6,7 +6,7 @@ import static org.mockito.Mockito.when;
 
 import com.novanovastudio.security.oauth2.ThirdPartyOAuth2Provider;
 import com.novanovastudio.security.oauth2.ThirdPartyOAuth2ProviderRegistry;
-import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
@@ -32,7 +32,8 @@ class OAuth2ClientConfigurationTest {
         ThirdPartyOAuth2Provider linuxDoProvider = provider("linuxDo");
         ThirdPartyOAuth2Provider googleProvider = provider("google");
         ThirdPartyOAuth2ProviderRegistry registry = mock(ThirdPartyOAuth2ProviderRegistry.class);
-        when(registry.enabledProviders()).thenReturn(List.of(linuxDoProvider, googleProvider));
+        when(registry.find("linuxDo")).thenReturn(Optional.of(linuxDoProvider));
+        when(registry.find("google")).thenReturn(Optional.of(googleProvider));
 
         ReactiveClientRegistrationRepository repository = new OAuth2ClientConfiguration().reactiveClientRegistrationRepository(registry);
 
@@ -51,7 +52,6 @@ class OAuth2ClientConfigurationTest {
     @DisplayName("没有启用第三方渠道时不返回客户端注册")
     void shouldReturnEmptyForNoEnabledProviders() {
         ThirdPartyOAuth2ProviderRegistry registry = mock(ThirdPartyOAuth2ProviderRegistry.class);
-        when(registry.enabledProviders()).thenReturn(List.of());
 
         ReactiveClientRegistrationRepository repository = new OAuth2ClientConfiguration().reactiveClientRegistrationRepository(registry);
 
@@ -67,6 +67,7 @@ class OAuth2ClientConfigurationTest {
     private ThirdPartyOAuth2Provider provider(String providerId) {
         ThirdPartyOAuth2Provider provider = mock(ThirdPartyOAuth2Provider.class);
         when(provider.providerId()).thenReturn(providerId);
+        when(provider.enabled()).thenReturn(true);
         when(provider.clientRegistration()).thenReturn(ClientRegistration.withRegistrationId(providerId)
                 .clientId(providerId + "-client-id")
                 .clientSecret("client-secret")

@@ -8,6 +8,7 @@ import com.novanovastudio.dto.PromptLibraryDtos;
 import com.novanovastudio.entity.PromptLibraryRecords;
 import com.novanovastudio.repository.PromptLibraryRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.storage.MediaAccessService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,9 @@ public class PromptLibraryService {
 
     /** 当前用户提供器 */
     private final CurrentUserProvider currentUserProvider;
+
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
 
     /**
      * 查询用户侧提示词列表。
@@ -131,7 +135,7 @@ public class PromptLibraryService {
      */
     private Mono<PromptLibraryDtos.PromptListResponse> listPrompts(PromptLibraryDtos.PromptListRequest request, boolean userOnly) {
         return Mono.zip(
-                repository.listPrompts(request).map(this::toItem).collectList(),
+                repository.listPrompts(request).concatMap(this::toItem).collectList(),
                 repository.countPrompts(request),
                 repository.listTags(userOnly).collectList(),
                 repository.listCategories(userOnly).collectList()
@@ -232,25 +236,28 @@ public class PromptLibraryService {
     }
 
     /**
-     * 转换提示词记录为响应条目。
+     * 转换提示词记录为响应条目，封面和来源地址按预览用途现签。
      *
      * @param record PromptRecord 提示词记录
-     * @return PromptItem 响应条目
+     * @return Mono<PromptItem> 响应条目
      */
-    private PromptLibraryDtos.PromptItem toItem(PromptLibraryRecords.PromptRecord record) {
-        return new PromptLibraryDtos.PromptItem(
-                record.getId(),
-                record.getTitle(),
-                record.getCoverUrl(),
-                record.getPromptContent(),
-                record.getTags(),
-                record.getCategory(),
-                record.getSourceUrl(),
-                record.getPreviewContent(),
-                record.getStatus(),
-                record.getSortOrder(),
-                record.getCreatedAt() == null ? null : record.getCreatedAt().toString(),
-                record.getUpdatedAt() == null ? null : record.getUpdatedAt().toString()
-        );
+    private Mono<PromptLibraryDtos.PromptItem> toItem(PromptLibraryRecords.PromptRecord record) {
+        return Mono.zip(
+                        mediaAccessService.signUrl(normalizeText(record.getCoverUrl()), MediaAccessService.Purpose.PREVIEW),
+                        mediaAccessService.signUrl(normalizeText(record.getSourceUrl()), MediaAccessService.Purpose.PREVIEW))
+                .map(urls -> new PromptLibraryDtos.PromptItem(
+                        record.getId(),
+                        record.getTitle(),
+                        urls.getT1(),
+                        record.getPromptContent(),
+                        record.getTags(),
+                        record.getCategory(),
+                        urls.getT2(),
+                        record.getPreviewContent(),
+                        record.getStatus(),
+                        record.getSortOrder(),
+                        record.getCreatedAt() == null ? null : record.getCreatedAt().toString(),
+                        record.getUpdatedAt() == null ? null : record.getUpdatedAt().toString()
+                ));
     }
 }

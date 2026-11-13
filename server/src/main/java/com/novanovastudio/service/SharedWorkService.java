@@ -14,6 +14,7 @@ import com.novanovastudio.security.AdminGuard;
 import com.novanovastudio.security.CurrentUser;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.TeamScope;
+import com.novanovastudio.storage.MediaAccessService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HashMap;
@@ -70,6 +71,8 @@ public class SharedWorkService {
     private final StorageBillingService storageBillingService;
     /** 仍在后台复制媒体的投稿，避免接口返回后无法确认准备是否结束。 */
     private final Set<String> activePreparations = ConcurrentHashMap.newKeySet();
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
 
     /**
      * 预览服务端实际将公开的内容，返回版本以防预览后内容被修改。
@@ -250,10 +253,27 @@ public class SharedWorkService {
      * @return 完成信号
      */
     public Mono<Void> cleanup() {
-        return repository.expirePreparations().thenMany(repository.cleanupMedia()).concatMap(asset -> storageBillingService.requestObjectDeletion(asset.getString("storageId"), asset.getString("objectKey"))
+        return repository.expirePreparations().thenMany(repository.cleanupMedia()).concatMap(asset -> deleteCover(asset)
+                .then(storageBillingService.requestObjectDeletion(asset.getString("storageId"), asset.getString("objectKey")))
                 .then(repository.markCleaned(asset.getString("shareCode"), asset.getString("assetId")))
                 .onErrorResume(error -> { log.error("清理分享媒体失败，保留记录等待重试", error); return Mono.empty(); }))
                 .then().contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
+    }
+
+    /**
+     * 登记分享视频封面的删除，没有封面时直接完成。
+     *
+     * @param asset 待清理的分享媒体
+     * @return 完成信号
+     */
+    private Mono<Void> deleteCover(JSONObject asset) {
+        String coverObjectKey = asset.getString("coverObjectKey");
+        if (coverObjectKey == null || coverObjectKey.isBlank()) return Mono.empty();
+        return storageBillingService.requestObjectDeletion(asset.getString("storageId"), coverObjectKey)
+                .onErrorResume(error -> {
+                    log.error("登记分享封面删除失败: shareCode={}, assetId={}", asset.getString("shareCode"), asset.getString("assetId"), error);
+                    return Mono.empty();
+                });
     }
 
     /** @param value 快照内容 @param replacements 媒体引用替换 @return 只更新媒体字段的独立数据，不改写恰好同名的文字或提示词 */
@@ -350,11 +370,37 @@ public class SharedWorkService {
 
     /** @param row 内部合并查询行 @return 统一首页卡片 */
     private Mono<SharedWorkDtos.FantasticItem> fantasticItem(JSONObject row) {
-        if ("official".equals(row.getString("source"))) return Mono.just(card(row, row.getString("mediaUrl"), row.getString("thumbnailUrl")));
+        if ("official".equals(row.getString("source"))) {
+            // 官方作品直接使用精选表里的媒体地址，私有桶下必须按公开页用途重签。
+            String mediaUrl = row.getString("mediaUrl") == null ? "" : row.getString("mediaUrl");
+            String thumbnailUrl = row.getString("thumbnailUrl") == null ? "" : row.getString("thumbnailUrl");
+            return Mono.zip(
+                            mediaAccessService.signUrl(mediaUrl, MediaAccessService.Purpose.PUBLIC_PAGE),
+                            mediaAccessService.signUrl(thumbnailUrl, MediaAccessService.Purpose.PUBLIC_PAGE))
+                    .map(urls -> card(row, urls.getT1(), urls.getT2()));
+        }
         return repository.media(row.getString("shareCode")).filter(asset -> "canvas".equals(row.getString("workType"))
                         ? asset.getString("mimeType").startsWith("image/") : asset.getString("mimeType").startsWith(row.getString("workType") + "/"))
-                .next().flatMap(mediaService::access).map(access -> card(row, access.url(), ""))
+                .next().flatMap(asset -> mediaService.access(asset)
+                        .flatMap(access -> coverAccess(asset).map(cover -> card(row, access.url(), cover)))
+                        .defaultIfEmpty(card(row, "", "")))
                 .defaultIfEmpty(card(row, "", ""));
+    }
+
+    /**
+     * 签发视频分享副本的封面地址，没有封面时返回空串。
+     *
+     * @param asset 分享媒体记录
+     * @return Mono&lt;String&gt; 封面地址
+     */
+    private Mono<String> coverAccess(JSONObject asset) {
+        String coverObjectKey = asset.getString("coverObjectKey");
+        if (coverObjectKey == null || coverObjectKey.isBlank()) return Mono.just("");
+        return mediaAccessService.signObject(asset.getString("storageId"), coverObjectKey, "cover.jpg", "image/jpeg",
+                        MediaAccessService.Purpose.PUBLIC_PAGE, false)
+                .map(MediaAccessService.Access::url)
+                .defaultIfEmpty("")
+                .onErrorResume(error -> Mono.just(""));
     }
 
     /** @param row 内部卡片 @param mediaUrl 已授权媒体地址 @param thumbnail 缩略图 @return 无内部存储信息的卡片 */

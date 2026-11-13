@@ -18,6 +18,7 @@ import com.novanovastudio.entity.VideoCompositionTask;
 import com.novanovastudio.repository.ComicDramaRepository;
 import com.novanovastudio.repository.VideoCompositionTaskRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.storage.MediaAccessService;
 import com.novanovastudio.task.StoryboardVideoExportProcessor;
 import com.novanovastudio.task.VideoCompositionMediaProcessor;
 import com.novanovastudio.task.VideoCompositionTaskCancellation;
@@ -115,6 +116,9 @@ public class VideoCompositionTaskService {
     /** 服务配置 */
     private final NovanovaProperties properties;
 
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
+
     /** 未完成任务恢复订阅 */
     private Disposable recoveryDisposable;
 
@@ -193,7 +197,7 @@ public class VideoCompositionTaskService {
                     return cancellation.clearCancellation(task.getId())
                             .then(repository.createTask(task))
                             .then(taskDispatcher.enqueue(task.getId()))
-                            .thenReturn(taskResponse(task));
+                            .then(taskResponse(task));
                 })))));
     }
 
@@ -228,7 +232,7 @@ public class VideoCompositionTaskService {
                     task.setErrorMessage("");
                     log.info("创建分镜导出任务: taskId={}, projectId={}, episodeId={}", task.getId(), request.projectId(), request.episodeId());
                     return cancellation.clearCancellation(task.getId()).then(repository.createTask(task))
-                            .then(taskDispatcher.enqueue(task.getId())).thenReturn(taskResponse(task));
+                            .then(taskDispatcher.enqueue(task.getId())).then(taskResponse(task));
                 }))));
     }
 
@@ -241,7 +245,7 @@ public class VideoCompositionTaskService {
         return currentUserProvider.currentUserId().flatMap(userId -> comicDramaRepository.getProject(userId, projectId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "漫剧项目不存在")))
                 .then(repository.getLatestStoryboardExport(userId, projectId))
-                .map(this::taskResponse));
+                .flatMap(this::taskResponse));
     }
 
     /**
@@ -341,7 +345,7 @@ public class VideoCompositionTaskService {
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> repository.getTask(userId, taskId)
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.videoCompositionTaskNotFound"))))
-                        .map(this::taskResponse));
+                        .flatMap(this::taskResponse));
     }
 
     /**
@@ -355,12 +359,12 @@ public class VideoCompositionTaskService {
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.videoCompositionTaskNotFound"))))
                 .flatMap(task -> {
                     if (isTerminal(task.getStatus())) {
-                        return Mono.just(taskResponse(task));
+                        return taskResponse(task);
                     }
                     return cancellation.requestCancellation(taskId)
                             .then(repository.cancelTask(userId, taskId))
                             .then(repository.getTask(userId, taskId))
-                            .map(this::taskResponse);
+                            .flatMap(this::taskResponse);
                 }));
     }
 
@@ -669,18 +673,21 @@ public class VideoCompositionTaskService {
     }
 
     /**
-     * 转换任务实体为接口响应。
+     * 转换任务实体为接口响应，结果JSON中的本系统媒体地址按预览用途现签。
      *
      * @param task VideoCompositionTask 任务实体
-     * @return VideoCompositionTaskResponse 接口响应
+     * @return Mono<VideoCompositionTaskResponse> 接口响应
      */
-    private VideoCompositionDtos.VideoCompositionTaskResponse taskResponse(VideoCompositionTask task) {
-        return new VideoCompositionDtos.VideoCompositionTaskResponse(
-                task.getId(), task.getStatus(), task.getProgress(),
-                "storyboardExport".equals(task.getTaskType()) ? List.of() : parseSourceStorageKeys(task.getSourceStorageKeys()),
-                parseJsonObject(task.getResultData()), task.getErrorMessage(), SystemMessage.stored(task.getErrorMessageKey(), task.getErrorMessageArguments()), formatTime(task.getStartedAt()),
-                formatTime(task.getCompletedAt()), formatTime(task.getCreatedAt()), formatTime(task.getUpdatedAt())
-        );
+    private Mono<VideoCompositionDtos.VideoCompositionTaskResponse> taskResponse(VideoCompositionTask task) {
+        JSONObject resultData = parseJsonObject(task.getResultData());
+        return mediaAccessService.signJson(resultData, MediaAccessService.Purpose.PREVIEW)
+                .defaultIfEmpty(resultData)
+                .map(signed -> new VideoCompositionDtos.VideoCompositionTaskResponse(
+                        task.getId(), task.getStatus(), task.getProgress(),
+                        "storyboardExport".equals(task.getTaskType()) ? List.of() : parseSourceStorageKeys(task.getSourceStorageKeys()),
+                        signed, task.getErrorMessage(), SystemMessage.stored(task.getErrorMessageKey(), task.getErrorMessageArguments()), formatTime(task.getStartedAt()),
+                        formatTime(task.getCompletedAt()), formatTime(task.getCreatedAt()), formatTime(task.getUpdatedAt())
+                ));
     }
 
     /**

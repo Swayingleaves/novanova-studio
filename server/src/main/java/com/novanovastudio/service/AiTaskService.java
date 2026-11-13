@@ -17,6 +17,7 @@ import com.novanovastudio.ai.AiProviderAdapterRegistry;
 import com.novanovastudio.ai.AiErrorDetails;
 import com.novanovastudio.ai.AiErrorSupport;
 import com.novanovastudio.ai.AiImageSizeSupport;
+import com.novanovastudio.ai.AiProviderRequestTracking;
 import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.AiTaskParameterReader;
 import com.novanovastudio.ai.AiTaskSources;
@@ -38,6 +39,7 @@ import com.novanovastudio.dto.VideoBillingConfiguration;
 import com.novanovastudio.entity.AiGenerationTask;
 import com.novanovastudio.repository.AiTaskRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.storage.MediaAccessService;
 import com.novanovastudio.task.AiTaskEventPublisher;
 import com.novanovastudio.task.AiTaskQueue;
 import com.novanovastudio.task.ModelTaskExecutionDispatcher;
@@ -49,6 +51,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -127,6 +130,9 @@ public class AiTaskService {
 
     /** 业务持久化服务 */
     private final PersistenceService persistenceService;
+
+    /** 私有存储桶读地址签发 */
+    private final MediaAccessService mediaAccessService;
 
     /** 事件发布器 */
     private final AiTaskEventPublisher eventPublisher;
@@ -382,6 +388,24 @@ public class AiTaskService {
     }
 
     /**
+     * 确认图片模型已启用图生图。自定义模型还必须有对应的调用配置。
+     *
+     * @param model 渠道与模型编码
+     * @return 校验通过信号
+     */
+    public Mono<Void> requireImageToImage(String model) {
+        return resolveModel(TYPE_IMAGE, model == null ? "" : model.trim()).flatMap(resolved -> {
+            List<String> capabilities = resolved.capabilities() == null ? List.of() : resolved.capabilities();
+            boolean configured = capabilities.contains("image-to-image")
+                    && (!resolved.isCustomModel() || (resolved.customModelConfig() != null && resolved.customModelConfig().containsKey("image-to-image")));
+            if (!configured) {
+                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.imageToImageModeIsNotConfigured")));
+            }
+            return Mono.empty();
+        });
+    }
+
+    /**
      * 旧Agent循环每次派发前复用统一权限和启用模型校验，不改变已经确定的调用参数。
      * @param model 固定的渠道与模型编码
      * @return 派发权限验证完成信号
@@ -592,7 +616,7 @@ public class AiTaskService {
      */
     public Mono<List<AiTaskDtos.AiGenerationTaskResponse>> listTasksForUser(Long userId, List<String> statuses) {
         return repository.listTasks(userId, statuses)
-                .map(this::taskResponse)
+                .concatMap(this::taskResponse)
                 .collectList();
     }
 
@@ -615,7 +639,7 @@ public class AiTaskService {
      */
     public Mono<AiTaskDtos.AiGenerationTaskResponse> getTaskForUser(Long userId, String taskId) {
         return repository.getTask(userId, taskId)
-                .map(this::taskResponse)
+                .flatMap(this::taskResponse)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.taskNotFound"))));
     }
 
@@ -632,13 +656,35 @@ public class AiTaskService {
     }
 
     /**
-     * 取消AI生成任务
+     * 取消AI生成任务，默认不放弃退款。
      *
      * @param taskId String 任务ID
      * @return Mono<AiGenerationTaskResponse> 任务响应
      */
     public Mono<AiTaskDtos.AiGenerationTaskResponse> cancelTask(String taskId) {
-        return currentUserProvider.currentUserId().flatMap(userId -> cancelTaskForUser(userId, taskId));
+        return cancelTask(taskId, false);
+    }
+
+    /**
+     * 取消AI生成任务。图片和视频请求尚未发出时退款；已经发出时必须确认放弃退款。
+     *
+     * @param taskId String 任务ID
+     * @param forfeitRefund boolean 是否确认取消已发送的请求且不退款
+     * @return Mono<AiGenerationTaskResponse> 任务响应
+     */
+    public Mono<AiTaskDtos.AiGenerationTaskResponse> cancelTask(String taskId, boolean forfeitRefund) {
+        return currentUserProvider.currentUserId().flatMap(userId -> cancelTaskForUser(userId, taskId, forfeitRefund));
+    }
+
+    /**
+     * 取消指定用户的AI生成任务，并在请求尚未发出时退款。
+     *
+     * @param userId Long 用户ID
+     * @param taskId String 任务ID
+     * @return Mono<AiGenerationTaskResponse> 任务响应
+     */
+    public Mono<AiTaskDtos.AiGenerationTaskResponse> cancelTaskForUser(Long userId, String taskId) {
+        return cancelTaskForUser(userId, taskId, false);
     }
 
     /**
@@ -646,17 +692,73 @@ public class AiTaskService {
      *
      * @param userId Long 用户ID
      * @param taskId String 任务ID
+     * @param forfeitRefund boolean 是否确认取消已发送的图片或视频请求且不退款
      * @return Mono<AiGenerationTaskResponse> 任务响应
      */
-    public Mono<AiTaskDtos.AiGenerationTaskResponse> cancelTaskForUser(Long userId, String taskId) {
+    public Mono<AiTaskDtos.AiGenerationTaskResponse> cancelTaskForUser(Long userId, String taskId, boolean forfeitRefund) {
         return repository.getTask(userId, taskId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.taskNotFound"))))
                 .flatMap(task -> {
-                    Mono<Void> update = isTerminal(task.getStatus()) ? Mono.empty() : eventPublisher.markCancelRequested(taskId)
-                            .then(finishTaskWithRefund(task, STATUS_CANCELED, SystemMessage.of("system.taskCanceled"), null))
-                            .then();
-                    return update.then(getTaskResponse(taskId, userId))
-                            .flatMap(response -> eventPublisher.publish(userId, new AiTaskDtos.AiTaskEvent(EVENT_TASK, response)).thenReturn(response));
+                    if (isTerminal(task.getStatus())) {
+                        return publishTask(task);
+                    }
+                    Map<String, Object> values = new java.util.LinkedHashMap<>();
+                    values.put("status", STATUS_CANCELED);
+                    values.put("progress", 100);
+                    SystemMessage.putTaskFields(values, SystemMessage.of("system.taskCanceled"));
+                    values.put("completed_at", OffsetDateTime.now());
+                    return repository.cancelActiveTask(taskId, values, forfeitRefund)
+                            .flatMap(providerRequestSent -> (Boolean.TRUE.equals(providerRequestSent)
+                                    ? Mono.<Void>empty()
+                                    : creditService.refundTask(task.getUserId(), taskId, task.getTaskType()))
+                                    .thenReturn(providerRequestSent))
+                            .as(transactionalOperator::transactional)
+                            .flatMap(providerRequestSent -> {
+                                log.info("取消AI生成任务: taskId={}, userId={}, forfeitRefund={}, providerRequestSent={}", taskId, userId, forfeitRefund, providerRequestSent);
+                                return eventPublisher.markCancelRequested(taskId).then(publishTask(task));
+                            })
+                            .switchIfEmpty(Mono.defer(() -> repository.getTask(userId, taskId)
+                                    .flatMap(latest -> {
+                                        if (isTerminal(latest.getStatus())) {
+                                            return publishTask(latest);
+                                        }
+                                        if (isImageOrVideo(latest.getTaskType()) && Boolean.TRUE.equals(latest.getProviderRequestSent())) {
+                                            log.info("拒绝取消已发送的图片或视频任务: taskId={}, userId={}", taskId, userId);
+                                            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.providerRequestAlreadySentCannotCancel")));
+                                        }
+                                        return publishTask(latest);
+                                    })));
+                });
+    }
+
+    /**
+     * 查询是否存在已经发往供应商且尚未结束的图片或视频任务。
+     *
+     * @param taskIds List<String> 任务ID
+     * @return Mono<Boolean> 是否存在
+     */
+    public Mono<Boolean> hasSubmittedMediaTask(List<String> taskIds) {
+        return repository.hasSubmittedMediaTask(taskIds);
+    }
+
+    /**
+     * 标记图片或视频生成请求已经发往供应商。任务已取消时返回 false，调用方不得继续发送。
+     *
+     * @param taskId String 任务ID
+     * @return Mono<Boolean> true 表示请求可以发送
+     */
+    public Mono<Boolean> markProviderRequestSent(String taskId) {
+        return repository.markProviderRequestSent(taskId)
+                .flatMap(updated -> {
+                    if (Boolean.TRUE.equals(updated)) {
+                        log.info("图片或视频生成请求已发往供应商: taskId={}", taskId);
+                        return repository.getTaskById(taskId)
+                                .flatMap(task -> publishTask(task).thenReturn(true))
+                                .defaultIfEmpty(true);
+                    }
+                    return repository.getTaskById(taskId)
+                            .map(task -> Boolean.TRUE.equals(task.getProviderRequestSent()) && !isTerminal(task.getStatus()))
+                            .defaultIfEmpty(false);
                 });
     }
 
@@ -786,7 +888,13 @@ public class AiTaskService {
                                                                 resolvedModel.imageSizeMappings()
                                                         );
                                                         return teamTaskScopeService.requireActive(task.getUserId()).then(Mono.defer(() -> adapter.execute(context))
-                                                                .contextWrite(teamContext -> teamContext.put(com.novanovastudio.security.TeamScope.IN_FLIGHT_KEY, true)));
+                                                                .contextWrite(teamContext -> {
+                                                                    reactor.util.context.Context contextWithTeam = teamContext.put(com.novanovastudio.security.TeamScope.IN_FLIGHT_KEY, true);
+                                                                    if (!isImageOrVideo(task.getTaskType())) {
+                                                                        return contextWithTeam;
+                                                                    }
+                                                                    return contextWithTeam.put(AiProviderRequestTracking.CONTEXT_KEY, (Supplier<Mono<Boolean>>) () -> markProviderRequestSent(taskId));
+                                                                }));
                                                         }));
                                                     })
                                                     .flatMap(result -> updateTaskState(taskId, STATUS_SUCCESS, 100, null, toJson(result)))
@@ -831,9 +939,19 @@ public class AiTaskService {
                         values.put("completed_at", OffsetDateTime.now());
                     }
                     return repository.updateTaskIfNotTerminal(taskId, values, resultData)
-                            .flatMap(updated -> Boolean.TRUE.equals(updated) && (STATUS_FAILED.equals(status) || STATUS_CANCELED.equals(status))
-                                    ? creditService.refundTask(task.getUserId(), taskId, task.getTaskType()).thenReturn(true)
-                                    : Mono.just(Boolean.TRUE.equals(updated)))
+                            .flatMap(updated -> {
+                                if (!Boolean.TRUE.equals(updated) || (!STATUS_FAILED.equals(status) && !STATUS_CANCELED.equals(status))) {
+                                    return Mono.just(Boolean.TRUE.equals(updated));
+                                }
+                                if (!STATUS_CANCELED.equals(status)) {
+                                    return creditService.refundTask(task.getUserId(), taskId, task.getTaskType()).thenReturn(true);
+                                }
+                                // 取消时重新读取标记：供应商请求已经发出则不退款，失败仍按原路径退款。
+                                return repository.getTaskById(taskId)
+                                        .flatMap(latest -> Boolean.TRUE.equals(latest.getProviderRequestSent())
+                                                ? Mono.just(true)
+                                                : creditService.refundTask(task.getUserId(), taskId, task.getTaskType()).thenReturn(true));
+                            })
                             .as(transactionalOperator::transactional)
                             .flatMap(updated -> Boolean.TRUE.equals(updated)
                                     ? getTaskResponse(taskId, task.getUserId())
@@ -889,7 +1007,7 @@ public class AiTaskService {
     private Mono<AiTaskDtos.AiGenerationTaskResponse> getTaskResponse(String taskId, Long userId) {
         // 按任务ID和用户ID获取最新响应。
         return repository.getTask(userId, taskId)
-                .map(this::taskResponse)
+                .flatMap(this::taskResponse)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.taskNotFound"))));
     }
 
@@ -897,10 +1015,15 @@ public class AiTaskService {
      * 转换任务响应
      *
      * @param task AiGenerationTask 任务实体
-     * @return AiGenerationTaskResponse 任务响应
+     * @return Mono<AiGenerationTaskResponse> 任务响应
      */
-    private AiTaskDtos.AiGenerationTaskResponse taskResponse(AiGenerationTask task) {
-        return new AiTaskDtos.AiGenerationTaskResponse(task.getId(), task.getTaskType(), task.getModel(), task.getProvider(), task.getStatus(), task.getProgress(), parseJson(task.getRequestData()), parseJson(task.getResultData()), empty(task.getErrorMessage()), SystemMessage.stored(task.getErrorMessageKey(), task.getErrorMessageArguments()), formatTime(task.getStartedAt()), formatTime(task.getCompletedAt()), formatTime(task.getCreatedAt()), formatTime(task.getUpdatedAt()));
+    private Mono<AiTaskDtos.AiGenerationTaskResponse> taskResponse(AiGenerationTask task) {
+        JSONObject requestData = parseJson(task.getRequestData());
+        JSONObject resultData = parseJson(task.getResultData());
+        // 结果JSON里的本系统媒体地址按预览用途现签，空结果保持原样。
+        return mediaAccessService.signJson(resultData, MediaAccessService.Purpose.PREVIEW)
+                .defaultIfEmpty(resultData)
+                .map(signed -> new AiTaskDtos.AiGenerationTaskResponse(task.getId(), task.getTaskType(), task.getModel(), task.getProvider(), task.getStatus(), task.getProgress(), requestData, signed, empty(task.getErrorMessage()), SystemMessage.stored(task.getErrorMessageKey(), task.getErrorMessageArguments()), formatTime(task.getStartedAt()), formatTime(task.getCompletedAt()), formatTime(task.getCreatedAt()), formatTime(task.getUpdatedAt()), Boolean.TRUE.equals(task.getProviderRequestSent())));
     }
 
     /**
@@ -1183,6 +1306,27 @@ public class AiTaskService {
      */
     private boolean isTerminal(String status) {
         return STATUS_SUCCESS.equals(status) || STATUS_FAILED.equals(status) || STATUS_CANCELED.equals(status);
+    }
+
+    /**
+     * 判断是否为图片或视频生成任务。
+     *
+     * @param taskType String 任务类型
+     * @return boolean 是否为图片或视频
+     */
+    private boolean isImageOrVideo(String taskType) {
+        return TYPE_IMAGE.equals(taskType) || TYPE_VIDEO.equals(taskType);
+    }
+
+    /**
+     * 发布任务最新状态。
+     *
+     * @param task AiGenerationTask 任务实体
+     * @return Mono<AiGenerationTaskResponse> 任务响应
+     */
+    private Mono<AiTaskDtos.AiGenerationTaskResponse> publishTask(AiGenerationTask task) {
+        return getTaskResponse(task.getId(), task.getUserId())
+                .flatMap(response -> eventPublisher.publish(task.getUserId(), new AiTaskDtos.AiTaskEvent(EVENT_TASK, response)).thenReturn(response));
     }
 
     /**

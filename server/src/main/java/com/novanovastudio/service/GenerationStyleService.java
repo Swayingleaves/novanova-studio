@@ -7,6 +7,7 @@ import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.entity.GenerationStyleRecords;
 import com.novanovastudio.repository.GenerationStyleRepository;
+import com.novanovastudio.storage.MediaAccessService;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -41,6 +42,9 @@ public class GenerationStyleService {
     /** 风格仓储。 */
     private final GenerationStyleRepository repository;
 
+    /** 私有存储桶读地址签发。 */
+    private final MediaAccessService mediaAccessService;
+
     /**
      * 查询用户侧启用风格。
      *
@@ -51,7 +55,7 @@ public class GenerationStyleService {
         String type = normalizeGenerationType(generationType);
         GenerationStyleDtos.StyleListRequest request = new GenerationStyleDtos.StyleListRequest("", type, null, 1, MAX_PAGE_SIZE);
         return repository.listStyles(request, true)
-                .map(this::toOption)
+                .concatMap(this::toOption)
                 .collectList()
                 .map(GenerationStyleDtos.StyleOptionListResponse::new);
     }
@@ -64,7 +68,7 @@ public class GenerationStyleService {
      */
     public Mono<GenerationStyleDtos.StyleListResponse> listAdminStyles(GenerationStyleDtos.StyleListRequest request) {
         GenerationStyleDtos.StyleListRequest normalized = normalizeListRequest(request);
-        return Mono.zip(repository.listStyles(normalized, false).map(this::toItem).collectList(), repository.countStyles(normalized, false))
+        return Mono.zip(repository.listStyles(normalized, false).concatMap(this::toItem).collectList(), repository.countStyles(normalized, false))
                 .map(tuple -> new GenerationStyleDtos.StyleListResponse(tuple.getT1(), tuple.getT2()));
     }
 
@@ -274,15 +278,17 @@ public class GenerationStyleService {
                 status, Math.max(1, source.page()), Math.min(MAX_PAGE_SIZE, Math.max(1, source.pageSize())));
     }
 
-    /** 风格记录转用户选项。 */
-    private GenerationStyleDtos.StyleOption toOption(GenerationStyleRecords.StyleRecord record) {
-        return new GenerationStyleDtos.StyleOption(record.getId(), record.getName(), record.getGenerationType(), record.getCoverUrl(), record.getCategory());
+    /** 风格记录转用户选项，封面按预览用途现签。 */
+    private Mono<GenerationStyleDtos.StyleOption> toOption(GenerationStyleRecords.StyleRecord record) {
+        return mediaAccessService.signUrl(record.getCoverUrl() == null ? "" : record.getCoverUrl(), MediaAccessService.Purpose.PREVIEW)
+                .map(url -> new GenerationStyleDtos.StyleOption(record.getId(), record.getName(), record.getGenerationType(), url, record.getCategory()));
     }
 
-    /** 风格记录转管理端条目。 */
-    private GenerationStyleDtos.StyleItem toItem(GenerationStyleRecords.StyleRecord record) {
-        return new GenerationStyleDtos.StyleItem(record.getId(), record.getGenerationType(), record.getName(), record.getStylePrompt(), record.getCoverUrl(), record.getCategory(),
-                record.getStatus(), record.getSortOrder(), formatTime(record.getCreatedAt()), formatTime(record.getUpdatedAt()));
+    /** 风格记录转管理端条目，封面按预览用途现签。 */
+    private Mono<GenerationStyleDtos.StyleItem> toItem(GenerationStyleRecords.StyleRecord record) {
+        return mediaAccessService.signUrl(record.getCoverUrl() == null ? "" : record.getCoverUrl(), MediaAccessService.Purpose.PREVIEW)
+                .map(url -> new GenerationStyleDtos.StyleItem(record.getId(), record.getGenerationType(), record.getName(), record.getStylePrompt(), url, record.getCategory(),
+                        record.getStatus(), record.getSortOrder(), formatTime(record.getCreatedAt()), formatTime(record.getUpdatedAt())));
     }
 
     /** 风格记录转快照。 */

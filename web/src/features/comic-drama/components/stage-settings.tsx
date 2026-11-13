@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { App, Button, Card, Form, Input, InputNumber, Radio, Select, Tag } from "antd";
 import { Check, RotateCcw, Save } from "lucide-react";
 
+import { ProjectCoverField } from "@/features/script/components/project-cover-field";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaProjectType, ComicDramaSettings } from "../types";
 
@@ -59,6 +60,7 @@ export function StageSettings() {
     const { message } = App.useApp();
     const workspace = useComicDramaStore((state) => state.workspace);
     const updateSettings = useComicDramaStore((state) => state.updateSettings);
+    const updateCover = useComicDramaStore((state) => state.updateCover);
 
     const [form] = Form.useForm<ComicDramaSettings>();
     const [saving, setSaving] = useState(false);
@@ -108,6 +110,8 @@ export function StageSettings() {
                         {translate("comicDrama.saveSettings")}</Button>
                 </div>
             </header>
+
+            <ProjectCoverField className="max-w-4xl" namespace="comicDrama" coverUrl={workspace.scriptProject?.coverUrl || ""} confirmText={translate("comicDrama.coverUpdated")} onChange={updateCover} />
 
             <Form form={form} layout="vertical" initialValues={workspace.settings} className="max-w-4xl">
                 <div className="grid gap-6 md:grid-cols-2">

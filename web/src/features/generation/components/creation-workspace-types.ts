@@ -37,6 +37,8 @@ export type CreationThreadRound = {
     userAttachments?: ReactNode;
     thinkings?: ThinkingBlockState[];
     activeThinkingId?: string;
+    /** 思考已结束或尚未开始，请求仍在进行且回复还没到达。 */
+    awaitingReply?: boolean;
     activities?: AgentActivityState[];
     statusText: string;
     assistantText?: string;
@@ -98,8 +100,14 @@ export type CreationMessageThreadProps = {
     onActionReply?: (value: string) => void;
     /** 用户点击修改提示词选项时回调，第二个参数为当前助手消息中的提示词草案。 */
     onPromptEdit?: (value: string, assistantText?: string, draftedPrompts?: Record<string, string>) => void;
-    /** 用户点击 action=upload_image 的 choice 选项时回调，触发页面参考图上传 */
+    /** 用户点击上传图片动作时回调，打开图片文件选择，不发送消息 */
     onUploadImage?: () => void;
+    /** 用户点击上传视频动作时回调，打开视频文件选择，不发送消息 */
+    onUploadVideo?: () => void;
+    /** 用户点击 action=adjust_video_duration 时回调，value 为对话要求的秒数，不发送消息 */
+    onAdjustDuration?: (seconds: string) => void;
+    /** 用户点击 action=ask_user_model_config 时回调，只打开更多设置，不发送消息 */
+    onOpenModelSettings?: () => void;
 };
 
 export type CreationComposerProps = {
@@ -121,6 +129,8 @@ export type CreationComposerProps = {
     /** 当前对话模式：agent 由主 Agent 规划优化，chat 直接提交生成。 */
     creationMode?: CreationMode;
     onCreationModeChange?: (mode: CreationMode) => void;
+    /** 从技能市场「去创作」进入后锁定 Agent，不能切到 Chat。 */
+    chatModeLocked?: boolean;
     running: boolean;
     queued?: boolean;
     canSubmit: boolean;

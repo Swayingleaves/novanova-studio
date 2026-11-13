@@ -5,6 +5,7 @@ import com.novanovastudio.common.SystemMessage;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import com.novanovastudio.ai.AiProviderRequestTracking;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.AiTaskDtos;
@@ -79,8 +80,9 @@ public class AiHttpClient {
      * @return Mono<JSONObject> 响应JSON
      */
     public Mono<JSONObject> sendJsonRequest(AiTaskDtos.AiChannelConfig channel, String method, String path, Object payload) {
-        return callBlocking(() -> {
+        return Mono.defer(() -> {
             String normalizedMethod = normalizeRequestMethod(method);
+            return ensureProviderRequestAccepted(normalizedMethod).then(callBlocking(() -> {
             String url = buildAiUrl(channel.baseUrl(), path);
             String jsonBody = "POST".equals(normalizedMethod) ? AiJsonUtils.toJson(payload) : "";
             log.info("AI请求: {} {} body={}", normalizedMethod, url, jsonBody.length() > 2000 ? jsonBody.substring(0, 2000) + "..." : jsonBody);
@@ -97,6 +99,7 @@ public class AiHttpClient {
             log.info("AI响应: {}", AiJsonUtils.formatResponseForLog(json));
             AiJsonUtils.validateEnvelope(json, stage);
             return json;
+            }));
         });
     }
 
@@ -283,7 +286,7 @@ public class AiHttpClient {
      * @return Mono<JSONObject> 响应JSON
      */
     public Mono<JSONObject> sendMultipartRequest(AiTaskDtos.AiChannelConfig channel, String path, String boundary, List<MultipartPart> parts) {
-        return callBlocking(() -> {
+        return ensureProviderRequestAccepted("POST").then(callBlocking(() -> {
             HttpRequest request = baseBearerRequest(channel, path)
                     .POST(multipartPublisher(boundary, parts))
                     .header("Content-Type", "multipart/form-data; boundary=" + boundary)
@@ -295,7 +298,7 @@ public class AiHttpClient {
             JSONObject json = AiJsonUtils.parseJson(response.body());
             AiJsonUtils.validateEnvelope(json, "submission");
             return json;
-        });
+        }));
     }
 
     /**
@@ -329,7 +332,7 @@ public class AiHttpClient {
      * @return Mono<GeneratedBinary> 二进制响应
      */
     public Mono<GeneratedBinary> postJsonForBinary(AiTaskDtos.AiChannelConfig channel, String path, Object payload, String defaultMimeType, String errorPrefix) {
-        return callBlocking(() -> {
+        return ensureProviderRequestAccepted("POST").then(callBlocking(() -> {
             HttpRequest request = baseBearerRequest(channel, path)
                     .POST(HttpRequest.BodyPublishers.ofString(AiJsonUtils.toJson(payload)))
                     .header("Content-Type", "application/json")
@@ -341,7 +344,7 @@ public class AiHttpClient {
             }
             String mimeType = response.headers().firstValue("Content-Type").orElse(defaultMimeType);
             return new GeneratedBinary(response.body(), mimeType);
-        });
+        }));
     }
 
     /**
@@ -354,11 +357,12 @@ public class AiHttpClient {
      * @return Mono<JSONObject> 响应JSON
      */
     public Mono<JSONObject> sendBearerJsonUrlRequest(AiTaskDtos.AiChannelConfig channel, String method, String url, Object payload) {
-        return callBlocking(() -> {
+        return Mono.defer(() -> {
+            String normalizedMethod = normalizeRequestMethod(method);
+            return ensureProviderRequestAccepted(normalizedMethod).then(callBlocking(() -> {
             if (!StringUtils.hasText(channel.apiKey())) {
                 throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.serverAIChannelHasNoAPIKey"));
             }
-            String normalizedMethod = normalizeRequestMethod(method);
             String jsonBody = "POST".equals(normalizedMethod) ? AiJsonUtils.toJson(payload) : "";
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
                     .timeout(Duration.ofMinutes(10))
@@ -372,6 +376,7 @@ public class AiHttpClient {
             JSONObject json = AiJsonUtils.parseJson(response.body());
             AiJsonUtils.validateEnvelope(json, requestStage(normalizedMethod));
             return json;
+            }));
         });
     }
 
@@ -414,7 +419,7 @@ public class AiHttpClient {
      * @return Mono<JSONObject> 响应JSON
      */
     public Mono<JSONObject> sendGeminiJsonRequest(AiTaskDtos.AiChannelConfig channel, String path, Object payload) {
-        return callBlocking(() -> {
+        return ensureProviderRequestAccepted("POST").then(callBlocking(() -> {
             if (!StringUtils.hasText(channel.apiKey())) {
                 throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.serverAIChannelHasNoAPIKey"));
             }
@@ -438,7 +443,7 @@ public class AiHttpClient {
                 throw AiErrorSupport.providerException(400, json.toJSONString(), "submission");
             }
             return json;
-        });
+        }));
     }
 
     /**
@@ -449,6 +454,22 @@ public class AiHttpClient {
      */
     private static String requestStage(String method) {
         return "POST".equals(method) ? "submission" : "polling";
+    }
+
+    /**
+     * 图片和视频任务在发出供应商请求前先落库。任务已经取消时不再发送。
+     *
+     * @param method String 规范化HTTP方法
+     * @return Mono<Void> 可以继续发送
+     */
+    private Mono<Void> ensureProviderRequestAccepted(String method) {
+        if (!"POST".equals(method)) {
+            return Mono.empty();
+        }
+        return AiProviderRequestTracking.markIfPresent()
+                .flatMap(accepted -> Boolean.TRUE.equals(accepted)
+                        ? Mono.empty()
+                        : Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCanceled"))));
     }
 
     /**

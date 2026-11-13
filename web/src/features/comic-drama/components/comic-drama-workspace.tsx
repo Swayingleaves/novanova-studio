@@ -263,7 +263,8 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
     return (
         <main className="studio-page flex h-full min-h-0 flex-col overflow-hidden">
             {/* Top Workspace Header */}
-            <header className="flex flex-wrap items-center gap-3 border-b border-[var(--studio-line)] bg-[var(--studio-panel-solid)] py-2.5 pl-4 pr-[260px]">
+            {/* 右侧预留全局浮动操作区的实测宽度，避免和购买积分、社群那一排重叠 */}
+            <header className="flex flex-wrap items-center gap-3 border-b border-[var(--studio-line)] bg-[var(--studio-panel-solid)] py-2.5 pl-4 pr-[var(--studio-floating-actions-width,20rem)]">
                 <Button
                     type="text"
                     aria-label={translate("comicDrama.backToComicDramaLibrary")}
