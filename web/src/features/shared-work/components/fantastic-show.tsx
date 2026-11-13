@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Empty, Input, Modal, Pagination, Tag } from "antd";
-import { Heart, Play, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Alert, App, Button, Empty, Input, Modal, Tag } from "antd";
+import { Heart, Loader2, Play, Search } from "lucide-react";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { FANTASTIC_SHOW_CATEGORIES } from "@/features/homepage/lib/fantastic-show";
 import { loadHomepageMedia } from "@/features/homepage/lib/homepage-media-cache";
@@ -10,7 +10,10 @@ import type { CanvasDocument } from "@/features/canvas/types";
 import { SharedCanvasViewer } from "@/features/shared-work/components/shared-content";
 import { getSharedWork, listFantasticWorks, sharedWorkTypeNames, toggleFantasticLike, type FantasticWork, type SharedSnapshot, type SharedWorkDetail } from "@/services/api/shared-work";
 
-/** 首页官方作品与用户作品统一由服务端筛选、排序和分页。 */
+/**
+ * 首页官方作品与用户作品统一由服务端筛选、排序和分页；
+ * 前端把每一页追加进瀑布流，滚动到底部时继续取下一页，不再展示分页器。
+ */
 export function FantasticShow() {
     const { message } = App.useApp();
     const [type, setType] = useState("");
@@ -19,12 +22,17 @@ export function FantasticShow() {
     const [search, setSearch] = useState("");
     const [page, setPage] = useState(1);
     const [items, setItems] = useState<FantasticWork[]>([]);
-    const [total, setTotal] = useState(0);
+    const [hasMore, setHasMore] = useState(true);
     const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
     const [error, setError] = useState("");
     const [revision, setRevision] = useState(0);
+    const [retry, setRetry] = useState(0);
     const [liking, setLiking] = useState<string[]>([]);
+    const sentinelRef = useRef<HTMLDivElement>(null);
     const lastLoadedAt = useRef(0);
+    const columnCount = useSyncExternalStore(subscribeColumnQueries, getColumnCount, () => 2);
+    const columns = useMemo(() => distributeColumns(items, columnCount), [items, columnCount]);
     useEffect(() => {
         const timer = setTimeout(() => {
             setSearch(keyword.trim());
@@ -34,28 +42,53 @@ export function FantasticShow() {
     }, [keyword]);
     useEffect(() => {
         const controller = new AbortController();
-        setLoading(true);
+        const firstPage = page === 1;
+        if (firstPage) {
+            setItems([]);
+            setHasMore(true);
+            setLoading(true);
+        } else {
+            setLoadingMore(true);
+        }
         setError("");
         lastLoadedAt.current = Date.now();
         void listFantasticWorks(type, category, search, page, controller.signal)
             .then((result) => {
-                if (!controller.signal.aborted) {
-                    setItems(result.items);
-                    setTotal(result.total);
-                }
+                if (controller.signal.aborted) return;
+                // 服务端按点赞数排序，翻页期间点赞变化可能让同一条作品重复出现，追加时按 id 去重。
+                setItems((list) => {
+                    const seen = new Set(list.map((entry) => entry.id));
+                    return firstPage ? result.items : [...list, ...result.items.filter((entry) => !seen.has(entry.id))];
+                });
+                setHasMore(result.items.length > 0 && page * result.pageSize < result.total);
             })
             .catch((failure) => {
                 if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "作品暂不可用");
             })
             .finally(() => {
-                if (!controller.signal.aborted) setLoading(false);
+                if (controller.signal.aborted) return;
+                setLoading(false);
+                setLoadingMore(false);
             });
         return () => controller.abort();
-    }, [type, category, search, page, revision]);
-    // 作品墙的媒体是临时地址，长时间停留或回到前台时低频重新拉取一次。
+    }, [type, category, search, page, revision, retry]);
+    // 哨兵进入滚动视口就追加下一页；每批数据落地后重建观察器，视口没填满时会自动继续加载。
+    useEffect(() => {
+        const node = sentinelRef.current;
+        if (!node || !hasMore || loading || loadingMore || error) return;
+        const observer = new IntersectionObserver((entries) => {
+            if (entries.some((entry) => entry.isIntersecting)) setPage((value) => value + 1);
+        }, { root: findScrollRoot(node), rootMargin: "600px 0px" });
+        observer.observe(node);
+        return () => observer.disconnect();
+    }, [hasMore, loading, loadingMore, error, items.length, columnCount]);
+    // 作品墙的媒体是临时地址，长时间停留或回到前台时低频重新拉取一次（回到首批，继续滚动会补齐后续页）。
     useEffect(() => {
         const refreshIfStale = () => {
-            if (document.visibilityState === "visible" && Date.now() - lastLoadedAt.current > 15 * 60_000) setRevision((value) => value + 1);
+            if (document.visibilityState === "visible" && Date.now() - lastLoadedAt.current > 15 * 60_000) {
+                setPage(1);
+                setRevision((value) => value + 1);
+            }
         };
         const timer = window.setInterval(refreshIfStale, 20 * 60_000);
         document.addEventListener("visibilitychange", refreshIfStale);
@@ -122,31 +155,94 @@ export function FantasticShow() {
                     <Input prefix={<Search className="size-4" />} type="search" aria-label="搜索作品或作者" placeholder="搜索作品或作者" maxLength={200} value={keyword} onChange={(event) => setKeyword(event.target.value)} allowClear />
                 </div>
             </div>
-            {error ? (
-                <Alert className="mt-4" type="error" showIcon title={error} action={<Button onClick={() => setRevision((value) => value + 1)}>重试</Button>} />
-            ) : loading ? (
-                <div className={workWallClassName}>
+            {error && !items.length ? (
+                <Alert className="mt-4" type="error" showIcon title={error} action={<Button onClick={() => setRetry((value) => value + 1)}>重试</Button>} />
+            ) : null}
+            {loading ? (
+                <div className="mt-4 grid grid-cols-2 items-start gap-3 sm:grid-cols-3 xl:grid-cols-5">
                     {["3/4", "16/9", "9/16", "1/1", "4/5", "16/10", "3/4", "9/16"].map((ratio, index) => (
-                        <div key={index} className="studio-skeleton mb-3 break-inside-avoid rounded-xl" style={{ aspectRatio: ratio }} />
+                        <div key={index} className="studio-skeleton rounded-xl" style={{ aspectRatio: ratio }} />
                     ))}
                 </div>
             ) : items.length ? (
-                <div className={workWallClassName}>
-                    {items.map((item) => (
-                        <FantasticCard key={`${item.source}:${item.id}`} item={item} pending={liking.includes(item.id)} onToggleLike={() => toggleLike(item)} />
+                <div className="mt-4 flex items-start gap-3">
+                    {columns.map((column, index) => (
+                        <div key={index} className="flex min-w-0 flex-1 flex-col gap-3">
+                            {column.map((item) => (
+                                <FantasticCard key={item.id} item={item} pending={liking.includes(item.id)} onToggleLike={() => toggleLike(item)} />
+                            ))}
+                        </div>
                     ))}
                 </div>
-            ) : (
+            ) : error ? null : (
                 <div className="py-10">
                     <Empty description="暂无符合条件的作品" />
                 </div>
             )}
-            {total > 8 ? <Pagination className="mt-6" current={page} pageSize={8} total={total} showSizeChanger={false} onChange={setPage} align="center" /> : null}
+            <div ref={sentinelRef} aria-hidden="true" className="h-px" />
+            {loadingMore ? (
+                <div className="mt-5 flex items-center justify-center gap-2 text-xs text-[var(--studio-muted)]">
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    正在加载更多作品
+                </div>
+            ) : null}
+            {error && items.length ? (
+                <div className="mt-5 flex flex-col items-center gap-2 text-xs text-[var(--studio-muted)]">
+                    <span>{error}</span>
+                    <Button size="small" onClick={() => setRetry((value) => value + 1)}>重试加载</Button>
+                </div>
+            ) : null}
+            {!loading && !loadingMore && !hasMore && items.length > 8 ? (
+                <p className="mt-5 text-center text-xs text-[var(--studio-faint)]">已经看完全部作品</p>
+            ) : null}
         </section>
     );
 }
 
-const workWallClassName = "mt-4 columns-2 gap-3 sm:columns-3 xl:columns-5";
+/** 与原 CSS 多列断点保持一致：2 / 3 / 5 列。 */
+const columnQueries = ["(min-width: 640px)", "(min-width: 1280px)"] as const;
+
+function subscribeColumnQueries(onChange: () => void) {
+    const lists = columnQueries.map((query) => window.matchMedia(query));
+    lists.forEach((list) => list.addEventListener("change", onChange));
+    return () => lists.forEach((list) => list.removeEventListener("change", onChange));
+}
+
+function getColumnCount() {
+    if (typeof window === "undefined") return 2;
+    if (window.matchMedia(columnQueries[1]).matches) return 5;
+    if (window.matchMedia(columnQueries[0]).matches) return 3;
+    return 2;
+}
+
+/**
+ * 按卡片占位宽高比估算高度，依次放进当前最短的列。
+ * <p>
+ * 分配对前缀稳定：追加一页时已展示卡片的列归属不会变化，不会像 CSS 多列那样整墙重排、留出大片空白。
+ */
+function distributeColumns(items: FantasticWork[], count: number) {
+    const columns: FantasticWork[][] = Array.from({ length: count }, () => []);
+    const heights = Array.from({ length: count }, () => 0);
+    for (const item of items) {
+        let target = 0;
+        for (let index = 1; index < count; index++) if (heights[index] < heights[target]) target = index;
+        columns[target].push(item);
+        // 以列宽为 1：图片默认 3/4、视频与画布 16/9，另加标题与作者两行。
+        heights[target] += (item.workType === "image" ? 4 / 3 : 9 / 16) + 0.14;
+    }
+    return columns;
+}
+
+/** 首页内容在独立滚动容器里，观察器必须以它为 root，rootMargin 的预加载才会生效。 */
+function findScrollRoot(node: Element) {
+    let parent = node.parentElement;
+    while (parent) {
+        const overflowY = getComputedStyle(parent).overflowY;
+        if ((overflowY === "auto" || overflowY === "scroll") && parent.scrollHeight > parent.clientHeight + 1) return parent;
+        parent = parent.parentElement;
+    }
+    return null;
+}
 
 function FilterText({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
     return (
@@ -216,7 +312,7 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
     return (
         <>
             <article
-                className="mb-3 min-w-0 cursor-pointer break-inside-avoid rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--studio-action)]"
+                className="min-w-0 cursor-pointer rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--studio-action)]"
                 role="button"
                 tabIndex={0}
                 aria-label={`预览 ${item.title}`}

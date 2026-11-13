@@ -75,7 +75,7 @@ OAuth2 第三方登录（Google、linux.do）的启用状态与凭据从 `.env` 
 | 表 | 核心字段与用途 | 查询索引 |
 | --- | --- | --- |
 | `shared_works` | `share_code` 为公开标识；`user_id`、`team_id` 保存发布归属；`source_type`、`source_id` 只用于内部溯源；`snapshot_data` 保存公开字段白名单快照；`work_type` 区分图片、视频、画布；`request_id` 防重复投稿 | 已发布作品按 `published_at` 倒序的部分索引；空间、作者、创建时间索引；空间、状态、创建时间审核队列索引；空间、作者、请求标识唯一约束 |
-| `shared_work_media` | 分享内 `asset_id` 与 `share_code` 联合主键；`storage_id`、`object_key`、`file_bytes` 记录独立私有副本；`cleaned_at` 标记已交给异步删除队列 | 存储配置、对象键唯一约束 |
+| `shared_work_media` | 分享内 `asset_id` 与 `share_code` 联合主键；`storage_id`、`object_key`、`file_bytes` 记录独立私有副本；`cover_object_key`、`cover_mime_type` 记录视频副本封面，非视频或截帧失败时为空（企业版 V95，社区版 V98）；`cleaned_at` 标记已交给异步删除队列 | 存储配置、对象键唯一约束 |
 | `shared_work_reviews` | 记录操作人、前后状态、原因、操作时间，审核状态变更与记录写入在同一事务 | 分享标识、操作序号索引 |
 | `shared_work_copy_jobs` | 在上传前持久化目标媒体清单，复制全部完成后原子保存个人画布并标记完成，失败或进程中断后按清单回收 | 未完成任务更新时间部分索引 |
 | `fantastic_work_likes` | `target_key` 为首页内容标识（`official:精选内容ID` 或 `user:分享标识`），`user_id` 与内容组成联合主键，保证每人每内容仅一条点赞记录，取消点赞直接删除该行 | 内容标识、用户联合主键，按内容统计点赞总数 |

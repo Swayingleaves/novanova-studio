@@ -74,8 +74,8 @@ class DatabaseMigrationHistoryIntegrationTest {
         List<String> history = readHistory(38);
 
         Flyway upgraded = migration("classpath:db/migration-community", "latest");
-        Assertions.assertEquals(51, upgraded.migrate().migrationsExecuted);
-        Assertions.assertEquals(89, upgraded.info().applied().length);
+        Assertions.assertEquals(59, upgraded.migrate().migrationsExecuted);
+        Assertions.assertEquals(97, upgraded.info().applied().length);
         Assertions.assertEquals(history, readHistory(38));
         assertUserPreserved();
 
