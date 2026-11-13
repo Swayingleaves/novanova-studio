@@ -10,10 +10,20 @@ const inflight = new Map<string, Promise<Blob | null>>();
 /**
  * 首页媒体缓存键。
  * <p>
- * 服务端返回的是临时签名地址，去掉查询参数后同一个对象始终用同一把缓存键，重新签名也能命中。
+ * 服务端返回的是临时签名地址，签名参数每次都可能变化，必须丢弃；但缩略图与原图的对象键相同，
+ * 只靠图像处理参数区分，所以这些参数必须保留，否则缩略图会污染原图缓存。
  */
 export function homepageMediaCacheKey(url?: string) {
-    return url?.trim().split("?")[0] || "";
+    const value = url?.trim();
+    if (!value) return "";
+    const separator = value.indexOf("?");
+    if (separator < 0) return value;
+    const base = value.slice(0, separator);
+    const processing = value.slice(separator + 1).split("&").filter((part) => {
+        const name = decodeURIComponent(part.split("=")[0]);
+        return name.startsWith("x-oss-process") || name.startsWith("imageMogr2") || name.startsWith("imageView2");
+    });
+    return processing.length ? `${base}?${processing.join("&")}` : base;
 }
 
 /**

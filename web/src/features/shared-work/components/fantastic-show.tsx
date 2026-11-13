@@ -192,11 +192,12 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
     const isVideo = item.workType === "video";
     const isCanvas = item.workType === "canvas";
     const [previewing, setPreviewing] = useState(false);
-    const [hovering, setHovering] = useState(false);
+    const [playing, setPlaying] = useState(false);
     const [ratio, setRatio] = useState<number | null>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
     const cover = item.thumbnailUrl?.trim() || "";
-    const showVideo = isVideo && (!cover || hovering);
+    // 卡片本身只展示封面，鼠标停在中部播放按钮上才挂载并播放视频。
+    const showVideo = isVideo && (!cover || playing);
     const openPreview = () => setPreviewing(true);
     const stopVideo = () => {
         const video = videoRef.current;
@@ -207,12 +208,11 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
     const rememberRatio = (width: number, height: number) => {
         if (width > 0 && height > 0) setRatio(width / height);
     };
-    // 悬停时才挂载视频并播放；没有封面时只能保留视频首帧，保持原有行为。
     useEffect(() => {
-        if (!hovering || !showVideo) return;
+        if (!playing || !showVideo) return;
         if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
         void videoRef.current?.play().catch(() => undefined);
-    }, [hovering, showVideo]);
+    }, [playing, showVideo]);
     return (
         <>
             <article
@@ -234,9 +234,8 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
                 <div
                     className="group relative overflow-hidden rounded-xl bg-[var(--studio-media)]"
                     style={{ aspectRatio: isCanvas ? 16 / 9 : ratio ?? (isVideo ? 16 / 9 : 3 / 4) }}
-                    onMouseEnter={() => setHovering(true)}
                     onMouseLeave={() => {
-                        setHovering(false);
+                        setPlaying(false);
                         stopVideo();
                     }}
                 >
@@ -246,15 +245,20 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
                         <video ref={videoRef} src={item.mediaUrl} poster={cover || undefined} muted loop playsInline preload="metadata" className="pointer-events-none size-full object-cover" onLoadedMetadata={(event) => rememberRatio(event.currentTarget.videoWidth, event.currentTarget.videoHeight)} />
                     ) : (
                         <CachedWorkMedia
-                            src={isVideo ? cover : item.mediaUrl}
+                            src={isVideo ? cover : item.thumbnailUrl?.trim() || item.mediaUrl}
                             className="size-full object-cover transition-transform group-hover:scale-[1.025] motion-reduce:transform-none"
                             onReady={rememberRatio}
                         />
                     )}
                     {isVideo ? (
-                        <span className="pointer-events-none absolute inset-0 grid place-items-center transition group-hover:opacity-0 motion-reduce:transition-none">
-                            <span className="grid size-12 place-items-center rounded-full border border-white/35 bg-black/55 text-white backdrop-blur-sm">
-                                <Play className="size-5 fill-current" aria-hidden="true" />
+                        <span className={`pointer-events-none absolute inset-0 grid place-items-center transition motion-reduce:transition-none ${playing ? "opacity-0" : ""}`}>
+                            <span
+                                className="pointer-events-auto grid size-12 cursor-pointer place-items-center rounded-full border border-white/35 bg-black/55 text-white backdrop-blur-sm"
+                                onMouseEnter={() => setPlaying(true)}
+                                onMouseLeave={() => setPlaying(false)}
+                                aria-hidden="true"
+                            >
+                                <Play className="size-5 fill-current" />
                             </span>
                         </span>
                     ) : null}

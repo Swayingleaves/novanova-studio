@@ -89,6 +89,8 @@ public class MediaAccessService {
         LIST_THUMBNAIL,
         /** 卡片封面。支持的服务商在读取时把长边缩到 960 像素，供技能市场等大卡片展示 */
         CARD_COVER,
+        /** 首页作品墙缩略图。支持的服务商在读取时把长边缩到 720 像素，点击后再读取原图 */
+        HOME_CARD,
         /** 附件下载 */
         DOWNLOAD,
         /** 第三方模型拉取参考素材 */
@@ -335,6 +337,7 @@ public class MediaAccessService {
         return switch (purpose) {
             case LIST_THUMBNAIL -> 160;
             case CARD_COVER -> 960;
+            case HOME_CARD -> 720;
             default -> 0;
         };
     }

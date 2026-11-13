@@ -374,30 +374,42 @@ public class SharedWorkService {
             // 官方作品直接使用精选表里的媒体地址，私有桶下必须按公开页用途重签。
             String mediaUrl = row.getString("mediaUrl") == null ? "" : row.getString("mediaUrl");
             String thumbnailUrl = row.getString("thumbnailUrl") == null ? "" : row.getString("thumbnailUrl");
+            // 图片精选大多没有单独配封面，直接对原图按卡片尺寸缩放；视频不能叠加图片处理参数，保持空由前端回退。
+            String cardCover = thumbnailUrl.isBlank() && "image".equals(row.getString("workType")) ? mediaUrl : thumbnailUrl;
             return Mono.zip(
                             mediaAccessService.signUrl(mediaUrl, MediaAccessService.Purpose.PUBLIC_PAGE),
-                            mediaAccessService.signUrl(thumbnailUrl, MediaAccessService.Purpose.PUBLIC_PAGE))
+                            mediaAccessService.signUrl(cardCover, MediaAccessService.Purpose.HOME_CARD))
                     .map(urls -> card(row, urls.getT1(), urls.getT2()));
         }
         return repository.media(row.getString("shareCode")).filter(asset -> "canvas".equals(row.getString("workType"))
                         ? asset.getString("mimeType").startsWith("image/") : asset.getString("mimeType").startsWith(row.getString("workType") + "/"))
                 .next().flatMap(asset -> mediaService.access(asset)
-                        .flatMap(access -> coverAccess(asset).map(cover -> card(row, access.url(), cover)))
+                        .flatMap(access -> cardThumbnail(asset).map(cover -> card(row, access.url(), cover)))
                         .defaultIfEmpty(card(row, "", "")))
                 .defaultIfEmpty(card(row, "", ""));
     }
 
     /**
-     * 签发视频分享副本的封面地址，没有封面时返回空串。
+     * 签发首页卡片缩略图地址。
+     * <p>
+     * 视频用分享时截取的 720 封面；图片与画布对原对象按卡片尺寸缩放；其余媒体没有缩略图。
      *
      * @param asset 分享媒体记录
-     * @return Mono&lt;String&gt; 封面地址
+     * @return Mono&lt;String&gt; 缩略图地址，没有可用缩略图时为空串
      */
-    private Mono<String> coverAccess(JSONObject asset) {
+    private Mono<String> cardThumbnail(JSONObject asset) {
         String coverObjectKey = asset.getString("coverObjectKey");
-        if (coverObjectKey == null || coverObjectKey.isBlank()) return Mono.just("");
-        return mediaAccessService.signObject(asset.getString("storageId"), coverObjectKey, "cover.jpg", "image/jpeg",
-                        MediaAccessService.Purpose.PUBLIC_PAGE, false)
+        if (coverObjectKey != null && !coverObjectKey.isBlank()) {
+            return mediaAccessService.signObject(asset.getString("storageId"), coverObjectKey, "cover.jpg", "image/jpeg",
+                            MediaAccessService.Purpose.PUBLIC_PAGE, false)
+                    .map(MediaAccessService.Access::url)
+                    .defaultIfEmpty("")
+                    .onErrorResume(error -> Mono.just(""));
+        }
+        String mimeType = asset.getString("mimeType");
+        if (mimeType == null || !mimeType.startsWith("image/")) return Mono.just("");
+        return mediaAccessService.signObject(asset.getString("storageId"), asset.getString("objectKey"),
+                        asset.getString("fileName"), mimeType, MediaAccessService.Purpose.HOME_CARD, false)
                 .map(MediaAccessService.Access::url)
                 .defaultIfEmpty("")
                 .onErrorResume(error -> Mono.just(""));
