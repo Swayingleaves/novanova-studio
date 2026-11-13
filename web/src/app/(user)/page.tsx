@@ -45,13 +45,18 @@ export default function IndexPage() {
                     </h1>
                     {teamIntroduction ? <p className="mx-auto mt-3 max-w-xl wrap-anywhere whitespace-pre-wrap text-center text-sm leading-6 text-[var(--studio-muted)]">{teamIntroduction}</p> : null}
                     <div className="mt-5 flex justify-center" role="group" aria-label={translate("page.creationEntry")}>
-                        <div className="inline-flex rounded-full bg-[var(--studio-surface)] p-1">
+                        <div className="relative grid grid-cols-2 rounded-full bg-[var(--studio-surface)] p-1">
+                            {/* 选中底块单独一层，切换时横向滑过去；按钮本身只做文字颜色过渡。 */}
+                            <span
+                                aria-hidden="true"
+                                className={`pointer-events-none absolute inset-y-1 left-1 w-[calc(50%_-_0.25rem)] rounded-full bg-[var(--studio-action)] transition-transform duration-300 ease-out motion-reduce:transition-none ${entry === "canvas" ? "translate-x-full" : ""}`}
+                            />
                             {(["generate", "canvas"] as const).map((value) => (
                                 <button
                                     key={value}
                                     type="button"
                                     aria-pressed={entry === value}
-                                    className={`rounded-full px-5 py-1.5 text-sm transition ${entry === value ? "bg-[var(--studio-action)]! font-medium text-[var(--studio-action-foreground)]!" : "text-[var(--studio-muted)] hover:text-[var(--studio-action)]"}`}
+                                    className={`relative z-10 rounded-full px-5 py-1.5 text-sm transition-colors duration-300 motion-reduce:transition-none ${entry === value ? "font-medium text-[var(--studio-action-foreground)]!" : "text-[var(--studio-muted)] hover:text-[var(--studio-action)]"}`}
                                     onClick={() => setEntry(value)}
                                 >
                                     {translate(value === "generate" ? "page.generate" : "page.canvas")}
@@ -61,11 +66,13 @@ export default function IndexPage() {
                     </div>
                 </div>
 
-                {entry === "canvas" ? <HomepageCanvasStarter /> : (
-                    <div className="mx-auto mt-6 w-full max-w-5xl">
-                        <HomepageGenerationComposer prompt={prompt} onPromptChange={setPrompt} target={creationTarget} onTargetChange={setCreationTarget} />
-                    </div>
-                )}
+                <div className="homepage-entry-swap" data-entry={entry}>
+                    {entry === "canvas" ? <HomepageCanvasStarter /> : (
+                        <div className="mx-auto mt-6 w-full max-w-5xl">
+                            <HomepageGenerationComposer prompt={prompt} onPromptChange={setPrompt} target={creationTarget} onTargetChange={setCreationTarget} />
+                        </div>
+                    )}
+                </div>
 
                 <HomepageFeatureEntries />
                 <FantasticShow />

@@ -639,6 +639,45 @@ html[data-theme="purple"] {
         backdrop-filter: blur(16px);
     }
 
+    /* 首页「生成 / 画布」切换：内容区淡入。两个 tab 各用一个动画名，animation-name 变化才会重播。 */
+    .homepage-entry-swap[data-entry="generate"] {
+        animation: homepage-entry-fade-a 0.26s ease-out;
+    }
+
+    .homepage-entry-swap[data-entry="canvas"] {
+        animation: homepage-entry-fade-b 0.26s ease-out;
+    }
+
+    @keyframes homepage-entry-fade-a {
+        from {
+            opacity: 0;
+            transform: translateY(6px);
+        }
+
+        to {
+            opacity: 1;
+            transform: none;
+        }
+    }
+
+    @keyframes homepage-entry-fade-b {
+        from {
+            opacity: 0;
+            transform: translateY(6px);
+        }
+
+        to {
+            opacity: 1;
+            transform: none;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .homepage-entry-swap[data-entry] {
+            animation: none;
+        }
+    }
+
     .creation-composer-band {
         flex-shrink: 0;
         padding: 0 16px 18px;
