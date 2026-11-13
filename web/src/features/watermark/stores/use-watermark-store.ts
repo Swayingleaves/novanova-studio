@@ -30,7 +30,7 @@ export const useWatermarkStore = create<WatermarkStore>((set, get) => ({
             set({ dialogOpen: true, resolvePending: resolve });
         });
     },
-    openDialog: () => set({ dialogOpen: true }),
+    openDialog: () => set({ dialogOpen: true, settings: readWatermarkSettings() }),
     save: (removeWatermark) => {
         const settings: WatermarkSettings = { removeWatermark, acknowledged: true };
         writeWatermarkSettings(settings);
