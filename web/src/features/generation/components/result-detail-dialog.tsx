@@ -11,6 +11,7 @@ import { formatBytes, formatDuration } from "@/features/generation/lib/image-uti
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceVideo } from "@/features/generation/types/media";
 import { ShareResultButton } from "@/features/shared-work/components/share-result-button";
+import { WatermarkBadge } from "@/features/watermark/components/watermark-badge";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
 
 /** 详情弹窗左侧展示的媒体信息 */
@@ -127,36 +128,44 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
             <div className={`grid gap-5 pt-1 ${showDetails ? "lg:grid-cols-[minmax(0,1fr)_300px]" : "grid-cols-1"}`}>
                 <div className="min-w-0 space-y-2.5">
                     {media.kind === "image" ? (
-                        <Image
-                            key={displayUrl}
-                            src={displayUrl}
-                            alt={translate("generation.imageGeneratedClickToEnlarge")}
-                            onError={handleMediaError}
-                            styles={{ root: { width: "100%", height: mediaHeight }, image: { width: "100%", height: "100%", objectFit: "contain" } }}
-                            classNames={{ root: "overflow-hidden rounded-lg bg-[var(--studio-media)]" }}
-                            preview={{
-                                cover: translate("generation.viewFullSize"),
-                                onOpenChange: () => setOriginalSize(false),
-                                imageRender: (node) => {
-                                    // 保留组件的缩放、拖动与事件，只切换图片的显示尺寸约束。
-                                    const imageNode = node as ReactElement<{ style?: CSSProperties }>;
-                                    return cloneElement(imageNode, {
-                                        style: { ...imageNode.props.style, flexShrink: 0, width: "auto", height: "auto", maxWidth: originalSize ? "none" : "100%", maxHeight: originalSize ? "none" : "80dvh" },
-                                    });
-                                },
-                                actionsRender: (actionsNode, { actions }) => (
-                                    <div className="flex flex-wrap items-center justify-center gap-2">
-                                        {actionsNode}
-                                        <Button onClick={() => {
-                                            actions.onReset();
-                                            setOriginalSize((current) => !current);
-                                        }}>
-                                            {originalSize ? translate("generation.fitToWindow") : translate("generation.originalSize100")}
-                                        </Button>
-                                    </div>
-                                ),
-                            }}
-                        />
+                        <div className="relative">
+                            <Image
+                                key={displayUrl}
+                                src={displayUrl}
+                                alt={translate("generation.imageGeneratedClickToEnlarge")}
+                                onError={handleMediaError}
+                                styles={{ root: { width: "100%", height: mediaHeight }, image: { width: "100%", height: "100%", objectFit: "contain" } }}
+                                classNames={{ root: "overflow-hidden rounded-lg bg-[var(--studio-media)]" }}
+                                preview={{
+                                    cover: translate("generation.viewFullSize"),
+                                    onOpenChange: () => setOriginalSize(false),
+                                    imageRender: (node) => {
+                                        // 保留组件的缩放、拖动与事件，只切换图片的显示尺寸约束。
+                                        const imageNode = node as ReactElement<{ style?: CSSProperties }>;
+                                        return (
+                                            <div className="relative inline-block">
+                                                {cloneElement(imageNode, {
+                                                    style: { ...imageNode.props.style, flexShrink: 0, width: "auto", height: "auto", maxWidth: originalSize ? "none" : "100%", maxHeight: originalSize ? "none" : "80dvh" },
+                                                })}
+                                                <WatermarkBadge />
+                                            </div>
+                                        );
+                                    },
+                                    actionsRender: (actionsNode, { actions }) => (
+                                        <div className="flex flex-wrap items-center justify-center gap-2">
+                                            {actionsNode}
+                                            <Button onClick={() => {
+                                                actions.onReset();
+                                                setOriginalSize((current) => !current);
+                                            }}>
+                                                {originalSize ? translate("generation.fitToWindow") : translate("generation.originalSize100")}
+                                            </Button>
+                                        </div>
+                                    ),
+                                }}
+                            />
+                            <WatermarkBadge />
+                        </div>
                     ) : mediaFallback.missing ? (
                         <img src={mediaFallback.displaySrc} alt={translate("generation.generatedVideoCannotBeLoaded")} className="w-full rounded-lg bg-[var(--studio-media)] object-contain" style={{ height: mediaHeight }} />
                     ) : (

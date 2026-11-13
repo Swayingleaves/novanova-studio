@@ -6,6 +6,7 @@ import { Button, Modal, Tag } from "antd";
 import { Copy, Download } from "lucide-react";
 
 import { formatAssetSummary } from "../lib/asset-summary";
+import { WatermarkBadge } from "@/features/watermark/components/watermark-badge";
 import type { Asset } from "../stores/use-asset-store";
 
 export function AssetPreviewDialog({ asset, onClose, onCopy, onDownload }: { asset: Asset | null; onClose: () => void; onCopy: () => void; onDownload: () => void }) {
@@ -15,7 +16,12 @@ export function AssetPreviewDialog({ asset, onClose, onCopy, onDownload }: { ass
     return (
         <Modal title={asset.title} open centered footer={null} width={820} onCancel={onClose} destroyOnHidden>
             <div className="grid gap-5 pt-1">
-                {cover ? <img src={cover} alt={asset.title} className="max-h-[52vh] w-full rounded-lg object-contain" /> : null}
+                {cover ? (
+                    <div className="relative">
+                        <img src={cover} alt={asset.title} className="max-h-[52vh] w-full rounded-lg object-contain" />
+                        {asset.kind === "image" ? <WatermarkBadge /> : null}
+                    </div>
+                ) : null}
                 {asset.kind === "video" ? <video src={asset.data.url} controls className="aspect-video w-full rounded-lg bg-black" /> : null}
                 {asset.kind === "text" ? <div className="studio-panel-solid whitespace-pre-wrap p-4 text-sm leading-6">{asset.data.content}</div> : null}
                 {asset.kind === "image" ? <p className="studio-subtitle text-sm">{formatAssetSummary(asset, " · ")}</p> : null}

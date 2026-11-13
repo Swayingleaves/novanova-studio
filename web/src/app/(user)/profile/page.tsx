@@ -15,6 +15,7 @@ import { uploadMediaFile } from "@/features/storage/services/file-storage";
 import { useUserStore, type ServerUserProfile } from "@/features/auth/stores/use-user-store";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
+import { useWatermarkStore } from "@/features/watermark/stores/use-watermark-store";
 
 type ProfileFormValues = Pick<ServerUserProfile, "username" | "nickname" | "avatar">;
 type PasswordFormValues = { currentPassword: string; newPassword: string; confirmPassword: string };
@@ -91,8 +92,31 @@ export default function ProfilePage() {
                     />
                 ) : null}
                 {user && profile && !loading ? <ProfileEditor profile={profile} onProfileUpdated={setProfile} /> : null}
+                {user && profile && !loading ? <WatermarkSettingsCard /> : null}
             </div>
         </main>
+    );
+}
+
+/** AI 水印设置入口，与下载时弹出的设置框共用同一份本地设置。 */
+function WatermarkSettingsCard() {
+    const translate = useTranslation();
+    const settings = useWatermarkStore((state) => state.settings);
+    const openDialog = useWatermarkStore((state) => state.openDialog);
+    // 本地设置在客户端才能读到，挂载后再展示当前状态，避免首屏水合不一致。
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => setMounted(true), []);
+    return (
+        <section className="studio-panel-solid rounded-xl border border-[var(--studio-line)] p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <h2 className="text-base font-medium text-[var(--studio-ink)]">{translate("common.aiWatermarkProfileTitle")}</h2>
+                    <p className="mt-1 text-sm text-[var(--studio-muted)]">{translate("common.aiWatermarkProfileDescription")}</p>
+                    <p className="mt-2 text-xs text-[var(--studio-muted)]">{mounted && settings.removeWatermark ? translate("common.aiWatermarkCurrentRemoved") : translate("common.aiWatermarkCurrentKeep")}</p>
+                </div>
+                <Button onClick={openDialog}>{translate("common.aiWatermarkProfileAction")}</Button>
+            </div>
+        </section>
     );
 }
 

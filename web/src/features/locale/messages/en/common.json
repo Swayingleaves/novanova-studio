@@ -27,5 +27,17 @@
   "copyFailedCopyManually": "Copy failed; copy manually",
   "newFeature": "New feature",
   "scriptCreation": "Scripts",
-  "comicDramaCreation": "Comic Drama"
+  "comicDramaCreation": "Comic Drama",
+  "aiWatermarkBadge": "AI generated",
+  "aiWatermarkTitle": "AI-generated watermark settings",
+  "aiWatermarkLegalNotice": "Applicable laws require platforms offering AI generation services to add a visible label (the \"AI generated\" watermark) to AI-generated content so the public is not misled. On your request, the platform may provide AI-generated content without that visible label. If you later publish AI-generated content through an information distribution service, you must also declare it and use the labelling features that service provides. You understand and agree that any consequences and liability arising from publishing AI-generated content without the required visible label are your own.",
+  "aiWatermarkRemoveNotice": "With this switch on, AI-generated content you create or generate on this platform will no longer carry the \"AI generated\" watermark when exported, but brand watermarks are retained.",
+  "aiWatermarkRemoveLabel": "Remove the AI-generated watermark from exports",
+  "aiWatermarkSaveHint": "Turning the switch on and saving means you have read and agree to the above. You can change this later in Profile → AI-generated watermark settings.",
+  "aiWatermarkSave": "Save settings",
+  "aiWatermarkProfileTitle": "AI-generated watermark settings",
+  "aiWatermarkProfileDescription": "Controls whether exported images carry the \"AI generated\" label.",
+  "aiWatermarkProfileAction": "Change settings",
+  "aiWatermarkCurrentKeep": "Current: exports keep the AI-generated watermark",
+  "aiWatermarkCurrentRemoved": "Current: exports omit the AI-generated watermark"
 }

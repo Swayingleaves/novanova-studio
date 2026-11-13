@@ -22,6 +22,7 @@ import { navigationTools, type NavigationToolSlug } from "@/shared/constants/nav
 import { creditAmount } from "@/shared/lib/credit-amounts";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { ShareWorkDialog } from "@/features/shared-work/components/share-work-dialog";
+import { WatermarkSettingsDialog } from "@/features/watermark/components/watermark-settings-dialog";
 
 export function AppShell({ children }: { children: ReactNode }) {
     const translate = useTranslation();
@@ -124,6 +125,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             <AuthModal />
             <ShareWorkDialog />
+            <WatermarkSettingsDialog />
             <WelcomeModal />
             <ProductTour />
         </div>

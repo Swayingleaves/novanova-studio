@@ -27,5 +27,17 @@
   "copyFailedCopyManually": "复制失败，请手动复制",
   "newFeature": "新功能",
   "scriptCreation": "剧本创作",
-  "comicDramaCreation": "漫剧创作"
+  "comicDramaCreation": "漫剧创作",
+  "aiWatermarkBadge": "AI生成",
+  "aiWatermarkTitle": "AI生成水印设置",
+  "aiWatermarkLegalNotice": "根据法律法规要求，本平台提供 AI 生成合成服务，可能引起公众混淆或误认，平台应当在 AI 生成合成内容上添加显式标识（即“AI生成”水印），向公众进行提示。经您的申请，平台可以向您提供未添加显式标识的 AI 生成合成内容。如您后续使用网络信息内容传播服务发布 AI 生成合成内容，请注意您还需主动声明并使用传播平台提供的标识功能进行标识。您理解并承诺，如您未按照法律法规要求在 AI 生成合成内容上添加显式标识，导致公众混淆或者误认，因此所发生的后果和责任均由您自行承担。",
+  "aiWatermarkRemoveNotice": "打开去除水印开关后，您使用本平台所创作、生成的 AI 生成合成内容在导出后将不再添加“AI生成”水印，但仍会保留品牌水印。",
+  "aiWatermarkRemoveLabel": "导出内容去除 AI 生成水印",
+  "aiWatermarkSaveHint": "打开开关并点击保存设置，代表您已确认充分了解上述情况并同意。后续可以在个人中心 → AI生成水印设置里修改水印设置。",
+  "aiWatermarkSave": "保存设置",
+  "aiWatermarkProfileTitle": "AI生成水印设置",
+  "aiWatermarkProfileDescription": "控制导出图片是否附带“AI生成”标识。",
+  "aiWatermarkProfileAction": "修改设置",
+  "aiWatermarkCurrentKeep": "当前：导出时保留 AI 生成水印",
+  "aiWatermarkCurrentRemoved": "当前：导出时不添加 AI 生成水印"
 }
