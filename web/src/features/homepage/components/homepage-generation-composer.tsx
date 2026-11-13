@@ -36,7 +36,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 import { PromptSelectDialog } from "@/features/prompts/components/prompt-select-dialog";
 import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-configuration-guard";
 import { ModelPicker } from "@/features/settings/components/model-picker";
-import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig, type VideoGenerationMode } from "@/features/settings/stores/use-config-store";
+import { useConfigStore, useEffectiveConfig, type AiConfig, type VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 import { uploadMediaFile } from "@/features/storage/services/file-storage";
 import { uploadImage } from "@/features/storage/services/image-storage";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
@@ -374,8 +374,8 @@ export function HomepageGenerationComposer({ prompt, onPromptChange, target, onT
     const creditCost = !loggedIn || !configHydrated ? undefined : target === "image" ? imageCredit : workflowSkill ? undefined : videoQuote.available ? videoQuote.credits : null;
     const canSubmit = (loggedIn ? configHydrated : true) && Boolean(prompt.trim()) && !balanceInsufficient && !isPromptOptimizing && !uploadingReferenceIds.length && !referenceIssue && !quoteIssue && !submitting;
     const settingsSummary = target === "image"
-        ? imageSettingsModified ? formatImageGenerationSettingsSummary({ quality: imageQualityLabel(config.quality || "medium"), resolution: imageResolutionLabel(config.imageResolution || "2K"), ratio: imageSizeLabel(config.size || "1:1"), model: modelOptionLabel(effectiveConfig, imageModel) }) : ""
-        : videoSettingsModified ? formatVideoGenerationSettingsSummary({ resolution: videoResolutionLabel(config.vquality || "720p"), ratio: videoSizeLabel(config.size || "16:9"), duration: videoSecondsLabel(config.videoSeconds || "5", { ...effectiveConfig, model: videoModel, videoModel, vquality: config.vquality, size: config.size, videoSeconds: config.videoSeconds }), model: modelOptionLabel(effectiveConfig, videoModel) }) : "";
+        ? imageSettingsModified ? formatImageGenerationSettingsSummary({ quality: imageQualityLabel(config.quality || "medium"), resolution: imageResolutionLabel(config.imageResolution || "2K"), ratio: imageSizeLabel(config.size || "1:1") }) : ""
+        : videoSettingsModified ? formatVideoGenerationSettingsSummary({ resolution: videoResolutionLabel(config.vquality || "720p"), ratio: videoSizeLabel(config.size || "16:9"), duration: videoSecondsLabel(config.videoSeconds || "5", { ...effectiveConfig, model: videoModel, videoModel, vquality: config.vquality, size: config.size, videoSeconds: config.videoSeconds }) }) : "";
     const visibleImages = target === "video" ? images : images;
     const referenceChips: CreationReferenceChip[] = [
         ...(target === "image" || target === "video" ? visibleImages : []).map((reference, index) => {
@@ -441,7 +441,31 @@ export function HomepageGenerationComposer({ prompt, onPromptChange, target, onT
                 onSuccess: (optimizedPrompt) => onPromptChange(reconcileImageMentions(optimizedPrompt, promptReferences, previousReferencesRef.current)),
             }),
         },
-        { key: "assets", label: translate(target === "image" ? "image.assetLibrary" : "video.assetLibrary"), icon: <FolderPlus className="size-3.5" />, onClick: () => setAssetPickerOpen(true) },
+        {
+            key: "assets",
+            label: translate(target === "image" ? "image.assetLibrary" : "video.assetLibrary"),
+            icon: <FolderPlus className="size-3.5" />,
+            onClick: () => setAssetPickerOpen(true),
+            trailing: (
+                <ModelPicker
+                    config={effectiveConfig}
+                    value={target === "image" ? imageModel : videoModel}
+                    onChange={(value) => {
+                        if (target === "image") {
+                            if (value !== imageModel) setImageSettingsModified(true);
+                            updateConfig("imageModel", value);
+                        } else {
+                            if (value !== videoModel) setVideoSettingsModified(true);
+                            updateConfig("videoModel", value);
+                        }
+                    }}
+                    capability={target}
+                    modelOptions={target === "video" ? availableVideoModelsForMode(effectiveConfig, config.videoGenerationMode) : undefined}
+                    showChannel={false}
+                    className="creation-composer-model-picker min-w-0 max-w-52"
+                />
+            ),
+        },
         { key: "settings", label: settingsSummary || translate(target === "image" ? "image.moreSettings" : "video.moreSettings"), className: settingsSummary ? "creation-composer-action-settings" : undefined, icon: <Cog className="size-3.5" />, onClick: () => setSettingsOpen(true) },
     ];
 
@@ -514,7 +538,7 @@ export function HomepageGenerationComposer({ prompt, onPromptChange, target, onT
                 running={false}
                 canSubmit={canSubmit}
                 creditCost={creditCost}
-                toolbarLeading={(
+                headerExtra={(
                     <Segmented
                         className="creation-composer-mode"
                         aria-label={translate("page.creationType")}
@@ -535,25 +559,6 @@ export function HomepageGenerationComposer({ prompt, onPromptChange, target, onT
             <CreationSettingsModal open={settingsOpen} title={translate(target === "image" ? "image.imageSettings" : "video.videoSettings")} onClose={() => setSettingsOpen(false)}>
                 <div className="space-y-4">
                     {target === "image" ? <ImageSettingsPanel config={config} onConfigChange={updateImageSetting} theme={theme} showTitle={false} showCount={false} className="space-y-4 px-0 py-0" /> : <VideoSettingsPanel config={config} onConfigChange={updateVideoSetting} theme={theme} showTitle={false} className="space-y-4 px-0 py-0" />}
-                    <div>
-                        <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">{translate(target === "image" ? "image.model" : "video.model")}</label>
-                        <ModelPicker
-                            config={effectiveConfig}
-                            value={target === "image" ? imageModel : videoModel}
-                            onChange={(value) => {
-                                if (target === "image") {
-                                    if (value !== imageModel) setImageSettingsModified(true);
-                                    updateConfig("imageModel", value);
-                                } else {
-                                    if (value !== videoModel) setVideoSettingsModified(true);
-                                    updateConfig("videoModel", value);
-                                }
-                            }}
-                            capability={target}
-                            modelOptions={target === "video" ? availableVideoModelsForMode(effectiveConfig, config.videoGenerationMode) : undefined}
-                            fullWidth
-                        />
-                    </div>
                 </div>
             </CreationSettingsModal>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={onPromptChange} />

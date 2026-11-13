@@ -75,6 +75,7 @@
     "loadingSkills": "技能加载中",
     "noAvailableSkills": "暂无可用技能",
     "selectedSkill": "已选择技能：{value0}",
+    "selectedStyle": "已选择风格：{value0}",
     "selectSkill": "选择技能",
     "failedToUpdateTitle": "修改标题失败",
     "deleteRecord": "删除记录",

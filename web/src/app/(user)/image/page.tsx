@@ -56,7 +56,7 @@ import { formatBytes } from "@/features/generation/lib/image-utils";
 import type { ReferenceImage } from "@/features/generation/types/image";
 import { PromptSelectDialog } from "@/features/prompts/components/prompt-select-dialog";
 import { ModelPicker } from "@/features/settings/components/model-picker";
-import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
+import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 import { deleteStoredImages, resolveImageStorageInfo, resolveImageUrl, reuseOrUploadImage, uploadImage } from "@/features/storage/services/image-storage";
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
@@ -1159,6 +1159,21 @@ export default function ImagePage() {
             label: translate("image.assetLibrary"),
             icon: <FolderPlus className="size-3.5" />,
             onClick: () => setAssetPickerOpen(true),
+            trailing: (
+                <ModelPicker
+                    config={effectiveConfig}
+                    value={historyModel || model}
+                    onChange={(value) => {
+                        if (value !== (historyModel || model)) {
+                            setImageDraftSettingsModified(true);
+                        }
+                        updateConfig("imageModel", value);
+                    }}
+                    capability="image"
+                    showChannel={false}
+                    className="creation-composer-model-picker min-w-0 max-w-52"
+                />
+            ),
         },
         {
             key: "settings",
@@ -1393,21 +1408,6 @@ export default function ImagePage() {
                     content: (
                         <div className="space-y-4">
                             <ImageSettingsPanel config={config} onConfigChange={handleImageSettingsChange} theme={theme} showTitle={false} showCount={false} className="space-y-4 px-0 py-0" />
-                            <div>
-                                <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">{translate("image.model")}</label>
-                                <ModelPicker
-                                    config={effectiveConfig}
-                                    value={historyModel || model}
-                                    onChange={(value) => {
-                                        if (value !== (historyModel || model)) {
-                                            setImageDraftSettingsModified(true);
-                                        }
-                                        updateConfig("imageModel", value);
-                                    }}
-                                    capability="image"
-                                    fullWidth
-                                />
-                            </div>
                         </div>
                     ),
                 }}
@@ -1526,7 +1526,6 @@ function buildImageSettingsSummary(settings: Partial<Pick<AiConfig, "quality" | 
         quality: imageQualityLabel(settings.quality || "medium"),
         resolution: imageResolutionLabel(settings.imageResolution || settings.resolution || "2K"),
         ratio: imageSizeLabel(settings.size || "1:1"),
-        model: modelOptionLabel(modelConfig, model),
     });
 }
 

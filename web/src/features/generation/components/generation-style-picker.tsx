@@ -284,8 +284,17 @@ export function GenerationStyleMenu({
                 }}
             >
                 <span className="inline-flex">
-                    <Tooltip title={disabled ? translate("generation.unavailableInChatMode") : translate("generation.selectStyle")}>
-                        <Button size="small" data-tour={dataTour} className={`creation-composer-action ${iconOnly ? "creation-composer-action-icon" : ""}`} icon={<Palette className="size-3.5" />} disabled={disabled} aria-expanded={open} aria-haspopup="dialog" aria-label={translate("generation.selectStyle")}>
+                    <Tooltip title={disabled ? translate("generation.unavailableInChatMode") : selected[0] ? translate("generation.selectedStyle", { value0: selected[0].name }) : translate("generation.selectStyle")}>
+                        <Button
+                            size="small"
+                            data-tour={dataTour}
+                            className={`creation-composer-action ${iconOnly ? "creation-composer-action-icon" : ""}`}
+                            icon={selected[0] ? <GenerationStyleCover style={selected[0]} className="size-4 shrink-0 overflow-hidden rounded-[4px]" fallbackIcon={<Palette className="size-3.5" />} /> : <Palette className="size-3.5" />}
+                            disabled={disabled}
+                            aria-expanded={open}
+                            aria-haspopup="dialog"
+                            aria-label={translate("generation.selectStyle")}
+                        >
                             {iconOnly ? null : translate("generation.style_1bfde6")}
                         </Button>
                     </Tooltip>

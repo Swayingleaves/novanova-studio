@@ -41,7 +41,7 @@ import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceVideo } from "@/features/generation/types/media";
 import { PromptSelectDialog } from "@/features/prompts/components/prompt-select-dialog";
 import { ModelPicker } from "@/features/settings/components/model-picker";
-import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig, type VideoGenerationMode } from "@/features/settings/stores/use-config-store";
+import { useConfigStore, useEffectiveConfig, type AiConfig, type VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 import { deleteStoredMedia, resolveMediaStorageInfo, resolveMediaUrl, uploadMediaFile } from "@/features/storage/services/file-storage";
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
@@ -1790,6 +1790,22 @@ export default function VideoPage() {
             label: translate("video.assetLibrary"),
             icon: <FolderPlus className="size-3.5" />,
             onClick: () => setAssetPickerOpen(true),
+            trailing: (
+                <ModelPicker
+                    config={effectiveConfig}
+                    value={model}
+                    onChange={(value) => {
+                        if (value !== model) {
+                            setVideoDraftSettingsModified(true);
+                        }
+                        updateConfig("videoModel", value);
+                    }}
+                    capability="video"
+                    modelOptions={availableVideoModelsForMode(effectiveConfig, config.videoGenerationMode)}
+                    showChannel={false}
+                    className="creation-composer-model-picker min-w-0 max-w-52"
+                />
+            ),
         },
         {
             key: "settings",
@@ -2140,22 +2156,6 @@ export default function VideoPage() {
                                         {translate("video.videoGenerationQuote")}{workflowVideoStageQuote.displayName} {workflowVideoStageQuote.credits} {translate("video.credits_10939f")}</span>
                                 </div>
                             ) : null}
-                            <div>
-                                <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">{translate("video.model")}</label>
-                                <ModelPicker
-                                    config={effectiveConfig}
-                                    value={model}
-                                    onChange={(value) => {
-                                        if (value !== model) {
-                                            setVideoDraftSettingsModified(true);
-                                        }
-                                        updateConfig("videoModel", value);
-                                    }}
-                                    capability="video"
-                                    modelOptions={availableVideoModelsForMode(effectiveConfig, config.videoGenerationMode)}
-                                    fullWidth
-                                />
-                            </div>
                         </div>
                     ),
                 }}
@@ -2384,7 +2384,6 @@ function buildVideoSettingsSummary(settings: Partial<Pick<AiConfig, "vquality" |
         resolution: videoResolutionLabel(summaryConfig.vquality),
         ratio: videoSizeLabel(summaryConfig.size),
         duration: videoSecondsLabel(summaryConfig.videoSeconds, summaryConfig),
-        model: modelOptionLabel(modelConfig, model),
     });
 }
 

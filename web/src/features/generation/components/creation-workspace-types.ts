@@ -89,6 +89,8 @@ export type CreationComposerAction = {
     iconOnly?: boolean;
     disabled?: boolean;
     loading?: boolean;
+    /** 紧跟在该动作后渲染的额外控件，例如常驻模型选择器。 */
+    trailing?: ReactNode;
     onClick: () => void;
 };
 
@@ -151,8 +153,8 @@ export type CreationComposerProps = {
     onStop?: () => void;
     /** 首页居中使用时去掉工作区左侧对齐偏移。 */
     embedded?: boolean;
-    /** 工具栏左侧额外控件，例如首页的图片/视频切换。 */
-    toolbarLeading?: ReactNode;
+    /** Agent 名称右侧的额外控件，例如首页的图片/视频切换。 */
+    headerExtra?: ReactNode;
 };
 
 export type CreationWorkspaceSidebarProps = CreationSidebarProps & {

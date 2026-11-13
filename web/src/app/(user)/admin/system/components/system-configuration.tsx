@@ -83,8 +83,12 @@ import { CommunityConfigManagement } from "./community-config-management";
 import { communityDraftIssue, communityDraftSignature, createCommunityDrafts, type CommunityConfigDraft } from "../community-config";
 import { saveCommunityConfigs } from "@/services/api/community";
 import { useCommunityStore } from "@/features/community/stores/use-community-store";
+import { ExternalLinkConfigManagement } from "./external-link-config-management";
+import { createExternalLinkDraft, emptyExternalLinkDraft, externalLinkDraftIssue, externalLinkDraftSignature, type ExternalLinkDraft } from "../external-link-config";
+import { saveExternalLinkConfig } from "@/services/api/external-link";
+import { useExternalLinkStore } from "@/features/external-link/stores/use-external-link-store";
 
-export type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "firstPurchaseBonus" | "objectStorage" | "timeouts" | "community";
+export type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "firstPurchaseBonus" | "objectStorage" | "timeouts" | "community" | "externalLink";
 
 const defaultTimeoutSettings = (): TimeoutSettings => ({
     aiRequestBodyTimeoutSeconds: 60,
@@ -369,6 +373,8 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const [draftFirstPurchaseBonusPercent, setDraftFirstPurchaseBonusPercent] = useState<CreditAmount>(0);
     const [communityBaseline, setCommunityBaseline] = useState<CommunityConfigDraft[]>([]);
     const [draftCommunityConfigs, setDraftCommunityConfigs] = useState<CommunityConfigDraft[]>([]);
+    const [externalLinkBaseline, setExternalLinkBaseline] = useState<ExternalLinkDraft>(emptyExternalLinkDraft);
+    const [draftExternalLink, setDraftExternalLink] = useState<ExternalLinkDraft>(emptyExternalLinkDraft);
     const [timeoutBaseline, setTimeoutBaseline] = useState<TimeoutSettings>(defaultTimeoutSettings);
     const [draftTimeoutSettings, setDraftTimeoutSettings] = useState<TimeoutSettings>(defaultTimeoutSettings);
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
@@ -409,14 +415,22 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
         setDraftCommunityConfigs(drafts.map((draft) => ({ ...draft })));
     }, []);
 
+    // 展示外链同样是平台级配置，团队空间不读取也不展示该页签。
+    const resetExternalLinkDraft = useCallback(() => {
+        const draft = useTeamStore.getState().team ? emptyExternalLinkDraft() : createExternalLinkDraft(useExternalLinkStore.getState().config);
+        setExternalLinkBaseline(draft);
+        setDraftExternalLink({ ...draft });
+    }, []);
+
     const resetAllDrafts = useCallback(() => {
         resetChannelDraft(true);
         resetModelConfigDraft(true);
         resetObjectStorageDraft();
         resetCommunityDraft();
+        resetExternalLinkDraft();
         setTestedObjectStorageId("");
         setObjectStorageTestUrl("");
-    }, [resetChannelDraft, resetModelConfigDraft, resetObjectStorageDraft, resetCommunityDraft]);
+    }, [resetChannelDraft, resetModelConfigDraft, resetObjectStorageDraft, resetCommunityDraft, resetExternalLinkDraft]);
 
     useEffect(() => {
         if (!canManageCurrentSpace()) return;
@@ -431,9 +445,10 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             useTeamStore.getState().team ? Promise.resolve({ checkInCredits: "0" }) : getCheckInRewardSettings(),
             useTeamStore.getState().team ? Promise.resolve({ percent: "0" }) : getFirstPurchaseBonusSettings(),
             useTeamStore.getState().team ? Promise.resolve() : useCommunityStore.getState().refresh(),
+            useTeamStore.getState().team ? Promise.resolve() : useExternalLinkStore.getState().refresh(),
             useTeamStore.getState().team ? Promise.resolve(defaultTimeoutSettings()) : getTimeoutSettings(),
         ])
-            .then(([, , creditSettings, invitationRewardSettings, checkInSettings, firstPurchaseBonusSettings, , timeoutSettings]) => {
+            .then(([, , creditSettings, invitationRewardSettings, checkInSettings, firstPurchaseBonusSettings, , , timeoutSettings]) => {
                 if (!active) return;
                 resetAllDrafts();
                 setCreditBaseline(creditSettings.initialCredits);
@@ -478,10 +493,11 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const checkInDirty = draftCheckInCredits !== checkInBaseline;
     const firstPurchaseBonusDirty = draftFirstPurchaseBonusPercent !== firstPurchaseBonusBaseline;
     const communityDirty = communityDraftSignature(draftCommunityConfigs) !== communityDraftSignature(communityBaseline);
+    const externalLinkDirty = externalLinkDraftSignature(draftExternalLink) !== externalLinkDraftSignature(externalLinkBaseline);
     const timeoutDirty = timeoutSettingsSignature(draftTimeoutSettings) !== timeoutSettingsSignature(timeoutBaseline);
     const editingModelBaseline = editingModelConfig && draftModelConfigs.find((item) => item.id === editingModelConfig.id);
     const modelEditorDirty = Boolean(editingModelConfig && (!sameValue(editingModelConfig, editingModelBaseline) || editingCustomBodyParameters !== JSON.stringify(editingModelBaseline?.customBodyParameters || {}, null, 2)));
-    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || firstPurchaseBonusDirty || communityDirty || timeoutDirty || modelEditorDirty;
+    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || firstPurchaseBonusDirty || communityDirty || externalLinkDirty || timeoutDirty || modelEditorDirty;
     const isSaving = Boolean(savingTab);
     useConfigurationLeaveGuard(draftsReady && hasUnsavedChanges);
 
@@ -915,6 +931,55 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             message.success(translate("administration.communitySaved"));
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("administration.communitySaveFailed"));
+        } finally {
+            setSavingTab("");
+        }
+    };
+
+    const saveExternalLinkSettings = async () => {
+        const issue = externalLinkDraftIssue(draftExternalLink);
+        if (issue) {
+            message.error(
+                issue === "title"
+                    ? translate("administration.externalLinkTitleRequired")
+                    : issue === "url"
+                      ? translate("administration.externalLinkUrlInvalid")
+                      : translate("administration.externalLinkCoverUrlInvalid"),
+            );
+            return;
+        }
+        const saved = {
+            title: draftExternalLink.title.trim(),
+            url: draftExternalLink.url.trim(),
+            description: draftExternalLink.description.trim(),
+            coverUrl: draftExternalLink.coverUrl.trim(),
+        };
+        setSavingTab("externalLink");
+        try {
+            await saveExternalLinkConfig(saved);
+            setExternalLinkBaseline(saved);
+            setDraftExternalLink(saved);
+            // 保存后立即刷新全局顶部入口，不必等用户重新载入页面。
+            void useExternalLinkStore.getState().refresh();
+            message.success(translate("administration.externalLinkSaved"));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("administration.externalLinkSaveFailed"));
+        } finally {
+            setSavingTab("");
+        }
+    };
+
+    const clearExternalLinkSettings = async () => {
+        setSavingTab("externalLink");
+        try {
+            await saveExternalLinkConfig(emptyExternalLinkDraft());
+            const empty = emptyExternalLinkDraft();
+            setExternalLinkBaseline(empty);
+            setDraftExternalLink(empty);
+            void useExternalLinkStore.getState().refresh();
+            message.success(translate("administration.externalLinkRemoved"));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("administration.externalLinkSaveFailed"));
         } finally {
             setSavingTab("");
         }
@@ -1606,7 +1671,21 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                 />
                             ),
                         },
-                    ].filter((item) => !team || !["credits", "creditProducts", "invitationReward", "checkIn", "firstPurchaseBonus", "community", "timeouts"].includes(item.key))}
+                        {
+                            key: "externalLink",
+                            label: translate("administration.externalLinkConfig"),
+                            children: (
+                                <ExternalLinkConfigManagement
+                                    draft={draftExternalLink}
+                                    dirty={externalLinkDirty}
+                                    saving={savingTab === "externalLink"}
+                                    onChange={setDraftExternalLink}
+                                    onSave={() => void saveExternalLinkSettings()}
+                                    onClear={() => void clearExternalLinkSettings()}
+                                />
+                            ),
+                        },
+                    ].filter((item) => !team || !["credits", "creditProducts", "invitationReward", "checkIn", "firstPurchaseBonus", "community", "externalLink", "timeouts"].includes(item.key))}
                 />
             )}
             {modelPicker && modelPickerGroup ? (

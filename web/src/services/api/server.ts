@@ -740,7 +740,7 @@ export function sendEmailCode(email: string) {
     return serverPost("/auth/sendEmailCode", { email }, { auth: false });
 }
 
-export function registerByEmail(input: { email: string; code: string; password: string; nickname?: string; invitationCode?: string }) {
+export function registerByEmail(input: { email: string; code: string; password: string; nickname?: string; invitationCode?: string; username?: string }) {
     return serverPost<AuthResponse>("/auth/register", input, { auth: false });
 }
 

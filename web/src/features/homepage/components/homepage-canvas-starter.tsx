@@ -29,13 +29,13 @@ export function HomepageCanvasStarter() {
                 <button
                     key={template.starter}
                     type="button"
-                    className="group relative min-h-48 overflow-hidden rounded-2xl p-4 text-left text-white"
+                    className="group relative min-h-48 overflow-hidden rounded-2xl p-4 text-left text-white!"
                     onClick={() => openHomepageCanvasStarter(template.starter)}
                 >
                     <img src={template.image} alt="" className="absolute inset-0 size-full object-cover transition duration-300 group-hover:scale-[1.03]" />
                     <span className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-black/30" />
-                    <span className="relative z-10 inline-flex rounded-md bg-black/40 px-2 py-0.5 text-xs backdrop-blur-sm">{translate("page.canvasTemplate")}</span>
-                    <span className="absolute bottom-4 left-4 z-10 text-base font-medium">{translate(template.labelKey)}</span>
+                    <span className="relative z-10 inline-flex rounded-md bg-black/40 px-2 py-0.5 text-xs! backdrop-blur-sm">{translate("page.canvasTemplate")}</span>
+                    <span className="absolute bottom-4 left-4 z-10 text-base! font-medium">{translate(template.labelKey)}</span>
                 </button>
             ))}
         </div>

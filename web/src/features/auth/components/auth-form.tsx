@@ -2,31 +2,37 @@
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { useEffect, useMemo, useState } from "react";
-import { App, Button, Form, Input, Tabs } from "antd";
-import { ArrowRight } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { App, Button, Checkbox, Form, Input } from "antd";
+import type { InputRef } from "antd";
 import { useRouter } from "@/shared/lib/team-navigation";
 
-import { loginByAccount, registerByEmail, sendEmailCode } from "@/services/api/server";
+import { loginByAccount, registerByEmail, sendEmailCode, ServerApiError } from "@/services/api/server";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { OAuth2LoginOptions } from "@/features/auth/components/oauth2-login-options";
+import { TermsDialog } from "@/features/auth/components/terms-dialog";
 import { completeAuthentication } from "@/features/auth/lib/complete-authentication";
 import { useSpaceBrand } from "@/features/team/use-space-brand";
 
-type LoginForm = {
+type AuthFormFields = {
     account: string;
     password: string;
-};
-
-type RegisterForm = {
     email: string;
     code: string;
-    password: string;
-    nickname?: string;
 };
+
+/** 登录与注册合并成同一入口后的两个面：凭证面与邮箱验证面。 */
+type AuthStep = "credentials" | "email";
 
 const EMAIL_CODE_COOLDOWN_SECONDS = 60;
 const EMAIL_CODE_COOLDOWN_STORAGE_KEY = "novanova:auth:email_code_cooldown_until";
+
+/** 账号不存在时后端返回的系统消息键，用来把界面翻到邮箱验证。 */
+const ACCOUNT_NOT_FOUND_MESSAGE_KEY = "business.accountNotFound";
+/** 邮箱已被占用时后端返回的系统消息键。 */
+const EMAIL_ALREADY_REGISTERED_MESSAGE_KEY = "business.emailAlreadyRegistered";
+/** 用户名已被占用时后端返回的系统消息键。 */
+const ACCOUNT_ALREADY_EXISTS_MESSAGE_KEY = "business.accountAlreadyExists";
 
 type AuthFormProps = {
     /** 登录或注册成功后的回调 */
@@ -44,13 +50,31 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
     const brand = useSpaceBrand();
     const registrationEnabled = !brand.isTeam;
     const platformInvitationCode = registrationEnabled ? invitationCode : undefined;
-    const [activeKey, setActiveKey] = useState(platformInvitationCode ? "register" : "login");
+    const [form] = Form.useForm<AuthFormFields>();
+    const [step, setStep] = useState<AuthStep>("credentials");
+    const [pendingAccount, setPendingAccount] = useState("");
+    const [emailLocked, setEmailLocked] = useState(false);
     const [sendingCode, setSendingCode] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [codeCooldownSeconds, setCodeCooldownSeconds] = useState(0);
-    const [loginForm] = Form.useForm<LoginForm>();
-    const [registerForm] = Form.useForm<RegisterForm>();
+    const [codeSentToEmail, setCodeSentToEmail] = useState("");
+    const [agreedToTerms, setAgreedToTerms] = useState(false);
+    const [termsOpen, setTermsOpen] = useState(false);
     const closeAuthModal = useUserStore((state) => state.closeAuthModal);
+    const emailInputRef = useRef<InputRef>(null);
+    const emailValue = Form.useWatch("email", form) as string | undefined;
+    const accountValue = Form.useWatch("account", form) as string | undefined;
+    // 邮箱填完整才展开验证码，避免一进邮箱步骤就给用户一堆空字段。
+    const codeVisible = Boolean(emailValue && emailValue.includes("@"));
+    // 已经发过码的账号原样再提交时直接翻回邮箱面，验证码和倒计时都还在，不重复发信。
+    const canResumeEmailStep = Boolean(pendingAccount && codeSentToEmail && accountValue?.trim() === pendingAccount);
+
+    // 翻到邮箱面后等翻转结束再聚焦，否则焦点会在旋转中途跳过去。
+    useEffect(() => {
+        if (step !== "email" || emailLocked) return;
+        const timer = window.setTimeout(() => emailInputRef.current?.focus(), 520);
+        return () => window.clearTimeout(timer);
+    }, [step, emailLocked]);
 
     useEffect(() => {
         if (!registrationEnabled) return;
@@ -72,11 +96,28 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
         return translate("auth.sendCode");
     }, [codeCooldownSeconds, sendingCode, translate.locale]);
 
+    /** 回到凭证面只切面，不清邮箱和验证码：翻回邮箱面时状态还在。 */
+    const backToCredentials = (account?: string) => {
+        if (account) form.setFieldValue("account", account);
+        setStep("credentials");
+    };
+
+    /** 未勾选服务协议时提示并阻止提交。 */
+    const ensureTermsAgreed = () => {
+        if (agreedToTerms) return true;
+        message.warning(translate("auth.pleaseAgreeToTerms"));
+        return false;
+    };
+
     const sendCode = async () => {
         if (!registrationEnabled) return;
-        const email = registerForm.getFieldValue("email");
+        const email = String(form.getFieldValue("email") ?? "").trim();
         if (!email) {
             message.warning(translate("auth.enterYourEmailFirst"));
+            return;
+        }
+        if (!email.includes("@")) {
+            message.warning(translate("auth.invalidEmailAddress"));
             return;
         }
         if (codeCooldownSeconds > 0) {
@@ -88,15 +129,35 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
             await sendEmailCode(email);
             startEmailCodeCooldown();
             setCodeCooldownSeconds(EMAIL_CODE_COOLDOWN_SECONDS);
+            setCodeSentToEmail(email);
             message.success(translate("auth.codeSentCheckYourInbox"));
         } catch (error) {
+            if (isMessageKey(error, EMAIL_ALREADY_REGISTERED_MESSAGE_KEY)) {
+                message.warning(translate("auth.emailAlreadyRegisteredSignInInstead"));
+                backToCredentials(email);
+                return;
+            }
             message.error(error instanceof Error ? error.message : translate("auth.failedToSendCode"));
         } finally {
             setSendingCode(false);
         }
     };
 
-    const login = async (values: LoginForm) => {
+    /** 凭证面：先按登录处理，账号不存在再翻到邮箱验证面。 */
+    const submitCredentials = async () => {
+        let values: Pick<AuthFormFields, "account" | "password">;
+        try {
+            values = await form.validateFields(["account", "password"]);
+        } catch {
+            return;
+        }
+        const account = values.account.trim();
+        if (!ensureTermsAgreed()) return;
+        // 同一个账号已经翻过一次：直接翻回邮箱面，邮箱和验证码都还在，不再请求登录、不再发信。
+        if (pendingAccount && account === pendingAccount) {
+            setStep("email");
+            return;
+        }
         setSubmitting(true);
         try {
             const result = await loginByAccount(values);
@@ -104,21 +165,57 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
             message.success(translate("auth.signedIn"));
             onSuccess?.();
         } catch (error) {
+            if (registrationEnabled && isMessageKey(error, ACCOUNT_NOT_FOUND_MESSAGE_KEY)) {
+                const isEmail = account.includes("@");
+                setPendingAccount(account);
+                setEmailLocked(isEmail);
+                setCodeSentToEmail("");
+                form.setFieldValue("email", isEmail ? account : "");
+                // 只翻面，不自动发码：验证码由用户点「发送验证码」自己触发。
+                setStep("email");
+                return;
+            }
             message.error(error instanceof Error ? error.message : translate("auth.signInFailed"));
         } finally {
             setSubmitting(false);
         }
     };
 
-    const register = async (values: RegisterForm) => {
-        if (!registrationEnabled) return;
+    /** 邮箱面：沿用凭证面填好的密码，验证码通过即完成注册并登录。 */
+    const submitRegistration = async () => {
+        let values: Pick<AuthFormFields, "email" | "code">;
+        try {
+            values = await form.validateFields(["email", "code"]);
+        } catch {
+            return;
+        }
+        const password = String(form.getFieldValue("password") ?? "");
+        if (!ensureTermsAgreed()) return;
+        if (password.length < 8) {
+            message.warning(translate("auth.atLeast8Characters"));
+            backToCredentials();
+            return;
+        }
         setSubmitting(true);
         try {
-            const result = await registerByEmail({ ...values, invitationCode: platformInvitationCode });
+            // 先填用户名再补邮箱时沿用该用户名；先填邮箱注册时后端回落到邮箱作为用户名。
+            const username = pendingAccount && !pendingAccount.includes("@") ? pendingAccount : undefined;
+            const result = await registerByEmail({ email: values.email.trim(), code: values.code.trim(), password, invitationCode: platformInvitationCode, username });
             completeAuthentication(result, redirectPath);
             message.success(translate("auth.signedUp"));
             onSuccess?.();
         } catch (error) {
+            if (isMessageKey(error, EMAIL_ALREADY_REGISTERED_MESSAGE_KEY)) {
+                message.warning(translate("auth.emailAlreadyRegisteredSignInInstead"));
+                backToCredentials(values.email.trim());
+                return;
+            }
+            if (isMessageKey(error, ACCOUNT_ALREADY_EXISTS_MESSAGE_KEY)) {
+                message.warning(error instanceof Error ? error.message : translate("auth.signUpFailed"));
+                setPendingAccount("");
+                backToCredentials();
+                return;
+            }
             message.error(error instanceof Error ? error.message : translate("auth.signUpFailed"));
         } finally {
             setSubmitting(false);
@@ -131,66 +228,95 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
     };
 
     return (
-        <>
-            <Tabs
-                activeKey={registrationEnabled ? activeKey : "login"}
-                onChange={setActiveKey}
-                items={[
-                {
-                    key: "login",
-                    label: translate("auth.signIn_1e2df9"),
-                    children: (
-                        <Form form={loginForm} layout="vertical" requiredMark={false} onFinish={login} className="pt-2">
-                            <Form.Item name="account" label={translate("auth.account")} rules={[{ required: true, whitespace: true, message: translate("auth.enterAccount") }]}>
-                                <Input size="large" autoComplete="username" placeholder={translate("auth.enterAccount")} />
-                            </Form.Item>
-                            <Form.Item name="password" label={translate("auth.password")} rules={[{ required: true, message: translate("auth.enterAPassword") }]}>
-                                <Input.Password size="large" autoComplete="current-password" placeholder={translate("auth.enterAPassword")} />
-                            </Form.Item>
-                            <div className="-mt-2 mb-2 flex justify-end">
-                                <Button type="link" className="min-h-11 px-0" onClick={goToForgotPassword}>
-                                    {translate("auth.forgotPassword")}</Button>
+        <Form form={form} layout="vertical" requiredMark={false} className="auth-form mt-3" onValuesChange={(changed) => {
+            // 换邮箱后旧验证码必然对不上，直接清掉，避免用户拿旧码去注册新邮箱。
+            if (Object.prototype.hasOwnProperty.call(changed, "email")) form.setFieldValue("code", "");
+        }}>
+            <div className="auth-flip" data-step={step}>
+                <div className="auth-flip-face" data-face="credentials" aria-hidden={step !== "credentials"}>
+                    <Form.Item name="account" rules={[{ required: true, whitespace: true, message: translate("auth.enterAccount") }]}>
+                        <Input size="large" variant="filled" className="h-12!" aria-label={translate("auth.account")} autoComplete="username" placeholder={translate("auth.enterAccount")} onPressEnter={submitCredentials} />
+                    </Form.Item>
+                    <Form.Item name="password" rules={[{ required: true, message: translate("auth.enterAPassword") }]}>
+                        <Input.Password size="large" variant="filled" className="h-12!" aria-label={translate("auth.password")} autoComplete="current-password" placeholder={translate("auth.enterAPassword")} onPressEnter={submitCredentials} />
+                    </Form.Item>
+                    <div className="-mt-1 mb-3 flex justify-end">
+                        <Button type="link" className="min-h-9 px-0 text-xs" onClick={goToForgotPassword}>
+                            {translate("auth.forgotPassword")}</Button>
+                    </div>
+                    <TermsAgreement checked={agreedToTerms} onChange={setAgreedToTerms} onOpenTerms={() => setTermsOpen(true)} />
+                    <Button type="primary" size="large" block loading={submitting} className="h-12! font-medium" onClick={submitCredentials}>
+                        {translate("auth.signInOrSignUp")}</Button>
+                    {canResumeEmailStep ? (
+                        <p className="mt-3 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 text-center text-xs leading-relaxed text-[var(--studio-muted)]">
+                            <span>{translate("auth.codeSentTo", { value0: codeSentToEmail })}</span>
+                            <button type="button" className="text-xs! text-[var(--studio-primary)]! hover:underline" onClick={() => setStep("email")}>
+                                {translate("auth.continueVerification")}
+                            </button>
+                        </p>
+                    ) : registrationEnabled ? (
+                        <p className="mt-3 text-center text-xs leading-relaxed text-[var(--studio-muted)]">{translate("auth.unregisteredAccountsAreCreatedAfterEmailVerification")}</p>
+                    ) : null}
+                    <OAuth2LoginOptions redirectPath={redirectPath} invitationCode={platformInvitationCode} />
+                </div>
+                <div className="auth-flip-face" data-face="email" aria-hidden={step !== "email"}>
+                    <p className="mb-3 text-[13px] leading-relaxed text-[var(--studio-muted)]">
+                        {translate(emailLocked ? "auth.emailIsNotRegisteredCreateItNow" : "auth.accountIsNotRegisteredAddAnEmail", { value0: pendingAccount })}
+                    </p>
+                    <Form.Item name="email" rules={[{ required: true, message: translate("auth.enterAnEmailAddress") }, { type: "email", message: translate("auth.invalidEmailAddress") }]}>
+                        <Input ref={emailInputRef} size="large" variant="filled" className="h-12!" readOnly={emailLocked} aria-label={translate("auth.email")} autoComplete="email" placeholder={translate("auth.enterAnEmailAddress")} />
+                    </Form.Item>
+                    <div className="auth-reveal" data-open={codeVisible}>
+                        <div>
+                            <div className="grid grid-cols-[1fr_auto] items-start gap-2">
+                                <Form.Item name="code" rules={[{ required: true, message: translate("auth.enterVerificationCode") }]}>
+                                    <Input size="large" variant="filled" className="h-12!" aria-label={translate("auth.verificationCode")} autoComplete="one-time-code" placeholder={translate("auth.6DigitCode")} onPressEnter={submitRegistration} />
+                                </Form.Item>
+                                <Button size="large" className="h-12!" loading={sendingCode} disabled={codeCooldownSeconds > 0} onClick={() => void sendCode()}>
+                                    {codeButtonText}
+                                </Button>
                             </div>
-                            <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<ArrowRight className="size-4" />} iconPlacement="end">
-                                {translate("auth.signIn_1e2df9")}</Button>
-                            <OAuth2LoginOptions redirectPath={redirectPath} invitationCode={platformInvitationCode} />
-                        </Form>
-                    ),
-                },
-                ...(registrationEnabled ? [{
-                    key: "register",
-                    label: translate("auth.signUp"),
-                    children: (
-                        <Form form={registerForm} layout="vertical" requiredMark={false} onFinish={register} className="pt-2">
-                            <Form.Item name="email" label={translate("auth.email")} rules={[{ required: true, message: translate("auth.enterAnEmailAddress") }, { type: "email", message: translate("auth.invalidEmailAddress") }]}>
-                                <Input size="large" autoComplete="email" placeholder="name@example.com" />
-                            </Form.Item>
-                            <Form.Item label={translate("auth.verificationCode")} required>
-                                <div className="grid grid-cols-[1fr_auto] gap-2">
-                                    <Form.Item name="code" noStyle rules={[{ required: true, message: translate("auth.enterVerificationCode") }]}>
-                                        <Input size="large" autoComplete="one-time-code" placeholder={translate("auth.6DigitCode")} />
-                                    </Form.Item>
-                                    <Button size="large" loading={sendingCode} disabled={codeCooldownSeconds > 0} onClick={sendCode}>
-                                        {codeButtonText}
-                                    </Button>
-                                </div>
-                            </Form.Item>
-                            <Form.Item name="nickname" label={translate("auth.displayName")}>
-                                <Input size="large" autoComplete="nickname" placeholder={translate("auth.optional")} />
-                            </Form.Item>
-                            <Form.Item name="password" label={translate("auth.password")} rules={[{ required: true, message: translate("auth.enterAPassword") }, { min: 8, message: translate("auth.atLeast8Characters") }]}>
-                                <Input.Password size="large" autoComplete="new-password" placeholder={translate("auth.atLeast8Characters_d482f2")} />
-                            </Form.Item>
-                            <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<ArrowRight className="size-4" />} iconPlacement="end">
-                                {translate("auth.signUpAndSignIn")}</Button>
-                            <OAuth2LoginOptions redirectPath={redirectPath} invitationCode={platformInvitationCode} />
-                        </Form>
-                    ),
-                }] : []),
-                ]}
-            />
-        </>
+                        </div>
+                    </div>
+                    <TermsAgreement checked={agreedToTerms} onChange={setAgreedToTerms} onOpenTerms={() => setTermsOpen(true)} />
+                    <Button type="primary" size="large" block loading={submitting} className="mt-1 h-12! font-medium" onClick={submitRegistration}>
+                        {translate("auth.signInOrSignUp")}</Button>
+                    <Button type="link" block className="mt-1 min-h-9 text-xs" onClick={() => backToCredentials()}>
+                        {translate("auth.backToSignIn")}</Button>
+                </div>
+            </div>
+            <TermsDialog open={termsOpen} onClose={() => setTermsOpen(false)} />
+        </Form>
     );
+}
+
+/** 协议勾选行：勾选状态跨两个面共享，点协议名单独打开条款弹窗。 */
+function TermsAgreement({ checked, onChange, onOpenTerms }: { checked: boolean; onChange: (checked: boolean) => void; onOpenTerms: () => void }) {
+    const translate = useTranslation();
+
+    return (
+        <Checkbox checked={checked} onChange={(event) => onChange(event.target.checked)} className="auth-terms mb-3 flex! items-start text-xs!">
+            <span className="text-xs leading-relaxed text-[var(--studio-muted)]">
+                {translate("auth.agreeToTermsPrefix")}
+                <button
+                    type="button"
+                    className="text-xs! text-[var(--studio-primary)]! hover:underline"
+                    onClick={(event) => {
+                        // 阻止点击冒泡到 Checkbox 的 label，否则看协议会顺手把勾选切掉。
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onOpenTerms();
+                    }}
+                >
+                    {translate("auth.termsOfService")}
+                </button>
+            </span>
+        </Checkbox>
+    );
+}
+
+function isMessageKey(error: unknown, messageKey: string) {
+    return error instanceof ServerApiError && error.messageKey === messageKey;
 }
 
 function readEmailCodeCooldownSeconds() {

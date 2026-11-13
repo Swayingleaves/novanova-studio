@@ -7,7 +7,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 import { App, Button, Input, Popover, Segmented, Tooltip } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { Fragment, useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
-import { ArrowUp, BookOpenText, Bot, LoaderCircle, Square, X } from "lucide-react";
+import { ArrowUp, Bot, LoaderCircle, Square, X } from "lucide-react";
 
 import type { CreationComposerProps, CreationStyleOption } from "@/features/generation/components/creation-workspace-types";
 import type { CreationMode } from "@/features/generation/lib/creation-mode-preference";
@@ -15,7 +15,6 @@ import { CreditCostDisplay } from "@/features/generation/constants/credits";
 import { GenerationStyleCover, GenerationStyleMenu } from "@/features/generation/components/generation-style-picker";
 import { filterGenerationStyles, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { getStyleCommandRange, parseGenerationStyleMessage, removeStyleCommand } from "@/features/generation/lib/style-command";
-import type { SkillOption } from "@/services/api/server";
 import { useSpaceBrand } from "@/features/team/use-space-brand";
 import { ReferencePromptInput, type ReferencePromptInputHandle } from "@/features/generation/components/reference-prompt-input";
 
@@ -29,10 +28,7 @@ export function CreationComposer({
     selectedStyles,
     styleLoading,
     styleError,
-    skillOptions,
     selectedSkill,
-    skillLoading,
-    skillError,
     actions,
     creationMode,
     onCreationModeChange,
@@ -47,14 +43,13 @@ export function CreationComposer({
     onChange,
     onStyleSelect,
     onStyleRemove,
-    onSkillSelect,
     onSkillRemove,
     onPasteImages,
     onSubmit,
     onStop,
     notice,
     embedded = false,
-    toolbarLeading,
+    headerExtra,
 }: CreationComposerProps) {
     const translate = useTranslation();
     const brand = useSpaceBrand();
@@ -66,7 +61,6 @@ export function CreationComposer({
     const [styleQuery, setStyleQuery] = useState("");
     const [styleCommand, setStyleCommand] = useState<{ start: number; end: number } | null>(null);
     const [highlightedStyleIndex, setHighlightedStyleIndex] = useState(0);
-    const [skillMenuOpen, setSkillMenuOpen] = useState(false);
     const toolbarActions = actions.filter((action) => action.placement !== "submit");
     const submitActions = actions.filter((action) => action.placement === "submit");
     const requestActive = running || queued;
@@ -74,7 +68,6 @@ export function CreationComposer({
     const availableStyles = styleOptions ?? [];
     const activeStyles: CreationStyleOption[] = chatMode ? [] : selectedStyles ?? [];
     const activeSkill = chatMode ? null : selectedSkill;
-    const availableSkills = skillOptions ?? [];
     const filteredStyles = useMemo(() => {
         return filterGenerationStyles(availableStyles, styleQuery);
     }, [availableStyles, styleQuery, translate.locale]);
@@ -105,7 +98,6 @@ export function CreationComposer({
         setStyleMenuOpenState(false);
         setStyleCommand(null);
         setStyleQuery("");
-        setSkillMenuOpen(false);
     }, [chatMode]);
 
     const updatePrompt = (nextValue: string, cursor: number) => {
@@ -221,18 +213,21 @@ export function CreationComposer({
     };
 
     const renderAction = (action: CreationComposerProps["actions"][number]) => {
+        // 设置摘要按「比例 · 分辨率 · 秒数」重排，并在最左侧补一个按真实比例绘制的小图标。
+        const summary = action.className?.includes("creation-composer-action-settings") && action.label.includes("|") ? splitSettingsSummary(action.label) : null;
+        const summaryText = summary ? summary.text : action.label;
         const button = (
             <Button
                 size="small"
                 data-tour={`composer-${action.key}`}
                 className={["creation-composer-action", action.iconOnly ? "creation-composer-action-icon" : "", action.className].filter(Boolean).join(" ")}
-                icon={action.icon}
+                icon={summary ? <SettingsRatioGlyph ratio={summary.ratio} /> : action.icon}
                 disabled={action.disabled}
                 loading={action.loading}
                 onClick={action.onClick}
-                aria-label={action.iconOnly ? action.label : undefined}
+                aria-label={action.iconOnly ? summaryText : undefined}
             >
-                {action.iconOnly ? null : <span className="creation-composer-action-label">{action.label}</span>}
+                {action.iconOnly ? null : <span className="creation-composer-action-label">{summaryText}</span>}
             </Button>
         );
         const trigger = action.popoverContent ? (
@@ -240,12 +235,12 @@ export function CreationComposer({
                 {button}
             </Popover>
         ) : (
-            <Tooltip title={action.label}>{button}</Tooltip>
+            <Tooltip title={summaryText}>{button}</Tooltip>
         );
         if (action.className?.includes("creation-composer-action-settings")) {
             return <div key={action.key} className="creation-composer-settings-slot">{trigger}</div>;
         }
-        return <Fragment key={action.key}>{trigger}</Fragment>;
+        return <Fragment key={action.key}>{trigger}{action.trailing}</Fragment>;
     };
 
     return (
@@ -253,13 +248,16 @@ export function CreationComposer({
             <div className={`relative mx-auto w-full max-w-5xl${embedded ? "" : " lg:-left-4"}`}>
                 <div className={`creation-composer-tray px-3 py-3 sm:px-4${compact ? " creation-composer-tray-compact" : ""}`}>
                     <div className="creation-composer-head">
-                        <span className="inline-flex min-w-0 items-center gap-1.5">
-                            <span className="inline-flex shrink-0 items-center gap-1" aria-hidden="true">
-                                <Bot className="size-3.5" strokeWidth={1.6} />
-                                <span className="size-1.5 rounded-full bg-[var(--studio-action)] shadow-[0_0_0_3px_var(--studio-primary-soft)]" />
+                        <span className="inline-flex min-w-0 items-center gap-2">
+                            <span className="inline-flex shrink-0 items-center gap-1.5">
+                                <span className="inline-flex shrink-0 items-center gap-1" aria-hidden="true">
+                                    <Bot className="size-3.5" strokeWidth={1.6} />
+                                    <span className="size-1.5 rounded-full bg-[var(--studio-action)] shadow-[0_0_0_3px_var(--studio-primary-soft)]" />
+                                </span>
+                                <span className="sr-only">{translate("generation.agentReady")}</span>
+                                <span className="truncate">{agentLabel ?? brand.agentName}</span>
                             </span>
-                            <span className="sr-only">{translate("generation.agentReady")}</span>
-                            <span className="truncate">{agentLabel ?? brand.agentName}</span>
+                            {headerExtra}
                         </span>
                         <span>{queued ? translate("generation.queued") : running ? translate("generation.generating") : `${value.length} / 2000`}</span>
                     </div>
@@ -321,7 +319,6 @@ export function CreationComposer({
 
                     <div className={`creation-composer-toolbar flex flex-nowrap items-center gap-2 overflow-hidden transition-all duration-200 ${compact ? "invisible mt-0 max-h-0 opacity-0" : embedded ? "mt-3 max-h-none opacity-100" : "mt-3 max-h-24 opacity-100"}`}>
                         <div className="creation-composer-toolbar-main">
-                            {toolbarLeading}
                             <GenerationStyleMenu
                                 styles={availableStyles}
                                 selected={activeStyles}
@@ -340,16 +337,6 @@ export function CreationComposer({
                                 onQueryChange={setStyleQuery}
                                 onHighlightedIndexChange={setHighlightedStyleIndex}
                                 onSelect={chooseStyle}
-                            />
-                            <SkillMenu
-                                skills={availableSkills}
-                                selectedSkill={activeSkill}
-                                loading={skillLoading}
-                                error={skillError}
-                                open={skillMenuOpen}
-                                disabled={chatMode}
-                                onOpenChange={setSkillMenuOpen}
-                                onSelect={onSkillSelect}
                             />
                             {toolbarActions.map(renderAction)}
                         </div>
@@ -412,103 +399,32 @@ export function CreationComposer({
     );
 }
 
-/** 技能选择浮层，参照风格库 Popover 交互样式。 */
-function SkillMenu({
-    skills,
-    selectedSkill,
-    loading,
-    error,
-    open,
-    disabled,
-    onOpenChange,
-    onSelect,
-}: {
-    skills: SkillOption[];
-    selectedSkill?: SkillOption | null;
-    loading?: boolean;
-    error?: string | null;
-    open: boolean;
-    disabled?: boolean;
-    onOpenChange: (open: boolean) => void;
-    onSelect?: (skill: SkillOption) => void;
-}) {
-    const translate = useTranslation();
-    const content = (
-        <div className="w-[min(24rem,calc(100vw-24px))] p-1" role="dialog" aria-label={translate("generation.skills")}>
-            <div className="flex items-center justify-between gap-3 px-2 pb-2 pt-1">
-                <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-[var(--studio-ink)]">
-                    <BookOpenText className="size-4 shrink-0 text-[var(--studio-action)]" />
-                    <span>{translate("generation.skill_99aea2")}</span>
-                </div>
-            </div>
-            {loading ? (
-                <div className="flex min-h-28 flex-col items-center justify-center gap-2 text-xs text-[var(--studio-muted)]">
-                    <LoaderCircle className="size-5 animate-spin" />
-                    <span>{translate("generation.loadingSkills")}</span>
-                </div>
-            ) : error ? (
-                <div className="flex min-h-28 flex-col items-center justify-center gap-2 text-xs text-[var(--studio-muted)]">
-                    <X className="size-5" />
-                    <span>{error}</span>
-                </div>
-            ) : skills.length ? (
-                <div className="thin-scrollbar max-h-[min(24rem,calc(100vh-190px))] overflow-y-auto pr-1">
-                    {skills.map((skill) => {
-                        const isSelected = selectedSkill?.id === skill.id;
-                        return (
-                            <button
-                                key={skill.id}
-                                type="button"
-                                className={`mb-1 flex w-full items-start gap-3 rounded-md border px-3 py-2 text-left transition ${isSelected ? "border-[var(--studio-action)] bg-[var(--studio-primary-soft)]" : "border-[var(--studio-line)] bg-[var(--studio-surface)] hover:border-[var(--studio-line-strong)] hover:bg-[var(--studio-surface-hover)]"}`}
-                                onClick={() => {
-                                    onSelect?.(skill);
-                                    onOpenChange(false);
-                                }}
-                            >
-                                <GenerationStyleCover style={skill} className="h-16 w-12 shrink-0 overflow-hidden rounded-md" fallbackIcon={<BookOpenText className="size-6" />} />
-                                <span className="min-w-0 flex-1">
-                                    <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-[var(--studio-ink)]">
-                                        <span className="truncate">{skill.name}</span>
-                                    </span>
-                                    {skill.description ? <span className="line-clamp-2 text-xs leading-5 text-[var(--studio-muted)]">{skill.description}</span> : null}
-                                </span>
-                            </button>
-                        );
-                    })}
-                </div>
-            ) : (
-                <div className="flex min-h-28 flex-col items-center justify-center gap-2 text-xs text-[var(--studio-muted)]">
-                    <BookOpenText className="size-5" />
-                    <span>{translate("generation.noAvailableSkills")}</span>
-                </div>
-            )}
-        </div>
-    );
+/**
+ * 拆分设置摘要（如「720p|16:9|5s」），把比例段提到最前并改用「 · 」连接。
+ * <p>
+ * 图片摘要是「画质|清晰度|比例」，视频摘要是「清晰度|比例|秒数」，统一后按钮展示顺序一致。
+ */
+function splitSettingsSummary(label: string) {
+    const segments = label.split("|").map((item) => item.trim()).filter(Boolean);
+    const ratioIndex = segments.findIndex((item) => /^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(item));
+    if (ratioIndex > 0) {
+        const [ratio] = segments.splice(ratioIndex, 1);
+        segments.unshift(ratio);
+    }
+    return { ratio: ratioIndex >= 0 ? segments[0] : "", text: segments.join(" · ") };
+}
+
+/** 按真实宽高比绘制设置摘要前的小图标，未识别到比例时退回 16:9。 */
+function SettingsRatioGlyph({ ratio }: { ratio: string }) {
+    const matched = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(ratio);
+    const width = matched ? Number(matched[1]) : 16;
+    const height = matched ? Number(matched[2]) : 9;
+    const value = width / height;
+    const boxWidth = value >= 1 ? 14 : Math.max(6, 14 * value);
+    const boxHeight = value >= 1 ? Math.max(6, 14 / value) : 14;
     return (
-        <Popover
-            open={open}
-            trigger="click"
-            placement="topLeft"
-            arrow={false}
-            autoAdjustOverflow
-            getPopupContainer={() => document.body}
-            destroyOnHidden
-            content={content}
-            onOpenChange={(nextOpen) => {
-                if (disabled && nextOpen) return;
-                onOpenChange(nextOpen);
-            }}
-            styles={{
-                root: { filter: "none" },
-                container: { padding: 8, background: "var(--studio-surface)", border: "1px solid var(--studio-line)", borderRadius: 8, boxShadow: "var(--studio-shadow)" },
-            }}
-        >
-            <span className="inline-flex">
-                <Tooltip title={disabled ? translate("generation.unavailableInChatMode") : selectedSkill ? translate("generation.selectedSkill", { value0: selectedSkill.name }) : translate("generation.selectSkill")}>
-                    <Button size="small" className="creation-composer-action" icon={<BookOpenText className="size-3.5" />} disabled={disabled} aria-expanded={open} aria-haspopup="dialog">
-                        {translate("generation.skill_99aea2")}</Button>
-                </Tooltip>
-            </span>
-        </Popover>
+        <span className="grid size-4 shrink-0 place-items-center" aria-hidden="true">
+            <span className="rounded-[2px] border border-current opacity-70" style={{ width: boxWidth, height: boxHeight }} />
+        </span>
     );
 }

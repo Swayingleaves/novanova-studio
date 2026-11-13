@@ -75,6 +75,7 @@
     "loadingSkills": "Loading skills",
     "noAvailableSkills": "No available skills",
     "selectedSkill": "Selected skill: {value0}",
+    "selectedStyle": "Selected style: {value0}",
     "selectSkill": "Select skill",
     "failedToUpdateTitle": "Failed to update title",
     "deleteRecord": "Delete record",

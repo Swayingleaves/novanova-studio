@@ -9,6 +9,7 @@ import { BookOpen, Layers3, Menu } from "lucide-react";
 
 import { AppSidebar } from "@/features/app-shell/components/app-sidebar";
 import { CommunityMenu } from "@/features/community/components/community-menu";
+import { ExternalLinkEntry } from "@/features/external-link/components/external-link-entry";
 import { CreditSymbol } from "@/features/generation/constants/credits";
 import { GitHubLink } from "@/features/app-shell/components/github-link";
 import { UserCreditMenu } from "@/features/app-shell/components/user-credit-menu";
@@ -80,6 +81,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <div ref={floatingActionsRef} className="fixed right-3 top-3 z-40 flex max-w-[calc(100vw-4.5rem)] items-center gap-2 md:max-w-[calc(100vw-7rem)]">
                     {team ? <span role="status" title={teamSpaceLabel} className="mr-1 min-w-0 max-w-80 truncate text-xs text-[var(--studio-muted)]">{teamSpaceLabel}</span> : null}
                     <div data-tour="header-links" className="flex items-center gap-2">
+                        <ExternalLinkEntry />
                         {!team && (
                             <Link
                                 href="/credits/purchase"

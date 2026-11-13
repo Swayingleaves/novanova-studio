@@ -26,16 +26,21 @@ type ModelPickerProps = {
     onMissingConfig?: () => void;
     modelOptions?: string[];
     showRealName?: boolean;
+    /** 是否在名称后附带渠道名，工具栏等空间紧张的位置传 false。 */
+    showChannel?: boolean;
 };
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = translate("settings.selectModel"), onMissingConfig, modelOptions, showRealName = false }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = translate("settings.selectModel"), onMissingConfig, modelOptions, showRealName = false, showChannel = true }: ModelPickerProps) {
     const translate = useTranslation();
     const { message } = App.useApp();
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const current = value || "";
     const options = useMemo(() => createModelOptions(config, capability, value, modelOptions), [capability, config, modelOptions, value, translate.locale]);
-    const modelLabel = (model: string) => (showRealName ? modelOptionLabelWithRealName(config, model) : modelOptionLabel(config, model));
+    const modelLabel = (model: string) => {
+        if (!showChannel) return config.modelDisplayNames?.[model.trim()] || modelOptionName(model);
+        return showRealName ? modelOptionLabelWithRealName(config, model) : modelOptionLabel(config, model);
+    };
 
     useEffect(() => {
         const closeWhenOtherPickerOpens = (event: Event) => {

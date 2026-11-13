@@ -2,10 +2,10 @@
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { Handle, Position } from "@xyflow/react";
-import { LoaderCircle, AlertTriangle, ImageOff, VideoOff } from "lucide-react";
+import { Handle, Position, useStore } from "@xyflow/react";
+import { LoaderCircle, AlertTriangle, ImageOff, Plus, VideoOff } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type MouseEventHandler, type PointerEvent, type ReactNode, type WheelEvent } from "react";
-import { CANVAS_CONNECTION_HANDLE_SIZE } from "../constants";
+import { CANVAS_CONNECTION_HANDLE_FOLLOW_RANGE, CANVAS_CONNECTION_HANDLE_OFFSET, CANVAS_CONNECTION_HANDLE_SIZE, CANVAS_CONNECTION_RAIL_SIZE } from "../constants";
 import type { CanvasNode } from "../types";
 import { useNodeActions } from "./node-action-context";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
@@ -187,17 +187,73 @@ const connectionHandleIds: Record<(typeof connectionHandlePositions)[number], st
  */
 export function CanvasConnectionHandles() {
     const theme = useCanvasTheme();
-    const connectionHandleStyle = {
-        width: CANVAS_CONNECTION_HANDLE_SIZE,
-        height: CANVAS_CONNECTION_HANDLE_SIZE,
-        background: theme.node.panel,
-        border: `2px solid ${theme.node.activeStroke}`,
+    // 手柄视觉层按屏幕像素跟手，缩放时要换算回节点内坐标。
+    const zoom = useStore((state) => state.transform[2]);
+    const inverseScale = 1 / Math.max(zoom, 0.05);
+    const leftVisualRef = useRef<HTMLSpanElement>(null);
+    const rightVisualRef = useRef<HTMLSpanElement>(null);
+
+    const visualRef = (position: Position) => (position === Position.Left ? leftVisualRef : rightVisualRef);
+
+    const resetVisual = (position: Position) => {
+        const element = visualRef(position).current;
+        if (element) element.style.transform = "translate(0px, 0px) scale(1)";
+    };
+
+    // 热区内以手柄中心为原点小幅跟手：参考 open-ai-canvas 的做法，视觉圆点浮动，
+    // 真正的连线锚点始终固定在热区中心，因此不需要重算边的端点。
+    const followPointer = (event: PointerEvent<HTMLDivElement>, position: Position) => {
+        const element = visualRef(position).current;
+        if (!element) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const deltaX = event.clientX - (bounds.left + bounds.width / 2);
+        const deltaY = event.clientY - (bounds.top + bounds.height / 2);
+        const limit = CANVAS_CONNECTION_HANDLE_FOLLOW_RANGE;
+        const offsetX = Math.max(-limit, Math.min(limit, deltaX)) * inverseScale;
+        const offsetY = Math.max(-limit, Math.min(limit, deltaY)) * inverseScale;
+        const focus = 1 + Math.max(0, 1 - Math.hypot(deltaX, deltaY) / limit) * 0.08;
+        element.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${focus})`;
     };
 
     return (
         <>
             {connectionHandlePositions.map((position) => (
-                <Handle key={position} id={connectionHandleIds[position]} type="source" position={position} className="!opacity-0 transition-opacity duration-150 group-hover:!opacity-100 motion-reduce:transition-none" style={connectionHandleStyle} />
+                <Handle
+                    key={position}
+                    id={connectionHandleIds[position]}
+                    type="source"
+                    position={position}
+                    className="!opacity-0 transition-opacity duration-150 group-hover:!opacity-100 hover:!opacity-100 focus-visible:!opacity-100 motion-reduce:transition-none"
+                    style={{
+                        width: CANVAS_CONNECTION_RAIL_SIZE,
+                        height: CANVAS_CONNECTION_RAIL_SIZE,
+                        border: 0,
+                        background: "transparent",
+                        cursor: "crosshair",
+                        ...(position === Position.Left ? { marginLeft: -CANVAS_CONNECTION_HANDLE_OFFSET } : { marginRight: -CANVAS_CONNECTION_HANDLE_OFFSET }),
+                    }}
+                    onPointerEnter={(event) => followPointer(event, position)}
+                    onPointerMove={(event) => followPointer(event, position)}
+                    onPointerLeave={() => resetVisual(position)}
+                >
+                    <span
+                        ref={visualRef(position)}
+                        className="pointer-events-none absolute left-1/2 top-1/2 flex items-center justify-center rounded-full border-2"
+                        style={{
+                            width: CANVAS_CONNECTION_HANDLE_SIZE,
+                            height: CANVAS_CONNECTION_HANDLE_SIZE,
+                            marginLeft: -CANVAS_CONNECTION_HANDLE_SIZE / 2,
+                            marginTop: -CANVAS_CONNECTION_HANDLE_SIZE / 2,
+                            background: theme.node.panel,
+                            borderColor: theme.node.activeStroke,
+                            color: theme.node.activeStroke,
+                            transition: "transform 90ms ease-out",
+                            willChange: "transform",
+                        }}
+                    >
+                        <Plus className="size-3" strokeWidth={2.4} aria-hidden="true" />
+                    </span>
+                </Handle>
             ))}
         </>
     );

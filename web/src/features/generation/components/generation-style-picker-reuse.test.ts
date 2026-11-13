@@ -28,10 +28,11 @@ test("已选风格标签复用风格封面缩略图", () => {
     assert.match(picker, /<GenerationStyleCover style=\{style\} className="size-5 shrink-0 overflow-hidden rounded-sm"/);
 });
 
-test("技能无封面时显示技能选择图标", () => {
+test("工具栏不再提供技能入口，已选技能仍以标签展示", () => {
     const composer = source("features/generation/components/creation-composer.tsx");
 
-    assert.match(composer, /fallbackIcon=\{<BookOpenText className="size-6" \/>\}/);
+    assert.doesNotMatch(composer, /<SkillMenu/);
+    assert.match(composer, /activeSkill\.name/);
 });
 
 test("画布单类型和混合类型入口均复用同一风格库组件", () => {
