@@ -33,7 +33,7 @@ import "@xyflow/react/dist/style.css";
 import { Eye, EyeOff } from "lucide-react";
 
 import type { CanvasBackgroundMode } from "@/shared/lib/canvas-theme";
-import { CANVAS_CONNECTION_RAIL_SIZE } from "../constants";
+import { CANVAS_CONNECTION_HANDLE_OFFSET, CANVAS_CONNECTION_RAIL_SIZE } from "../constants";
 import { getCanvasControlStyleVars } from "./canvas-flow-theme";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
@@ -72,8 +72,8 @@ const CANVAS_PAN_ON_DRAG = [0, 1, 2];
 const CANVAS_SELECTION_KEY_CODES = ["Control", "Meta"];
 const CANVAS_PRO_OPTIONS = { hideAttribution: true };
 const CANVAS_MINIMAP_VISIBLE_STORAGE_KEY = "novanova:canvas:minimap_visible";
-// 端点按热区外缘给，收回热区半径后正好落在吸附点中心。
-const CANVAS_CONNECTION_HANDLE_RADIUS = CANVAS_CONNECTION_RAIL_SIZE / 2;
+// React Flow 以热区外缘作为线端；收回热区半径与外移距离后，线条落到节点边缘上。
+const CANVAS_CONNECTION_HANDLE_RADIUS = CANVAS_CONNECTION_RAIL_SIZE / 2 + CANVAS_CONNECTION_HANDLE_OFFSET;
 
 const canvasEdgeTypes: EdgeTypes = { canvasConnection: CanvasConnectionEdge };
 
