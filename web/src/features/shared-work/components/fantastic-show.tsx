@@ -269,7 +269,7 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
                         aria-label={item.liked ? "取消点赞" : "点赞"}
                         title={item.liked ? "取消点赞" : "点赞"}
                         disabled={pending}
-                        className="absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded-full border border-white/25 bg-black/45 px-2 py-1 text-[11px] font-medium tabular-nums text-white backdrop-blur-sm transition hover:bg-black/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-progress"
+                        className="absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded-full border border-white/25 bg-black/45 px-2 py-1 text-[11px]! font-medium tabular-nums text-white! backdrop-blur-sm transition hover:bg-black/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-progress"
                         onClick={(event) => {
                             event.stopPropagation();
                             onToggleLike();
