@@ -18,19 +18,19 @@
 </p>
 
 <p align="center">
-  <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/homepage2-compressed.webp" alt="Novanova Studio 首页截图">
+  <img src="github_images/homepage2-compressed.webp" alt="Novanova Studio 首页截图">
 </p>
 <p align="center">
-  <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/nova-s2.png" alt="Novanova Studio 画布截图">
+  <img src="github_images/nova-s2.png" alt="Novanova Studio 画布截图">
 </p>
 <p align="center">
-  <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/fgk.png" alt="Novanova Studio 画布截图">
+  <img src="github_images/fgk.png" alt="Novanova Studio 画布截图">
 </p>
 <p align="center">
-  <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/jbcz.png" alt="Novanova Studio 剧本创作">
+  <img src="github_images/jbcz.png" alt="Novanova Studio 剧本创作">
 </p>
 <p align="center">
-  <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/mjcz.png" alt="Novanova Studio 漫剧创作">
+  <img src="github_images/mjcz.png" alt="Novanova Studio 漫剧创作">
 </p>
 
 
@@ -48,10 +48,10 @@
   <tbody>
     <tr>
       <td align="center" width="33%">
-        <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/wechat_me.png" alt="作者微信二维码" width="220" />
+        <img src="github_images/wechat_me.png" alt="作者微信二维码" width="220" />
       </td>
       <td align="center" width="33%">
-        <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/images/20261101/32c933ca50e4a6fcaf502fac.png" alt="交流群二维码" width="220" />
+        <img src="github_images/wechat-group-1113.png" alt="交流群二维码" width="220" />
       </td>
     </tr>
   </tbody>
@@ -69,7 +69,7 @@
   <tbody>
     <tr>
       <td align="center" width="33%">
-        <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/sponsor/notoken.png" alt="notoken" width="220" />
+        <img src="github_images/sponsor/notoken.png" alt="notoken" width="220" />
       </td>
       <td align="left" width="33%">
         https://notoken.pro/ <br>
@@ -79,7 +79,7 @@
     </tr>
     <tr>
       <td align="center" width="33%">
-        <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/sponsor/LL2.png" alt="notoken" width="220" />
+        <img src="github_images/sponsor/LL2.png" alt="notoken" width="220" />
       </td>
       <td align="left" width="33%">
         ll2.cn｜自营算力底座 · 官方直签批价。MiniMax-H3 0.05 元/秒（自部署 768P 满血）；deepseek-v4.1-flash 官方 4 折；Seedance 系列 7 折起；超分 0.018 元/秒；Vega系列 6折起 注册链接：https://hub.ll2.cn?p=ua5r
