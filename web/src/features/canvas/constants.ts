@@ -14,7 +14,17 @@ export interface CanvasNodeTemplate {
     height: number;
 }
 
-export const CANVAS_CONNECTION_HANDLE_SIZE = 16;
+/** 视觉圆点直径。 */
+export const CANVAS_CONNECTION_HANDLE_SIZE = 22;
+
+/** 连接点热区直径：比圆点大一圈，便于点中；外缘贴节点边界，不遮挡节点内容。 */
+export const CANVAS_CONNECTION_RAIL_SIZE = 56;
+
+/** 热区中心相对节点边缘向外偏移的距离。 */
+export const CANVAS_CONNECTION_HANDLE_OFFSET = CANVAS_CONNECTION_RAIL_SIZE / 2;
+
+/** 鼠标在热区内移动时圆点的最大跟随距离（屏幕像素）。 */
+export const CANVAS_CONNECTION_HANDLE_FOLLOW_RANGE = 30;
 
 const IMAGE_NODE_TEMPLATE: CanvasNodeTemplate = {
     get title() { return translate("canvas.image_37e4e4"); },
