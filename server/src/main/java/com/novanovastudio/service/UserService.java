@@ -237,13 +237,16 @@ public class UserService {
         // 注册前统一校验邮箱、密码和邮箱占用状态。
         String email = normalizeEmail(request.email());
         emailRegistrationPolicy.validate(email);
-        log.info("用户注册: email={}", email);
+        // 合并登录注册后，用户可能先填了用户名再补邮箱，注册沿用该用户名；未填时与过去一致使用邮箱。
+        String username = request.username() == null || request.username().isBlank() ? email : AccountIdentifier.username(request.username());
+        log.info("用户注册: email={}, username={}", email, username);
         validatePassword(request.password());
         return invitationService.resolveInviterUserId(request.invitationCode())
                 .map(Optional::of)
                 .defaultIfEmpty(Optional.empty())
                 .flatMap(inviterUserId -> userRepository.findByEmail(email)
                 .flatMap(existing -> Mono.<UserDtos.AuthResponse>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered"))))
+                .switchIfEmpty(Mono.defer(() -> rejectTakenUsername(username, email)))
                 .switchIfEmpty(userRepository.latestValidEmailCode(email, CODE_PURPOSE_REGISTER)
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailCodeIsInvalidOrExpired"))))
                         .flatMap(codeRecord -> matchesPassword(request.code().trim(), codeRecord.getCodeHash())
@@ -254,7 +257,7 @@ public class UserService {
                                     return encodePassword(request.password())
                                             .flatMap(passwordHash -> {
                                                 User user = new User();
-                                                user.setUsername(email);
+                                                user.setUsername(username);
                                                 user.setPassword(passwordHash);
                                                 user.setEmail(email);
                                                 user.setNickname(firstNonEmpty(request.nickname(), emailName(email)));
@@ -274,6 +277,23 @@ public class UserService {
     }
 
     /**
+     * 用户名已被占用时阻止注册。
+     * <p>
+     * 沿用邮箱作为用户名时直接跳过：邮箱占用已由调用方的邮箱检查覆盖，重复查询没有意义。
+     *
+     * @param username String 注册用户名
+     * @param email String 注册邮箱
+     * @return Mono<AuthResponse> 被占用时返回业务错误，可用时为空
+     */
+    private Mono<UserDtos.AuthResponse> rejectTakenUsername(String username, String email) {
+        if (username.equals(email)) {
+            return Mono.empty();
+        }
+        return userRepository.findByUsername(username)
+                .flatMap(existing -> Mono.<UserDtos.AuthResponse>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.accountAlreadyExists"))));
+    }
+
+    /**
      * 用户名或邮箱密码登录
      *
      * @param request LoginRequest 登录请求
@@ -283,8 +303,9 @@ public class UserService {
         // 账号类型在查询前确定，密码错误后不尝试另一种标识。
         AccountIdentifier account = AccountIdentifier.parse(request.account());
         log.info("用户登录: account={}", account.value());
+        // 登录与注册已合并为同一入口：账号不存在时返回独立提示，前端据此引导补邮箱注册；密码错误仍与原来一致。
         return findAccount(account)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.incorrectAccountOrPassword"))))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.accountNotFound"))))
                 .flatMap(user -> passwordLoginLockService.remainingLockDuration(user.getId())
                         .flatMap(duration -> Mono.<UserDtos.AuthResponse>error(passwordLockException(duration)))
                         .switchIfEmpty(matchesPassword(request.password(), user.getPassword()).flatMap(matches -> {

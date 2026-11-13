@@ -68,7 +68,7 @@ class UserServiceTest {
                         && "business.emailSuffixNotAllowed".equals(businessException.getSystemMessage().key()))
                 .verify();
         StepVerifier.create(Mono.defer(() -> context.service.register(new UserDtos.RegisterRequest(
-                        email, "123456", "password123", "新用户", null))))
+                        email, "123456", "password123", "新用户", null, null))))
                 .expectErrorMatches(error -> error instanceof BusinessException businessException
                         && "business.emailSuffixNotAllowed".equals(businessException.getSystemMessage().key()))
                 .verify();
@@ -121,7 +121,7 @@ class UserServiceTest {
                 .thenReturn(new TokenService.SignedToken("token", OffsetDateTime.now().plusHours(1)));
 
         StepVerifier.create(context.service.register(new UserDtos.RegisterRequest(
-                        "new@example.com", "123456", "password123", "新用户", "INVITATIONCODE01")))
+                        "new@example.com", "123456", "password123", "新用户", "INVITATIONCODE01", null)))
                 .expectNextCount(1)
                 .verifyComplete();
 
@@ -139,7 +139,7 @@ class UserServiceTest {
                 .thenReturn(Mono.error(new BusinessException(com.novanovastudio.common.ErrorCode.BUSINESS_ERROR, "邀请码无效")));
 
         StepVerifier.create(context.service.register(new UserDtos.RegisterRequest(
-                        "new@example.com", "123456", "password123", "新用户", "INVALIDCODE")))
+                        "new@example.com", "123456", "password123", "新用户", "INVALIDCODE", null)))
                 .expectError(BusinessException.class)
                 .verify();
 
@@ -647,13 +647,13 @@ class UserServiceTest {
         verify(context.userRepository, never()).findByEmail(any());
     }
 
-    /** 用户名不存在或大小写不一致时统一拒绝，不再按邮箱查找。 */
+    /** 用户名不存在或大小写不一致时统一拒绝，不再按邮箱查找；提示为“尚未注册”以便前端引导补邮箱注册。 */
     @Test
     void shouldNotFallbackForUnknownUsername() {
         TestContext context = testContext();
         when(context.userRepository.findByUsername("creator")).thenReturn(Mono.empty());
         StepVerifier.create(context.service.login(new UserDtos.LoginRequest("creator", "password123")))
-                .expectErrorMatches(error -> error instanceof BusinessException && error.getMessage().equals("账号或密码错误")).verify();
+                .expectErrorMatches(error -> error instanceof BusinessException && error.getMessage().equals("该账号尚未注册")).verify();
         verify(context.userRepository, never()).findByEmail(any());
     }
 

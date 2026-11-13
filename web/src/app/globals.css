@@ -494,6 +494,103 @@ html[data-theme="purple"] {
         backdrop-filter: blur(24px) saturate(1.4);
     }
 
+    /* 登录弹窗改成左品牌面板 + 右表单的双栏布局，必须去掉 antd 容器的内边距与圆角外溢。 */
+    .auth-modal .ant-modal-container {
+        padding: 0 !important;
+        overflow: hidden;
+    }
+
+    /* 登录弹窗左侧品牌面板：底色由主题变量混合而成，避免把浅色主题的暖色硬编码到暗色主题里。 */
+    .auth-showcase {
+        background:
+            radial-gradient(120% 92% at 0% 0%, color-mix(in srgb, var(--studio-action) 14%, transparent) 0%, transparent 64%),
+            radial-gradient(88% 78% at 100% 100%, color-mix(in srgb, var(--studio-accent) 10%, transparent) 0%, transparent 58%),
+            var(--studio-surface-soft);
+        border-right: 1px solid var(--studio-line);
+    }
+
+    .auth-showcase-glow {
+        position: absolute;
+        top: -46%;
+        left: -26%;
+        width: 124%;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: radial-gradient(closest-side, color-mix(in srgb, var(--studio-ink) 7%, transparent), transparent 78%);
+        pointer-events: none;
+    }
+
+    .auth-showcase-card {
+        background: var(--studio-panel);
+        border: 1px solid color-mix(in srgb, var(--studio-line) 72%, transparent);
+        box-shadow: 0 1px 2px color-mix(in srgb, var(--studio-ink) 5%, transparent);
+    }
+
+    /* 认证表单去掉字段标签后，收紧 antd 默认的 24px 字段间距；登录弹窗与 /auth 页共用。 */
+    .auth-form .ant-form-item {
+        margin-bottom: 12px !important;
+    }
+
+    .auth-form .ant-form-item-explain-error {
+        padding-top: 4px;
+        font-size: 12px;
+    }
+
+    /* 登录/注册合并后的两步翻转：两个面叠在同一个网格单元里，切换时 rotateY 翻过去。 */
+    .auth-flip {
+        display: grid;
+        perspective: 1800px;
+    }
+
+    .auth-flip-face {
+        grid-area: 1 / 1;
+        align-self: center;
+        backface-visibility: hidden;
+        transform-origin: 50% 50%;
+        transition: transform 0.52s cubic-bezier(0.22, 0.68, 0.28, 1), opacity 0.34s ease, visibility 0s;
+    }
+
+    .auth-flip[data-step="credentials"] .auth-flip-face[data-face="email"],
+    .auth-flip[data-step="email"] .auth-flip-face[data-face="credentials"] {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: transform 0.52s cubic-bezier(0.22, 0.68, 0.28, 1), opacity 0.34s ease, visibility 0s linear 0.34s;
+    }
+
+    .auth-flip[data-step="credentials"] .auth-flip-face[data-face="email"] {
+        transform: rotateY(-180deg);
+    }
+
+    .auth-flip[data-step="email"] .auth-flip-face[data-face="credentials"] {
+        transform: rotateY(180deg);
+    }
+
+    /* 邮箱填完整才展开验证码：用 grid-template-rows 过渡让高度自适应，不写死 max-height。 */
+    .auth-reveal {
+        display: grid;
+        grid-template-rows: 0fr;
+        opacity: 0;
+        transition: grid-template-rows 0.32s ease, opacity 0.28s ease;
+    }
+
+    .auth-reveal[data-open="true"] {
+        grid-template-rows: 1fr;
+        opacity: 1;
+    }
+
+    .auth-reveal > div {
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .auth-flip-face,
+        .auth-reveal {
+            transition: none;
+        }
+    }
+
     @keyframes auth-ray-sway {
         0% {
             transform: rotate(calc(var(--ray-angle) - 4deg)) translate3d(-2%, 0, 0) scaleY(1);

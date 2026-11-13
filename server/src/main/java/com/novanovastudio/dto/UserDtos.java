@@ -39,12 +39,14 @@ public final class UserDtos {
      * @param password String 密码
      * @param nickname String 昵称
      * @param invitationCode String 可选邀请码
+     * @param username String 可选用户名，未填时沿用邮箱
      */
     public record RegisterRequest(@NotBlank(message = "business.emailIsRequired") String email,
                                   @NotBlank(message = "business.verificationCodeIsRequired") String code,
                                   @NotBlank(message = "business.passwordIsRequired") String password,
                                   String nickname,
-                                  @Size(max = 16, message = "business.invitationCodeMustNotExceed16Characters") String invitationCode) {
+                                  @Size(max = 16, message = "business.invitationCodeMustNotExceed16Characters") String invitationCode,
+                                  @Size(max = 50, message = "business.usernameMustNotExceed50Characters") String username) {
     }
 
     /**
