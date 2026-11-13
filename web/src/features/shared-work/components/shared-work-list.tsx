@@ -1,10 +1,10 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Empty, Input, Modal, Pagination, Select, Spin, Tag } from "antd";
-import { Copy, Eye, RefreshCw } from "lucide-react";
+import { Copy, Eye, ImagePlus, RefreshCw } from "lucide-react";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
-import { getSharedWork, listSharedWorks, reviewSharedWork, sharedWorkStatusNames, sharedWorkTypeNames, withdrawSharedWork, type SharedWork, type SharedWorkDetail, type SharedWorkPage, type SharedWorkStatus } from "@/services/api/shared-work";
+import { getSharedWork, listSharedWorks, refreshMissingCovers, reviewSharedWork, sharedWorkStatusNames, sharedWorkTypeNames, withdrawSharedWork, type SharedWork, type SharedWorkDetail, type SharedWorkPage, type SharedWorkStatus } from "@/services/api/shared-work";
 import { SharedContent } from "./shared-content";
 
 /** 作者列表和管理员队列共享状态展示及详情，服务端按当前空间强制限定权限。 */
@@ -21,6 +21,7 @@ export function SharedWorkList({ review = false }: { review?: boolean }) {
     const [detail, setDetail] = useState<SharedWorkDetail | null>(null);
     const [previewing, setPreviewing] = useState("");
     const [busy, setBusy] = useState("");
+    const [refreshingCovers, setRefreshingCovers] = useState(false);
     const [decision, setDecision] = useState<{ work: SharedWork; action: "reject" | "takeDown" } | null>(null);
     const [reason, setReason] = useState("");
     const lastLoadedAt = useRef(0);
@@ -54,10 +55,20 @@ export function SharedWorkList({ review = false }: { review?: boolean }) {
         catch (failure) { message.error(failure instanceof Error ? failure.message : "读取预览失败"); }
         finally { setPreviewing(""); }
     };
+    // 分享时截帧失败的视频没有封面，这里按批次补生成，单次最多二十条。
+    const refreshCovers = async () => {
+        setRefreshingCovers(true);
+        try {
+            const result = await refreshMissingCovers();
+            message.success(result.scanned ? `扫描 ${result.scanned} 条，补齐 ${result.refreshed} 条，失败 ${result.failed} 条` : "没有缺少封面的视频");
+            setRevision((value) => value + 1);
+        } catch (failure) { message.error(failure instanceof Error ? failure.message : "补齐封面失败"); }
+        finally { setRefreshingCovers(false); }
+    };
     return <div className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-[var(--studio-muted)]">{review ? team ? `仅审核「${team.name}」的团队投稿` : "仅审核个人空间投稿" : team ? `「${team.name}」中由我提交的作品` : "我的个人作品投稿"}</p>
-            <div className="flex gap-2"><Select aria-label="分享状态" value={status} className="min-w-32" onChange={(value) => { setStatus(value); setPage(1); }} options={[{ value: "", label: "全部状态" }, ...Object.entries(sharedWorkStatusNames).filter(([value]) => !review || (value !== "preparing" && value !== "failed")).map(([value, label]) => ({ value, label }))]} /><Button icon={<RefreshCw className="size-4" />} onClick={() => setRevision((value) => value + 1)}>刷新</Button></div>
+            <div className="flex gap-2"><Select aria-label="分享状态" value={status} className="min-w-32" onChange={(value) => { setStatus(value); setPage(1); }} options={[{ value: "", label: "全部状态" }, ...Object.entries(sharedWorkStatusNames).filter(([value]) => !review || (value !== "preparing" && value !== "failed")).map(([value, label]) => ({ value, label }))]} /><Button icon={<RefreshCw className="size-4" />} onClick={() => setRevision((value) => value + 1)}>刷新</Button>{review ? <Button icon={<ImagePlus className="size-4" />} loading={refreshingCovers} onClick={() => void refreshCovers()}>补齐封面</Button> : null}</div>
         </div>
         {error ? <Alert type="error" title={error} showIcon /> : loading ? <div className="grid min-h-60 place-items-center"><Spin /></div> : !data?.items.length ? <Empty description="暂无分享作品" /> : <div className="divide-y divide-[var(--studio-line)] rounded-lg border border-[var(--studio-line)]">
             {data.items.map((work) => <article key={work.shareCode} className="flex flex-col gap-4 p-4 sm:flex-row sm:p-5">

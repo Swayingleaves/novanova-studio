@@ -261,6 +261,33 @@ public class SharedWorkService {
     }
 
     /**
+     * 补齐已提交视频缺失的分享封面，供上线后一次性补偿，也可在截帧失败后重试。
+     *
+     * @param limit 单次最多处理条数
+     * @return 扫描、补齐和失败数量
+     */
+    public Mono<SharedWorkDtos.CoverRefreshResult> refreshMissingCovers(int limit) {
+        int batch = Math.max(1, Math.min(limit, 20));
+        Mono<SharedWorkDtos.CoverRefreshResult> refresh = repository.missingVideoCovers(batch)
+                .concatMap(asset -> mediaService.refreshCover(asset)
+                        .map(done -> Map.entry(done, asset))
+                        .onErrorResume(error -> {
+                            log.error("补充分享视频封面失败：shareCode={}, assetId={}", asset.getString("shareCode"), asset.getString("assetId"), error);
+                            return Mono.just(Map.entry(false, asset));
+                        }))
+                .collectList()
+                .map(results -> new SharedWorkDtos.CoverRefreshResult(results.size(),
+                        (int) results.stream().filter(Map.Entry::getKey).count(),
+                        (int) results.stream().filter(entry -> !entry.getKey()).count()))
+                .contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
+        // 补封面要跨空间读取并写回媒体记录，只允许平台管理员执行，空间管理员不应动到其它空间的作品。
+        return currentUserProvider.currentUser()
+                .filter(user -> "admin".equals(user.role()))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, "仅平台管理员可以补齐分享封面")))
+                .then(refresh);
+    }
+
+    /**
      * 登记分享视频封面的删除，没有封面时直接完成。
      *
      * @param asset 待清理的分享媒体

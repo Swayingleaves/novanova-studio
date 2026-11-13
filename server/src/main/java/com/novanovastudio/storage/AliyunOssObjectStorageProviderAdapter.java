@@ -65,12 +65,14 @@ public class AliyunOssObjectStorageProviderAdapter implements ObjectStorageProvi
      * @param download 是否附件下载
      * @param expiresAt 到期时间
      * @param edge 缩放后的长边像素
+     * @param jpeg 是否同时转成 JPEG
      * @return 带 image/resize 的临时 GET 地址
      */
     @Override
-    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge) {
+    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge, boolean jpeg) {
         int size = Math.max(1, edge);
-        return presign(config, key, fileName, mimeType, download, expiresAt, "image/resize,m_lfit,w_" + size + ",h_" + size);
+        String process = "image/resize,m_lfit,w_" + size + ",h_" + size + (jpeg ? "/format,jpg/quality,q_80" : "");
+        return presign(config, key, fileName, mimeType, download, expiresAt, process);
     }
 
     /**

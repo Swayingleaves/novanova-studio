@@ -41,9 +41,10 @@ public interface ObjectStorageProviderAdapter {
      * @param download 是否要求附件下载
      * @param expiresAt 到期时间
      * @param edge 缩放后的长边像素
+     * @param jpeg 是否同时把结果转成 JPEG，用于 PNG 截图这类缩放后体积仍然过大的原图
      * @return 缩略图临时地址，不支持时返回 null
      */
-    default String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge) {
+    default String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge, boolean jpeg) {
         return null;
     }
 

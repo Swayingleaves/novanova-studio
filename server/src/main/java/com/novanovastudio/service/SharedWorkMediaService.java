@@ -93,10 +93,10 @@ public class SharedWorkMediaService {
      * @param mimeType 实际媒体类型
      * @param video 已下载的本地视频
      * @param config 目标存储
-     * @return 完成信号，没有封面时也是完成
+     * @return 是否真的写入了封面
      */
-    private Mono<Void> storeVideoCover(String code, String assetId, String mimeType, Path video, PersistenceDtos.ObjectStorageConfig config) {
-        if (!mimeType.startsWith("video/")) return Mono.empty();
+    private Mono<Boolean> storeVideoCover(String code, String assetId, String mimeType, Path video, PersistenceDtos.ObjectStorageConfig config) {
+        if (!mimeType.startsWith("video/")) return Mono.just(false);
         String key = "shared-work/" + code + "/" + assetId + ".cover.jpg";
         return Mono.fromCallable(() -> VideoCoverExtractor.extract(video,
                         properties.getAi().getVideoComposition().getFfmpegExecutable(), VideoCoverExtractor.SHARE_EDGE))
@@ -113,12 +113,41 @@ public class SharedWorkMediaService {
                                         Files.deleteIfExists(cover);
                                     }
                                 })
-                        .flatMap(coverKey -> repository.updateMediaCover(code, assetId, coverKey, "image/jpeg")))
+                        .flatMap(coverKey -> repository.updateMediaCover(code, assetId, coverKey, "image/jpeg"))
+                        .thenReturn(true))
                 .onErrorResume(error -> {
                     log.error("生成分享视频封面失败，保留无封面记录: code={}, assetId={}", code, assetId, error);
-                    return Mono.empty();
+                    return Mono.just(false);
                 })
-                .then();
+                .defaultIfEmpty(false);
+    }
+
+    /**
+     * 为已提交作品补生成缺失的视频封面，复用分享时的截帧、容量登记和对象键规则。
+     * <p>
+     * 下载走第三方读取用途的签名地址，只在服务端内部使用，不返回给前端。
+     *
+     * @param asset 分享媒体记录
+     * @return 是否已补齐封面
+     */
+    public Mono<Boolean> refreshCover(JSONObject asset) {
+        String shareCode = asset.getString("shareCode");
+        String assetId = asset.getString("assetId");
+        String storageId = asset.getString("storageId");
+        String objectKey = asset.getString("objectKey");
+        String mimeType = asset.getString("mimeType");
+        if (shareCode == null || assetId == null || storageId == null || objectKey == null || mimeType == null || !mimeType.startsWith("video/")) {
+            return Mono.just(false);
+        }
+        long maximumBytes = Math.max(1, properties.getAi().getVideoComposition().getMaximumInputBytes());
+        return persistenceService.getObjectStorageForCleanup(storageId)
+                .flatMap(config -> temporaryFile(path -> mediaAccessService.signObject(storageId, objectKey, asset.getString("fileName"),
+                                mimeType, MediaAccessService.Purpose.THIRD_PARTY, false)
+                        .map(MediaAccessService.Access::url)
+                        .flatMap(url -> httpClient.downloadRemoteMediaToFile(url, mimeType, path, maximumBytes))
+                        .flatMap(file -> storeVideoCover(shareCode, assetId, file.mimeType(), path, config))))
+                .contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true))
+                .defaultIfEmpty(false);
     }
 
     /**

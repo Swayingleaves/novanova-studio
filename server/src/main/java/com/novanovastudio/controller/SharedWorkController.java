@@ -74,6 +74,11 @@ public class SharedWorkController {
     @RequireRole("admin")
     public Mono<ApiResponse<String>> review(@Valid @RequestBody SharedWorkDtos.ReviewRequest request) { return service.review(request).thenReturn(ApiResponse.ok("ok")); }
 
+    /** @param limit 单次最多处理条数 @return 视频封面补齐结果 */
+    @PostMapping("/admin/sharedWork/refreshMissingCovers")
+    @RequireRole("admin")
+    public Mono<ApiResponse<SharedWorkDtos.CoverRefreshResult>> refreshMissingCovers(@RequestParam(defaultValue = "10") int limit) { return service.refreshMissingCovers(limit).map(ApiResponse::ok); }
+
     /** @param workType 媒体类型 @param category 分类 @param keyword 关键词 @param page 页码 @param response 禁止缓存临时授权的响应 @return 首页混合作品 */
     @GetMapping("/homepage/listFantasticWorks")
     public Mono<ApiResponse<SharedWorkDtos.FantasticPage>> fantastic(@RequestParam(defaultValue = "") String workType,

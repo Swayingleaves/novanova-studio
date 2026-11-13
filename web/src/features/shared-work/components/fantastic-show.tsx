@@ -196,8 +196,8 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
     const [ratio, setRatio] = useState<number | null>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
     const cover = item.thumbnailUrl?.trim() || "";
-    // 卡片本身只展示封面，鼠标停在中部播放按钮上才挂载并播放视频。
-    const showVideo = isVideo && (!cover || playing);
+    // 卡片本身只展示封面，鼠标停在中部播放按钮上才挂载并播放；没有封面的视频同样不预载，避免一进首页就拉整段视频。
+    const showVideo = isVideo && playing;
     const openPreview = () => setPreviewing(true);
     const stopVideo = () => {
         const video = videoRef.current;

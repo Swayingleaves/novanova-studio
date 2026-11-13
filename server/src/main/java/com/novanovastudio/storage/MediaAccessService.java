@@ -315,9 +315,12 @@ public class MediaAccessService {
         String resolvedName = StringUtils.hasText(fileName) ? fileName : lastSegment(key);
         String resolvedMimeType = StringUtils.hasText(mimeType) ? mimeType : null;
         int edge = thumbnailEdge(purpose);
+        // PNG 截图缩到 720 之后仍然有 MB 级体积，首页卡片缩放时一并转成 JPEG；其他用途保持原格式。
+        boolean jpeg = purpose == Purpose.HOME_CARD && edge > 0 && "image/png".equalsIgnoreCase(resolvedMimeType);
+        String outputMimeType = jpeg ? "image/jpeg" : resolvedMimeType;
         return Mono.fromCallable(() -> edge > 0
-                        ? objectStorageService.createThumbnailReadUrl(config, key, resolvedName, resolvedMimeType, download, expiresAt, edge)
-                        : objectStorageService.createReadUrl(config, key, resolvedName, resolvedMimeType, download, expiresAt))
+                        ? objectStorageService.createThumbnailReadUrl(config, key, resolvedName, outputMimeType, download, expiresAt, edge, jpeg)
+                        : objectStorageService.createReadUrl(config, key, resolvedName, outputMimeType, download, expiresAt))
                 .subscribeOn(Schedulers.boundedElastic())
                 .doOnNext(url -> {
                     if (signedUrls.size() > SIGNED_URL_CACHE_LIMIT) {

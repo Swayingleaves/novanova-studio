@@ -61,4 +61,7 @@ public final class SharedWorkDtos {
 
     /** 复制后的个人画布标识。 */
     public record CopyResult(String documentId) { }
+
+    /** 分享视频封面补偿结果。scanned 为本次扫描条数，refreshed 为成功补齐数，failed 为仍失败数。 */
+    public record CoverRefreshResult(int scanned, int refreshed, int failed) { }
 }

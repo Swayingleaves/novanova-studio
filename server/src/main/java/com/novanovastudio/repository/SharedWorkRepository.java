@@ -140,6 +140,23 @@ public class SharedWorkRepository {
     }
 
     /**
+     * 找出已提交但缺少封面的视频媒体，供补齐首页卡片封面。
+     *
+     * @param limit 单次最多处理条数
+     * @return 待补封面的媒体记录
+     */
+    public Flux<JSONObject> missingVideoCovers(int limit) {
+        return queries.query("""
+                SELECT media.* FROM shared_work_media media JOIN shared_works works USING(share_code)
+                WHERE media.cleaned_at IS NULL AND media.mime_type LIKE 'video/%'
+                  AND (media.cover_object_key IS NULL OR media.cover_object_key = '')
+                  AND works.work_status IN ('pending', 'published')
+                ORDER BY works.published_at DESC NULLS LAST, media.share_code
+                LIMIT :limit
+                """, Map.of("limit", limit));
+    }
+
+    /**
      * 用期望状态进行原子更新，避免审核与撤回互相覆盖。
      * @param code 分享标识
      * @param teamId 操作空间

@@ -68,7 +68,7 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
      */
     @Override
     public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
-        return presign(config, key, fileName, mimeType, download, expiresAt, 0);
+        return presign(config, key, fileName, mimeType, download, expiresAt, 0, false);
     }
 
     /**
@@ -81,11 +81,12 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
      * @param download 是否附件下载
      * @param expiresAt 到期时间
      * @param edge 缩放后的长边像素
+     * @param jpeg 是否同时转成 JPEG
      * @return 带 imageMogr2 的临时 GET 地址
      */
     @Override
-    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge) {
-        return presign(config, key, fileName, mimeType, download, expiresAt, Math.max(1, edge));
+    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge, boolean jpeg) {
+        return presign(config, key, fileName, mimeType, download, expiresAt, Math.max(1, edge), jpeg);
     }
 
     /**
@@ -98,16 +99,17 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
      * @param download 是否附件下载
      * @param expiresAt 到期时间
      * @param thumbnailEdge 附加图片处理时的长边像素，0 表示读取原图
+     * @param jpeg 是否同时把结果转成 JPEG
      * @return 临时 GET 地址
      */
-    private String presign(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int thumbnailEdge) {
+    private String presign(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int thumbnailEdge, boolean jpeg) {
         validate(config);
         COSClient client = createClient(config);
         try {
             var request = new com.qcloud.cos.model.GeneratePresignedUrlRequest(config.bucket(), key, com.qcloud.cos.http.HttpMethodName.GET);
             request.setExpiration(java.util.Date.from(expiresAt));
             if (thumbnailEdge > 0) {
-                request.addRequestParameter("imageMogr2/thumbnail/" + thumbnailEdge + "x", null);
+                request.addRequestParameter("imageMogr2/thumbnail/" + thumbnailEdge + "x" + (jpeg ? "/format/jpg/quality/80" : ""), null);
             }
             var headers = new com.qcloud.cos.model.ResponseHeaderOverrides();
             if (StringUtils.hasText(fileName)) {
