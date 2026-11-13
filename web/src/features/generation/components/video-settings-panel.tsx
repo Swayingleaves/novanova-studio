@@ -247,11 +247,11 @@ function RatioButton({ preset, active, disabled, theme, onClick }: { preset: Rat
             disabled={disabled}
             title={disabled ? translate("generation.thisVideoModelDoesNotSupportThisAspectRatio") : undefined}
             className="flex h-[78px] min-w-0 flex-col items-center justify-center gap-2 rounded-lg border text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-35"
-            style={{ borderColor: active ? theme.node.activeStroke : theme.node.stroke, color: theme.node.text, background: active ? theme.node.fill : "transparent" }}
+            style={{ borderColor: active ? theme.node.activeStroke : theme.node.stroke, color: active ? "var(--studio-action-foreground)" : theme.node.text, background: active ? theme.node.activeStroke : "transparent" }}
             onMouseDown={stopDown}
             onClick={onClick}
         >
-            <RatioGlyph width={preset.width} height={preset.height} color={theme.node.text} />
+            <RatioGlyph width={preset.width} height={preset.height} color={active ? "var(--studio-action-foreground)" : theme.node.text} />
             <span>{preset.label}</span>
         </button>
     );
@@ -264,7 +264,7 @@ function OptionButton({ active, disabled = false, disabledReason, theme, onClick
             disabled={disabled}
             title={disabled ? disabledReason : undefined}
             className="h-10 rounded-lg border text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-35"
-            style={{ borderColor: active ? theme.node.activeStroke : theme.node.stroke, color: theme.node.text, background: active ? theme.node.fill : "transparent" }}
+            style={{ borderColor: active ? theme.node.activeStroke : theme.node.stroke, color: active ? "var(--studio-action-foreground)" : theme.node.text, background: active ? theme.node.activeStroke : "transparent" }}
             onMouseDown={stopDown}
             onClick={onClick}
         >
@@ -362,7 +362,8 @@ export function videoResolutionLabel(value: string): string {
     if (normalizedValue === "2k") return "2K";
     if (normalizedValue === "768p" || normalizedValue === "768") return "768P";
     const normalized = normalizeVideoResolutionValue(value);
-    return normalized.toUpperCase() === "4K" ? "4K" : `${normalized}p`;
+    // 统一用大写 P，与清晰度选项按钮的 720P / 1080P 写法保持一致。
+    return normalized.toUpperCase() === "4K" ? "4K" : `${normalized.toUpperCase()}P`;
 }
 
 export function videoSizeLabel(value: string): string {

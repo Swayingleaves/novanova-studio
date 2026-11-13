@@ -25,12 +25,13 @@ test("resolveModelIcon 为 Qwen 和 Wan 系列模型显示 Qwen 图标", () => {
     assert.equal(resolveModelIcon("want-video-model"), "");
 });
 
-test("isMonochromeModelIcon 标记需要暗色反色处理的图标", () => {
+test("isMonochromeModelIcon 只标记需要暗色反色的黑白单色图标", () => {
     assert.equal(isMonochromeModelIcon("gpt-image-2"), true);
     assert.equal(isMonochromeModelIcon("grok-video"), true);
-    assert.equal(isMonochromeModelIcon("custom-video-model", "agnes"), true);
-    assert.equal(isMonochromeModelIcon("doubao-seedance-1.5-pro"), true);
-    assert.equal(isMonochromeModelIcon("MiniMax-H3"), true);
+    // 带品牌色或深浅双色的图标保持原色，不做暗色反色。
+    assert.equal(isMonochromeModelIcon("custom-video-model", "agnes"), false);
+    assert.equal(isMonochromeModelIcon("doubao-seedance-1.5-pro"), false);
+    assert.equal(isMonochromeModelIcon("MiniMax-H3"), false);
     assert.equal(isMonochromeModelIcon("gemini-2.5-flash"), false);
 });
 

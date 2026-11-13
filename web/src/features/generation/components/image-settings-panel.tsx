@@ -96,11 +96,11 @@ export function ImageSettingsPanel({
                                     key={preset.value}
                                     type="button"
                                     className="flex h-20 flex-col items-center justify-center gap-1 rounded-lg border text-xs transition-colors"
-                                    style={{ borderColor: active ? theme.node.activeStroke : theme.node.stroke, color: theme.node.text, background: active ? theme.node.fill : "transparent" }}
+                                    style={{ borderColor: active ? theme.node.activeStroke : theme.node.stroke, color: active ? "var(--studio-action-foreground)" : theme.node.text, background: active ? theme.node.activeStroke : "transparent" }}
                                     onMouseDown={stopDown}
                                     onClick={() => onConfigChange("size", preset.value)}
                                 >
-                                    <RatioGlyph w={preset.w} h={preset.h} color={theme.node.text} />
+                                    <RatioGlyph w={preset.w} h={preset.h} color={active ? "var(--studio-action-foreground)" : theme.node.text} />
                                     {preset.label}
                                 </button>
                             );
@@ -137,6 +137,11 @@ export function ImageSettingsTheme({ theme, children }: { theme: CanvasTheme; ch
                     colorTextLightSolid: "#ffffff",
                 },
                 components: {
+                    Segmented: {
+                        itemSelectedBg: theme.node.activeStroke,
+                        // 选中项文字取主色反色，暗色主题下浅绿底配深字，和下方比例、清晰度按钮保持一致。
+                        itemSelectedColor: "var(--studio-action-foreground)",
+                    },
                     Button: {
                         primaryColor: theme.toolbar.activeGradientText,
                         defaultBg: theme.toolbar.panel,
@@ -190,7 +195,7 @@ function Chip({ active, theme, onMouseDown, onClick, children }: { active: boole
         <button
             type="button"
             className="h-10 rounded-lg border text-xs transition-colors"
-            style={{ borderColor: active ? theme.node.activeStroke : theme.node.stroke, color: theme.node.text, background: active ? theme.node.fill : "transparent" }}
+            style={{ borderColor: active ? theme.node.activeStroke : theme.node.stroke, color: active ? "var(--studio-action-foreground)" : theme.node.text, background: active ? theme.node.activeStroke : "transparent" }}
             onMouseDown={onMouseDown}
             onClick={onClick}
         >

@@ -20,11 +20,14 @@ export function resolveModelIcon(model: string, apiFormat?: ApiCallFormat): stri
     return "";
 }
 
+/**
+ * 需要在暗色主题下反色的图标：OpenAI、Grok 用 currentColor，在 img 里渲染成黑色，
+ * 不反色在深色背景上会糊成一块。Seedance、MiniMax、Agnes、Qwen 等本身带品牌色
+ * 或深浅双色，保持原色，避免反色后偏离品牌配色。
+ */
 export function isMonochromeModelIcon(model: string, apiFormat?: ApiCallFormat): boolean {
-    if (apiFormat === "agnes" || apiFormat === "seedance" || apiFormat === "minimax") return true;
-
     const name = model.toLowerCase();
-    return name.includes("gpt") || name.includes("openai") || name.includes("grok") || name.includes("seedance") || name.includes("minimax");
+    return name.includes("gpt") || name.includes("openai") || name.includes("grok");
 }
 
 /**
@@ -56,5 +59,5 @@ export function resolveModelIconByKey(key: string | null | undefined): string {
     return found?.path || "";
 }
 
-/** 需要暗色反色处理的品牌图标标识集合。 */
-export const MODEL_ICON_MONOCHROME_KEYS = new Set(["agnes", "seedance", "minimax", "openai", "grok"]);
+/** 需要暗色反色处理的品牌图标标识集合：只包含 OpenAI、Grok 这类纯黑单色图标。 */
+export const MODEL_ICON_MONOCHROME_KEYS = new Set(["openai", "grok"]);
