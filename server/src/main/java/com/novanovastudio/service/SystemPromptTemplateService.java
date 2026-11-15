@@ -122,6 +122,8 @@ public class SystemPromptTemplateService {
             case AGENT_STORY_BIBLE -> systemPrompt.getAgentStoryBibleFile();
             case AGENT_USER_ACTIONS -> systemPrompt.getAgentUserActionsFile();
             case IMAGE_STORYBOARD_ASSET -> systemPrompt.getImageStoryboardAssetFile();
+            case AGENT_DRAMA -> systemPrompt.getAgentDramaFile();
+            case AGENT_DRAMA_MEDIA -> systemPrompt.getAgentDramaMediaFile();
         };
     }
 }

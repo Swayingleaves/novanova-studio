@@ -95,6 +95,28 @@ public class AgentScopeAgentFactory {
     }
 
     /**
+     * 创建智能短剧导演Agent。
+     *
+     * @param model Model 用户选择的文本模型
+     * @return ReActAgent 短剧导演Agent
+     */
+    public ReActAgent dramaAgent(Model model) {
+        return build("drama-agent", promptService.get(PromptTemplateType.AGENT_DRAMA), model,
+                "只能返回当前请求对应的短剧结构化结果，不得调用工具、解释或输出额外文本。", false);
+    }
+
+    /**
+     * 创建智能短剧提示词Agent，只负责把一个生成目标写成图片或视频提示词。
+     *
+     * @param model Model 用户选择的文本模型
+     * @return ReActAgent 短剧提示词Agent
+     */
+    public ReActAgent dramaMediaAgent(Model model) {
+        return build("drama-media-agent", promptService.get(PromptTemplateType.AGENT_DRAMA_MEDIA), model,
+                "只能返回 MediaPrompt 结构化结果，不得调用工具、解释或输出额外文本。", false);
+    }
+
+    /**
      * 创建剧本创作Agent。
      *
      * @param model Model 用户明确选择的文本模型

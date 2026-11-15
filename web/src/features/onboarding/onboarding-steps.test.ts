@@ -27,6 +27,7 @@ test("只在欢迎弹窗已消费、未完成当前版本、非团队空间的�
     assert.equal(shouldStartOnboarding({ ...base, user: { welcomeRead: true, onboardingVersion: ONBOARDING_VERSION + 1 } }), false);
     assert.equal(shouldStartOnboarding({ ...base, desktop: false }), false);
     assert.equal(shouldStartOnboarding({ ...base, pathname: "/canvas/abc" }), false);
+    assert.equal(shouldStartOnboarding({ ...base, pathname: "/drama/abc" }), false);
     assert.equal(shouldStartOnboarding({ ...base, pathname: "/canvas" }), true);
 });
 
@@ -42,6 +43,8 @@ test("引导锚点固定，且画布详情页与侧栏隐藏规则一致", () =>
     assert.equal(hidesSidebar("/canvas/abc"), true);
     assert.equal(hidesSidebar("/canvas/abc/edit"), true);
     assert.equal(hidesSidebar("/canvas"), false);
+    assert.equal(hidesSidebar("/drama/abc"), true);
+    assert.equal(hidesSidebar("/drama"), false);
 });
 
 test("创作页导览等全局引导完成后才启动，图片与视频共用同一个版本号", () => {

@@ -39,6 +39,7 @@ import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 import reactor.core.Disposable;
@@ -98,6 +99,18 @@ public class CreationAgentOrchestrator {
     private final Map<String, ActiveRequestExecution> activeRequests = new ConcurrentHashMap<>();
     /** 已领取请求的可取消订阅，用于及时中断前端工具等待 */
     private final Map<String, Disposable> claimedRequestSubscriptions = new ConcurrentHashMap<>();
+    /** 短剧处理器，执行时再取，避免和调度器形成构造循环。 */
+    private ObjectProvider<com.novanovastudio.service.DramaAgentService> dramaAgentServices;
+
+    /**
+     * 注入短剧处理器。
+     *
+     * @param dramaAgentServices 短剧处理器提供者
+     */
+    @Autowired
+    void setDramaAgentServices(ObjectProvider<com.novanovastudio.service.DramaAgentService> dramaAgentServices) {
+        this.dramaAgentServices = dramaAgentServices;
+    }
     /** 画布图片命令的原始用户提示词格式 */
     private static final Pattern CANVAS_IMAGE_COMMAND_PATTERN = Pattern.compile(
             "^(?:生成|创建|绘制|制作)\\s*(?:一张|一幅|一个)?\\s*(?:图片|图像)\\s*[：:]\\s*(.+)$",
@@ -473,7 +486,8 @@ public class CreationAgentOrchestrator {
         Mono<Void> execution = requestRepository.findById(requestId)
                 .flatMap(request -> requestRepository.markRunningIfQueued(requestId)
                         .filter(Boolean::booleanValue)
-                        .flatMap(ignored -> executeRunningRequest(request)));
+                        .flatMap(ignored -> com.novanovastudio.service.DramaStageRules.ENTRY.equals(request.getEntrySource())
+                                ? executeDramaRequest(request) : executeRunningRequest(request)));
         // 通过完成信号终止外层订阅，确保调用方拿到的Disposable也同步进入已释放状态。
         return Mono.firstWithSignal(execution, stopSignal.asMono())
                 .doOnSubscribe(subscription -> claimedRequestSubscriptions.put(requestId, new Disposable() {
@@ -1927,6 +1941,21 @@ public class CreationAgentOrchestrator {
                 && !"imagePage".equals(request.entrySource()) && !"videoPage".equals(request.entrySource())) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.chatModeOnlySupportsCreationPages"));
         }
+    }
+
+    /**
+     * 把短剧请求交给专用处理器，图片、视频和画布仍走原编排。
+     *
+     * @param request 已领取的短剧请求
+     * @return 执行完成信号
+     */
+    private Mono<Void> executeDramaRequest(CreationAgentRequest request) {
+        com.novanovastudio.service.DramaAgentService dramaAgentService = dramaAgentServices == null ? null : dramaAgentServices.getIfAvailable();
+        if (dramaAgentService == null) {
+            return finishClaimedRequest(request, "failed", "短剧处理器未就绪", null,
+                    SystemMessage.of("system.executionFailed", "短剧处理器未就绪"));
+        }
+        return dramaAgentService.executeRunning(request);
     }
 
     /**

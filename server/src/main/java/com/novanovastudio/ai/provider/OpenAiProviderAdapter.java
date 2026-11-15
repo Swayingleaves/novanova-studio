@@ -10,12 +10,15 @@ import com.novanovastudio.ai.*;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
@@ -29,6 +32,7 @@ import reactor.core.publisher.Mono;
  */
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class OpenAiProviderAdapter implements AiProviderAdapter {
 
     /** AI HTTP客户端 */
@@ -124,7 +128,9 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
             String imageSize = AiImageSizeSupport.resolveSize(context.request().parameters(), context.convertImageSizeToPixels(), context.imageSizeMappings());
             if (StringUtils.hasText(imageSize)) payload.put("size", imageSize);
         }
-        return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/images/generations", AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
+        Map<String, Object> body = AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters());
+        logRequest(context, "图片请求", "/images/generations", body);
+        return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/images/generations", body)
                 .flatMap(response -> storeImageItems(context, AiJsonUtils.responseArrayPayload(response, "data")));
     }
 
@@ -160,6 +166,7 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
                     for (String referenceUrl : referenceUrls) {
                         parts.add(aiHttpClient.formPart("input_reference[]", referenceUrl));
                     }
+                    logRequest(context, "视频请求", "/videos", formSummary(parts));
                     return aiHttpClient.sendMultipartRequest(context.channel(), "/videos", boundary, parts);
                 }).flatMap(created -> {
                     JSONObject createdPayload = AiJsonUtils.responsePayload(created);
@@ -217,6 +224,7 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
                         parts.add(aiHttpClient.formPart("size", imageSize));
                     }
                     parts.addAll(fileParts);
+                    logRequest(context, "图片编辑", "/images/edits", formSummary(parts));
                     return aiHttpClient.sendMultipartRequest(context.channel(), "/images/edits", boundary, parts);
                 })
                 .flatMap(response -> storeImageItems(context, AiJsonUtils.responseArrayPayload(response, "data")));
@@ -353,5 +361,44 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
             return "720p";
         }
         return resolution.endsWith("p") ? resolution : resolution + "p";
+    }
+
+    /** 发起图片或视频请求前打印实际 URL 和请求体，便于对照渠道收到的内容。 */
+    private void logRequest(AiTaskExecutionContext context, String purpose, String path, Object body) {
+        String url = AiHttpClient.buildAiUrl(context.channel().baseUrl(), path);
+        String json = body instanceof String text ? text : JSON.toJSONString(body);
+        log.info("AI构造请求体请求: taskId={}, purpose={}, url={}, body={}", context.task().getId(), purpose, url, abbreviate(json));
+    }
+
+    /** multipart 请求没有 JSON 请求体，按字段名汇总成一份便于对照的 JSON。 */
+    private JSONObject formSummary(List<MultipartPart> parts) {
+        JSONObject summary = new JSONObject();
+        for (MultipartPart part : parts) {
+            if (part == null || part.name() == null) {
+                continue;
+            }
+            Object value = part.fileName() != null
+                    ? "[file] " + part.fileName() + " (" + (part.contentType() == null ? "" : part.contentType()) + ")"
+                    : (part.data() == null ? "" : new String(part.data(), StandardCharsets.UTF_8));
+            Object existing = summary.get(part.name());
+            if (existing == null) {
+                summary.put(part.name(), value);
+            } else if (existing instanceof JSONArray array) {
+                array.add(value);
+            } else {
+                JSONArray array = new JSONArray();
+                array.add(existing);
+                array.add(value);
+                summary.put(part.name(), array);
+            }
+        }
+        return summary;
+    }
+
+    private static String abbreviate(String body) {
+        if (body == null || body.length() <= 10000) {
+            return body == null ? "" : body;
+        }
+        return body.substring(0, 10000) + "...(已截断)";
     }
 }

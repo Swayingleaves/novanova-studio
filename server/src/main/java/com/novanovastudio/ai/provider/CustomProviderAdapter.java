@@ -1018,9 +1018,9 @@ public class CustomProviderAdapter implements AiProviderAdapter {
      * @return String 截断后的文本
      */
     private static String abbreviate(String body) {
-        if (body == null || body.length() <= 2000) {
+        if (body == null || body.length() <= 10000) {
             return body == null ? "" : body;
         }
-        return body.substring(0, 2000) + "...(已截断)";
+        return body.substring(0, 10000) + "...(已截断)";
     }
 }

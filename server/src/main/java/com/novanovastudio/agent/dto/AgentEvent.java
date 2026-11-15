@@ -283,6 +283,19 @@ public record AgentEvent(
     }
 
     /**
+     * 通知工作台某个阶段产物已更新。
+     *
+     * @param sessionId 会话ID
+     * @param projectId 短剧项目ID
+     * @param stage 阶段
+     * @return 阶段更新事件
+     */
+    public static AgentEvent dramaStage(String sessionId, String projectId, String stage) {
+        return new AgentEvent("drama-stage", sessionId, null, null, null, null, null, null, null, null, null, null,
+                null, null, Map.of("projectId", projectId, "stage", stage == null ? "" : stage), null, null, "updated", null);
+    }
+
+    /**
      * 构造主Agent排队或领取状态事件。
      *
      * @param sessionId String 会话ID

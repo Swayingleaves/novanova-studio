@@ -1403,6 +1403,12 @@ public class NovanovaProperties {
             /** 分镜资产图片提示词模板文件路径 */
             private String imageStoryboardAssetFile = "";
 
+            /** 智能短剧导演Agent文件路径 */
+            private String agentDramaFile = "";
+
+            /** 智能短剧提示词Agent文件路径 */
+            private String agentDramaMediaFile = "";
+
             /**
              * 获取图片提示词优化文件路径。
              *
@@ -1617,6 +1623,42 @@ public class NovanovaProperties {
              */
             public void setImageStoryboardAssetFile(String imageStoryboardAssetFile) {
                 this.imageStoryboardAssetFile = imageStoryboardAssetFile;
+            }
+
+            /**
+             * 获取智能短剧导演Agent文件路径。
+             *
+             * @return String 智能短剧导演Agent文件路径
+             */
+            public String getAgentDramaFile() {
+                return agentDramaFile;
+            }
+
+            /**
+             * 设置智能短剧导演Agent文件路径。
+             *
+             * @param agentDramaFile String 智能短剧导演Agent文件路径
+             */
+            public void setAgentDramaFile(String agentDramaFile) {
+                this.agentDramaFile = agentDramaFile;
+            }
+
+            /**
+             * 获取智能短剧提示词Agent文件路径。
+             *
+             * @return String 智能短剧提示词Agent文件路径
+             */
+            public String getAgentDramaMediaFile() {
+                return agentDramaMediaFile;
+            }
+
+            /**
+             * 设置智能短剧提示词Agent文件路径。
+             *
+             * @param agentDramaMediaFile String 智能短剧提示词Agent文件路径
+             */
+            public void setAgentDramaMediaFile(String agentDramaMediaFile) {
+                this.agentDramaMediaFile = agentDramaMediaFile;
             }
 
         }

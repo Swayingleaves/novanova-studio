@@ -125,7 +125,7 @@ class AiTaskServiceTest {
     void setUp() {
         executionOrder = new ArrayList<>();
         when(persistenceService.requireStorageWritable(org.mockito.ArgumentMatchers.anyLong())).thenReturn(Mono.empty());
-        service = new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), repository, currentUserProvider, properties, persistenceService, mediaAccessService, eventPublisher, taskQueue, modelTaskExecutionDispatcher, orchestrator, adapterRegistry, customProviderAdapter, creditService, transactionalOperator);
+        service = new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), repository, currentUserProvider, properties, persistenceService, null, null, mediaAccessService, eventPublisher, taskQueue, modelTaskExecutionDispatcher, orchestrator, adapterRegistry, customProviderAdapter, creditService, transactionalOperator);
         org.mockito.Mockito.lenient().when(mediaAccessService.signJson(any(), any())).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
 
         AiTaskDtos.AiChannelConfig channel = new AiTaskDtos.AiChannelConfig(

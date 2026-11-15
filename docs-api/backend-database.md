@@ -406,7 +406,7 @@ flowchart TB
 | `id` | `VARCHAR(64)` | 主 Agent 请求 ID，主键。 |
 | `user_id` | `BIGINT` | 请求所属用户 ID，关联 `users.id`。 |
 | `session_id` | `VARCHAR(64)` | 关联 Agent 会话 ID，关联 `agent_session.id`。 |
-| `entry_source` | `VARCHAR(20)` | 入口来源：`imagePage`、`videoPage`、`canvas`。 |
+| `entry_source` | `VARCHAR(20)` | 入口来源：`imagePage`、`videoPage`、`canvas`、`drama`。`drama` 是智能短剧工作台，与图片视频画布分开排队。 |
 | `request_data` | `JSONB` | 完整 `AgentChatRequest` 请求快照。 |
 | `status` | `VARCHAR(20)` | `queued`、`running`、`success`、`failed`、`canceled`、`interrupted`。 |
 | `plan_id` | `VARCHAR(64)` | 主 Agent 创建后的创作计划 ID，可为空。 |
@@ -632,7 +632,7 @@ CREATE TABLE creation_agent_request (
     completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT ck_creation_agent_request_entry_source CHECK (entry_source IN ('imagePage', 'videoPage', 'canvas')),
+    CONSTRAINT ck_creation_agent_request_entry_source CHECK (entry_source IN ('imagePage', 'videoPage', 'canvas', 'drama')),
     CONSTRAINT ck_creation_agent_request_status CHECK (status IN ('queued', 'running', 'success', 'failed', 'canceled', 'interrupted'))
 );
 
@@ -640,7 +640,7 @@ COMMENT ON TABLE creation_agent_request IS '统一主Agent请求队列持久化�
 COMMENT ON COLUMN creation_agent_request.id IS '主Agent请求ID';
 COMMENT ON COLUMN creation_agent_request.user_id IS '请求所属用户ID';
 COMMENT ON COLUMN creation_agent_request.session_id IS '关联Agent会话ID';
-COMMENT ON COLUMN creation_agent_request.entry_source IS '入口来源：imagePage、videoPage、canvas';
+COMMENT ON COLUMN creation_agent_request.entry_source IS '入口来源：imagePage、videoPage、canvas、drama';
 COMMENT ON COLUMN creation_agent_request.request_data IS '完整AgentChatRequest请求快照JSON';
 COMMENT ON COLUMN creation_agent_request.status IS '请求状态：queued排队、running运行、success成功、failed失败、canceled取消、interrupted重启中断';
 COMMENT ON COLUMN creation_agent_request.plan_id IS '主Agent创建后的创作计划ID';
@@ -661,6 +661,18 @@ CREATE INDEX idx_creation_agent_request_user_entry_created
 CREATE INDEX idx_creation_agent_request_session_created
     ON creation_agent_request(session_id, created_at DESC);
 ```
+
+### `drama_project` / `drama_stage_version` / `drama_client_request`
+
+智能短剧原型独立保存项目和阶段版本，不写入剧本或漫剧项目。对话和运行请求仍复用 `agent_session`、`creation_agent_request`。
+
+| 表 | 关键字段 | 说明 |
+| --- | --- | --- |
+| `drama_project` | `team_id`、`user_id`、`idea_text`、`story_text`、`text_model`、`session_id`、`current_stage`、`status`、`revision`、`active_request_id`、`duration_seconds`、`text_credits` | 当前用户和空间的单集项目。`revision` 用于确认和编辑，`text_credits` 是已发生的文本积分。 |
+| `drama_stage_version` | `stage`、`version_number`、`baseline_json`、`content_json`、`confirmation_status`、`freshness`、`source_request_id` | 某一阶段的一个版本。确认记录留在原版本上；上游改动后，下游最新版本的 `freshness` 为 `needs_update`。 |
+| `drama_client_request` | `client_request_id`、`operation`、`result_data` | 创建和确认的稳定请求号，重复提交返回同一结果。 |
+
+阶段取值：`plan`、`script`、`cast`、`storyboard`、`shot`、`audio`、`preview`。项目状态：`active`、`completed`。版本确认：`pending`、`confirmed`。新鲜度：`current`、`needs_update`。
 
 ### `api_logs`
 

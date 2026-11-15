@@ -17,6 +17,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -59,6 +60,19 @@ public class CreationAgentRequestDispatcher {
 
     /** 服务配置 */
     private final NovanovaProperties properties;
+
+    /** 短剧中断退款，执行时再取。 */
+    private ObjectProvider<com.novanovastudio.service.DramaRuntime> dramaRuntimes;
+
+    /**
+     * 注入短剧退款运行时。
+     *
+     * @param dramaRuntimes 短剧运行时提供者
+     */
+    @Autowired
+    void setDramaRuntimes(ObjectProvider<com.novanovastudio.service.DramaRuntime> dramaRuntimes) {
+        this.dramaRuntimes = dramaRuntimes;
+    }
 
     /** 虚拟线程执行器 */
     private ExecutorService executorService;
@@ -515,6 +529,12 @@ public class CreationAgentRequestDispatcher {
         Mono<Void> failPlan = request.getPlanId() == null || request.getPlanId().isBlank()
                 ? Mono.empty()
                 : Mono.defer(() -> planRepository.markInterruptedPlanFailed(request.getPlanId(), message));
+        Mono<Void> releaseDrama = dramaRuntimes == null || !com.novanovastudio.service.DramaStageRules.ENTRY.equals(request.getEntrySource())
+                ? Mono.empty()
+                : Mono.defer(() -> {
+                    com.novanovastudio.service.DramaRuntime runtime = dramaRuntimes.getIfAvailable();
+                    return runtime == null ? Mono.empty() : runtime.releaseInterrupted(request);
+                });
         return Flux.fromIterable(requestRepository.taskIds(request))
                 .concatMap(taskId -> aiTaskService.cancelTaskForUser(request.getUserId(), taskId)
                         .onErrorResume(exception -> {
@@ -522,6 +542,7 @@ public class CreationAgentRequestDispatcher {
                             return Mono.empty();
                         }))
                 .then(failPlan)
+                .then(releaseDrama)
                 .doOnSuccess(ignored -> eventEmitter.emit(request.getUserId(), AgentEvent.error(request.getSessionId(),
                         message).withSystemMessage(SystemMessage.of("system.requestInterrupted")).withRequestId(request.getId())));
     }

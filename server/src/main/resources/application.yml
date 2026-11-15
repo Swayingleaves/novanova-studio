@@ -229,6 +229,10 @@ novanova:
       agent-user-actions-file: ${AI_SYSTEM_PROMPT_AGENT_USER_ACTIONS_FILE:file:./server/config/prompts/agent-user-actions.md}
       # 分镜资产图片提示词模板文件路径
       image-storyboard-asset-file: ${AI_SYSTEM_PROMPT_IMAGE_STORYBOARD_ASSET_FILE:file:./server/config/prompts/image-storyboard-asset.md}
+      # 智能短剧导演Agent系统提示词文件路径
+      agent-drama-file: ${AI_SYSTEM_PROMPT_AGENT_DRAMA_FILE:file:./server/config/prompts/agent-drama.md}
+      # 智能短剧提示词Agent系统提示词文件路径
+      agent-drama-media-file: ${AI_SYSTEM_PROMPT_AGENT_DRAMA_MEDIA_FILE:file:./server/config/prompts/agent-drama-media.md}
     storyboard-agent:
       # 分镜、剧本、故事知识库 Agent 的调用超时在管理后台「超时设置」中配置
       # 批量合成镜头提示词时同时请求模型的镜头数量

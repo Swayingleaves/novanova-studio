@@ -40,9 +40,9 @@ public class VideoCompositionController {
     @PostMapping("/composeVideo")
     public Mono<ApiResponse<VideoCompositionDtos.VideoCompositionTaskResponse>> composeVideo(
             @Valid @RequestBody VideoCompositionDtos.CreateVideoCompositionRequest request, ServerHttpRequest httpRequest) {
-        log.info("视频合成请求: url=/api/v1/ai/video/composeVideo, headers={}, request={}", httpRequest.getHeaders(), request);
+        log.debug("视频合成请求: url=/api/v1/ai/video/composeVideo, headers={}, request={}", httpRequest.getHeaders(), request);
         return videoCompositionTaskService.createTask(request)
-                .doOnNext(response -> log.info("视频合成任务已创建: response={}", response))
+                .doOnNext(response -> log.debug("视频合成任务已创建: response={}", response))
                 .flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
     }
 
@@ -56,9 +56,9 @@ public class VideoCompositionController {
     @PostMapping("/getCompositionTask")
     public Mono<ApiResponse<VideoCompositionDtos.VideoCompositionTaskResponse>> getCompositionTask(
             @Valid @RequestBody VideoCompositionDtos.VideoCompositionTaskIdRequest request, ServerHttpRequest httpRequest) {
-        log.info("查询视频合成任务: url=/api/v1/ai/video/getCompositionTask, headers={}, request={}", httpRequest.getHeaders(), request);
+        log.debug("查询视频合成任务: url=/api/v1/ai/video/getCompositionTask, headers={}, request={}", httpRequest.getHeaders(), request);
         return videoCompositionTaskService.getTask(request.taskId())
-                .doOnNext(response -> log.info("视频合成任务查询响应: response={}", response))
+                .doOnNext(response -> log.debug("视频合成任务查询响应: response={}", response))
                 .flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
     }
 
@@ -72,9 +72,9 @@ public class VideoCompositionController {
     @PostMapping("/cancelCompositionTask")
     public Mono<ApiResponse<VideoCompositionDtos.VideoCompositionTaskResponse>> cancelCompositionTask(
             @Valid @RequestBody VideoCompositionDtos.VideoCompositionTaskIdRequest request, ServerHttpRequest httpRequest) {
-        log.info("取消视频合成任务: url=/api/v1/ai/video/cancelCompositionTask, headers={}, request={}", httpRequest.getHeaders(), request);
+        log.debug("取消视频合成任务: url=/api/v1/ai/video/cancelCompositionTask, headers={}, request={}", httpRequest.getHeaders(), request);
         return videoCompositionTaskService.cancelTask(request.taskId())
-                .doOnNext(response -> log.info("视频合成任务取消响应: response={}", response))
+                .doOnNext(response -> log.debug("视频合成任务取消响应: response={}", response))
                 .flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
     }
 }

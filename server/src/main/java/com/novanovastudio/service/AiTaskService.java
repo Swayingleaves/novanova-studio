@@ -9,6 +9,7 @@ import com.novanovastudio.common.WebsiteLanguage;
 import com.novanovastudio.common.SystemMessage;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AudioInputSupport;
 import com.novanovastudio.agent.AgentTaskOrchestrator;
@@ -38,6 +39,7 @@ import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.dto.VideoBillingConfiguration;
 import com.novanovastudio.entity.AiGenerationTask;
 import com.novanovastudio.repository.AiTaskRepository;
+import com.novanovastudio.repository.DramaRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.storage.MediaAccessService;
 import com.novanovastudio.task.AiTaskEventPublisher;
@@ -45,6 +47,7 @@ import com.novanovastudio.task.AiTaskQueue;
 import com.novanovastudio.task.ModelTaskExecutionDispatcher;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -130,6 +133,12 @@ public class AiTaskService {
 
     /** 业务持久化服务 */
     private final PersistenceService persistenceService;
+
+    /** 短剧媒体记录，用于判断项目删除后迟到的生成结果是否还该保留。 */
+    private final DramaRepository dramaRepository;
+
+    /** 对象存储实际删除。 */
+    private final StorageBillingService storageBillingService;
 
     /** 私有存储桶读地址签发 */
     private final MediaAccessService mediaAccessService;
@@ -953,12 +962,73 @@ public class AiTaskService {
                                                 : creditService.refundTask(task.getUserId(), taskId, task.getTaskType()).thenReturn(true));
                             })
                             .as(transactionalOperator::transactional)
-                            .flatMap(updated -> Boolean.TRUE.equals(updated)
-                                    ? getTaskResponse(taskId, task.getUserId())
-                                            .flatMap(response -> eventPublisher.publish(task.getUserId(), new AiTaskDtos.AiTaskEvent(EVENT_TASK, response)))
-                                    : Mono.empty());
+                            .flatMap(updated -> {
+                                if (!Boolean.TRUE.equals(updated)) {
+                                    return Mono.empty();
+                                }
+                                Mono<Void> orphan = STATUS_SUCCESS.equals(status) ? discardOrphanDramaMedia(task, resultData) : Mono.empty();
+                                return orphan.then(getTaskResponse(taskId, task.getUserId())
+                                        .flatMap(response -> eventPublisher.publish(task.getUserId(), new AiTaskDtos.AiTaskEvent(EVENT_TASK, response))));
+                            });
                 })
                 .then();
+    }
+
+    /**
+     * 短剧项目已经删除时，丢掉这个任务刚生成的图片或视频。
+     *
+     * @param task 刚完成的任务
+     * @param resultData 结果JSON
+     * @return 完成信号。不是短剧任务或项目仍在时什么都不做
+     */
+    private Mono<Void> discardOrphanDramaMedia(AiGenerationTask task, String resultData) {
+        JSONObject request = parseJson(task.getRequestData());
+        if (!AiTaskSources.DRAMA.equals(request.getString("generationSource"))) {
+            return Mono.empty();
+        }
+        List<String> keys = resultStorageKeys(resultData);
+        if (keys.isEmpty()) {
+            return Mono.empty();
+        }
+        return dramaRepository.hasMediaTask(task.getId())
+                .flatMap(exists -> {
+                    if (Boolean.TRUE.equals(exists)) {
+                        return Mono.empty();
+                    }
+                    log.info("短剧项目已删除，清理迟到的生成结果: taskId={}, count={}", task.getId(), keys.size());
+                    return persistenceService.deleteMediaForUser(task.getUserId(), keys)
+                            .then(storageBillingService.deletePendingObjects());
+                })
+                .onErrorResume(error -> {
+                    log.warn("清理已删除短剧的生成结果失败: taskId={}, message={}", task.getId(), error.getMessage());
+                    return Mono.empty();
+                });
+    }
+
+    private List<String> resultStorageKeys(String resultData) {
+        JSONObject result = parseJson(resultData);
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
+        addStorageKey(keys, result.getString("storageKey"));
+        addStorageKey(keys, result.getJSONObject("item"));
+        JSONArray items = result.getJSONArray("items");
+        if (items != null) {
+            for (int index = 0; index < items.size(); index++) {
+                addStorageKey(keys, items.getJSONObject(index));
+            }
+        }
+        return List.copyOf(keys);
+    }
+
+    private void addStorageKey(Set<String> keys, JSONObject item) {
+        if (item != null) {
+            addStorageKey(keys, item.getString("storageKey"));
+        }
+    }
+
+    private void addStorageKey(Set<String> keys, String storageKey) {
+        if (StringUtils.hasText(storageKey)) {
+            keys.add(storageKey);
+        }
     }
 
     /**
