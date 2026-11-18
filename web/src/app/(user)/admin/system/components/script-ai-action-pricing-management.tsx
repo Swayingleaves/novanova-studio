@@ -2,11 +2,12 @@
 
 import type { CreditAmount } from "@/shared/lib/credit-amounts";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Empty, InputNumber, Select, Space, Table, Tag } from "antd";
 import { RefreshCw } from "lucide-react";
 
+import { compareModelNames } from "@/features/settings/stores/use-config-store";
 import { getScriptAiActionPricing, saveScriptAiActionPricing } from "@/services/api/script";
 import { SCRIPT_AI_ACTIONS } from "@/features/script/lib/script-ai-actions";
 import { useTranslation } from "@/features/locale/use-translation";
@@ -20,7 +21,10 @@ export function ScriptAiActionPricingManagement() {
     const [modelConfigId, setModelConfigId] = useState("");
     const [drafts, setDrafts] = useState<Record<string, CreditAmount | null>>({});
     const [saving, setSaving] = useState(false);
-    const models = query.data || [];
+    const models = useMemo(
+        () => [...(query.data || [])].sort((first, second) => compareModelNames(first.displayName, second.displayName) || compareModelNames(first.model, second.model)),
+        [query.data],
+    );
     const current: ScriptAiActionModelPricing | undefined = models.find((item) => item.modelConfigId === modelConfigId);
 
     useEffect(() => {

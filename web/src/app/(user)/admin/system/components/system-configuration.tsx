@@ -26,6 +26,7 @@ import {
     modelOptionChannel,
     modelOptionLabelWithRealName,
     normalizeModelOptionValue,
+    sortModelOptions,
     useConfigStore,
     type AiConfig,
     type ApiCallFormat,
@@ -475,7 +476,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const draftConfig = useMemo(() => {
         const nextConfig = configFromModelConfigs(draftChannels, draftModelConfigs, config);
         // 管理界面保留失效配置，允许用户看见并移除；业务模型目录仍只展示可用模型。
-        for (const group of createModelGroups(translate)) nextConfig[group.modelsKey] = draftModelConfigs.filter((item) => item.modelType === group.capability).map(modelConfigValue);
+        for (const group of createModelGroups(translate)) nextConfig[group.modelsKey] = sortModelOptions(draftModelConfigs.filter((item) => item.modelType === group.capability).map(modelConfigValue), nextConfig);
         return nextConfig;
     }, [config, draftChannels, draftModelConfigs, translate.locale]);
     const dependencyIssues = useMemo(() => modelConfigDependencyIssues(channelBaseline, draftModelConfigs), [channelBaseline, draftModelConfigs, translate.locale]);
@@ -2382,9 +2383,17 @@ function createChannelModelGroups(config: AiConfig, models: string[], translator
     }
     const groups: ChannelModelGroup[] = channels
         .filter((channel) => channel.models.length)
-        .map((channel) => ({ channelId: channel.channelId, channelName: channel.channelName, models: channel.models.map((model) => ({ value: model, label: modelOptionLabelWithRealName(config, model, false) })) }));
+        .map((channel) => ({
+            channelId: channel.channelId,
+            channelName: channel.channelName,
+            models: sortModelOptions(channel.models, config).map((model) => ({ value: model, label: modelOptionLabelWithRealName(config, model, false) })),
+        }));
     if (unassigned.length) {
-        groups.push({ channelId: "", channelName: translator("appShell.noChannelModels"), models: unassigned.map((model) => ({ value: model, label: modelOptionLabelWithRealName(config, model, false) })) });
+        groups.push({
+            channelId: "",
+            channelName: translator("appShell.noChannelModels"),
+            models: sortModelOptions(unassigned, config).map((model) => ({ value: model, label: modelOptionLabelWithRealName(config, model, false) })),
+        });
     }
     return groups;
 }

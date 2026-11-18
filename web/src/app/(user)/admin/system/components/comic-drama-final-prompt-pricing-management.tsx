@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Empty, InputNumber, Select, Tag } from "antd";
 import { RefreshCw } from "lucide-react";
+import { compareModelNames } from "@/features/settings/stores/use-config-store";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { getComicDramaFinalPromptPricing, saveComicDramaFinalPromptPricing } from "@/services/api/comic-drama";
 import { creditText } from "@/shared/lib/credit-amounts";
@@ -16,7 +17,10 @@ export function ComicDramaFinalPromptPricingManagement() {
     const [modelConfigId, setModelConfigId] = useState("");
     const [credits, setCredits] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
-    const models = query.data;
+    const models = useMemo(
+        () => (query.data ? [...query.data].sort((first, second) => compareModelNames(first.displayName, second.displayName) || compareModelNames(first.model, second.model)) : undefined),
+        [query.data],
+    );
     const current = models?.find((model) => model.modelConfigId === modelConfigId);
 
     useEffect(() => {

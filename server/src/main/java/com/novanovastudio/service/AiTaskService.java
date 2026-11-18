@@ -47,6 +47,7 @@ import com.novanovastudio.task.AiTaskQueue;
 import com.novanovastudio.task.ModelTaskExecutionDispatcher;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -815,11 +816,13 @@ public class AiTaskService {
                             .toList();
                     // 管理端关闭的模型不进入用户可见的模型目录；默认模型判定仍按全量配置，
                     // 关闭某个默认模型时同类型其它已开启模型仍然可用。
+                    // 按模型展示名、真实模型名、渠道名称与模型值排序，保证同名及同系列模型排列在一起。
                     List<AiTaskDtos.AiModelOption> availableModels = models.stream()
                             .filter(model -> models.stream().anyMatch(candidate -> model.capability().equals(candidate.capability())
                                     && Boolean.TRUE.equals(candidate.defaultModel())))
                             .filter(model -> tuple.getT2().stream().noneMatch(config -> Boolean.FALSE.equals(config.enabled())
                                     && model.value().equals(config.channelId() + CHANNEL_MODEL_SEPARATOR + config.modelName())))
+                            .sorted(MODEL_OPTION_COMPARATOR)
                             .toList();
                     return new AiTaskDtos.AiModelListResponse(availableModels,
                             modelValues(availableModels, TYPE_IMAGE), modelValues(availableModels, TYPE_VIDEO), modelValues(availableModels, TYPE_TEXT));
@@ -1290,6 +1293,41 @@ public class AiTaskService {
         if (!StringUtils.hasText(channel.apiKey())) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.askTheAdministratorToCompleteChannel", channelDisplayName(channel)));
         }
+    }
+
+    /** 按模型展示名、真实模型名、渠道名称及完整值排序，确保同名及同系列模型排列在一起。 */
+    private static final Comparator<AiTaskDtos.AiModelOption> MODEL_OPTION_COMPARATOR = Comparator
+            .comparing((AiTaskDtos.AiModelOption option) -> safeModelText(option.label()), String.CASE_INSENSITIVE_ORDER)
+            .thenComparing(option -> safeModelText(option.label()))
+            .thenComparing(option -> extractModelName(option.value()), String.CASE_INSENSITIVE_ORDER)
+            .thenComparing(option -> extractModelName(option.value()))
+            .thenComparing(option -> safeModelText(option.provider()), String.CASE_INSENSITIVE_ORDER)
+            .thenComparing(option -> safeModelText(option.provider()))
+            .thenComparing(option -> safeModelText(option.value()), String.CASE_INSENSITIVE_ORDER)
+            .thenComparing(option -> safeModelText(option.value()));
+
+    /**
+     * 归一化模型排序文本，空值视为空字符串并去除首尾空白。
+     *
+     * @param value String 原始文本
+     * @return String 归一化后的排序文本
+     */
+    private static String safeModelText(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    /**
+     * 从渠道模型组合值中提取真实模型名称。
+     *
+     * @param modelValue String 渠道与模型组合值，格式为 channelId::modelName
+     * @return String 真实模型名称
+     */
+    private static String extractModelName(String modelValue) {
+        String normalized = safeModelText(modelValue);
+        int separatorIndex = normalized.indexOf(CHANNEL_MODEL_SEPARATOR);
+        return separatorIndex >= 0
+                ? normalized.substring(separatorIndex + CHANNEL_MODEL_SEPARATOR.length()).trim()
+                : normalized;
     }
 
     /**

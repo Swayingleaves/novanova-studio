@@ -400,6 +400,7 @@ public class PersistenceRepository {
      * @return Flux<UserAiModelConfigRecord> 全站模型配置记录流
      */
     public Flux<PersistenceRecords.UserAiModelConfigRecord> listPlatformAiModelConfigs() {
+        // 按展示名称与真实模型名归并排序，避免同名模型分散在不同创建时间位置。
         return databaseClient.sql("""
                 SELECT id, team_id, NULL::BIGINT AS user_id, model_config_id, channel_id, model_name, model_type,
                        capabilities::text AS capabilities, is_default, is_enabled, sort_order, credit_cost, credit_unit,
@@ -407,7 +408,7 @@ public class PersistenceRepository {
                        video_billing_configuration::text AS video_billing_configuration, image_billing_configuration::text AS image_billing_configuration, display_name, model_icon,
                        is_custom_model, custom_model_config::text AS custom_model_config, created_at, updated_at
                 FROM platform_ai_model_configs
-                ORDER BY created_at DESC, id DESC
+                ORDER BY LOWER(COALESCE(NULLIF(BTRIM(display_name), ''), model_name)) ASC, LOWER(model_name) ASC, channel_id ASC, id ASC
                 """).map((row, metadata) -> RowMappers.userAiModelConfig(row)).all();
     }
 

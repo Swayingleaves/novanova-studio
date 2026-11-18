@@ -2,11 +2,12 @@
 
 import type { CreditAmount } from "@/shared/lib/credit-amounts";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Empty, InputNumber, Select, Space, Switch, Table, Tag, Tooltip } from "antd";
 import { HelpCircle, Plus, RefreshCw, Trash2 } from "lucide-react";
 
+import { compareModelNames } from "@/features/settings/stores/use-config-store";
 import { getStoryBiblePricing, saveStoryBiblePricing } from "@/services/api/script";
 import type { StoryBibleModelPricing, StoryBiblePricingTier, StoryBibleQuickConfiguration } from "@/features/script/types";
 
@@ -27,7 +28,10 @@ export function StoryBiblePricingManagement() {
     const [tiers, setTiers] = useState<StoryBiblePricingTier[]>([]);
     const [quickConfiguration, setQuickConfiguration] = useState<StoryBibleQuickConfiguration | null>(null);
     const [saving, setSaving] = useState(false);
-    const models = query.data || [];
+    const models = useMemo(
+        () => [...(query.data || [])].sort((first, second) => compareModelNames(first.displayName, second.displayName) || compareModelNames(first.model, second.model)),
+        [query.data],
+    );
     const current: StoryBibleModelPricing | undefined = models.find((item) => item.modelConfigId === modelConfigId);
 
     useEffect(() => {
