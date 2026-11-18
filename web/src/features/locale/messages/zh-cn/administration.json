@@ -557,5 +557,18 @@
   "oauthClientsResetSecretConfirm": "重新生成后，旧密钥立即失效。确定继续吗？",
   "oauthClientsSecretReset": "客户端密钥已重新生成",
   "oauthClientsSecretResetFailed": "重新生成客户端密钥失败",
-  "oauthClientCopied": "已复制"
+  "oauthClientCopied": "已复制",
+  "menuManagement": "菜单管理",
+  "menuManagementHint": "控制应用左侧导航栏及移动端导航抽屉中各功能菜单的开启状态与显示顺序；可拖拽或使用上移、下移调整顺序，保存后对全站生效。",
+  "menuResetDefault": "恢复默认",
+  "menuMoveUp": "上移",
+  "menuMoveDown": "下移",
+  "menuDragHint": "拖拽调整顺序",
+  "menuVisible": "显示",
+  "menuHidden": "已隐藏",
+  "menuToggleAriaLabel": "切换 {name} 菜单显示状态",
+  "menuSystemLockedHint": "管理员固定入口，始终对管理员显示",
+  "menuSaved": "菜单配置已保存",
+  "menuSaveFailed": "保存菜单配置失败",
+  "menuLoadFailed": "加载菜单配置失败"
 }

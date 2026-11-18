@@ -1110,3 +1110,13 @@ V61 按空间、用户、原配置和对象键精确关联已有媒体及原文�
 新增单行表 `platform_payment_settings`（`id` 固定为 1）。后台入口为「支付配置」，支付宝和微信支付分成两个页签。接口为 `GET /api/v1/admin/payment/getPaymentSettings`、`POST /api/v1/admin/payment/updateAlipaySettings` 和 `POST /api/v1/admin/payment/updateWechatSettings`，仅平台空间的全局管理员可读写。服务端启动后读取该行，并每 5 秒刷新；保存后当前实例立即生效。这些配置不再通过环境变量或证书目录注入。
 
 支付宝保存应用标识、应用私钥、支付宝公钥、网关、异步通知地址和同步回跳地址。微信 Native 支付保存应用标识、商户号、商户 API 证书序列号、商户私钥 PEM、32 字节 APIv3 密钥、微信支付公钥 PEM、公钥 ID 和通知地址。应用私钥、商户私钥和 APIv3 密钥使用 `APP_SECRET_KEY` 加密；支付宝公钥和微信支付公钥按原文保存，但接口都不返回密钥正文，只返回是否已设置。保存时对应密钥留空表示不修改。启用某一渠道时，该渠道的必填项必须已经齐全。更换应用密钥后，已加密的密钥无法解密，需要重新填写。未启用微信支付时，后台不扫描微信待支付订单。
+
+## 平台导航菜单配置（企业版 V102、社区版 V103）
+
+| 表 | 关键字段及约束 |
+| --- | --- |
+| `platform_navigation_menu_configs` | `menu_key`（最长 64，主键，对应前端可配置导航工具键）、`enabled`（布尔值，默认 `TRUE`，控制是否展示）、`sort_order`（非负整数，按提交顺序从 0 递增）、`created_at`/`updated_at`；索引 `(sort_order, menu_key)` |
+
+导航菜单配置用于控制应用主界面桌面端左侧导航栏和移动端导航抽屉中普通菜单项的展示开关与排列顺序（`admin/system` 保持固定对管理员在底部显示，不纳入隐藏开关）。公开查询走 `GET /api/v1/platform/listNavigationMenuConfigs`，未登录及全部团队空间均可读取，服务端将已保存配置与默认菜单清单合并并按最终顺序返回；平台管理员保存走 `POST /api/v1/admin/platform/saveNavigationMenuConfigs`，必须覆盖全部可配置菜单项，数组顺序即展示顺序。
+
+保存时在事务内使用咨询锁 `pg_advisory_xact_lock(hashtext('platform-navigation-menu-configs'))` 串行化后整表重建，任何校验或写入失败整批回滚。团队作用域一律拒绝写入，仅平台空间的全局管理员可修改。

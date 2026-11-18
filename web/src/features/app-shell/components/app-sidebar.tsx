@@ -12,8 +12,10 @@ import { Popover, Tooltip } from "antd";
 import { LanguageMenu } from "@/features/locale/components/language-menu";
 import { SidebarInstallEntry } from "@/features/pwa/components/sidebar-install-entry";
 import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
-import { navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
-import { canManageCurrentSpace } from "@/features/team/stores/use-team-store";
+import { navigationTools, type NavigationTool, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
+import { resolveVisibleNavigationTools } from "@/features/navigation-menu/lib/navigation-menu-config";
+import { useNavigationMenuStore } from "@/features/navigation-menu/stores/use-navigation-menu-store";
+import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { cn } from "@/shared/lib/utils";
 import { useNotificationStore } from "@/features/notification/stores/use-notification-store";
@@ -38,6 +40,9 @@ export function AppSidebar() {
     const brand = useSpaceBrand();
     const pathname = usePathname();
     const user = useUserStore((state) => state.user);
+    const team = useTeamStore((state) => state.team);
+    const menuConfigs = useNavigationMenuStore((state) => state.configs);
+    const menuLoaded = useNavigationMenuStore((state) => state.loaded);
     const myTeams = useQuery({ queryKey: ["myTeams", user?.id], queryFn: listMyTeams, enabled: Boolean(user && user.role !== "admin") });
     const { notifications, invitations, unreadCount, loadNotifications } = useNotificationStore();
     const [detailNotification, setDetailNotification] = useState<(typeof notifications)[number] | null>(null);
@@ -47,14 +52,27 @@ export function AppSidebar() {
         if (user) void loadNotifications();
     }, [user, loadNotifications]);
 
+    useEffect(() => {
+        void useNavigationMenuStore.getState().refresh();
+        const reload = () => {
+            if (document.visibilityState !== "hidden") void useNavigationMenuStore.getState().refresh();
+        };
+        window.addEventListener("focus", reload);
+        document.addEventListener("visibilitychange", reload);
+        return () => {
+            window.removeEventListener("focus", reload);
+            document.removeEventListener("visibilitychange", reload);
+        };
+    }, []);
+
     const pathSlug = pathname.split("/").filter(Boolean).slice(0, 2).join("/");
     const slug = pathSlug.startsWith("admin/") ? pathSlug : pathname.split("/").filter(Boolean)[0];
 
-    const visibleTools = navigationTools.filter((tool) => !tool.adminOnly || canManageCurrentSpace());
+    const visibleTools = resolveVisibleNavigationTools(menuConfigs, canManageCurrentSpace());
     const activeSlug = navigationTools.some((tool) => tool.slug === slug) ? (slug as NavigationToolSlug) : undefined;
     const showTeamSwitcher = Boolean(user && user.role !== "admin" && myTeams.data?.length);
 
-    const renderNavItem = (tool: (typeof navigationTools)[number]) => {
+    const renderNavItem = (tool: NavigationTool) => {
         const Icon = tool.icon;
         const active = tool.slug === activeSlug;
 
@@ -114,7 +132,7 @@ export function AppSidebar() {
                     </Tooltip>
                 </div>
 
-                <nav data-tour="sidebar-nav" className="hide-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto px-2 pb-3">{visibleTools.map(renderNavItem)}</nav>
+                <nav data-tour="sidebar-nav" className="hide-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto px-2 pb-3">{menuLoaded ? visibleTools.map(renderNavItem) : null}</nav>
 
                 <div data-tour="sidebar-actions" className="flex shrink-0 flex-col items-center gap-2 border-t border-[var(--studio-line)] px-2 py-2">
                     <Tooltip title={translate("appShell.announcements")} placement="right">

@@ -17,7 +17,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Checkbox, DatePicker, Drawer, Empty, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Activity, Bell, BookText, Check, ChevronDown, ClipboardCheck, Coins, Edit, HardDrive, Image as ImageIcon, LayoutTemplate, Mail, Menu as MenuIcon, Palette, Plus, Power, Search, Send, Settings2, ShieldCheck, Sparkles, Tags, Ticket, Trash2, Upload, UserRound, UsersRound, Video, Wallet, X } from "lucide-react";
+import { Activity, Bell, BookText, Check, ChevronDown, ClipboardCheck, Coins, Edit, HardDrive, Image as ImageIcon, LayoutTemplate, Mail, Menu as MenuIcon, Palette, PanelLeft, Plus, Power, Search, Send, Settings2, ShieldCheck, Sparkles, Tags, Ticket, Trash2, Upload, UserRound, UsersRound, Video, Wallet, X } from "lucide-react";
 
 import {
     adjustServerUserCredits,
@@ -76,6 +76,7 @@ import { ModelConfigTextArea } from "./components/model-config-textarea";
 import { SkillPromptLabel } from "@/features/skill-market/components/skill-prompt-help";
 import { SKILL_PROMPT_ACTIONS } from "@/features/skill-market/lib/skill-prompt-actions";
 import { SystemConfiguration, type ConfigurationTabKey } from "./components/system-configuration";
+import { NavigationMenuManagement } from "./components/navigation-menu-management";
 import { OAuthClientManagement } from "./components/oauth-client-management";
 import { OAuthIntegrationManagement } from "./components/oauth-integration-management";
 import { StandardOAuth2Management } from "./components/standard-oauth2-management";
@@ -164,6 +165,7 @@ export default function AdminSystemPage() {
                 { key: "configuration:externalLink", label: translate("administration.externalLinkConfig"), tab: "configuration", sub: "externalLink" },
             ],
         },
+        ...(!team ? [{ key: "navigationMenus", label: translate("administration.menuManagement"), icon: <PanelLeft className="size-4" />, tab: "navigationMenus" }] : []),
         ...(!team ? [{ key: "identityAuth", label: translate("administration.identityAuthentication"), icon: <ShieldCheck className="size-4" />, leaves: [
             { key: "identityAuth:oauth", label: translate("administration.oauthIntegration"), tab: "identityAuth", sub: "oauth" },
             { key: "identityAuth:standardOAuth2", label: translate("administration.standardOAuth2"), tab: "identityAuth", sub: "standardOAuth2" },
@@ -199,6 +201,7 @@ export default function AdminSystemPage() {
     // 内容区仍交给 antd Tabs 管理，保留首次访问才挂载、切回不丢表单草稿的行为，左侧菜单只负责切换。
     const tabItems = [
         { key: "configuration", label: translate("appShell.configurationPreferences"), children: <SystemConfiguration activeTab={configurationTabKey} onTabChange={setConfigurationTabKey} /> },
+        ...(!team ? [{ key: "navigationMenus", label: translate("administration.menuManagement"), children: <NavigationMenuManagement /> }] : []),
         ...(!team ? [{ key: "identityAuth", label: translate("administration.identityAuthentication"), children: <Tabs
             activeKey={identityAuthTabKey}
             onChange={(tabKey) => setIdentityAuthTabKey(tabKey as IdentityAuthTabKey)}
