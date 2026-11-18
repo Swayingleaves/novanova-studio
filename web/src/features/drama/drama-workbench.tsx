@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { App, Button, Input, Select, Spin } from "antd";
-import { ArrowLeft, ArrowUp, LoaderCircle, Square } from "lucide-react";
+import { ArrowLeft, ArrowUp, Square } from "lucide-react";
 import Link, { useRouter } from "@/shared/lib/team-navigation";
 import { useTranslation } from "@/features/locale/use-translation";
+import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { creditText } from "@/shared/lib/credit-amounts";
@@ -16,8 +17,11 @@ import { cancelAiTasksWithRefundPolicy } from "@/features/generation/lib/cancel-
 import { dramaAspectRatio } from "./aspect-ratio";
 import { agentSubscribeEvents, cancelAgentChat } from "@/features/canvas/api/agent";
 import { getAgentSessionHistory, getAiTaskInfo, type ServerAgentSessionHistoryMessage } from "@/services/api/server";
-import { confirmDramaStage, dramaStages, generateDramaMedia, getDramaWorkspace, sendDramaMessage, updateDramaProject, type DramaMedia, type DramaStage, type DramaVersion, type DramaWorkspace } from "@/services/api/drama";
+import { confirmDramaStage, discardDramaVersion, dramaStages, generateDramaMedia, getDramaWorkspace, regenerateDramaStage, sendDramaMessage, updateDramaProject, type DramaMedia, type DramaStage, type DramaVersion, type DramaWorkspace } from "@/services/api/drama";
 import { DramaArtifact } from "./artifact-view";
+import { DramaChatMessage } from "./chat/chat-message";
+import { GooThinking } from "./chat/goo-thinking";
+import { parseDramaMeta } from "./chat/stage-card";
 import { dramaStageMeta } from "./stage-meta";
 
 export function DramaWorkbench({ projectId }: { projectId: string }) {
@@ -27,6 +31,8 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
     const config = useEffectiveConfig();
     const [workspace, setWorkspace] = useState<DramaWorkspace | null>(null);
     const [messages, setMessages] = useState<ServerAgentSessionHistoryMessage[]>([]);
+    const [streaming, setStreaming] = useState<{ id: string; text: string } | null>(null);
+    const [gooMounted, setGooMounted] = useState(false);
     const [loading, setLoading] = useState(true);
     const [missing, setMissing] = useState(false);
     const [follow, setFollow] = useState(true);
@@ -48,12 +54,13 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
     const [videoResolution, setVideoResolution] = useState(DEFAULT_VIDEO_LAST_USED_SETTINGS.vquality);
     const [pendingKeys, setPendingKeys] = useState<string[]>([]);
     const [stoppingTaskId, setStoppingTaskId] = useState("");
+    const [stopping, setStopping] = useState(false);
     const [filling, setFilling] = useState(false);
     const batchRef = useRef(0);
     const refreshRef = useRef<{ projectId: string; promise: Promise<DramaWorkspace> } | null>(null);
     const sendKey = useRef({ text: "", id: "" });
     const confirmKey = useRef({ versionId: "", id: "" });
-    const endRef = useRef<HTMLDivElement>(null);
+    const listRef = useRef<HTMLDivElement>(null);
 
     const refresh = useCallback(async () => {
         if (refreshRef.current?.projectId === projectId) return refreshRef.current.promise;
@@ -120,6 +127,10 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
         const sessionId = workspace?.project.sessionId;
         if (!sessionId) return;
         const source = agentSubscribeEvents();
+        /** 先拉到落库消息再撤掉流式气泡，避免「气泡消失又出现」的闪烁。 */
+        const settle = () => {
+            void refresh().catch(() => undefined).finally(() => setStreaming(null));
+        };
         const onEvent = (event: MessageEvent) => {
             let data: { sessionId?: string; errorMessage?: string; message?: string; resultData?: { projectId?: string } } = {};
             try { data = JSON.parse(event.data); } catch { return; }
@@ -127,11 +138,30 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
             if (data.resultData?.projectId && data.resultData.projectId !== projectId) return;
             if (event.type === "error" || event.type === "canceled") {
                 setNotice({ status: event.type === "canceled" ? "canceled" : "failed", message: data.errorMessage || data.message || "" });
+                settle();
+                return;
             }
             if (event.type === "drama-stage") setNotice(null);
             void refresh().catch(() => undefined);
         };
+        const onDelta = (event: MessageEvent) => {
+            let data: { sessionId?: string; messageId?: string; delta?: string } = {};
+            try { data = JSON.parse(event.data); } catch { return; }
+            if (data.sessionId && data.sessionId !== sessionId) return;
+            if (!data.messageId || !data.delta) return;
+            setStreaming((current) => current?.id === data.messageId
+                ? { id: current.id, text: current.text + data.delta }
+                : { id: data.messageId as string, text: data.delta as string });
+        };
+        const onComplete = (event: MessageEvent) => {
+            let data: { sessionId?: string } = {};
+            try { data = JSON.parse(event.data); } catch { return; }
+            if (data.sessionId && data.sessionId !== sessionId) return;
+            settle();
+        };
         for (const type of ["drama-stage", "queue-status", "error", "canceled"]) source.addEventListener(type, onEvent);
+        source.addEventListener("text-delta", onDelta);
+        source.addEventListener("task-complete", onComplete);
         return () => source.close();
     }, [projectId, refresh, workspace?.project.sessionId]);
 
@@ -139,7 +169,27 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
         if (workspace && !nameFocused) setName(workspace.project.name);
     }, [nameFocused, workspace]);
 
-    useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [messages, busy]);
+    // 贴底要连容器自己的下内边距一起滚出来，scrollIntoView 会把它吃掉，导致正文贴住输入框。
+    useEffect(() => {
+        const element = listRef.current;
+        if (element) element.scrollTop = element.scrollHeight;
+    }, [messages, busy, streaming?.text]);
+
+    // 等待时挂出三个点；第一段正文到达后先播完收拢动画再卸载。
+    const awaiting = Boolean(busy || sending);
+    const liveText = Boolean(streaming);
+    useEffect(() => {
+        if (!awaiting) {
+            setGooMounted(false);
+            return;
+        }
+        if (!liveText) {
+            setGooMounted(true);
+            return;
+        }
+        const timer = window.setTimeout(() => setGooMounted(false), 220);
+        return () => window.clearTimeout(timer);
+    }, [awaiting, liveText]);
 
     const project = workspace?.project;
     const viewed = (follow ? project?.currentStage : picked) || "plan";
@@ -185,10 +235,11 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
         }
     };
 
-    const send = async () => {
-        const text = draft.trim();
+    const send = async (override?: string) => {
+        const text = (override ?? draft).trim();
         if (!project || !text || busy) return;
         if (sendKey.current.text !== text) sendKey.current = { text, id: crypto.randomUUID() };
+        setStreaming(null);
         setSending(true);
         try {
             const next = await sendDramaMessage({
@@ -204,7 +255,7 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                 videoResolution,
             });
             sendKey.current = { text: "", id: "" };
-            setDraft("");
+            if (!override) setDraft("");
             setNotice(null);
             setWorkspace(next);
             if (next.project.sessionId) setMessages(await getAgentSessionHistory(next.project.sessionId));
@@ -213,6 +264,60 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
         } finally {
             setSending(false);
         }
+    };
+
+    /** 跳到右侧工作台查看某个阶段版本。 */
+    const viewStage = (stage: DramaStage, versionId?: string) => {
+        setFollow(false);
+        setPicked(stage);
+        setVersionId(versionId || null);
+        setPanel("work");
+    };
+
+    /** 重做这条消息对应的产物：阶段消息走重做接口，普通回答才重发上一句。 */
+    const regenerate = async (index: number) => {
+        const meta = parseDramaMeta(messages[index]?.meta);
+        if (meta?.kind === "stage" && meta.stage && project) {
+            try {
+                setStreaming(null);
+                setWorkspace(await regenerateDramaStage({
+                    clientRequestId: crypto.randomUUID(),
+                    projectId: project.id,
+                    revision: project.revision,
+                    stage: meta.stage,
+                }));
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : translate("common.serverRequestFailed_5ed90b"));
+            }
+            return;
+        }
+        for (let cursor = index; cursor >= 0; cursor -= 1) {
+            const item = messages[cursor];
+            if (item.role === "user") {
+                void send(item.text);
+                return;
+            }
+        }
+    };
+
+    /** 撤销这条消息产生的阶段版本。 */
+    const undo = (versionId: string) => {
+        if (!project) return;
+        modal.confirm({
+            title: translate("drama.discardTitle"),
+            content: translate("drama.discardHint"),
+            okButtonProps: { danger: true },
+            onOk: async () => {
+                try {
+                    const next = await discardDramaVersion({ projectId: project.id, revision: project.revision, versionId });
+                    setWorkspace(next);
+                    if (next.project.sessionId) setMessages(await getAgentSessionHistory(next.project.sessionId));
+                    message.success(translate("drama.discardDone"));
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : translate("common.serverRequestFailed_5ed90b"));
+                }
+            },
+        });
     };
 
     const confirm = async () => {
@@ -239,12 +344,15 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
     };
 
     const stop = async () => {
-        if (!project?.sessionId || !workspace?.activeRequest.requestId) return;
+        if (!project?.sessionId || !workspace?.activeRequest.requestId || stopping) return;
+        setStopping(true);
         try {
             await cancelAgentChat(project.sessionId, workspace.activeRequest.requestId);
             await refresh();
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("common.serverRequestFailed_5ed90b"));
+        } finally {
+            setStopping(false);
         }
     };
 
@@ -396,6 +504,9 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
 
     const taskStatus = busy ? workspace.activeRequest.status : notice?.status || "";
     const taskMessage = busy ? workspace.activeRequest.message : notice?.message || "";
+    const nextStage: DramaStage | undefined = project.status === "completed" ? undefined : dramaStages[currentIndex + 1];
+    const CurrentStageIcon = dramaStageMeta[project.currentStage].icon;
+    const lastAssistantIndex = messages.reduce((found, item, index) => (item.role === "assistant" ? index : found), -1);
 
     return (
         <main className="studio-page flex h-full min-h-0 flex-col overflow-hidden">
@@ -412,10 +523,13 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                     onChange={(event) => setName(event.target.value)}
                     className="min-w-36 flex-1 rounded-lg bg-transparent px-2 py-1 text-sm font-semibold text-[var(--studio-ink)] outline-none hover:bg-[var(--studio-surface-hover)] focus:bg-[var(--studio-surface)]"
                 />
-                <span className="inline-flex items-center rounded-full bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]">{translate(dramaStageMeta[project.currentStage].label)}</span>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]">
+                    <span className="tabular-nums opacity-70">{currentIndex + 1}/{dramaStages.length}</span>
+                    {translate(dramaStageMeta[project.currentStage].label)}
+                </span>
                 {project.status === "completed" ? <StatusPill tone="success">{translate("drama.completed")}</StatusPill> : null}
                 <span className="text-xs tabular-nums text-[var(--studio-muted)]">{translate("drama.credits", { value0: creditText(project.textCredits) })}</span>
-                <ModelPicker config={config} value={project.textModel} onChange={(textModel) => { if (textModel !== project.textModel) void saveSettings({ textModel }); }} capability="text" className="max-w-56 !border-[var(--studio-line-strong)] !bg-[var(--studio-surface)] !text-[var(--studio-ink)] shadow-none" />
+                <ThemePreferenceMenu variant="toolbar" />
             </header>
             <div className="flex gap-1 border-b border-[var(--studio-line)] bg-[var(--studio-panel-solid)] px-3 py-2 lg:hidden">
                 {(["chat", "work"] as const).map((item) => (
@@ -432,41 +546,70 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
             </div>
             <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
                 <section className={`${panel === "chat" ? "flex" : "hidden"} min-h-0 flex-col border-[var(--studio-line)] bg-[var(--studio-panel-solid)] lg:flex lg:border-r`}>
-                    <div className="flex shrink-0 items-center border-b border-[var(--studio-line)] px-4 py-2.5">
+                    <div className="flex shrink-0 items-center gap-2 border-b border-[var(--studio-line)] px-4 py-2.5">
                         <img src="/icons/novanovastudio-icon.svg" alt="" aria-hidden="true" className="size-6" />
+                        <span className="text-sm font-medium text-[var(--studio-ink)]">{translate("drama.agentTitle")}</span>
                     </div>
-                    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-                        {messages.length === 0 && !busy ? (
+                    <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-4 pb-7 pt-4">
+                        {messages.length === 0 && !gooMounted && !streaming ? (
                             <div className="flex h-full min-h-40 items-center justify-center">
                                 <p className="max-w-xs text-center text-sm leading-6 text-[var(--studio-muted)]">{translate("drama.noMessages")}</p>
                             </div>
                         ) : (
-                            <div className="flex flex-col gap-3">
-                                {messages.map((item) => {
-                                    const isUser = item.role === "user";
+                            <div className="flex flex-col gap-4">
+                                {messages.map((item, index) => {
+                                    if (streaming && item.id === streaming.id) return null;
+                                    const kind = parseDramaMeta(item.meta)?.kind;
+                                    const canRegenerate = index === lastAssistantIndex && (kind === "stage" || kind === "answer" || !kind);
                                     return (
-                                        <div key={item.id} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-                                            <p className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm leading-6 ${isUser ? "rounded-br-md bg-[var(--studio-action)] text-[var(--studio-action-foreground)]" : "rounded-bl-md border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] text-[var(--studio-ink)]"}`}>{item.text}</p>
-                                        </div>
+                                        <DramaChatMessage
+                                            key={item.id}
+                                            message={item}
+                                            workspace={workspace}
+                                            busy={busy}
+                                            showSuggestions={!busy && !streaming && index === lastAssistantIndex}
+                                            onView={viewStage}
+                                            onRegenerate={canRegenerate ? () => void regenerate(index) : undefined}
+                                            onUndo={undo}
+                                            onSuggest={setDraft}
+                                        />
                                     );
                                 })}
-                                {busy ? (
-                                    <div className="flex justify-start">
-                                        <p className="inline-flex items-center gap-2 rounded-2xl rounded-bl-md border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] px-3.5 py-2.5 text-sm text-[var(--studio-muted)]">
-                                            <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
-                                            {statusText(translate, taskStatus)}
-                                        </p>
+                                {gooMounted ? (
+                                    <div className={`flex origin-top gap-2.5 overflow-hidden transition-all duration-200 ease-out ${streaming ? "max-h-0 opacity-0" : "max-h-10 opacity-100"}`}>
+                                        <span className="size-8 shrink-0" aria-hidden="true" />
+                                        <GooThinking leaving={Boolean(streaming)} />
                                     </div>
+                                ) : null}
+                                {streaming ? (
+                                    <DramaChatMessage
+                                        message={{ id: streaming.id, role: "assistant", text: streaming.text, meta: null, createdAt: null }}
+                                        workspace={workspace}
+                                        busy={busy}
+                                        streaming
+                                        revealing
+                                        onView={viewStage}
+                                        onSuggest={setDraft}
+                                    />
                                 ) : null}
                             </div>
                         )}
-                        <div ref={endRef} />
                     </div>
                     <div className="border-t border-[var(--studio-line)] px-3 py-3 sm:px-4">
                         {canConfirm ? (
                             <div className="mb-3 rounded-xl border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] p-3">
-                                <p className="text-xs leading-5 text-[var(--studio-text)]">{translate("drama.confirmHint")}</p>
-                                <Button className="mt-2" type="primary" loading={confirming} onClick={() => void confirm()}>{project.currentStage === "preview" ? translate("drama.confirmLast") : translate("drama.confirm")}</Button>
+                                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                                    <span className="text-[11px] font-medium text-[var(--studio-muted)]">{translate("drama.currentStep")}</span>
+                                    <span className="text-sm font-semibold tabular-nums text-[var(--studio-ink)]">{translate("drama.stepProgress", { value0: currentIndex + 1, value1: dramaStages.length })}</span>
+                                    <span className="inline-flex items-center gap-1 text-sm font-medium text-[var(--studio-ink)]">
+                                        <CurrentStageIcon className="size-3.5 text-[var(--studio-muted)]" aria-hidden="true" />
+                                        {translate(dramaStageMeta[project.currentStage].label)}
+                                    </span>
+                                </div>
+                                <p className="mt-2 text-xs leading-5 text-[var(--studio-text)]">{nextStage ? translate("drama.confirmHintNext", { value0: translate(dramaStageMeta[nextStage].label) }) : translate("drama.confirmHintLast")}</p>
+                                <Button className="mt-2" type="primary" loading={confirming} onClick={() => void confirm()}>
+                                    {nextStage ? translate("drama.confirmNext", { value0: translate(dramaStageMeta[nextStage].label) }) : translate("drama.confirmLast")}
+                                </Button>
                             </div>
                         ) : null}
                         <div className="rounded-2xl border border-[var(--studio-composer-border)] bg-[var(--studio-composer-surface)] p-2">
@@ -481,27 +624,41 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                                 onKeyDown={onDraftKeyDown}
                             />
                             <div className="flex items-center justify-between gap-2 px-1 pb-0.5">
-                                <div className="flex min-w-0 items-center gap-2">
+                                <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                                    <ModelPicker
+                                        config={config}
+                                        value={project.textModel}
+                                        onChange={(textModel) => { if (textModel !== project.textModel) void saveSettings({ textModel }); }}
+                                        capability="text"
+                                        showChannel={false}
+                                        className="h-7 min-w-0 max-w-[9.5rem] gap-1.5 border-[var(--studio-line)] bg-transparent px-1.5 text-xs font-medium text-[var(--studio-muted)] shadow-none hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]"
+                                    />
+                                    <span className="h-3.5 w-px shrink-0 bg-[var(--studio-line)]" aria-hidden="true" />
                                     <button type="button" className="inline-flex min-w-0 items-center gap-1.5 text-xs text-[var(--studio-muted)] hover:text-[var(--studio-ink)]" onClick={() => setTasksOpen((open) => !open)}>
                                         <span className={`size-1.5 shrink-0 rounded-full ${statusDot(taskStatus)}`} />
                                         <span className="truncate">{translate("drama.tasks")} · {statusText(translate, taskStatus)}</span>
                                     </button>
-                                    {busy ? (
-                                        <button type="button" className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-[var(--studio-ink)]" onClick={() => void stop()}>
-                                            <Square className="size-3" aria-hidden="true" />
-                                            {translate("drama.stop")}
-                                        </button>
-                                    ) : null}
                                 </div>
-                                <Button
-                                    type="primary"
-                                    shape="circle"
-                                    aria-label={translate("drama.send")}
-                                    icon={<ArrowUp className="size-4" />}
-                                    disabled={busy || !draft.trim()}
-                                    loading={sending}
-                                    onClick={() => void send()}
-                                />
+                                {busy ? (
+                                    <Button
+                                        type="primary"
+                                        shape="circle"
+                                        aria-label={translate("drama.stop")}
+                                        icon={<Square className="size-3 fill-current" aria-hidden="true" />}
+                                        loading={stopping}
+                                        onClick={() => void stop()}
+                                    />
+                                ) : (
+                                    <Button
+                                        type="primary"
+                                        shape="circle"
+                                        aria-label={translate("drama.send")}
+                                        icon={<ArrowUp className="size-4" />}
+                                        disabled={!draft.trim()}
+                                        loading={sending}
+                                        onClick={() => void send()}
+                                    />
+                                )}
                             </div>
                             {tasksOpen ? <p className="px-1 pt-2 text-xs leading-5 text-[var(--studio-muted)]">{taskMessage || translate("drama.noTaskDetail")}</p> : null}
                         </div>

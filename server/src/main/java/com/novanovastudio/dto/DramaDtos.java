@@ -51,6 +51,15 @@ public final class DramaDtos {
     public record SaveCutRequest(@NotBlank String projectId, @NotBlank @Size(max = 64) String taskId) {
     }
 
+    /** @param projectId 项目ID @param revision 修订号 @param versionId 要撤销的版本 */
+    public record DiscardVersionRequest(@NotBlank String projectId, @Min(1) int revision, @NotBlank String versionId) {
+    }
+
+    /** @param clientRequestId 稳定请求号 @param projectId 项目ID @param revision 修订号 @param stage 要重做的阶段 */
+    public record RegenerateStageRequest(@NotBlank @Size(max = 64) String clientRequestId, @NotBlank String projectId,
+                                         @Min(1) int revision, @NotBlank @Size(max = 32) String stage) {
+    }
+
     /**
      * 为当前阶段里的一个角色、场景或镜头提交真实的图片或视频任务。
      *
@@ -82,9 +91,9 @@ public final class DramaDtos {
     public record WorkspaceResponse(ProjectDetail project, List<VersionView> versions, ActiveRequest activeRequest, List<MediaView> media) {
     }
 
-    /** @param id 记录ID @param versionId 来源版本 @param targetKey 生成目标 @param mediaType 图片或视频 @param taskId 任务ID @param model 模型 @param status 状态 @param url 可预览地址 @param storageKey 存储键 @param mimeType 媒体类型 @param errorMessage 失败说明 @param createdAt 创建时间 */
+    /** @param id 记录ID @param versionId 来源版本 @param targetKey 生成目标 @param mediaType 图片或视频 @param taskId 任务ID @param model 模型 @param status 状态 @param progress 生成进度，0到100 @param url 可预览地址 @param storageKey 存储键 @param mimeType 媒体类型 @param errorMessage 失败说明 @param createdAt 创建时间 */
     public record MediaView(String id, String versionId, String targetKey, String mediaType, String taskId, String model,
-                            String status, String url, String storageKey, String mimeType, String errorMessage, String createdAt) {
+                            String status, Integer progress, String url, String storageKey, String mimeType, String errorMessage, String createdAt) {
     }
 
     /** @param id 项目ID @param name 名称 @param ideaText 创意 @param storyText 正文 @param textModel 模型 @param sessionId 会话 @param currentStage 当前阶段 @param status 状态 @param revision 修订号 @param durationSeconds 时长 @param textCredits 文本积分 @param updatedAt 更新时间 */

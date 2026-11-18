@@ -289,21 +289,23 @@ public class WholeBookAdaptationRunner {
             case "overview" -> {
                 WholeBookAdaptationDtos.Options options = job.settings()
                         .toJavaObject(WholeBookAdaptationDtos.Options.class);
+                int totalEpisodeCount = Math.max(1, workflow.slots().size());
+                int totalDurationSeconds = Math.min(864000, totalEpisodeCount * options.episodeDurationSeconds());
                 String instruction = "根据全书策略与素材摘要生成故事概览，覆盖全书主线、人物成长与结局；"
                         + "contentType、targetEpisodeCount、targetDurationSeconds 由服务端设定，保持与输入一致。";
                 return scriptAgentService.callWholeBookUnit(job.userId(), unit.key(), job.modelValue(),
                                 draftInput("overview", "overview", instruction, planningContext(job, workflow,
                                         Map.of("sources", sources,
                                                 "contentType", options.format(),
-                                                "targetEpisodeCount", workflow.slots().size(),
-                                                "targetDurationSeconds", options.episodeDurationSeconds()))),
+                                                "targetEpisodeCount", totalEpisodeCount,
+                                                "targetDurationSeconds", totalDurationSeconds))),
                                 ScriptDtos.GeneratedOverviewDraft.class)
                         .flatMap(generated -> {
                             JSONObject data = JSON.parseObject(JSON.toJSONString(generated.draftData()));
-                            // 改编形式与目标集数由用户设置决定，模型不需要也不应该改写。
+                            // 改编形式、目标集数与全剧总时长由用户设置决定，模型不需要也不应该改写。
                             data.put("contentType", options.format());
-                            data.put("targetEpisodeCount", Math.max(1, workflow.slots().size()));
-                            data.put("targetDurationSeconds", options.episodeDurationSeconds());
+                            data.put("targetEpisodeCount", totalEpisodeCount);
+                            data.put("targetDurationSeconds", totalDurationSeconds);
                             return saveDraft(job, workflow, unit, "overview", "overview", instruction, data, true);
                         });
             }

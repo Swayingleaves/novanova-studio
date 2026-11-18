@@ -154,6 +154,34 @@ public class DramaController {
     }
 
     /**
+     * 重做指定阶段的产物，直接按生成请求入队，不走对话意图判断。
+     *
+     * @param request 重做请求
+     * @param httpRequest 当前HTTP请求
+     * @return 工作台
+     */
+    @PostMapping("/regenerateStage")
+    public Mono<ApiResponse<DramaDtos.WorkspaceResponse>> regenerateStage(@Valid @RequestBody DramaDtos.RegenerateStageRequest request, ServerHttpRequest httpRequest) {
+        log.info("重做短剧阶段: url={}, headers={}, body={}", httpRequest.getURI(), headers(httpRequest), request);
+        return dramaWorkspaceService.regenerateStage(request).map(ApiResponse::ok)
+                .doOnNext(response -> log.info("重做短剧阶段响应: projectId={}, stage={}", request.projectId(), request.stage()));
+    }
+
+    /**
+     * 撤销最近一次生成的阶段版本，连同这一版的图片和视频一起删除。
+     *
+     * @param request 撤销请求
+     * @param httpRequest 当前HTTP请求
+     * @return 工作台
+     */
+    @PostMapping("/discardVersion")
+    public Mono<ApiResponse<DramaDtos.WorkspaceResponse>> discardVersion(@Valid @RequestBody DramaDtos.DiscardVersionRequest request, ServerHttpRequest httpRequest) {
+        log.info("撤销短剧版本: url={}, headers={}, body={}", httpRequest.getURI(), headers(httpRequest), request);
+        return dramaWorkspaceService.discardVersion(request).map(ApiResponse::ok)
+                .doOnNext(response -> log.info("撤销短剧版本响应: projectId={}, versionId={}", request.projectId(), request.versionId()));
+    }
+
+    /**
      * 删除短剧项目及其会话，不影响剧本和漫剧项目。
      *
      * @param request 删除请求

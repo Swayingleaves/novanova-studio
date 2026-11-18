@@ -174,7 +174,7 @@
     "thisShotHasNoGeneratedMediaSoNoGeneratedResults": "该镜头尚未生成媒体素材，删除不会损失生成成果。",
     "keepAtLeastOneShotInTheDraft": "镜头草稿至少需要保留一个镜头",
     "shotDraftAdjustmentsSaved": "镜头草稿微调已保存",
-    "shotDraftApprovedAndAppendedToTheShotList": "镜头草稿已确认生效，已正式追加至镜头清单",
+    "shotDraftApprovedAndAppendedToTheShotList": "镜头草稿已确认生效并写入镜头清单",
     "discardThisShotBreakdownDraft": "确定放弃此拆分草稿？",
     "existingShotsWillRemainUnchangedTheDraftWillBeArchived": "放弃后不会影响现有正式镜头，历史记录将存档。",
     "confirmDiscard": "确认放弃",
@@ -528,7 +528,7 @@
     "breakDownShotsWithAi": "AI 自动拆分镜头",
     "addShot": "添加镜头",
     "aShotBreakdownDraftIsAwaitingApproval": "存在待确认的镜头拆分草稿",
-    "reviewAndAdjustTheProposedShotsBeforeAppendingThemTo": "包含已拆分的候选镜头，微调确认后将正式追加至镜头清单中。",
+    "reviewAndAdjustTheProposedShotsBeforeAppendingThemTo": "包含已拆分的候选镜头，确认生效后将覆盖替换对应分集或场次的原有镜头。",
     "reviewAndEditDraft": "审核并编辑草稿",
     "episodeFilter": "分集筛选：",
     "allEpisodes": "全部分集",
@@ -983,5 +983,13 @@
     "batchAssetTargets": "目标：{value0} 个资产（各取最新版本）",
     "batchAssetsSkipped": " · 另有{value0} 个资产还没有版本，将被跳过",
     "batchAssetsGeneratingSkipped": " · 另有{value0} 个资产正在生成中，已跳过",
-    "assetImageIsGeneratingWaitForTheCurrentTask": "该资产图正在生成中，请等待当前任务完成"
+    "assetImageIsGeneratingWaitForTheCurrentTask": "该资产图正在生成中，请等待当前任务完成",
+    "episodeDurationAndSceneSplitHint": "本集目标时长 {value0} 秒 · 共 {value1} 场：留空预计镜头数时，将按目标时长与各场篇幅并发拆分并自动关联场次。",
+    "episodeNoDurationSceneSplitHint": "本集共 {value0} 场（未设目标时长，可在剧本创作中设置如 180 秒）：留空预计镜头数时，将按各场对白与动作体量并发拆分并关联场次。",
+    "shotDraftReplaceSummaryInfo": "确认生效后，将用本次拆分的 {value0} 个新镜头覆盖替换当前范围内的 {value1} 个原有镜头（其他分集或场次不受影响）。",
+    "shotDraftReplaceSummaryWarning": "确认生效后，将覆盖替换当前范围内的 {value0} 个原有镜头，并清理其中关联的 {value1} 个已生成图片/视频及提示词版本。",
+    "confirmOverwriteExistingShotsTitle": "确认覆盖原有镜头？",
+    "confirmOverwriteExistingShotsContent": "当前范围内原有的 {value0} 个镜头将被替换为 {value1} 个新镜头，关联的 {value2} 个已生成媒体与提示词记录将一并清理。此操作不可逆，是否继续？",
+    "confirmOverwriteAction": "确认覆盖生效",
+    "shotDraftReplacedExistingSuccess": "镜头草稿已确认生效，已覆盖替换原有 {value0} 个镜头"
 }

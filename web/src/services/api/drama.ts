@@ -48,6 +48,7 @@ export type DramaMedia = {
     taskId: string;
     model: string;
     status: "pending" | "running" | "success" | "failed" | "canceled" | string;
+    progress: number;
     url: string;
     storageKey: string;
     mimeType: string;
@@ -93,6 +94,16 @@ export function sendDramaMessage(body: { clientRequestId: string; projectId: str
 
 export function deleteDramaProject(body: { projectId: string; revision: number }) {
     return serverPost<void>("/drama/deleteProject", body);
+}
+
+/** 撤销某阶段最新一次生成，连同该版本的图片和视频一起删除。 */
+export function discardDramaVersion(body: { projectId: string; revision: number; versionId: string }) {
+    return serverPost<DramaWorkspace>("/drama/discardVersion", body);
+}
+
+/** 重做某个阶段的产物：服务端直接按生成请求入队，不依赖对话意图判断。 */
+export function regenerateDramaStage(body: { clientRequestId: string; projectId: string; revision: number; stage: DramaStage }) {
+    return serverPost<DramaWorkspace>("/drama/regenerateStage", body);
 }
 
 export function saveDramaCut(body: { projectId: string; taskId: string }) {

@@ -39,9 +39,9 @@ class AgentSessionServiceTest {
         when(repository.findById(377L, "history")).thenReturn(Mono.just(session));
 
         Assertions.assertEquals(List.of(
-                new AgentSessionHistoryMessage("user", "user", "请生成图片"),
-                new AgentSessionHistoryMessage("assistant", "assistant", "请先补充图片要求"),
-                new AgentSessionHistoryMessage("follow-up", "user", "使用动漫风格")),
+                new AgentSessionHistoryMessage("user", "user", "请生成图片", "内部元数据", null),
+                new AgentSessionHistoryMessage("assistant", "assistant", "请先补充图片要求", "内部元数据", null),
+                new AgentSessionHistoryMessage("follow-up", "user", "使用动漫风格", null, null)),
                 service.getSessionHistory(377L, "history").block());
         verify(repository).findById(377L, "history");
         verifyNoMoreInteractions(repository);

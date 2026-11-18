@@ -1,7 +1,7 @@
 "use client";
 
 import { App, Button, InputNumber } from "antd";
-import { Check, Download, Minus, Play, Square } from "lucide-react";
+import { Check, Download, LoaderCircle, Minus, Play, Square } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "@/features/locale/use-translation";
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
@@ -102,20 +102,35 @@ function MediaFrame({
     const canStop = queued && Boolean(media?.taskId) && Boolean(onStop);
     const stopping = Boolean(media?.taskId) && media?.taskId === stoppingTaskId;
     return (
-        <div className={bare ? "bg-[var(--studio-media)]" : "overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-media)]"}>
+        <div className={`relative ${bare ? "bg-[var(--studio-media)]" : "overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-media)]"}`}>
             {ready && kind === "image" ? <ZoomableMedia kind="image" url={media?.url || ""} storageKey={media?.storageKey} className={`${aspect} w-full object-cover`} /> : null}
             {ready && kind === "video" ? <ZoomableMedia kind="video" url={media?.url || ""} storageKey={media?.storageKey} className={`${aspect} w-full bg-black object-cover`} /> : null}
-            {!ready ? (
+            {queued && (media?.progress || 0) > 0 ? (
+                <span className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium tabular-nums text-white">{media?.progress}%</span>
+            ) : null}
+            {!ready && running ? (
+                <div className={`${aspect} w-full`} role="status" aria-label={media?.status === "pending" ? translate("drama.mediaQueued") : translate("drama.mediaRunning")}>
+                    <div className="studio-skeleton studio-skeleton-media h-full w-full" aria-hidden="true" />
+                </div>
+            ) : null}
+            {!ready && !running ? (
                 <div className={`${aspect} grid w-full place-items-center px-4 text-center text-xs leading-5 text-[var(--studio-muted)]`}>
-                    {media?.status === "pending" ? translate("drama.mediaQueued") : media?.status === "running" ? translate("drama.mediaRunning") : failed ? (media?.errorMessage || translate("drama.statusFailed")) : kind === "video" ? translate("drama.noVideoYet") : translate("drama.noImageYet")}
+                    {failed ? (media?.errorMessage || translate("drama.statusFailed")) : kind === "video" ? translate("drama.noVideoYet") : translate("drama.noImageYet")}
                 </div>
             ) : null}
             {onGenerate ? (
                 <div className="flex justify-end border-t border-[var(--studio-line)] bg-[var(--studio-surface)] px-3 py-2">
                     {canStop ? (
-                        <Button size="small" danger loading={stopping} icon={<Square className="size-3" aria-hidden="true" />} onClick={() => media && onStop?.(media)}>
+                        <button
+                            type="button"
+                            disabled={stopping}
+                            aria-label={translate("drama.stop")}
+                            onClick={() => media && onStop?.(media)}
+                            className="inline-flex h-6 items-center gap-1.5 rounded-full bg-[var(--studio-surface-hover)] px-2.5 text-xs font-medium text-[var(--studio-muted)] transition-colors hover:bg-[color-mix(in_srgb,var(--studio-danger)_14%,transparent)] hover:text-[var(--studio-danger)] disabled:cursor-progress disabled:opacity-60"
+                        >
+                            {stopping ? <LoaderCircle className="size-3 animate-spin" aria-hidden="true" /> : <Square className="size-2.5 fill-current" aria-hidden="true" />}
                             {translate("drama.stop")}
-                        </Button>
+                        </button>
                     ) : (
                         <Button size="small" type={ready ? "default" : "primary"} loading={running} disabled={running} onClick={() => onGenerate(targetKey)}>
                             {targetKey.startsWith("sheet:") ? translate("drama.generateSheet") : kind === "video" ? translate("drama.generateVideo") : translate("drama.generateImage")}

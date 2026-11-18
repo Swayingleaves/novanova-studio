@@ -166,6 +166,21 @@ public final class DramaArtifacts {
         };
     }
 
+    /**
+     * 读取图片宽高，读不出来时按 0 处理。
+     *
+     * @param source 图片字节
+     * @return 下标 0 为宽，下标 1 为高
+     */
+    public static int[] imageSize(byte[] source) {
+        try {
+            BufferedImage image = ImageIO.read(new ByteArrayInputStream(source));
+            return image == null ? new int[]{0, 0} : new int[]{image.getWidth(), image.getHeight()};
+        } catch (Exception exception) {
+            return new int[]{0, 0};
+        }
+    }
+
     private static byte[] png(BufferedImage source, int x, int y, int width, int height) {
         BufferedImage cell = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         Graphics2D graphics = cell.createGraphics();

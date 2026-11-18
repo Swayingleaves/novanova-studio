@@ -100,7 +100,8 @@ public class AgentSessionService {
      * @return Mono<Void>
      */
     public Mono<Void> appendUserMessage(String sessionId, String messageId, String text) {
-        return repository.appendMessage(sessionId, new AgentMessage(messageId, "user", text, null));
+        return repository.appendMessage(sessionId, new AgentMessage(messageId, "user", text, null, null, null, null,
+                null, null, OffsetDateTime.now()));
     }
 
     /**
@@ -112,7 +113,21 @@ public class AgentSessionService {
      * @return Mono<Void>
      */
     public Mono<Void> appendAssistantMessage(String sessionId, String messageId, String text) {
-        return repository.appendMessage(sessionId, new AgentMessage(messageId, "assistant", text, null));
+        return appendAssistantMessage(sessionId, messageId, text, null);
+    }
+
+    /**
+     * 追加助手消息，并带上前端渲染卡片需要的附加信息。
+     *
+     * @param sessionId String 会话ID
+     * @param messageId String 消息ID
+     * @param text      String 消息文本
+     * @param meta      String 附加信息JSON，可为空
+     * @return Mono<Void>
+     */
+    public Mono<Void> appendAssistantMessage(String sessionId, String messageId, String text, String meta) {
+        return repository.appendMessage(sessionId, new AgentMessage(messageId, "assistant", text, meta, null, null, null,
+                null, null, OffsetDateTime.now()));
     }
 
     /**
@@ -165,7 +180,8 @@ public class AgentSessionService {
                 .map(session -> session.messages().stream()
                         .filter(message -> "user".equals(message.role()) || "assistant".equals(message.role()))
                         .filter(message -> StringUtils.hasText(message.text()))
-                        .map(message -> new AgentSessionHistoryMessage(message.id(), message.role(), message.text()))
+                        .map(message -> new AgentSessionHistoryMessage(message.id(), message.role(), message.text(),
+                                message.meta(), message.createdAt()))
                         .toList());
     }
 

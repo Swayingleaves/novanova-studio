@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -271,16 +272,17 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         // 查询请求体只构造一次：AI构造模式避免每轮重复调用LLM，模板模式渲染结果幂等。
         Mono<JSONObject> bodyMono = resolveQueryBody(context, group, taskId).cache();
         AtomicReference<JSONObject> lastResponse = new AtomicReference<>();
-        return Flux.range(0, MAX_POLLING_ATTEMPTS)
+        // 进度只增不减，渠道偶尔回退时不让前端百分比跳动。
+        AtomicInteger lastProgress = new AtomicInteger(20);
+        Mono<String> polling = Flux.range(0, MAX_POLLING_ATTEMPTS)
                 .concatMap(attempt -> Mono.delay(interval)
                         .then(context.isCancelRequested())
-                        .flatMap(cancelRequested -> {
+                        .<JSONObject>flatMap(cancelRequested -> {
                             if (Boolean.TRUE.equals(cancelRequested)) {
                                 return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCanceled")));
                             }
-                            int progress = Math.min(95, 20 + attempt);
-                            return context.updateRunningProgress(progress).then(
-                                    bodyMono.flatMap(body -> {
+                            int fallback = Math.min(95, 20 + attempt);
+                            return bodyMono.flatMap(body -> {
                                         log.info("自定义模型查询轮询第{}次: taskId={}, providerTaskId={}, method={}, url={}, body={}",
                                                 attempt + 1, context.task().getId(), taskId, method, queryUrl, abbreviate(body == null ? "" : body.toJSONString()));
                                         return aiHttpClient.sendBearerJsonUrlRequest(context.channel(), method, queryUrl, body)
@@ -295,9 +297,11 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                                                     log.info("自定义模型查询轮询第{}次响应: taskId={}, providerTaskId={}, response={}",
                                                             attempt + 1, context.task().getId(), taskId,
                                                             AiJsonUtils.formatResponseForLog(response).toJSONString());
-                                                    return Mono.just(response);
+                                                    int progress = Math.max(lastProgress.get(), providerProgress(response, fallback));
+                                                    lastProgress.set(progress);
+                                                    return context.updateRunningProgress(progress).thenReturn(response);
                                                 });
-                                    }));
+                                    });
                         }))
                 .map(response -> extractByPath(response, group.queryResultPath()))
                 // 图片查询结果可能是data URL或纯Base64，接受范围与同步分支保持一致；视频仍只认http(s)
@@ -305,6 +309,24 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                 .next()
                 .switchIfEmpty(Mono.defer(() -> extractWithAgent(context, taskKind,
                         lastResponse.get() == null ? new JSONObject() : lastResponse.get())));
+        return context.updateRunningProgress(lastProgress.get()).then(polling);
+    }
+
+    /**
+     * 读取渠道返回的执行进度。取不到时按轮询次数兜底，并把结果限制在 1 到 95 之间。
+     *
+     * @param response JSONObject 查询响应
+     * @param fallback int 兜底进度
+     * @return int 进度，1 到 95
+     */
+    private static int providerProgress(JSONObject response, int fallback) {
+        Integer value = response == null ? null : response.getInteger("progress");
+        if (value == null && response != null) {
+            JSONObject data = response.getJSONObject("data");
+            value = data == null ? null : data.getInteger("progress");
+        }
+        int progress = value == null ? fallback : value;
+        return Math.max(1, Math.min(95, progress));
     }
 
     /**

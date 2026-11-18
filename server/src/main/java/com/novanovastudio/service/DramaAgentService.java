@@ -7,6 +7,7 @@ import com.novanovastudio.agent.AgentEventEmitter;
 import com.novanovastudio.agent.AgentScopeAgentFactory;
 import com.novanovastudio.agent.AgentScopeModelFactory;
 import com.novanovastudio.agent.AgentSessionService;
+import com.novanovastudio.agent.DramaReplyStreamMiddleware;
 import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.common.BusinessException;
@@ -19,6 +20,7 @@ import com.novanovastudio.security.TeamScope;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
 import java.time.Duration;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -92,6 +94,7 @@ public class DramaAgentService {
             return fail(request, new BusinessException(ErrorCode.PARAM_INVALID, "短剧请求缺少项目"), settled);
         }
         String projectId = payload.getString("projectId");
+        String assistantId = UUID.randomUUID().toString();
         return TeamScope.current().flatMap(scope -> dramaRepository.findProject(request.getUserId(), scope.teamId(), projectId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "短剧项目不存在")))
                 .flatMap(project -> modelFactory.resolveTextModel(project.textModel()).flatMap(model -> runtime.charge(
@@ -103,58 +106,181 @@ public class DramaAgentService {
                         })
                         .then(dramaRepository.listVersions(project.id(), scope.teamId()).collectList())
                         .flatMap(versions -> dramaRepository.listMedia(project.id(), scope.teamId()).collectList()
-                                .flatMap(media -> callModel(request, project, payload, versions, media, model)))
+                                .flatMap(media -> callModel(request, project, payload, versions, media, model, scope.teamId(), assistantId)))
                         .flatMap(raw -> requestRepository.findStatusById(request.getId()).flatMap(status -> {
                             if (!"running".equals(status)) {
                                 settled.set(true);
                                 return runtime.release(request);
                             }
-                            return apply(request, project, payload, raw, settled, scope.teamId());
+                            return apply(request, project, payload, raw, settled, scope.teamId(), assistantId);
                         })))))
                 .doOnSubscribe(ignored -> eventEmitter.emit(request.getUserId(), AgentEvent.queueStatus(
                         request.getSessionId(), request.getId(), "running", "生成中")));
     }
 
     private Mono<Void> apply(CreationAgentRequest request, DramaRepository.ProjectRow project, JSONObject payload, JSONObject raw,
-                             AtomicBoolean settled, long teamId) {
+                             AtomicBoolean settled, long teamId, String assistantId) {
         String kind = payload.getString("kind");
         String intent = raw.getString("intent");
         if (!"generate".equals(kind) && !INTENTS.contains(intent)) {
             return fail(request, new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "短剧结果缺少有效意图"), settled);
         }
         String reply = DramaArtifacts.reply(raw);
+        String viewedStage = payload.getString("viewedStage");
         if ("converse".equals(kind) && "confirm".equals(intent)) {
             settled.set(true);
+            String nextStage = DramaStageRules.next(project.currentStage());
             return runtime.release(request)
                     .then(workspaceService.confirmFromAgent(request.getUserId(), teamId, project.id(), request.getId()))
-                    .then(sessionService.appendAssistantMessage(request.getSessionId(), UUID.randomUUID().toString(), reply))
+                    .then(complete(request, teamId, assistantId, reply,
+                            simpleMeta("confirm", StringUtils.hasText(nextStage) ? nextStage : project.currentStage())))
                     .then(finish(request, "success", ""));
         }
         if ("converse".equals(kind) && "answer".equals(intent)) {
             settled.set(true);
-            return sessionService.appendAssistantMessage(request.getSessionId(), UUID.randomUUID().toString(), reply)
+            return complete(request, teamId, assistantId, reply, simpleMeta("answer", viewedStage))
                     .then(dramaRepository.clearActive(project.id(), request.getId()))
                     .then(finish(request, "success", ""));
         }
         if ("converse".equals(kind) && "media".equals(intent)) {
             settled.set(true);
-            return workspaceService.executeMediaPlan(request.getUserId(), teamId, project, request.getId(), raw, payload)
-                    .then(sessionService.appendAssistantMessage(request.getSessionId(), UUID.randomUUID().toString(), reply))
+            // 先把这轮回复落库并发给前端，用户立刻能看到「开始生成…」；
+            // 真正的提交要等上一镜尾帧，可能花上几分钟，不能压在这条回复前面。
+            return complete(request, teamId, assistantId, reply, mediaMeta(viewedStage, raw))
+                    .then(workspaceService.executeMediaPlan(request.getUserId(), teamId, project, request.getId(), raw, payload))
                     .then(dramaRepository.clearActive(project.id(), request.getId()))
                     .then(finish(request, "success", ""));
         }
         String stage = "generate".equals(kind) ? payload.getString("stage") : targetStage(payload, raw, project.currentStage());
         return workspaceService.applyGeneratedVersion(request.getUserId(), teamId, project.id(), request.getId(), stage, raw, payload.getString("message"))
-                .then(sessionService.appendAssistantMessage(request.getSessionId(), UUID.randomUUID().toString(), reply))
+                .flatMap(version -> complete(request, teamId, assistantId, reply, stageMeta(stage, version)))
                 .then(Mono.fromRunnable(() -> eventEmitter.emit(request.getUserId(), AgentEvent.dramaStage(request.getSessionId(), project.id(), stage)
                         .withRequestId(request.getId()))))
                 .then(finish(request, "success", ""))
                 .doOnSuccess(ignored -> settled.set(true));
     }
 
+    /**
+     * 保存本轮助手消息并补发终态事件，前端据此收尾流式气泡。
+     *
+     * @param request 主Agent请求
+     * @param teamId 团队空间
+     * @param assistantId 本轮助手消息编号
+     * @param reply 回复正文
+     * @param meta 卡片附加信息
+     * @return 完成信号
+     */
+    private Mono<Void> complete(CreationAgentRequest request, long teamId, String assistantId, String reply, String meta) {
+        return sessionService.appendAssistantMessage(request.getSessionId(), assistantId, reply, meta)
+                .then(Mono.fromRunnable(() -> eventEmitter.emit(request.getUserId(), teamId,
+                        AgentEvent.taskComplete(request.getSessionId(), assistantId, reply))));
+    }
+
+    /**
+     * 生成不含卡片的附加信息。
+     *
+     * @param kind 消息种类
+     * @param stage 所属阶段
+     * @return String 附加信息JSON
+     */
+    private String simpleMeta(String kind, String stage) {
+        JSONObject meta = new JSONObject();
+        meta.put("kind", kind);
+        if (StringUtils.hasText(stage)) {
+            meta.put("stage", stage);
+        }
+        return meta.toJSONString();
+    }
+
+    /**
+     * 生成阶段产物卡片的附加信息，只放数字类统计，文案由前端按语言拼接。
+     *
+     * @param stage 阶段
+     * @param version 新落库的版本
+     * @return String 附加信息JSON
+     */
+    private String stageMeta(String stage, DramaRepository.VersionRow version) {
+        JSONObject meta = new JSONObject();
+        meta.put("kind", "stage");
+        meta.put("stage", stage);
+        meta.put("versionId", version.id());
+        meta.put("versionNumber", version.versionNumber());
+        meta.put("counts", counts(stage, version.contentJson()));
+        return meta.toJSONString();
+    }
+
+    /**
+     * 统计阶段产物的条目数量。
+     *
+     * @param stage 阶段
+     * @param contentJson 版本内容JSON
+     * @return JSONObject 统计结果
+     */
+    private JSONObject counts(String stage, String contentJson) {
+        JSONObject counts = new JSONObject();
+        JSONObject content = JSON.parseObject(contentJson);
+        if (content == null) {
+            return counts;
+        }
+        switch (stage) {
+            case "plan" -> {
+                counts.put("durationSeconds", content.getInteger("durationSeconds"));
+                counts.put("aspectRatio", content.getString("aspectRatio"));
+            }
+            case "script" -> counts.put("scenes", sizeOf(content.getJSONArray("scenes")));
+            case "cast" -> {
+                counts.put("characters", sizeOf(content.getJSONArray("characters")));
+                counts.put("locations", sizeOf(content.getJSONArray("locations")));
+            }
+            case "storyboard", "shot" -> counts.put("shots", sizeOf(content.getJSONArray("shots")));
+            default -> counts.put("checks", sizeOf(content.getJSONArray("checklist")));
+        }
+        counts.values().removeIf(Objects::isNull);
+        return counts;
+    }
+
+    /**
+     * 生成出图出视频卡片的附加信息。
+     *
+     * @param stage 所属阶段
+     * @param raw 导演结果
+     * @return String 附加信息JSON
+     */
+    private String mediaMeta(String stage, JSONObject raw) {
+        JSONObject meta = new JSONObject();
+        meta.put("kind", "media");
+        if (StringUtils.hasText(stage)) {
+            meta.put("stage", stage);
+        }
+        JSONArray keys = new JSONArray();
+        JSONObject plan = raw.getJSONObject("media");
+        JSONArray items = plan == null ? null : plan.getJSONArray("items");
+        if (items != null) {
+            for (int index = 0; index < items.size(); index++) {
+                JSONObject item = items.getJSONObject(index);
+                if (item != null && StringUtils.hasText(item.getString("targetKey"))) {
+                    keys.add(item.getString("targetKey"));
+                }
+            }
+        }
+        meta.put("mediaKeys", keys);
+        meta.put("mediaCount", keys.size());
+        return meta.toJSONString();
+    }
+
+    /**
+     * 统计数组长度，空数组按0处理。
+     *
+     * @param array 目标数组
+     * @return int 长度
+     */
+    private int sizeOf(JSONArray array) {
+        return array == null ? 0 : array.size();
+    }
+
     private Mono<JSONObject> callModel(CreationAgentRequest request, DramaRepository.ProjectRow project, JSONObject payload,
                                        java.util.List<DramaRepository.VersionRow> versions, java.util.List<DramaRepository.MediaRow> media,
-                                       AgentScopeModelFactory.TextModelSelection model) {
+                                       AgentScopeModelFactory.TextModelSelection model, long teamId, String assistantId) {
         JSONObject input = new JSONObject();
         input.put("kind", payload.getString("kind"));
         input.put("targetStage", payload.getString("stage"));
@@ -183,9 +309,13 @@ public class DramaAgentService {
         input.put("referenceRules", "角色用c1，场景用l1，剧本场景用sc1，镜头用sh1。只使用输入里已经出现的短序号；新增条目接着当前最大序号。不要输出持久化标识。media.items 的 targetKey 只能从 mediaStatus 里选；prompt 和 referenceKeys 由短剧提示词 Agent 负责，留空即可。");
         return Mono.defer(() -> {
             ReActAgent agent = agentFactory.dramaAgent(model.agentModel());
+            RuntimeContext context = RuntimeContext.builder()
+                    .sessionId("drama:" + request.getId()).userId(String.valueOf(request.getUserId())).build();
+            context.put(DramaReplyStreamMiddleware.DramaReplyStreamContext.class,
+                    new DramaReplyStreamMiddleware.DramaReplyStreamContext(request.getUserId(), teamId,
+                            request.getSessionId(), assistantId));
             log.info("短剧Agent请求: requestId={}, userId={}, model={}, input={}", request.getId(), request.getUserId(), model.modelValue(), input.toJSONString());
-            return agent.call(input.toJSONString(), DramaContracts.DirectorResult.class, RuntimeContext.builder()
-                            .sessionId("drama:" + request.getId()).userId(String.valueOf(request.getUserId())).build())
+            return agent.call(input.toJSONString(), DramaContracts.DirectorResult.class, context)
                     .timeout(Duration.ofSeconds(properties.timeoutSettings().scriptAgentTimeoutSeconds()))
                     .map(message -> JSON.parseObject(JSON.toJSONString(message.getStructuredData(DramaContracts.DirectorResult.class))))
                     .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "短剧Agent未返回结构化结果")))
@@ -293,7 +423,8 @@ public class DramaAgentService {
         String message = error instanceof BusinessException business ? business.getMessage() : "短剧生成失败";
         log.error("短剧请求失败: requestId={}, message={}", request.getId(), message, error);
         return runtime.release(request)
-                .then(sessionService.appendAssistantMessage(request.getSessionId(), UUID.randomUUID().toString(), message))
+                .then(sessionService.appendAssistantMessage(request.getSessionId(), UUID.randomUUID().toString(), message,
+                        "{\"kind\":\"error\"}"))
                 .onErrorResume(ignored -> Mono.empty())
                 .then(finish(request, "failed", message))
                 .then(Mono.fromRunnable(() -> eventEmitter.emit(request.getUserId(), AgentEvent.error(request.getSessionId(), message).withRequestId(request.getId()))));

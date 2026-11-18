@@ -62,12 +62,6 @@ public class EpisodeBodiesService {
     /** 计费操作名，取消或失败按未完成分集退回。 */
     private static final String OPERATION_NAME = "分集正文批量生成";
 
-    /** 单场最短秒数：总时长除以它得到场次数上限。 */
-    private static final int MIN_SCENE_SECONDS = 12;
-
-    /** 单场最长秒数：总时长除以它得到场次数下限。 */
-    private static final int MAX_SCENE_SECONDS = 20;
-
     /** 当前用户提供器。 */
     private final CurrentUserProvider currentUserProvider;
 
@@ -294,16 +288,13 @@ public class EpisodeBodiesService {
                 .filter(detail -> detail.episode().id().equals(episodeId)).findFirst()
                 .orElseThrow(() -> new BusinessException(ErrorCode.DATA_CONFLICT, "目标分集已不存在，请刷新后重试"));
         NovelAdaptationDtos.Settings settings = adaptationSettings(job);
-        int minimumScenes = Math.max(2, settings.episodeDurationSeconds() / MAX_SCENE_SECONDS);
-        int maximumScenes = Math.max(minimumScenes + 1, settings.episodeDurationSeconds() / MIN_SCENE_SECONDS);
+        int episodeSeconds = target.episode().targetDurationSeconds() > 0
+                ? ScriptDurationBudget.clampEpisodeSeconds(target.episode().targetDurationSeconds())
+                : ScriptDurationBudget.clampEpisodeSeconds(settings.episodeDurationSeconds());
         String instruction = "根据confirmedFacts中的已确认事实与targetEpisode的分集规划，为本集写出完整场次与正文。"
-                + "改编形式=" + settings.format() + "；单集秒数=" + settings.episodeDurationSeconds()
+                + "改编形式=" + settings.format() + "；单集秒数=" + episodeSeconds
                 + "；节奏=" + settings.pacing() + "；改编程度=" + settings.adaptationLevel() + "。"
-                // 只给总秒数时场次数完全随模型自由发挥，实测每集只有三到五场、单场近一分钟，
-                // 因此把密度换成明确区间；末句约束空洞描写，避免模型为了凑场次把内容稀释。
-                + "按每场 " + MIN_SCENE_SECONDS + "-" + MAX_SCENE_SECONDS + " 秒编排，本集应有 "
-                + minimumScenes + "-" + maximumScenes + " 场；"
-                + "每场是一个连续时空内的完整段落，必须有明确的场景目标与至少一次情节推进，不得用空洞描写充数。"
+                + ScriptDurationBudget.episodeBodyInstruction(episodeSeconds)
                 + "characters和locations是正式剧本的引用列表，只列出本集事实涉及的人物与地点："
                 + "场次characterIds与对白characterId只能使用characters中的id，"
                 + "场次locationId只能使用locations中的id，没有对应正式地点时留空；"
@@ -539,10 +530,13 @@ public class EpisodeBodiesService {
             if (targets.isEmpty()) {
                 return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "请至少选择一集再批量生成正文"));
             }
+            ScriptDtos.EpisodeSummary firstTarget = snapshot.project().episodes().stream()
+                    .filter(episode -> targets.contains(episode.id())).findFirst().orElse(null);
+            int episodeSeconds = ScriptDurationBudget.resolveEpisodeSeconds(
+                    null, firstTarget, snapshot.project().overview());
             NovelAdaptationDtos.Settings adaptation = new NovelAdaptationDtos.Settings(
                     snapshot.project().overview().contentType(), projectOrder.size(),
-                    snapshot.project().overview().targetDurationSeconds() <= 0 ? 180
-                            : snapshot.project().overview().targetDurationSeconds(),
+                    episodeSeconds,
                     "balanced", "balanced");
             // 报价只锁定分集范围与模型价格：事实快照在任务落库时留空，执行阶段再按取舍结果读取本集事实，
             // 避免报价请求为整本书上千条事实付出读取代价。

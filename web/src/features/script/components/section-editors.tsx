@@ -311,7 +311,14 @@ export function EpisodeDetailEditor({ detail, sceneId, onChange, onDelete, onSel
                 <Button icon={<Sparkles className="size-4" />} onClick={() => setAiTarget({ targetType: "episode", targetId: detail.episode.id, label: detail.episode.title })}>{translate("script.setAsAiTarget")}</Button>
                 <Button danger icon={<Trash2 className="size-4" />} onClick={onDelete}>{translate("script.deleteEpisode")}</Button>
             </div>
-            <div className="mt-3 max-w-52"><Field label={translate("script.targetDurationSeconds")}><InputNumber className="w-full" min={0} max={86400} value={detail.episode.targetDurationSeconds} onChange={(value) => updateSummary({ targetDurationSeconds: value ?? 0 })} /></Field></div>
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+                <div className="w-52"><Field label={translate("script.targetDurationSeconds")}><InputNumber className="w-full!" min={0} max={600} suffix={translate("script.secondsUnit")} value={detail.episode.targetDurationSeconds} onChange={(value) => updateSummary({ targetDurationSeconds: value ?? 0 })} /></Field></div>
+                {([60, 120, 180] as const).map((preset) => (
+                    <Button key={preset} size="small" type={detail.episode.targetDurationSeconds === preset ? "primary" : "default"} onClick={() => updateSummary({ targetDurationSeconds: preset })}>
+                        {preset === 60 ? translate("script.episodeDurationPreset1Min") : preset === 120 ? translate("script.episodeDurationPreset2Min") : translate("script.episodeDurationPreset3Min")}
+                    </Button>
+                ))}
+            </div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">{episodeFields.map(([key, label]) => <Field key={key} label={label}>
                 <Input.TextArea rows={3} value={detail.episode[key]} onChange={(event) => updateSummary({ [key]: event.target.value })} />
             </Field>)}</div>

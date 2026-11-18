@@ -103,7 +103,19 @@ export function NovelAdaptationPanel() {
     const [pinnedStep, setPinnedStep] = useState<number | null>(null);
 
     useEffect(() => { if (!model && config.textModel) setModel(config.textModel); }, [config.textModel, model]);
-    useEffect(() => { if (project) setSettings((current) => ({ ...current, format: project.overview.contentType, episodeDurationSeconds: project.overview.targetDurationSeconds || 180 })); }, [project?.id]);
+    useEffect(() => {
+        if (!project) return;
+        const count = Math.max(1, project.overview.targetEpisodeCount);
+        const rawDuration = project.overview.targetDurationSeconds;
+        const derivedEpisodeSeconds = rawDuration > 0
+            ? (count > 1 && rawDuration >= count * 30 ? Math.round(rawDuration / count) : rawDuration)
+            : 180;
+        setSettings((current) => ({
+            ...current,
+            format: project.overview.contentType,
+            episodeDurationSeconds: Math.min(600, Math.max(30, derivedEpisodeSeconds)),
+        }));
+    }, [project?.id]);
     // 页面刷新后恢复进行中或最近失败的任务，避免用户失去续跑入口；失败时可手动重试。
     useEffect(() => {
         if (!projectId || !hasSource) return;
@@ -379,7 +391,7 @@ export function NovelAdaptationPanel() {
                         <label className="block text-sm">{translate("script.adaptationFormat")}<Select className="mt-1 w-full" value={settings.format} options={[{ value: "comicDrama", label: translate("script.comicDrama") }, { value: "liveActionShort", label: translate("script.liveActionShortDrama") }, { value: "animation", label: translate("script.animation") }, { value: "advertisement", label: translate("script.advertisement") }, { value: "musicVideo", label: translate("script.musicVideo") }, { value: "storyShort", label: translate("script.shortFilm") }]} onChange={(value) => setSettings((current) => ({ ...current, format: value }))} /></label>
                         {/* InputNumber 自带 width:90px，而 Tailwind v4 的 utilities 在 @layer 里压不过 antd 注入的
                             无层样式，w-full 会被覆盖：控件撑不开就会和标签挤在同一行，看着完全没对齐。 */}
-                        <label className="block text-sm">{translate("script.episodeDurationSeconds")}<InputNumber className="mt-1 w-full!" min={30} max={86400} value={settings.episodeDurationSeconds} onChange={(value) => value && setSettings((current) => ({ ...current, episodeDurationSeconds: value }))} /></label>
+                        <label className="block text-sm">{translate("script.episodeDurationSeconds")}<InputNumber className="mt-1 w-full!" min={30} max={600} suffix={translate("script.secondsUnit")} value={settings.episodeDurationSeconds} onChange={(value) => value && setSettings((current) => ({ ...current, episodeDurationSeconds: value }))} /></label>
                         <label className="block text-sm">{translate("script.narrativePacing")}<Select className="mt-1 w-full" value={settings.pacing} options={[{ value: "slow", label: translate("script.relaxed") }, { value: "balanced", label: translate("script.balanced") }, { value: "fast", label: translate("script.fastPaced") }]} onChange={(value) => setSettings((current) => ({ ...current, pacing: value }))} /></label>
                         <label className="block text-sm">{translate("script.adaptationApproach")}<Select className="mt-1 w-full" value={settings.adaptationLevel} options={[{ value: "faithful", label: translate("script.faithful") }, { value: "balanced", label: translate("script.balanced") }, { value: "bold", label: translate("script.bold") }]} onChange={(value) => setSettings((current) => ({ ...current, adaptationLevel: value }))} /></label>
                     </div>

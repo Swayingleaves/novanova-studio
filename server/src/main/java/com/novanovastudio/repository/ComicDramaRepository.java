@@ -41,6 +41,14 @@ public class ComicDramaRepository {
     public record ShotGenerationSource(String scriptContent, String visualStyle, long scriptRevision) {
     }
 
+    /** 按场次拆分镜头所需的结构化场次正文、所属分集目标时长与项目视觉风格。 */
+    public record SceneGenerationSource(String episodeId, int episodeNumber, int episodeDurationSeconds,
+                                        String sceneId, int sceneNumber, String sceneTitle, String locationName,
+                                        String interiorExterior, String timeDescription, String bodyContent,
+                                        String spokenContent, String actionContent, String visualStyle,
+                                        int projectEpisodeDurationSeconds, long scriptRevision) {
+    }
+
     /**
      * 分页查询当前用户的漫剧项目。
      *
@@ -411,6 +419,74 @@ public class ComicDramaRepository {
                 value(row, "script_revision", Long.class, 0L))).one();
     }
 
+    /**
+     * 查询镜头拆分范围内的结构化场次列表及所属分集目标时长。
+     * <p>
+     * 当指定具体场次时，同时加载同集全部场次，供业务层按场次体量占比分摊单集目标时长。
+     *
+     * @param projectId 漫剧项目标识
+     * @param episodeId 可选分集标识
+     * @param sceneId 可选场次标识
+     * @return 按分集与场次顺序排列的结构化场次源数据
+     */
+    public Flux<SceneGenerationSource> listShotGenerationScenes(String projectId, String episodeId, String sceneId) {
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
+                SELECT e.id AS episode_id,
+                       e.episode_number,
+                       e.target_duration_seconds AS episode_duration_seconds,
+                       sc.id AS scene_id,
+                       sc.scene_number,
+                       sc.title AS scene_title,
+                       COALESCE(loc.name, '') AS location_name,
+                       sc.interior_exterior,
+                       sc.time_description,
+                       COALESCE(string_agg(CASE WHEN b.block_type='dialogue' THEN COALESCE(ch.name || '：','') || b.content
+                            ELSE b.content END, E'\n' ORDER BY b.sort_order), '') AS body_content,
+                       COALESCE(string_agg(CASE WHEN b.block_type IN ('dialogue','narration')
+                            THEN b.content END, E'\n' ORDER BY b.sort_order), '') AS spoken_content,
+                       COALESCE(string_agg(CASE WHEN b.block_type NOT IN ('dialogue','narration')
+                            THEN b.content END, E'\n' ORDER BY b.sort_order), '') AS action_content,
+                       st.visual_style,
+                       st.episode_duration_seconds AS project_episode_duration_seconds,
+                       p.revision AS script_revision
+                FROM comic_drama_project_settings st
+                JOIN script_projects p ON p.id=st.script_project_id AND p.status=1
+                JOIN script_episodes e ON e.project_id=p.id
+                JOIN script_scenes sc ON sc.episode_id=e.id
+                LEFT JOIN script_locations loc ON loc.id=sc.location_id
+                LEFT JOIN script_blocks b ON b.scene_id=sc.id
+                LEFT JOIN script_characters ch ON ch.id=b.character_id
+                WHERE st.script_project_id=:projectId
+                  AND (:episodeId IS NULL OR e.id=:episodeId)
+                  AND (:sceneId IS NULL OR e.id=(
+                      SELECT s2.episode_id FROM script_scenes s2
+                      JOIN script_episodes e2 ON e2.id=s2.episode_id
+                      WHERE e2.project_id=:projectId AND s2.id=:sceneId))
+                GROUP BY e.id, e.episode_number, e.sort_order, e.target_duration_seconds,
+                         sc.id, sc.scene_number, sc.sort_order, sc.title, loc.name, sc.interior_exterior, sc.time_description,
+                         st.visual_style, st.episode_duration_seconds, p.revision
+                ORDER BY e.sort_order, sc.sort_order
+                """).bind("projectId", projectId);
+        spec = bindNullable(spec, "episodeId", episodeId, String.class);
+        spec = bindNullable(spec, "sceneId", sceneId, String.class);
+        return spec.map((row, metadata) -> new SceneGenerationSource(
+                row.get("episode_id", String.class),
+                value(row, "episode_number", Integer.class, 1),
+                value(row, "episode_duration_seconds", Integer.class, 0),
+                row.get("scene_id", String.class),
+                value(row, "scene_number", Integer.class, 1),
+                text(row.get("scene_title", String.class)),
+                text(row.get("location_name", String.class)),
+                text(row.get("interior_exterior", String.class)),
+                text(row.get("time_description", String.class)),
+                text(row.get("body_content", String.class)),
+                text(row.get("spoken_content", String.class)),
+                text(row.get("action_content", String.class)),
+                text(row.get("visual_style", String.class)),
+                value(row, "project_episode_duration_seconds", Integer.class, 0),
+                value(row, "script_revision", Long.class, 0L))).all();
+    }
+
     /** 查询来源场次所属分集，避免正式镜头丢失分集关联。 */
     public Mono<String> getSceneEpisodeId(String projectId, String sceneId) {
         return databaseClient.sql("""
@@ -435,8 +511,12 @@ public class ComicDramaRepository {
                         row.get("appearance_description", String.class))).all();
     }
 
-    /** 保存待确认镜头草稿。 */
+    /** 保存待确认镜头草稿，并将同项目此前未处理的待确认草稿自动标记为已放弃。 */
     public Mono<Void> createShotDraft(Long userId, ComicDramaDtos.ShotDraft draft) {
+        Mono<Long> discardPrevious = databaseClient.sql("""
+                UPDATE comic_drama_shot_drafts SET status='discarded'
+                WHERE script_project_id=:projectId AND user_id=:userId AND status='pending'
+                """).bind("projectId", draft.projectId()).bind("userId", userId).fetch().rowsUpdated();
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
                 INSERT INTO comic_drama_shot_drafts(id,script_project_id,user_id,scope_type,scope_id,
                     base_project_revision,base_script_revision,instruction,model,draft_data,charged_credits)
@@ -445,10 +525,12 @@ public class ComicDramaRepository {
                 """).bind("id", draft.id()).bind("projectId", draft.projectId()).bind("userId", userId)
                 .bind("scopeType", draft.scopeType());
         spec = bindNullable(spec, "scopeId", draft.scopeId(), String.class);
-        return spec.bind("baseRevision", draft.baseProjectRevision()).bind("baseScriptRevision", draft.baseScriptRevision())
+        Mono<Long> insertCurrent = spec.bind("baseRevision", draft.baseProjectRevision())
+                .bind("baseScriptRevision", draft.baseScriptRevision())
                 .bind("instruction", text(draft.instruction()))
                 .bind("model", draft.model()).bind("draftData", json(draft.draftData()))
-                .bind("chargedCredits", draft.chargedCredits()).fetch().rowsUpdated().then();
+                .bind("chargedCredits", draft.chargedCredits()).fetch().rowsUpdated();
+        return discardPrevious.then(insertCurrent).then();
     }
 
     /** 查询当前用户待确认镜头草稿。 */
@@ -466,14 +548,18 @@ public class ComicDramaRepository {
                 .bind("projectId", projectId).map((row, metadata) -> mapShotDraft(row)).all();
     }
 
-    /** 标记镜头草稿已确认。 */
+    /** 标记镜头草稿已确认，并清理同项目其他遗留的待确认草稿。 */
     public Mono<Long> confirmShotDraft(String projectId, String draftId) {
         return databaseClient.sql("""
                 UPDATE comic_drama_shot_drafts SET status='confirmed', confirmed_at=CURRENT_TIMESTAMP
                 WHERE script_project_id=:projectId AND id=:draftId AND status='pending'
                   AND base_project_revision=(SELECT revision FROM comic_drama_projects WHERE script_project_id=:projectId)
                   AND base_script_revision=(SELECT revision FROM script_projects WHERE id=:projectId AND status=1)
-                """).bind("projectId", projectId).bind("draftId", draftId).fetch().rowsUpdated();
+                """).bind("projectId", projectId).bind("draftId", draftId).fetch().rowsUpdated()
+                .flatMap(updated -> updated == 0 ? Mono.just(0L) : databaseClient.sql("""
+                        UPDATE comic_drama_shot_drafts SET status='discarded'
+                        WHERE script_project_id=:projectId AND id<>:draftId AND status='pending'
+                        """).bind("projectId", projectId).bind("draftId", draftId).fetch().rowsUpdated().thenReturn(updated));
     }
 
     /** 在剧本与漫剧修订均未变化时保存镜头草稿编辑结果。 */
@@ -585,6 +671,36 @@ public class ComicDramaRepository {
     public Mono<Long> deleteShot(String projectId, String shotId) {
         return databaseClient.sql("DELETE FROM comic_drama_shots WHERE script_project_id=:projectId AND id=:shotId")
                 .bind("projectId", projectId).bind("shotId", shotId).fetch().rowsUpdated();
+    }
+
+    /**
+     * 批量删除被新拆分草稿覆盖替换的旧镜头，并同步清理无外键级联的镜头级媒体、变更影响与画布绑定。
+     *
+     * @param projectId 漫剧项目标识
+     * @param shotIds 待替换删除的镜头标识列表
+     * @return 删除完成信号
+     */
+    public Mono<Void> deleteShotsForReplacement(String projectId, List<String> shotIds) {
+        if (shotIds == null || shotIds.isEmpty()) {
+            return Mono.empty();
+        }
+        return databaseClient.sql("""
+                DELETE FROM comic_drama_media_results
+                WHERE script_project_id=:projectId AND target_type='shot' AND target_id IN (:shotIds)
+                """).bind("projectId", projectId).bind("shotIds", shotIds).fetch().rowsUpdated()
+                .then(databaseClient.sql("""
+                        DELETE FROM comic_drama_change_impacts
+                        WHERE script_project_id=:projectId AND target_type='shot' AND target_id IN (:shotIds)
+                        """).bind("projectId", projectId).bind("shotIds", shotIds).fetch().rowsUpdated())
+                .then(databaseClient.sql("""
+                        DELETE FROM comic_drama_canvas_bindings
+                        WHERE script_project_id=:projectId AND target_type='shot' AND target_id IN (:shotIds)
+                        """).bind("projectId", projectId).bind("shotIds", shotIds).fetch().rowsUpdated())
+                .then(databaseClient.sql("""
+                        DELETE FROM comic_drama_shots
+                        WHERE script_project_id=:projectId AND id IN (:shotIds)
+                        """).bind("projectId", projectId).bind("shotIds", shotIds).fetch().rowsUpdated())
+                .then();
     }
 
     /** 查询镜头删除前关联的媒体结果。 */

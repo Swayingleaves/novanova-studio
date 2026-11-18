@@ -293,6 +293,34 @@ public class DramaRepository {
     }
 
     /**
+     * 删除指定阶段版本。
+     *
+     * @param projectId 项目ID
+     * @param versionId 版本ID
+     * @return 完成信号
+     */
+    public Mono<Void> deleteVersion(String projectId, String versionId) {
+        return databaseClient.sql("""
+                DELETE FROM drama_stage_version WHERE id = :id AND project_id = :projectId
+                """)
+                .bind("id", versionId).bind("projectId", projectId).then();
+    }
+
+    /**
+     * 删除挂在指定版本上的图片和视频记录。
+     *
+     * @param projectId 项目ID
+     * @param versionId 版本ID
+     * @return 完成信号
+     */
+    public Mono<Void> deleteMediaByVersion(String projectId, String versionId) {
+        return databaseClient.sql("""
+                DELETE FROM drama_media WHERE version_id = :versionId AND project_id = :projectId
+                """)
+                .bind("versionId", versionId).bind("projectId", projectId).then();
+    }
+
+    /**
      * 读取下一版本号。
      *
      * @param projectId 项目ID
@@ -430,6 +458,21 @@ public class DramaRepository {
                 WHERE client_request_id = :id AND COALESCE(result_data->>'notified', 'false') <> 'true'
                 """)
                 .bind("result", result).bind("id", clientRequestId).fetch().rowsUpdated().map(count -> count > 0);
+    }
+
+    /**
+     * 回写还没反馈完的对话生成批次，用于推进待办队列。
+     *
+     * @param clientRequestId 请求号
+     * @param result 结果JSON
+     * @return 完成信号
+     */
+    public Mono<Void> updateChatMedia(String clientRequestId, String result) {
+        return databaseClient.sql("""
+                UPDATE drama_client_request SET result_data = :result::jsonb
+                WHERE client_request_id = :id AND COALESCE(result_data->>'notified', 'false') <> 'true'
+                """)
+                .bind("result", result).bind("id", clientRequestId).then();
     }
 
     /** @param id 请求号 @param result 结果JSON */

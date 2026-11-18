@@ -21,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -61,6 +62,9 @@ public class DramaWorkspaceService {
 
     /** 图片和视频生成记录。 */
     private final DramaMediaService dramaMediaService;
+
+    /** 正在推进的批次，合并并发刷新，避免同一个目标被提交两次。 */
+    private final ConcurrentHashMap<String, Mono<Void>> advancing = new ConcurrentHashMap<>();
 
     /**
      * 创建项目并排队制作方案。
@@ -259,19 +263,18 @@ public class DramaWorkspaceService {
                         return sessionService.appendAssistantMessage(project.sessionId(), UUID.randomUUID().toString(), reply)
                                 .then(dramaRepository.clearActive(project.id(), requestId));
                     }
-                    String castVersion = latest(versions, "cast") == null ? "" : latest(versions, "cast").id();
-                    String storyboardVersion = latest(versions, "storyboard") == null ? "" : latest(versions, "storyboard").id();
-                    List<DramaMediaCommands.NameTarget> catalog = new ArrayList<>();
-                    catalog.addAll(namedTargets(cast, "characters", "character:"));
-                    catalog.addAll(namedTargets(cast, "locations", "location:"));
-                    return Flux.fromIterable(keys).concatMap(key -> submitChatMedia(project, payload, itemOf(requested, key), castVersion, storyboardVersion)
-                                    .onErrorResume(error -> Mono.just("")))
-                            .collectList()
-                            .flatMap(startedKeys -> {
-                                List<String> started = startedKeys.stream().filter(StringUtils::hasText).toList();
-                                return rememberChatMedia(user, project, requestId, started, catalog, cast, storyboard)
-                                        .then(dramaRepository.clearActive(project.id(), requestId));
-                            });
+                    // 整批落库成待办，先把不依赖别人的提交掉，剩下的等前置完成再唤醒。
+                    JSONObject batch = new JSONObject();
+                    batch.put("stage", mediaStage(keys));
+                    batch.put("items", itemsOf(requested, keys));
+                    batch.put("payload", payload == null ? new JSONObject() : payload);
+                    batch.put("pending", new com.alibaba.fastjson2.JSONArray(keys));
+                    batch.put("tasks", new com.alibaba.fastjson2.JSONArray());
+                    batch.put("keys", new com.alibaba.fastjson2.JSONArray());
+                    batch.put("notified", false);
+                    return dramaRepository.insertClientRequest(requestId, teamId, userId, "chat-media", project.id(), batch.toJSONString())
+                            .then(advanceChain(user, project))
+                            .then(dramaRepository.clearActive(project.id(), requestId));
                 }));
     }
 
@@ -288,6 +291,8 @@ public class DramaWorkspaceService {
             String resolution = payload == null ? "" : payload.getString("videoResolution");
             parameters.put("resolution", StringUtils.hasText(resolution) ? resolution : "720p");
             parameters.put("watermark", false);
+            // 供应商的 size 要的是比例：留空会被兜底成 16:9 再换算成 720x1280，直接被拒。
+            parameters.put("size", DramaArtifacts.normalizeAspect(project.aspectRatio()));
         } else {
             String quality = payload == null ? "" : payload.getString("imageQuality");
             String resolution = payload == null ? "" : payload.getString("imageResolution");
@@ -307,30 +312,211 @@ public class DramaWorkspaceService {
                 .orElse(new DramaContracts.MediaItem(key, null, List.of()));
     }
 
-    private Mono<Void> rememberChatMedia(User user, DramaRepository.ProjectRow project, String clientRequestId, List<String> keys, List<DramaMediaCommands.NameTarget> catalog, JSONObject cast, JSONObject storyboard) {
-        if (keys.isEmpty()) {
-            return Mono.empty();
+    /**
+     * 推进项目里所有未完成的对话生成批次。
+     * <p>不阻塞请求：每次只提交依赖已经就绪的那一个，剩下的留在批次里，
+     * 下一次刷新或唤醒时继续，用户不用干等。</p>
+     *
+     * @param user 当前用户与空间
+     * @param project 项目
+     * @return 完成信号
+     */
+    private Mono<Void> advanceChain(User user, DramaRepository.ProjectRow project) {
+        // 前端每 3 秒刷一次，会有多个 workspace 请求同时在跑；不合并的话同一个目标会被提交两次。
+        return advancing.computeIfAbsent(project.id(), key -> advanceAll(user, project)
+                .doFinally(signal -> advancing.remove(key)).cache());
+    }
+
+    private Mono<Void> advanceAll(User user, DramaRepository.ProjectRow project) {
+        return dramaRepository.listChatMedia(project.id(), user.userId(), user.teamId())
+                .concatMap(batch -> advanceBatch(user, project, batch))
+                .then();
+    }
+
+    private Mono<Void> advanceBatch(User user, DramaRepository.ProjectRow project, DramaRepository.ChatMediaBatch batch) {
+        return advanceOnce(user, project, batch)
+                .flatMap(changed -> changed
+                        ? dramaRepository.listChatMedia(project.id(), user.userId(), user.teamId())
+                                .filter(item -> batch.id().equals(item.id()))
+                                .concatMap(item -> advanceBatch(user, project, item)).then()
+                        : Mono.empty());
+    }
+
+    /**
+     * 从批次里取出一个可提交的目标提交掉；没有可提交的就返回 false。
+     *
+     * @param user 当前用户与空间
+     * @param project 项目
+     * @param batch 对话生成批次
+     * @return 是否有进展
+     */
+    private Mono<Boolean> advanceOnce(User user, DramaRepository.ProjectRow project, DramaRepository.ChatMediaBatch batch) {
+        JSONObject result = JSON.parseObject(batch.result());
+        if (result == null || result.getBooleanValue("notified")) {
+            return Mono.just(false);
         }
-        return dramaRepository.listMedia(project.id(), user.teamId()).collectList().flatMap(rows -> {
-            com.alibaba.fastjson2.JSONArray tasks = new com.alibaba.fastjson2.JSONArray();
-            for (String key : keys) {
-                DramaRepository.MediaRow row = rows.stream().filter(item -> key.equals(item.targetKey()) && StringUtils.hasText(item.taskId())).findFirst().orElse(null);
-                if (row == null) {
-                    continue;
-                }
-                com.alibaba.fastjson2.JSONObject task = new com.alibaba.fastjson2.JSONObject();
-                task.put("taskId", row.taskId());
-                task.put("name", mediaLabel(key, catalog, cast, storyboard));
-                tasks.add(task);
+        com.alibaba.fastjson2.JSONArray pending = result.getJSONArray("pending");
+        if (pending == null || pending.isEmpty()) {
+            return Mono.just(false);
+        }
+        List<DramaContracts.MediaItem> items = readItems(result);
+        JSONObject payload = result.getJSONObject("payload");
+        return dramaRepository.listVersions(project.id(), user.teamId()).collectList()
+                .flatMap(versions -> dramaMediaService.list(user.userId(), user.teamId(), project.id()).flatMap(media -> {
+                    JSONObject storyboard = contentOf(latest(versions, "storyboard"));
+                    JSONObject cast = contentOf(latest(versions, "cast"));
+                    String castVersion = latest(versions, "cast") == null ? "" : latest(versions, "cast").id();
+                    String storyboardVersion = latest(versions, "storyboard") == null ? "" : latest(versions, "storyboard").id();
+                    List<DramaMediaCommands.NameTarget> catalog = new ArrayList<>();
+                    catalog.addAll(namedTargets(cast, "characters", "character:"));
+                    catalog.addAll(namedTargets(cast, "locations", "location:"));
+                    com.alibaba.fastjson2.JSONArray rest = new com.alibaba.fastjson2.JSONArray();
+                    String target = null;
+                    boolean dropped = false;
+                    for (int index = 0; index < pending.size(); index++) {
+                        String key = pending.getString(index);
+                        String state = chainState(key, storyboard, media);
+                        if (target == null && "ready".equals(state)) {
+                            target = key;
+                            continue;
+                        }
+                        if (target == null && "dead".equals(state)) {
+                            dropped = true;
+                            log.warn("短剧跳过无法生成的目标: projectId={}, target={}", project.id(), key);
+                            continue;
+                        }
+                        rest.add(key);
+                    }
+                    if (target == null) {
+                        if (!dropped) {
+                            return Mono.just(false);
+                        }
+                        result.put("pending", rest);
+                        return dramaRepository.updateChatMedia(batch.id(), result.toJSONString()).thenReturn(true);
+                    }
+                    String key = target;
+                    return submitChatMedia(project, payload, itemOf(items, key), castVersion, storyboardVersion)
+                            .flatMap(submitted -> appendTask(user, project, result, submitted, catalog))
+                            .onErrorResume(error -> {
+                                log.warn("短剧对话提交媒体失败: projectId={}, target={}, message={}", project.id(), key, error.getMessage());
+                                return Mono.just(result);
+                            })
+                            .flatMap(updated -> {
+                                updated.put("pending", rest);
+                                return dramaRepository.updateChatMedia(batch.id(), updated.toJSONString()).thenReturn(true);
+                            });
+                }));
+    }
+
+    /**
+     * 把刚提交的目标记进批次的完成清单。
+     *
+     * @param user 当前用户与空间
+     * @param project 项目
+     * @param result 批次结果
+     * @param key 生成目标
+     * @param catalog 角色与场景的短序号目录
+     * @return 更新后的批次结果
+     */
+    private Mono<JSONObject> appendTask(User user, DramaRepository.ProjectRow project, JSONObject result, String key,
+                                        List<DramaMediaCommands.NameTarget> catalog) {
+        return dramaMediaService.list(user.userId(), user.teamId(), project.id()).map(media -> {
+            DramaDtos.MediaView row = media.stream()
+                    .filter(item -> key.equals(item.targetKey()) && StringUtils.hasText(item.taskId()))
+                    .findFirst().orElse(null);
+            if (row == null) {
+                return result;
             }
-            if (tasks.isEmpty()) {
-                return Mono.empty();
+            com.alibaba.fastjson2.JSONArray tasks = result.getJSONArray("tasks");
+            if (tasks == null) {
+                tasks = new com.alibaba.fastjson2.JSONArray();
+                result.put("tasks", tasks);
             }
-            com.alibaba.fastjson2.JSONObject result = new com.alibaba.fastjson2.JSONObject();
-            result.put("tasks", tasks);
-            result.put("notified", false);
-            return dramaRepository.insertClientRequest(clientRequestId, user.teamId(), user.userId(), "chat-media", project.id(), result.toJSONString()).then();
+            com.alibaba.fastjson2.JSONArray keys = result.getJSONArray("keys");
+            if (keys == null) {
+                keys = new com.alibaba.fastjson2.JSONArray();
+                result.put("keys", keys);
+            }
+            JSONObject task = new JSONObject();
+            task.put("taskId", row.taskId());
+            task.put("name", mediaLabel(key, catalog));
+            tasks.add(task);
+            keys.add(key);
+            return result;
         });
+    }
+
+    /**
+     * 判断一个生成目标现在能不能提交。
+     *
+     * @param key 生成目标
+     * @param storyboard 最新分镜
+     * @param media 当前项目的全部媒体
+     * @return ready 可以提交，wait 等前置，dead 前置已经废了
+     */
+    private String chainState(String key, JSONObject storyboard, List<DramaDtos.MediaView> media) {
+        if (!chainedTarget(key)) {
+            return "ready";
+        }
+        String ref = DramaMediaTargets.ref(key);
+        List<String> required;
+        List<String> blockers;
+        if (key.startsWith("sheet:")) {
+            required = DramaMediaTargets.requiredReferences(key, storyboard);
+            String previous = DramaMediaTargets.previousRef(storyboard, ref);
+            blockers = StringUtils.hasText(previous) ? List.of("sheet:" + previous) : List.of();
+        } else {
+            required = List.of("cut:first:" + ref, "cut:last:" + ref);
+            blockers = List.of("sheet:" + ref);
+        }
+        if (required.isEmpty() || ready(media, required)) {
+            return "ready";
+        }
+        return blocked(media, blockers) ? "dead" : "wait";
+    }
+
+    /**
+     * 把主 Agent 声明的生成目标存进批次，唤醒后还能按同样的提示词重放。
+     *
+     * @param requested 主 Agent 声明的目标
+     * @param keys 实际要提交的目标
+     * @return 批次里的目标数组
+     */
+    private com.alibaba.fastjson2.JSONArray itemsOf(List<DramaContracts.MediaItem> requested, List<String> keys) {
+        com.alibaba.fastjson2.JSONArray items = new com.alibaba.fastjson2.JSONArray();
+        for (String key : keys) {
+            DramaContracts.MediaItem item = itemOf(requested, key);
+            JSONObject entry = new JSONObject();
+            entry.put("targetKey", key);
+            entry.put("prompt", item.prompt());
+            entry.put("referenceKeys", item.referenceKeys());
+            items.add(entry);
+        }
+        return items;
+    }
+
+    /**
+     * 从批次里读回生成目标。
+     *
+     * @param result 批次结果
+     * @return 生成目标
+     */
+    private List<DramaContracts.MediaItem> readItems(JSONObject result) {
+        List<DramaContracts.MediaItem> items = new ArrayList<>();
+        com.alibaba.fastjson2.JSONArray array = result.getJSONArray("items");
+        if (array == null) {
+            return items;
+        }
+        for (int index = 0; index < array.size(); index++) {
+            JSONObject entry = array.getJSONObject(index);
+            if (entry == null || !StringUtils.hasText(entry.getString("targetKey"))) {
+                continue;
+            }
+            com.alibaba.fastjson2.JSONArray refs = entry.getJSONArray("referenceKeys");
+            items.add(new DramaContracts.MediaItem(entry.getString("targetKey"), entry.getString("prompt"),
+                    refs == null ? List.of() : refs.toJavaList(String.class)));
+        }
+        return items;
     }
 
     private Mono<Void> notifyFinishedChat(User user, DramaRepository.ProjectRow project, List<DramaDtos.MediaView> media) {
@@ -341,6 +527,11 @@ public class DramaWorkspaceService {
             }
             com.alibaba.fastjson2.JSONArray tasks = result.getJSONArray("tasks");
             if (tasks == null || tasks.isEmpty()) {
+                return Mono.empty();
+            }
+            // 队列里还有没提交的，说明这一批还没跑完，不能提前发完成清单。
+            com.alibaba.fastjson2.JSONArray queue = result.getJSONArray("pending");
+            if (queue != null && !queue.isEmpty()) {
                 return Mono.empty();
             }
             List<String> names = new ArrayList<>();
@@ -364,11 +555,54 @@ public class DramaWorkspaceService {
             result.put("notified", true);
             return dramaRepository.finishChatMedia(batch.id(), result.toJSONString())
                     .flatMap(updated -> Boolean.TRUE.equals(updated)
-                            ? sessionService.appendAssistantMessage(project.sessionId(), UUID.randomUUID().toString(), DramaMediaCommands.completionReply(names, statuses))
+                            ? sessionService.appendAssistantMessage(project.sessionId(), UUID.randomUUID().toString(),
+                                    DramaMediaCommands.completionReply(names, statuses),
+                                    mediaDoneMeta(names.size(), result.getString("stage"), result.getJSONArray("keys")))
                             : Mono.empty());
         }).then().onErrorResume(error -> {
             log.warn("短剧生成完成反馈失败: projectId={}, message={}", project.id(), error.getMessage());
             return Mono.empty();
+        });
+    }
+
+    /**
+     * 是否必须串行提交：连续图和镜头视频要用上一镜的尾帧，顺序错了参考图就凑不齐。
+     *
+     * @param key 生成目标
+     * @return 需要串行返回 true
+     */
+    private static boolean chainedTarget(String key) {
+        return key.startsWith("sheet:") || key.startsWith("shot-video:");
+    }
+
+    /**
+     * 判断这些参考图是否都已经生成成功。
+     *
+     * @param media 当前项目的全部媒体
+     * @param keys 参考图目标
+     * @return boolean 全部就绪时为true
+     */
+    private static boolean ready(List<DramaDtos.MediaView> media, List<String> keys) {
+        return keys.stream().allMatch(key -> media.stream().anyMatch(item -> key.equals(item.targetKey())
+                && "success".equals(item.status())
+                && (StringUtils.hasText(item.storageKey()) || StringUtils.hasText(item.url()))));
+    }
+
+    /**
+     * 判断前置素材是不是真的废了。
+     * <p>只有既没有成功、也没有在生成的记录才算；用户重发一次时旧记录还是 failed，
+     * 但新任务已经在跑，这时提前跳过会让后面整串镜头都不生成。</p>
+     *
+     * @param media 当前项目的全部媒体
+     * @param blockers 前置目标
+     * @return boolean 无望时为true
+     */
+    private static boolean blocked(List<DramaDtos.MediaView> media, List<String> blockers) {
+        return blockers.stream().anyMatch(key -> {
+            List<DramaDtos.MediaView> rows = media.stream().filter(item -> key.equals(item.targetKey())).toList();
+            boolean alive = rows.stream().anyMatch(item -> "success".equals(item.status())
+                    || "pending".equals(item.status()) || "running".equals(item.status()));
+            return !alive && rows.stream().anyMatch(item -> "failed".equals(item.status()) || "canceled".equals(item.status()));
         });
     }
 
@@ -415,32 +649,31 @@ public class DramaWorkspaceService {
         return refs;
     }
 
-    private static String mediaLabel(String key, List<DramaMediaCommands.NameTarget> catalog, JSONObject cast, JSONObject storyboard) {
+    /**
+     * 生成完成清单里的显示名。角色和场景用名字；镜头相关的用镜头序号，
+     * 否则同一角色的多张连续图会列成「林澈、林澈、林澈」。
+     *
+     * @param key 生成目标
+     * @param catalog 角色与场景的短序号目录
+     * @return String 显示名
+     */
+    private static String mediaLabel(String key, List<DramaMediaCommands.NameTarget> catalog) {
         for (DramaMediaCommands.NameTarget entry : catalog) {
             if (key.equals(entry.key()) && StringUtils.hasText(entry.name())) {
                 return entry.name();
             }
         }
         String ref = key.substring(key.lastIndexOf(':') + 1);
-        com.alibaba.fastjson2.JSONArray shots = storyboard == null ? null : storyboard.getJSONArray("shots");
-        if (shots != null) {
-            for (int index = 0; index < shots.size(); index++) {
-                com.alibaba.fastjson2.JSONObject shot = shots.getJSONObject(index);
-                if (shot == null || !ref.equals(shot.getString("ref"))) {
-                    continue;
-                }
-                String characterRef = shot.getString("characterRef");
-                for (DramaMediaCommands.NameTarget entry : catalog) {
-                    if (("character:" + characterRef).equals(entry.key()) && StringUtils.hasText(entry.name())) {
-                        return entry.name();
-                    }
-                }
-            }
+        if (key.startsWith("sheet:")) {
+            return ref + " 的连续图";
         }
         if (key.startsWith("shot-video:")) {
             return ref + " 的视频";
         }
-        return "分镜 " + ref;
+        if (key.startsWith("board:")) {
+            return ref + " 的分镜";
+        }
+        return ref;
     }
 
     private static List<DramaMediaCommands.NameTarget> namedTargets(JSONObject content, String field, String prefix) {
@@ -487,9 +720,9 @@ public class DramaWorkspaceService {
      * @param stage 阶段
      * @param raw 导演结果
      * @param userMessage 用户原话，用来判断是否允许缩短分镜
-     * @return 完成信号
+     * @return 落库的新版本
      */
-    public Mono<Void> applyGeneratedVersion(long userId, long teamId, String projectId, String requestId, String stage, JSONObject raw, String userMessage) {
+    public Mono<DramaRepository.VersionRow> applyGeneratedVersion(long userId, long teamId, String projectId, String requestId, String stage, JSONObject raw, String userMessage) {
         User user = new User(userId, teamId);
         return dramaRepository.findProject(userId, teamId, projectId).switchIfEmpty(Mono.error(missing()))
                 .flatMap(project -> dramaRepository.listVersions(projectId, teamId).collectList().flatMap(versions -> {
@@ -501,6 +734,77 @@ public class DramaWorkspaceService {
                     JSONObject content = DramaArtifacts.normalize(stage, raw, contentOf(latest(versions, stage)),
                             contentOf(latest(versions, "cast")), contentOf(latest(versions, "storyboard")), project.durationSeconds(), project.aspectRatio(), userMessage);
                     return storeVersion(user, project, versions, stage, requestId, content, true);
+                }));
+    }
+
+    /**
+     * 重做指定阶段：直接按生成请求入队，由服务端指定目标阶段，不依赖模型判断意图。
+     *
+     * @param request 重做请求
+     * @return 工作台
+     */
+    public Mono<DramaDtos.WorkspaceResponse> regenerateStage(DramaDtos.RegenerateStageRequest request) {
+        return scope(user -> dramaRepository.findProject(user.userId(), user.teamId(), request.projectId())
+                .switchIfEmpty(Mono.error(missing()))
+                .flatMap(project -> {
+                    if (project.revision() != request.revision()) {
+                        return Mono.error(conflict());
+                    }
+                    DramaStageRules.index(request.stage());
+                    return requireIdle(project).then(dramaRepository.listVersions(project.id(), user.teamId()).collectList()
+                            .flatMap(versions -> {
+                                if (latest(versions, request.stage()) == null && !request.stage().equals(project.currentStage())) {
+                                    return Mono.error(invalid("这一阶段还没有产物，不能重做"));
+                                }
+                                String requestId = request.clientRequestId() + ":regen";
+                                JSONObject payload = turn("generate", project.id(), request.stage(), "", request.stage());
+                                return dramaRepository.saveProgress(user.userId(), user.teamId(), project.id(), project.revision(),
+                                                request.stage(), "active", requestId, project.durationSeconds(), project.name())
+                                        .flatMap(this::requireUpdated)
+                                        .then(enqueue(user, project, requestId, payload))
+                                        .then(workspace(user, project.id()));
+                            }));
+                }));
+    }
+
+    /**
+     * 撤销最近一次生成：删除该版本和它的图片视频，必要时把进度退回上一阶段。
+     *
+     * @param request 撤销请求
+     * @return 更新后的工作台
+     */
+    public Mono<DramaDtos.WorkspaceResponse> discardVersion(DramaDtos.DiscardVersionRequest request) {
+        return scope(user -> dramaRepository.findProject(user.userId(), user.teamId(), request.projectId())
+                .switchIfEmpty(Mono.error(missing()))
+                .flatMap(project -> {
+                    if (project.revision() != request.revision()) {
+                        return Mono.error(conflict());
+                    }
+                    return requireIdle(project).then(dramaRepository.listVersions(project.id(), user.teamId()).collectList()
+                            .flatMap(versions -> {
+                                DramaRepository.VersionRow target = versions.stream()
+                                        .filter(item -> item.id().equals(request.versionId())).findFirst().orElse(null);
+                                if (target == null) {
+                                    return Mono.error(invalid("要撤销的版本不存在"));
+                                }
+                                DramaRepository.VersionRow newest = latest(versions, target.stage());
+                                if (newest == null || !newest.id().equals(target.id())) {
+                                    return Mono.error(invalid("只能撤销该阶段的最新版本"));
+                                }
+                                if (!"pending".equals(target.confirmationStatus())) {
+                                    return Mono.error(invalid("已确认的版本不能撤销"));
+                                }
+                                boolean lastOfStage = versions.stream().noneMatch(item ->
+                                        target.stage().equals(item.stage()) && !item.id().equals(target.id()));
+                                String stage = target.stage().equals(project.currentStage()) && lastOfStage
+                                        ? DramaStageRules.previous(target.stage()) : project.currentStage();
+                                return transactionalOperator.transactional(dramaRepository.deleteMediaByVersion(project.id(), target.id())
+                                                .then(dramaRepository.deleteVersion(project.id(), target.id()))
+                                                .then(dramaRepository.saveProgress(user.userId(), user.teamId(), project.id(), project.revision(),
+                                                        stage, "active", "", project.durationSeconds(), project.name())
+                                                        .flatMap(this::requireUpdated).then()))
+                                        .then(workspace(user, project.id()));
+                            }));
                 }));
     }
 
@@ -572,8 +876,8 @@ public class DramaWorkspaceService {
         });
     }
 
-    private Mono<Void> storeVersion(User user, DramaRepository.ProjectRow project, List<DramaRepository.VersionRow> versions, String stage,
-                                    String requestId, JSONObject content, boolean fromModel) {
+    private Mono<DramaRepository.VersionRow> storeVersion(User user, DramaRepository.ProjectRow project, List<DramaRepository.VersionRow> versions, String stage,
+                                                          String requestId, JSONObject content, boolean fromModel) {
         DramaRepository.VersionRow previous = latest(versions, stage);
         int number = previous == null ? 1 : previous.versionNumber() + 1;
         String name = project.name();
@@ -591,7 +895,7 @@ public class DramaWorkspaceService {
         return transactionalOperator.transactional(dramaRepository.insertVersion(version, user.teamId())
                 .then(Flux.fromIterable(DramaStageRules.downstream(stage)).concatMap(item -> dramaRepository.markLatestStale(project.id(), item)).then())
                 .then(dramaRepository.saveProgress(user.userId(), user.teamId(), project.id(), project.revision(), stage, "active",
-                        "", duration, finalName).flatMap(this::requireUpdated).then()));
+                        "", duration, finalName).flatMap(this::requireUpdated).then())).thenReturn(version);
     }
 
     private Mono<Void> enqueue(User user, DramaRepository.ProjectRow project, String requestId, JSONObject payload) {
@@ -637,7 +941,8 @@ public class DramaWorkspaceService {
         return dramaRepository.findProject(user.userId(), user.teamId(), projectId).switchIfEmpty(Mono.error(missing()))
                 .flatMap(project -> dramaRepository.listVersions(project.id(), user.teamId()).collectList()
                         .flatMap(versions -> dramaMediaService.list(user.userId(), user.teamId(), project.id())
-                                .flatMap(media -> notifyFinishedChat(user, project, media)
+                                .flatMap(media -> advanceChain(user, project)
+                                        .then(notifyFinishedChat(user, project, media))
                                         .then(active(project).map(active -> new DramaDtos.WorkspaceResponse(detail(project),
                                         versions.stream().map(this::versionView).toList(), active, media))))));
     }
@@ -662,6 +967,43 @@ public class DramaWorkspaceService {
 
     private Mono<Boolean> requireUpdated(Boolean updated) {
         return Boolean.TRUE.equals(updated) ? Mono.just(true) : Mono.error(conflict());
+    }
+
+    /**
+     * 生成出图出视频完成提示的附加信息。
+     *
+     * @param count 本轮完成的目标数量
+     * @param stage 这批目标所属阶段，决定对话里由哪个身份说话
+     * @param keys 这批目标，前端据此取缩略图
+     * @return String 附加信息JSON
+     */
+    private String mediaDoneMeta(int count, String stage, com.alibaba.fastjson2.JSONArray keys) {
+        JSONObject meta = new JSONObject();
+        meta.put("kind", "media-done");
+        if (StringUtils.hasText(stage)) {
+            meta.put("stage", stage);
+        }
+        meta.put("mediaCount", count);
+        if (keys != null && !keys.isEmpty()) {
+            meta.put("mediaKeys", keys);
+        }
+        return meta.toJSONString();
+    }
+
+    /**
+     * 按生成目标判断这批素材属于哪个阶段。
+     *
+     * @param keys 生成目标
+     * @return String 阶段；角色和场景归 cast，镜头连续图和视频归 shot，其余归 storyboard
+     */
+    private String mediaStage(List<String> keys) {
+        if (keys.stream().allMatch(key -> key.startsWith("character:") || key.startsWith("location:"))) {
+            return "cast";
+        }
+        if (keys.stream().anyMatch(key -> key.startsWith("sheet:") || key.startsWith("shot-video:"))) {
+            return "shot";
+        }
+        return "storyboard";
     }
 
     private DramaDtos.ProjectView summary(DramaRepository.ProjectRow project) {

@@ -802,26 +802,40 @@ export function StageShots() {
                         />
                     </div>
 
-                    {splitEpisodeId && (
-                        <div>
-                            <label className="block text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.specificSceneOptional")}</label>
-                            <Select
-                                className="mt-1 w-full"
-                                value={splitSceneId}
-                                onChange={setSplitSceneId}
-                                loading={splitEpisodeQuery.isFetching}
-                                disabled={splitEpisodeQuery.isFetching || splitEpisodeQuery.isError}
-                                options={[
-                                    { value: "", label: translate("comicDrama.breakDownEntireEpisode") },
-                                    ...(splitEpisodeQuery.data?.scenes ?? []).map((sc) => ({
-                                        value: sc.id,
-                                        label: translate("comicDrama.sceneCountCount", { value0: sc.sceneNumber, value1: workspace.scriptProject.locations.find((location) => location.id === sc.locationId)?.name || translate("comicDrama.locationNotSet") }),
-                                    })),
-                                ]}
-                            />
-                            {splitEpisodeQuery.isError && <Alert type="error" title={splitEpisodeQuery.error.message} />}
-                        </div>
-                    )}
+                    {splitEpisodeId && (() => {
+                        const splitEpisode = episodes.find((item) => item.id === splitEpisodeId);
+                        const episodeDuration = (splitEpisode?.targetDurationSeconds ?? 0) > 0
+                            ? splitEpisode!.targetDurationSeconds
+                            : (workspace.settings.episodeTargetDuration || 0);
+                        const sceneCount = splitEpisodeQuery.data?.scenes.length ?? 0;
+                        return (
+                            <div>
+                                <label className="block text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.specificSceneOptional")}</label>
+                                <Select
+                                    className="mt-1 w-full"
+                                    value={splitSceneId}
+                                    onChange={setSplitSceneId}
+                                    loading={splitEpisodeQuery.isFetching}
+                                    disabled={splitEpisodeQuery.isFetching || splitEpisodeQuery.isError}
+                                    options={[
+                                        { value: "", label: translate("comicDrama.breakDownEntireEpisode") },
+                                        ...(splitEpisodeQuery.data?.scenes ?? []).map((sc) => ({
+                                            value: sc.id,
+                                            label: translate("comicDrama.sceneCountCount", { value0: sc.sceneNumber, value1: workspace.scriptProject.locations.find((location) => location.id === sc.locationId)?.name || translate("comicDrama.locationNotSet") }),
+                                        })),
+                                    ]}
+                                />
+                                {!splitSceneId && sceneCount > 0 ? (
+                                    <p className="mt-1.5 text-xs leading-5 text-[var(--studio-faint)]">
+                                        {episodeDuration > 0
+                                            ? translate("comicDrama.episodeDurationAndSceneSplitHint", { value0: episodeDuration, value1: sceneCount })
+                                            : translate("comicDrama.episodeNoDurationSceneSplitHint", { value0: sceneCount })}
+                                    </p>
+                                ) : null}
+                                {splitEpisodeQuery.isError && <Alert type="error" title={splitEpisodeQuery.error.message} />}
+                            </div>
+                        );
+                    })()}
 
                     <div className="grid grid-cols-2 gap-3">
                         <div>
@@ -829,7 +843,7 @@ export function StageShots() {
                             {/* InputNumber 自带 90px 固定宽度且属于无层样式，普通 w-full 会被它压过，必须用 w-full! 才能撑满 */}
                             <InputNumber
                                 min={1}
-                                max={50}
+                                max={100}
                                 className="mt-1 w-full!"
                                 placeholder={translate("comicDrama.leaveBlankForAiToDecide")}
                                 value={splitShotCount}

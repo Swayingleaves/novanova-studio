@@ -2,9 +2,9 @@
 
 import { useTranslation } from "@/features/locale/use-translation";
 
-import { useEffect, useState } from "react";
-import { App, Button, Drawer, Empty, Input, InputNumber, Modal, Select, Space, Table, Tag } from "antd";
-import { Check, Edit, Sparkles, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, App, Button, Drawer, Input, InputNumber, Space, Tag } from "antd";
+import { Sparkles, Trash2 } from "lucide-react";
 
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaShotDraft } from "../types";
@@ -18,7 +18,8 @@ type ShotDraftModalProps = {
 /** 镜头拆分草稿审核与编辑弹窗。 */
 export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
     const translate = useTranslation();
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
+    const workspace = useComicDramaStore((state) => state.workspace);
     const confirmShotDraft = useComicDramaStore((state) => state.confirmShotDraft);
     const updateShotDraft = useComicDramaStore((state) => state.updateShotDraft);
     const discardShotDraft = useComicDramaStore((state) => state.discardShotDraft);
@@ -35,6 +36,39 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
             setDraftShots([]);
         }
     }, [draft]);
+
+    // 计算当前草稿确认生效后将被覆盖替换的原有镜头及已生成媒体数量，与后端替换范围规则保持一致。
+    const { replacedShotCount, affectedMediaCount } = useMemo(() => {
+        if (!draft || !workspace) return { replacedShotCount: 0, affectedMediaCount: 0 };
+        const scopeType = (draft.scopeType || "").trim();
+        let scopeId = (draft.scopeId || "").trim();
+        if (!scopeId) {
+            scopeId = scopeType === "scene"
+                ? String(draft.draftData.sourceSceneId || "").trim()
+                : scopeType === "episode" ? String(draft.draftData.sourceEpisodeId || "").trim() : "";
+        }
+        const episodes = workspace.scriptProject.episodes;
+        const singleEpisodeProject = episodes.length === 1 && episodes[0].id === scopeId;
+        const replacedIds = new Set<string>();
+        for (const existing of workspace.shots) {
+            const match = scopeType === "scene" && scopeId
+                ? (existing.sourceSceneId || "").trim() === scopeId
+                : scopeType === "episode" && scopeId
+                    ? ((existing.sourceEpisodeId || "").trim() === scopeId
+                        || (singleEpisodeProject && !(existing.sourceEpisodeId || "").trim()))
+                    : true;
+            if (match) replacedIds.add(existing.id);
+        }
+        if (replacedIds.size === 0) return { replacedShotCount: 0, affectedMediaCount: 0 };
+        let mediaCount = 0;
+        for (const media of workspace.media) {
+            if (media.targetType === "shot" && replacedIds.has(media.targetId)
+                && ["queued", "processing", "completed", "needsUpdate"].includes(media.status)) {
+                mediaCount++;
+            }
+        }
+        return { replacedShotCount: replacedIds.size, affectedMediaCount: mediaCount };
+    }, [draft, workspace]);
 
     if (!draft) return null;
 
@@ -70,11 +104,17 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
         }
     };
 
-    const handleConfirm = async () => {
+    const executeConfirm = async () => {
         setConfirming(true);
         try {
+            const originalShots = Array.isArray(draft.draftData.shots) ? draft.draftData.shots : [];
+            if (JSON.stringify(draftShots) !== JSON.stringify(originalShots)) {
+                await updateShotDraft(draft.id, { ...draft.draftData, shots: draftShots });
+            }
             await confirmShotDraft(draft.id);
-            message.success(translate("comicDrama.shotDraftApprovedAndAppendedToTheShotList"));
+            message.success(replacedShotCount > 0
+                ? translate("comicDrama.shotDraftReplacedExistingSuccess", { value0: replacedShotCount })
+                : translate("comicDrama.shotDraftApprovedAndAppendedToTheShotList"));
             onClose();
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
@@ -83,8 +123,27 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
         }
     };
 
-    const handleDiscard = async () => {
-        Modal.confirm({
+    const handleConfirm = () => {
+        if (affectedMediaCount > 0) {
+            modal.confirm({
+                title: translate("comicDrama.confirmOverwriteExistingShotsTitle"),
+                content: translate("comicDrama.confirmOverwriteExistingShotsContent", {
+                    value0: replacedShotCount,
+                    value1: draftShots.length,
+                    value2: affectedMediaCount,
+                }),
+                okText: translate("comicDrama.confirmOverwriteAction"),
+                cancelText: translate("comicDrama.cancel"),
+                okButtonProps: { danger: true },
+                onOk: executeConfirm,
+            });
+            return;
+        }
+        void executeConfirm();
+    };
+
+    const handleDiscard = () => {
+        modal.confirm({
             title: translate("comicDrama.discardThisShotBreakdownDraft"),
             content: translate("comicDrama.existingShotsWillRemainUnchangedTheDraftWillBeArchived"),
             okText: translate("comicDrama.confirmDiscard"),
@@ -125,6 +184,15 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
             }
         >
             <div className="flex flex-col gap-4">
+                {replacedShotCount > 0 ? (
+                    <Alert
+                        type={affectedMediaCount > 0 ? "warning" : "info"}
+                        showIcon
+                        title={affectedMediaCount > 0
+                            ? translate("comicDrama.shotDraftReplaceSummaryWarning", { value0: replacedShotCount, value1: affectedMediaCount })
+                            : translate("comicDrama.shotDraftReplaceSummaryInfo", { value0: draftShots.length, value1: replacedShotCount })}
+                    />
+                ) : null}
                 <div className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-3 text-xs text-[var(--studio-muted)]">
                     <p>{translate("comicDrama.instructionsCount_4ef0ac", { value0: draft.instruction })}</p>
                     <p className="mt-1">{translate("comicDrama.modelCountActualCostCountCreditsAwaitingApproval_265d32", { value0: draft.model, value1: draft.chargedCredits })}</p>

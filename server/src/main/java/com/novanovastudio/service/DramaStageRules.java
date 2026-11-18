@@ -62,6 +62,17 @@ public final class DramaStageRules {
     }
 
     /**
+     * 返回上一个阶段。
+     *
+     * @param stage 当前阶段
+     * @return 上一阶段；第一个阶段返回自己
+     */
+    public static String previous(String stage) {
+        int index = index(stage);
+        return index <= 0 ? ORDER.get(0) : ORDER.get(index - 1);
+    }
+
+    /**
      * 判断目标阶段是否已经产生过，或就是当前等待确认的阶段。
      *
      * @param currentStage 当前进度

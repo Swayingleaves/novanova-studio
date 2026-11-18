@@ -243,7 +243,7 @@ public final class ComicDramaDtos {
      */
     public record GenerateShotDraftRequest(@NotBlank @Size(max = 64) String projectId,
                                            @Size(max = 64) String episodeId, @Size(max = 64) String sceneId,
-                                           @Min(1) Integer shotCount, @Size(max = 120) String rhythm,
+                                           @Min(1) @Max(StoryboardDtos.MAX_SHOT_COUNT) Integer shotCount, @Size(max = 120) String rhythm,
                                            @Size(max = 8000) String focus,
                                            @NotBlank @Pattern(regexp = "short|medium|long") String shotDuration,
                                            @NotBlank @Size(max = 256) String model,

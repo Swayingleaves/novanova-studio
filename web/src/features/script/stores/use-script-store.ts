@@ -291,8 +291,15 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
         if (!project) return "";
         const episodeNumber = project.episodes.length + 1;
         const id = nanoid();
+        const episodeCount = Math.max(1, project.overview.targetEpisodeCount);
+        const derivedSeconds = project.overview.targetDurationSeconds > 0
+            ? (episodeCount > 1 && project.overview.targetDurationSeconds >= episodeCount * 30
+                ? Math.round(project.overview.targetDurationSeconds / episodeCount)
+                : project.overview.targetDurationSeconds)
+            : 180;
+        const targetDurationSeconds = Math.min(600, Math.max(30, derivedSeconds));
         get().updateEpisode({
-            episode: { id, episodeNumber, title: translate("script.episodeCount", { value0: episodeNumber }), summary: "", keyEvents: "", mainConflict: "", climax: "", endingHook: "", targetDurationSeconds: 0, completionStatus: "planning", sortOrder: project.episodes.length },
+            episode: { id, episodeNumber, title: translate("script.episodeCount", { value0: episodeNumber }), summary: "", keyEvents: "", mainConflict: "", climax: "", endingHook: "", targetDurationSeconds, completionStatus: "planning", sortOrder: project.episodes.length },
             scenes: [],
         });
         return id;

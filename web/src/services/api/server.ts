@@ -1356,6 +1356,10 @@ export type ServerAgentSessionHistoryMessage = {
     id: string;
     role: "user" | "assistant";
     text: string;
+    /** 附加信息 JSON，短剧用它渲染产物卡片，其它入口为空。 */
+    meta?: string | null;
+    /** 消息创建时间，用于对话里的时间行。 */
+    createdAt?: string | null;
 };
 
 /** 按当前用户和团队读取历史对话正文。 */

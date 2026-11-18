@@ -381,6 +381,132 @@ class StoryboardAgentServiceTest {
     }
 
     /**
+     * 结构化工具Schema必须声明shots等必填字段，避免OpenAI兼容模型将shots视为可省字段提交空对象。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldGenerateRequiredFieldsInStructuredToolSchema() {
+        var schema = io.agentscope.core.util.JsonSchemaUtils.generateSchemaFromClass(StoryboardDtos.GeneratedStoryboardResult.class);
+        List<String> rootRequired = (List<String>) schema.get("required");
+        Assertions.assertNotNull(rootRequired);
+        Assertions.assertTrue(rootRequired.containsAll(List.of("shots", "assets")));
+    }
+
+    /**
+     * 多场并发生成时单场偶发返回空镜头应自动重跑该场，且整单只扣费一次。
+     */
+    @Test
+    void shouldRetryFailedSegmentOnEmptyShotsWithoutRechargingCredits() {
+        var currentUser = mock(CurrentUserProvider.class);
+        var modelFactory = mock(AgentScopeModelFactory.class);
+        var agentFactory = mock(AgentScopeAgentFactory.class);
+        var agent = mock(io.agentscope.core.ReActAgent.class);
+        var validMessage = mock(io.agentscope.core.message.Msg.class);
+        var emptyMessage = mock(io.agentscope.core.message.Msg.class);
+        var model = new AgentScopeModelFactory.TextModelSelection(
+                null, "model-config", "channel::model", "模型", "渠道", java.math.BigDecimal.valueOf(3), 801L);
+        when(currentUser.currentUserId()).thenReturn(Mono.just(8L));
+        when(modelFactory.resolveTextModel("channel::model")).thenReturn(Mono.just(model));
+        when(agentFactory.storyboardAgent(null)).thenReturn(agent);
+        when(creditService.chargeOperation(eq(8L), anyString(), any(java.math.BigDecimal.class), anyString())).thenReturn(Mono.empty());
+        when(emptyMessage.getStructuredData(StoryboardDtos.GeneratedStoryboardResult.class))
+                .thenReturn(new StoryboardDtos.GeneratedStoryboardResult(List.of(), List.of()));
+        when(validMessage.getStructuredData(StoryboardDtos.GeneratedStoryboardResult.class))
+                .thenReturn(new StoryboardDtos.GeneratedStoryboardResult(List.of(
+                        new StoryboardDtos.GeneratedStoryboardShot(1, 5, "夜雨长街主角缓步前行", "中景", "冷色霓虹", "", "雨声", "推进", null)), List.of()));
+        var secondSegmentAttempts = new java.util.concurrent.atomic.AtomicInteger(0);
+        when(agent.call(anyString(), eq(StoryboardDtos.GeneratedStoryboardResult.class), any(io.agentscope.core.agent.RuntimeContext.class)))
+                .thenAnswer(invocation -> {
+                    String payload = invocation.getArgument(0, String.class);
+                    if (payload.contains("第二场") && secondSegmentAttempts.incrementAndGet() == 1) {
+                        return Mono.just(emptyMessage);
+                    }
+                    return Mono.just(validMessage);
+                });
+
+        var service = new StoryboardAgentService(currentUser, modelFactory, agentFactory,
+                new NovanovaProperties(), creditService, mock(SystemPromptTemplateService.class), mock(AiTaskService.class));
+        var requests = List.of(
+                new StoryboardDtos.GenerateStoryboardRequest("第一场剧本内容", "拆解第一场", VISUAL_STYLE, "channel::model"),
+                new StoryboardDtos.GenerateStoryboardRequest("第二场剧本内容", "拆解第二场", VISUAL_STYLE, "channel::model"));
+
+        StoryboardAgentService.StoryboardSegmentsResult result = service.generateStoryboardSegments(requests, "channel::model").block();
+
+        Assertions.assertNotNull(result);
+        Assertions.assertEquals(2, result.segments().size());
+        Assertions.assertEquals(1, result.segments().get(0).shots().size());
+        Assertions.assertEquals(1, result.segments().get(1).shots().size());
+        Assertions.assertEquals(2, secondSegmentAttempts.get());
+        verify(creditService).chargeOperation(eq(8L), anyString(), eq(java.math.BigDecimal.valueOf(3)), eq("分镜首次生成"));
+        verify(creditService, never()).refundOperation(any(), anyString(), anyString());
+    }
+
+    /**
+     * 兼容模型未调用结构化工具而输出代码块JSON，或在工具参数中使用字符串化数组时应正确提取分镜结果。
+     */
+    @Test
+    void shouldExtractGeneratedStoryboardFromMarkdownJsonTextOrStringifiedArrays() {
+        var currentUser = mock(CurrentUserProvider.class);
+        var modelFactory = mock(AgentScopeModelFactory.class);
+        var agentFactory = mock(AgentScopeAgentFactory.class);
+        var agent = mock(io.agentscope.core.ReActAgent.class);
+        var markdownMessage = mock(io.agentscope.core.message.Msg.class);
+        var stringifiedArrayMessage = mock(io.agentscope.core.message.Msg.class);
+        var model = new AgentScopeModelFactory.TextModelSelection(
+                null, "model-config", "channel::model", "模型", "渠道", java.math.BigDecimal.ONE, 801L);
+        when(currentUser.currentUserId()).thenReturn(Mono.just(8L));
+        when(modelFactory.resolveTextModel("channel::model")).thenReturn(Mono.just(model));
+        when(agentFactory.storyboardAgent(null)).thenReturn(agent);
+        when(creditService.chargeOperation(eq(8L), anyString(), any(java.math.BigDecimal.class), anyString())).thenReturn(Mono.empty());
+
+        when(markdownMessage.hasStructuredData()).thenReturn(false);
+        when(markdownMessage.getStructuredData(StoryboardDtos.GeneratedStoryboardResult.class))
+                .thenThrow(new IllegalStateException("No structured data in message. Use hasStructuredData() to check first."));
+        when(markdownMessage.getTextContent()).thenReturn("""
+                ```json
+                {
+                  "shots": [
+                    {
+                      "shotNumber": 1,
+                      "durationSeconds": 6,
+                      "visualDescription": "破庙屋檐滴落雨水，少年握紧佩剑",
+                      "shotSize": "近景",
+                      "lightingAtmosphere": "烛火摇曳"
+                    }
+                  ],
+                  "assets": []
+                }
+                ```
+                """);
+
+        when(stringifiedArrayMessage.hasStructuredData()).thenReturn(true);
+        when(stringifiedArrayMessage.getStructuredData(StoryboardDtos.GeneratedStoryboardResult.class))
+                .thenThrow(new IllegalArgumentException("Cannot deserialize value of type ArrayList from String value"));
+        when(stringifiedArrayMessage.getStructuredData(true)).thenReturn(java.util.Map.of(
+                "shots", "[{\"shotNumber\":1,\"durationSeconds\":4,\"visualDescription\":\"山门石阶云雾翻涌\",\"shotSize\":\"远景\",\"assetReferenceKeys\":[\"gate\"]}]",
+                "assets", "[{\"kind\":\"scene\",\"referenceKey\":\"gate\",\"name\":\"山门石阶\",\"description\":\"青石古阶\"}]"));
+
+        var service = new StoryboardAgentService(currentUser, modelFactory, agentFactory,
+                new NovanovaProperties(), creditService, mock(SystemPromptTemplateService.class), mock(AiTaskService.class));
+        var request = new StoryboardDtos.GenerateStoryboardRequest("剧本内容", "拆解镜头", VISUAL_STYLE, "channel::model");
+
+        when(agent.call(anyString(), eq(StoryboardDtos.GeneratedStoryboardResult.class), any(io.agentscope.core.agent.RuntimeContext.class)))
+                .thenReturn(Mono.just(markdownMessage));
+        StoryboardDtos.GenerateStoryboardResponse fromMarkdown = service.generateStoryboard(request).block();
+        Assertions.assertNotNull(fromMarkdown);
+        Assertions.assertEquals(1, fromMarkdown.shots().size());
+        Assertions.assertEquals(List.of(), fromMarkdown.shots().getFirst().assetIds());
+
+        when(agent.call(anyString(), eq(StoryboardDtos.GeneratedStoryboardResult.class), any(io.agentscope.core.agent.RuntimeContext.class)))
+                .thenReturn(Mono.just(stringifiedArrayMessage));
+        StoryboardDtos.GenerateStoryboardResponse fromStringified = service.generateStoryboard(request).block();
+        Assertions.assertNotNull(fromStringified);
+        Assertions.assertEquals(1, fromStringified.shots().size());
+        Assertions.assertEquals(1, fromStringified.assets().size());
+        Assertions.assertEquals(fromStringified.assets().getFirst().id(), fromStringified.shots().getFirst().assetIds().getFirst());
+    }
+
+    /**
      * 构造有效镜头。
      *
      * @param id String 稳定镜头标识

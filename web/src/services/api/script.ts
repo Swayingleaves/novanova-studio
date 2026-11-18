@@ -212,7 +212,7 @@ export function deleteScriptEpisode(projectId: string, expectedRevision: number,
     return serverPost<MutationResult>(`${SCRIPT_PATH}/deleteEpisode`, { projectId, expectedRevision, episodeId });
 }
 
-export function generateScriptDraft(input: { projectId: string; expectedRevision: number; actionType: string; targetType: string; targetId?: string; instruction?: string; model: string }) {
+export function generateScriptDraft(input: { projectId: string; expectedRevision: number; actionType: string; targetType: string; targetId?: string; instruction?: string; model: string; episodeDurationSeconds?: number }) {
     return serverPost<ScriptAiDraft>(`${SCRIPT_PATH}/generateDraft`, input);
 }
 
