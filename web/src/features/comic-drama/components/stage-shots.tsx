@@ -133,7 +133,7 @@ export function StageShots() {
     // 预计镜头数量默认留空，由模型按剧本内容自行判断；填了才按填的数量拆分。
     const [splitShotCount, setSplitShotCount] = useState<number | null>(null);
     const [splitRhythm, setSplitRhythm] = useState<string>("紧凑利落");
-    const [splitDuration, setSplitDuration] = useState<ComicDramaShotDurationLevel>("medium");
+    const [splitDuration, setSplitDuration] = useState<ComicDramaShotDurationLevel>("long");
     // 创作重点不预填，改成输入框里的帮助提示，避免每次都要先删掉默认文案。
     const [splitFocus, setSplitFocus] = useState<string>("");
     const [splitModel, setSplitModel] = useState<string>("");
