@@ -88,8 +88,10 @@ import { ExternalLinkConfigManagement } from "./external-link-config-management"
 import { createExternalLinkDraft, emptyExternalLinkDraft, externalLinkDraftIssue, externalLinkDraftSignature, type ExternalLinkDraft } from "../external-link-config";
 import { saveExternalLinkConfig } from "@/services/api/external-link";
 import { useExternalLinkStore } from "@/features/external-link/stores/use-external-link-store";
+import { getVideoExportSettings, saveVideoExportSettings } from "@/services/api/video-export-settings";
+import { useVideoExportSettingsStore } from "@/features/comic-drama/stores/use-video-export-settings-store";
 
-export type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "firstPurchaseBonus" | "objectStorage" | "timeouts" | "community" | "externalLink";
+export type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "firstPurchaseBonus" | "objectStorage" | "timeouts" | "community" | "externalLink" | "videoExport";
 
 const defaultTimeoutSettings = (): TimeoutSettings => ({
     aiRequestBodyTimeoutSeconds: 60,
@@ -378,6 +380,8 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const [draftExternalLink, setDraftExternalLink] = useState<ExternalLinkDraft>(emptyExternalLinkDraft);
     const [timeoutBaseline, setTimeoutBaseline] = useState<TimeoutSettings>(defaultTimeoutSettings);
     const [draftTimeoutSettings, setDraftTimeoutSettings] = useState<TimeoutSettings>(defaultTimeoutSettings);
+    const [videoExportBaseline, setVideoExportBaseline] = useState<boolean>(true);
+    const [draftVideoExportEnabled, setDraftVideoExportEnabled] = useState<boolean>(true);
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
     const [modelPicker, setModelPicker] = useState<{ capability: ModelCapability; mode: "options" | "default" } | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
@@ -448,8 +452,9 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             useTeamStore.getState().team ? Promise.resolve() : useCommunityStore.getState().refresh(),
             useTeamStore.getState().team ? Promise.resolve() : useExternalLinkStore.getState().refresh(),
             useTeamStore.getState().team ? Promise.resolve(defaultTimeoutSettings()) : getTimeoutSettings(),
+            useTeamStore.getState().team ? Promise.resolve({ enabled: true }) : getVideoExportSettings(),
         ])
-            .then(([, , creditSettings, invitationRewardSettings, checkInSettings, firstPurchaseBonusSettings, , , timeoutSettings]) => {
+            .then(([, , creditSettings, invitationRewardSettings, checkInSettings, firstPurchaseBonusSettings, , , timeoutSettings, videoExportSettings]) => {
                 if (!active) return;
                 resetAllDrafts();
                 setCreditBaseline(creditSettings.initialCredits);
@@ -462,6 +467,10 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                 setDraftFirstPurchaseBonusPercent(firstPurchaseBonusSettings.percent);
                 setTimeoutBaseline(timeoutSettings);
                 setDraftTimeoutSettings(timeoutSettings);
+                const videoExportEnabled = videoExportSettings ? Boolean(videoExportSettings.enabled) : true;
+                setVideoExportBaseline(videoExportEnabled);
+                setDraftVideoExportEnabled(videoExportEnabled);
+                useVideoExportSettingsStore.getState().setEnabled(videoExportEnabled);
                 setDraftsReady(true);
             })
             .catch((error) => {
@@ -496,9 +505,10 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const communityDirty = communityDraftSignature(draftCommunityConfigs) !== communityDraftSignature(communityBaseline);
     const externalLinkDirty = externalLinkDraftSignature(draftExternalLink) !== externalLinkDraftSignature(externalLinkBaseline);
     const timeoutDirty = timeoutSettingsSignature(draftTimeoutSettings) !== timeoutSettingsSignature(timeoutBaseline);
+    const videoExportDirty = draftVideoExportEnabled !== videoExportBaseline;
     const editingModelBaseline = editingModelConfig && draftModelConfigs.find((item) => item.id === editingModelConfig.id);
     const modelEditorDirty = Boolean(editingModelConfig && (!sameValue(editingModelConfig, editingModelBaseline) || editingCustomBodyParameters !== JSON.stringify(editingModelBaseline?.customBodyParameters || {}, null, 2)));
-    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || firstPurchaseBonusDirty || communityDirty || externalLinkDirty || timeoutDirty || modelEditorDirty;
+    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || firstPurchaseBonusDirty || communityDirty || externalLinkDirty || timeoutDirty || videoExportDirty || modelEditorDirty;
     const isSaving = Boolean(savingTab);
     useConfigurationLeaveGuard(draftsReady && hasUnsavedChanges);
 
@@ -981,6 +991,22 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             message.success(translate("administration.externalLinkRemoved"));
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("administration.externalLinkSaveFailed"));
+        } finally {
+            setSavingTab("");
+        }
+    };
+
+    const saveVideoExportConfigSettings = async () => {
+        setSavingTab("videoExport");
+        try {
+            const saved = await saveVideoExportSettings(draftVideoExportEnabled);
+            const enabled = Boolean(saved.enabled);
+            setVideoExportBaseline(enabled);
+            setDraftVideoExportEnabled(enabled);
+            useVideoExportSettingsStore.getState().setEnabled(enabled);
+            message.success(translate("administration.videoExportSettingsSaved"));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("administration.videoExportSettingsSaveFailed"));
         } finally {
             setSavingTab("");
         }
@@ -1686,7 +1712,45 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                 />
                             ),
                         },
-                    ].filter((item) => !team || !["credits", "creditProducts", "invitationReward", "checkIn", "firstPurchaseBonus", "community", "externalLink", "timeouts"].includes(item.key))}
+                        {
+                            key: "videoExport",
+                            label: translate("administration.videoExportSettings"),
+                            children: (
+                                <Form layout="vertical" requiredMark={false} className="max-w-xl">
+                                    <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                        <div className="flex items-center gap-2 text-sm font-semibold">
+                                            <Video className="size-4" aria-hidden="true" />
+                                            {translate("administration.videoExportSettings")}
+                                        </div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("administration.videoExportSettingsHint")}</div>
+                                        <div className="mt-5 flex items-center justify-between gap-4 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-3.5 py-3">
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-medium">{translate("administration.videoExportStoryboardLabel")}</div>
+                                                <div className="mt-0.5 text-xs text-[var(--studio-muted)]">{translate("administration.videoExportStoryboardDescription")}</div>
+                                            </div>
+                                            <Switch
+                                                checked={draftVideoExportEnabled}
+                                                checkedChildren={translate("administration.videoExportEnabled")}
+                                                unCheckedChildren={translate("administration.videoExportDisabled")}
+                                                disabled={isSaving}
+                                                aria-label={translate("administration.videoExportStoryboardLabel")}
+                                                onChange={(checked) => setDraftVideoExportEnabled(checked)}
+                                            />
+                                        </div>
+                                        <Button
+                                            type="primary"
+                                            className="mt-5"
+                                            disabled={!videoExportDirty || isSaving}
+                                            loading={savingTab === "videoExport"}
+                                            onClick={() => void saveVideoExportConfigSettings()}
+                                        >
+                                            {translate("appShell.save")}
+                                        </Button>
+                                    </div>
+                                </Form>
+                            ),
+                        },
+                    ].filter((item) => !team || !["credits", "creditProducts", "invitationReward", "checkIn", "firstPurchaseBonus", "community", "externalLink", "timeouts", "videoExport"].includes(item.key))}
                 />
             )}
             {modelPicker && modelPickerGroup ? (

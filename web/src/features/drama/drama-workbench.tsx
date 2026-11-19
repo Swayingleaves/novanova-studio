@@ -148,10 +148,11 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
             let data: { sessionId?: string; messageId?: string; delta?: string } = {};
             try { data = JSON.parse(event.data); } catch { return; }
             if (data.sessionId && data.sessionId !== sessionId) return;
-            if (!data.messageId || !data.delta) return;
-            setStreaming((current) => current?.id === data.messageId
-                ? { id: current.id, text: current.text + data.delta }
-                : { id: data.messageId as string, text: data.delta as string });
+            const { messageId, delta } = data;
+            if (!messageId || !delta) return;
+            setStreaming((current) => current?.id === messageId
+                ? { id: current.id, text: current.text + delta }
+                : { id: messageId, text: delta });
         };
         const onComplete = (event: MessageEvent) => {
             let data: { sessionId?: string } = {};

@@ -570,5 +570,13 @@
   "menuSystemLockedHint": "Fixed administrator entry, always visible to administrators",
   "menuSaved": "Menu settings saved",
   "menuSaveFailed": "Failed to save menu settings",
-  "menuLoadFailed": "Failed to load menu settings"
+  "menuLoadFailed": "Failed to load menu settings",
+  "videoExportSettings": "Export video",
+  "videoExportSettingsHint": "Controls the Export video feature in the Comic Drama Visual Storyboard. When enabled, the Export video button is shown in the Visual Storyboard so users can compose and download videos; when disabled, the button is hidden and video export is disabled.",
+  "videoExportStoryboardLabel": "Visual Storyboard video export",
+  "videoExportStoryboardDescription": "Show the Export video button in the Comic Drama Visual Storyboard and allow backend video composition and download",
+  "videoExportEnabled": "Enabled",
+  "videoExportDisabled": "Disabled",
+  "videoExportSettingsSaved": "Video export settings saved",
+  "videoExportSettingsSaveFailed": "Failed to save video export settings"
 }

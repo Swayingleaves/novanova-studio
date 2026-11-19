@@ -873,8 +873,9 @@ export default function ImagePage() {
         if (conversation.rounds.length) return;
         setConversationHistory({ id: conversation.id, messages: [], loading: true, error: "" });
         try {
-            const messages = await getAgentSessionHistory(conversation.id);
+            const historyMessages = await getAgentSessionHistory(conversation.id);
             if (requestVersion !== historyRequestVersion.current || activeIdRef.current !== conversation.id) return;
+            const messages: ChatMessageItem[] = historyMessages.map(({ id, role, text }) => ({ id, role, text }));
             setConversationHistory({ id: conversation.id, messages, loading: false, error: "" });
         } catch (error) {
             if (requestVersion !== historyRequestVersion.current || activeIdRef.current !== conversation.id) return;

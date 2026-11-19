@@ -1120,3 +1120,11 @@ V61 按空间、用户、原配置和对象键精确关联已有媒体及原文�
 导航菜单配置用于控制应用主界面桌面端左侧导航栏和移动端导航抽屉中普通菜单项的展示开关与排列顺序（`admin/system` 保持固定对管理员在底部显示，不纳入隐藏开关）。公开查询走 `GET /api/v1/platform/listNavigationMenuConfigs`，未登录及全部团队空间均可读取，服务端将已保存配置与默认菜单清单合并并按最终顺序返回；平台管理员保存走 `POST /api/v1/admin/platform/saveNavigationMenuConfigs`，必须覆盖全部可配置菜单项，数组顺序即展示顺序。
 
 保存时在事务内使用咨询锁 `pg_advisory_xact_lock(hashtext('platform-navigation-menu-configs'))` 串行化后整表重建，任何校验或写入失败整批回滚。团队作用域一律拒绝写入，仅平台空间的全局管理员可修改。
+
+## 平台导出视频配置（企业版 V103、社区版 V104）
+
+| 表 | 关键字段及约束 |
+| --- | --- |
+| `platform_video_export_settings` | 单行表，`id` 固定为 1；`enabled`（布尔值，默认 `TRUE`，控制漫剧创作视觉分镜板中是否显示「导出视频」按钮并允许合成下载）、`created_at`/`updated_at` |
+
+后台入口为「配置与用户偏好 · 导出视频」。公开读取走 `GET /api/v1/platform/getVideoExportSettings`，未登录及全部团队空间均可读取，无记录时默认返回 `enabled = true`；平台管理员保存走 `POST /api/v1/admin/platform/saveVideoExportSettings`，仅平台空间的全局管理员可修改。开启时漫剧创作视觉分镜板页面顶部展示「导出视频」按钮，支持后台合成视频并下载；关闭时页面隐藏该按钮，且服务端拒绝创建分镜导出任务与下载分镜导出视频。

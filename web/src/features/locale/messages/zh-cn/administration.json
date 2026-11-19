@@ -570,5 +570,13 @@
   "menuSystemLockedHint": "管理员固定入口，始终对管理员显示",
   "menuSaved": "菜单配置已保存",
   "menuSaveFailed": "保存菜单配置失败",
-  "menuLoadFailed": "加载菜单配置失败"
+  "menuLoadFailed": "加载菜单配置失败",
+  "videoExportSettings": "导出视频",
+  "videoExportSettingsHint": "控制漫剧创作视觉分镜板中的「导出视频」功能。开启后，视觉分镜板页面顶部将展示「导出视频」按钮，用户可通过后台合成视频并下载；关闭后，页面不显示该按钮且禁止导出与下载。",
+  "videoExportStoryboardLabel": "视觉分镜板导出视频",
+  "videoExportStoryboardDescription": "开启后在漫剧创作视觉分镜板中展示「导出视频」按钮并支持后台合成下载",
+  "videoExportEnabled": "已开启",
+  "videoExportDisabled": "已关闭",
+  "videoExportSettingsSaved": "导出视频配置已保存",
+  "videoExportSettingsSaveFailed": "保存导出视频配置失败"
 }

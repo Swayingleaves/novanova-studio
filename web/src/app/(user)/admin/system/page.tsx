@@ -163,6 +163,7 @@ export default function AdminSystemPage() {
                 ...(!team ? [{ key: "configuration:timeouts", label: translate("administration.timeoutSettings"), tab: "configuration", sub: "timeouts" }] : []),
                 { key: "configuration:community", label: translate("administration.communityConfig"), tab: "configuration", sub: "community" },
                 { key: "configuration:externalLink", label: translate("administration.externalLinkConfig"), tab: "configuration", sub: "externalLink" },
+                ...(!team ? [{ key: "configuration:videoExport", label: translate("administration.videoExportSettings"), tab: "configuration", sub: "videoExport" }] : []),
             ],
         },
         ...(!team ? [{ key: "navigationMenus", label: translate("administration.menuManagement"), icon: <PanelLeft className="size-4" />, tab: "navigationMenus" }] : []),

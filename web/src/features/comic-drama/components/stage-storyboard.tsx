@@ -57,6 +57,7 @@ import { useFinalPromptConfirmation } from "../hooks/use-final-prompt-confirmati
 import { useFinalPromptPricing } from "../hooks/use-final-prompt-pricing";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
+import { useVideoExportSettingsStore } from "../stores/use-video-export-settings-store";
 import type { ComicDramaAssetVersion, ComicDramaMediaResult, ComicDramaShot, ComicDramaShotInput, ComicDramaTimelineText, ComicDramaTimelineTextInput, ComicDramaVoiceTrack, ComicDramaVoiceTrackInput, StoryboardFontFamily } from "../types";
 import { cameraMovementOptions } from "../lib/production-labels";
 import { ShotGenerationModal } from "./shot-generation-modal";
@@ -334,6 +335,18 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
 
     // Project and assets
     const projectId = workspace?.projectId;
+    const videoExportEnabled = useVideoExportSettingsStore((state) => state.enabled);
+    const videoExportLoaded = useVideoExportSettingsStore((state) => state.loaded);
+
+    useEffect(() => {
+        void useVideoExportSettingsStore.getState().refresh();
+    }, []);
+
+    useEffect(() => {
+        if (!videoExportEnabled && exportDialogOpen) {
+            setExportDialogOpen(false);
+        }
+    }, [videoExportEnabled, exportDialogOpen]);
 
     useEffect(() => {
         setDisabledTextTracks([]);
@@ -341,14 +354,14 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
     }, [projectId]);
 
     useEffect(() => {
-        if (!projectId) return;
+        if (!projectId || !videoExportLoaded || !videoExportEnabled) return;
         let canceled = false;
         setExportTask(null);
         void getLatestComicDramaVideoExport(projectId)
             .then((result) => { if (!canceled) setExportTask(result.task); })
             .catch((error) => { if (!canceled) message.error(error instanceof Error ? error.message : translate("comicDrama.couldNotLoadTheExportTask")); });
         return () => { canceled = true; };
-    }, [projectId, message]);
+    }, [projectId, videoExportLoaded, videoExportEnabled, message]);
 
     useEffect(() => {
         if (!exportTask || !["pending", "running"].includes(exportTask.status)) return;
@@ -1443,7 +1456,9 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                     {timelineSaveError ? <span className="max-w-52 truncate text-xs text-rose-500" title={timelineSaveError}>{translate("comicDrama.saveFailedCount_e86f4e", { value0: timelineSaveError })}</span> : pendingTimelineCount > 0 ? <span className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.unsavedCountItems_27a8aa", { value0: pendingTimelineCount })}</span> : null}
                     <Button size="small" icon={<Save className="size-3.5" />} disabled={!pendingTimelineCount} loading={timelineSaving} onClick={() => void savePendingTimelineChanges().then((saved) => { if (saved) message.success(translate("comicDrama.timelineSaved")); else message.error(useComicDramaStore.getState().timelineSaveError || translate("comicDrama.thereAreStillUnsavedChanges")); })}>{translate("comicDrama.save")}</Button>
 
-                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => setExportDialogOpen(true)}>{translate("comicDrama.exportVideo")}</Button>
+                    {videoExportEnabled ? (
+                        <Button size="small" icon={<Download className="size-3.5" />} onClick={() => setExportDialogOpen(true)}>{translate("comicDrama.exportVideo")}</Button>
+                    ) : null}
 
                     {/* View mode toggle */}
                     <div className="flex items-center rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-0.5">
