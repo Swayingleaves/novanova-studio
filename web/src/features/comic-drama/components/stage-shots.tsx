@@ -35,8 +35,12 @@ import {
     ChevronDown,
     Clapperboard,
     Edit,
+    Eye,
     Image as ImageIcon,
+    Info,
+    Loader2,
     Plus,
+    RefreshCw,
     RotateCcw,
     Sparkles,
     Trash2,
@@ -44,14 +48,16 @@ import {
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
-import { readComicDramaMediaUrl, type ComicDramaShotDurationLevel } from "@/services/api/comic-drama";
+import { listComicDramaAssetVersions, readComicDramaMediaUrl, type ComicDramaShotDurationLevel } from "@/services/api/comic-drama";
 import { getScriptEpisode } from "@/services/api/script";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
+import { AssetImageBatchModal } from "./asset-image-batch-modal";
+import { useMediaAutoRefresh } from "../hooks/use-media-auto-refresh";
 import { useFinalPromptPricing } from "../hooks/use-final-prompt-pricing";
 import { useFinalPromptConfirmation } from "../hooks/use-final-prompt-confirmation";
 import { usePendingImpactTargets } from "../hooks/use-pending-impact-targets";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
-import type { ComicDramaPromptVersion, ComicDramaShot, ComicDramaShotDraft, ComicDramaShotInput } from "../types";
+import type { ComicDramaAssetType, ComicDramaPromptVersion, ComicDramaShot, ComicDramaShotDraft, ComicDramaShotInput } from "../types";
 import { ShotDeleteImpactModal } from "./shot-delete-impact-modal";
 import { ShotDraftModal } from "./shot-draft-modal";
 import { readPromptBody } from "../lib/prompt-references";
@@ -109,6 +115,10 @@ export function StageShots() {
     const generateFinalVideoPrompt = useComicDramaStore((state) => state.generateFinalVideoPrompt);
     const composePromptsBatch = useComicDramaStore((state) => state.composePromptsBatch);
     const savePrompt = useComicDramaStore((state) => state.savePrompt);
+    const focusAssetVersion = useComicDramaStore((state) => state.focusAssetVersion);
+    const refreshing = useComicDramaStore((state) => state.refreshing);
+    const reloadWorkspace = useComicDramaStore((state) => state.reloadWorkspace);
+    const [previewVersionId, setPreviewVersionId] = useState<string | null>(null);
 
     // Filters
     const [selectedEpisodeId, setSelectedEpisodeId] = useState<string>("all");
@@ -204,6 +214,40 @@ export function StageShots() {
         }
         return images;
     }, [workspace]);
+    // 在视觉资产里发起的资产图任务：排队或生成中时这里显示 loading，并自动轮询，完成后工作区媒体更新、缩略图自动出现
+    const assetMedia = useMemo(() => (workspace?.media || []).filter((item) => item.targetType === "assetVersion"), [workspace]);
+    useMediaAutoRefresh(assetMedia);
+    const generatingVersionIds = useMemo(
+        () => new Set(assetMedia.filter((item) => item.status === "queued" || item.status === "processing").map((item) => item.targetId)),
+        [assetMedia],
+    );
+
+    // 一键批量生成当前镜头引用、且尚未在生成中的资产图
+    const [assetBatch, setAssetBatch] = useState<{ versionIds: string[]; types: ComicDramaAssetType[] } | null>(null);
+    const [assetBatchLoadingShotId, setAssetBatchLoadingShotId] = useState<string | null>(null);
+    const openAssetBatch = async (shot: ComicDramaShot) => {
+        if (!workspace) return;
+        setAssetBatchLoadingShotId(shot.id);
+        try {
+            const targets = new Set(shot.assetVersionIds.filter((versionId) => !generatingVersionIds.has(versionId)));
+            const typeByVersionId = new Map<string, ComicDramaAssetType>();
+            await Promise.all(workspace.assets.map(async (asset) => {
+                for (const version of await listComicDramaAssetVersions(workspace.projectId, asset.id)) {
+                    if (targets.has(version.id)) typeByVersionId.set(version.id, asset.assetType);
+                }
+            }));
+            const versionIds = [...targets].filter((versionId) => typeByVersionId.has(versionId));
+            if (versionIds.length === 0) {
+                message.info(translate("comicDrama.noAssetsToGenerateForThisShot"));
+                return;
+            }
+            setAssetBatch({ versionIds, types: versionIds.map((versionId) => typeByVersionId.get(versionId)!) });
+        } catch (error) {
+            if (error instanceof Error) message.error(error.message);
+        } finally {
+            setAssetBatchLoadingShotId(null);
+        }
+    };
 
     const composingPrompts = Boolean(composingPromptShotId) || Boolean(batchComposeProgress);
 
@@ -484,6 +528,8 @@ export function StageShots() {
                         {translate("comicDrama.breakScriptScenesIntoContinuousActionableShotsGenerateAiDrafts")}</p>
                 </div>
                 <div className="flex items-center gap-2">
+                    <Button icon={<RefreshCw className="size-4" />} loading={refreshing} onClick={() => void reloadWorkspace()}>
+                        {translate("comicDrama.refreshShotList")}</Button>
                     <Button icon={<Sparkles className="size-4 text-purple-500" />} onClick={openSplitModal}>
                         {translate("comicDrama.breakDownShotsWithAi")}</Button>
                     <Button type="primary" icon={<Plus className="size-4" />} onClick={openCreateShot}>
@@ -638,7 +684,6 @@ export function StageShots() {
                                             #{shot.shotNumber}
                                         </span>
                                         <Tag color="cyan">{productionParameterLabel(shot.shotSize || "", translate) || translate("comicDrama.shotSizeNotSet")}</Tag>
-                                        <Tag color="geekblue">{productionParameterLabel(shot.cameraMovement || "", translate) || translate("comicDrama.staticCamera")}</Tag>
                                         <span className="text-xs text-[var(--studio-muted)]">{shot.durationSeconds}s</span>
                                         <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
                                     </div>
@@ -705,26 +750,66 @@ export function StageShots() {
                                                     const assetImageUrl = assetImageByVersionId.get(versionId);
                                                     const versionLabel = versionId.split("_")[1] || versionId;
                                                     return assetImageUrl ? (
-                                                        <Image
-                                                            key={versionId}
-                                                            src={assetImageUrl}
-                                                            alt={translate("comicDrama.assetVersionCount", { value0: versionLabel })}
-                                                            width={52}
-                                                            height={52}
-                                                            className="size-[52px] rounded-md border border-[var(--studio-line)] object-cover"
-                                                            classNames={{ root: "overflow-hidden rounded-md" }}
-                                                            title={versionLabel}
-                                                        />
+                                                        <div key={versionId} className="group relative size-[52px] shrink-0">
+                                                            <Image
+                                                                src={assetImageUrl}
+                                                                alt={translate("comicDrama.assetVersionCount", { value0: versionLabel })}
+                                                                width={52}
+                                                                height={52}
+                                                                className="size-[52px] rounded-md border border-[var(--studio-line)] object-cover"
+                                                                classNames={{ root: "overflow-hidden rounded-md" }}
+                                                                title={versionLabel}
+                                                                preview={{
+                                                                    open: previewVersionId === versionId,
+                                                                    onOpenChange: (open) => { if (!open) setPreviewVersionId(null); },
+                                                                    cover: <></>,
+                                                                }}
+                                                            />
+                                                            {generatingVersionIds.has(versionId) && (
+                                                        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-md bg-black/40 group-hover:hidden">
+                                                            <Loader2 className="size-5 animate-spin text-white" />
+                                                        </div>
+                                                    )}
+                                                    <div className="absolute inset-0 hidden items-center justify-center gap-1 rounded-md bg-black/50 group-hover:flex">
+                                                                <button
+                                                                    type="button"
+                                                                    className="flex size-5 cursor-pointer items-center justify-center rounded bg-white/90 text-black"
+                                                                    title={translate("comicDrama.enlargeAssetImage")}
+                                                                    onClick={() => setPreviewVersionId(versionId)}
+                                                                >
+                                                                    <Eye className="size-3.5" />
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className="flex size-5 cursor-pointer items-center justify-center rounded bg-white/90 text-black"
+                                                                    title={translate("comicDrama.viewAssetDetail")}
+                                                                    onClick={() => focusAssetVersion(versionId)}
+                                                                >
+                                                                    <Info className="size-3.5" />
+                                                                </button>
+                                                            </div>
+                                                        </div>
                                                     ) : (
-                                                        <span
+                                                        <button
+                                                            type="button"
                                                             key={versionId}
                                                             title={translate("comicDrama.assetVersionCountHasNoGeneratedImageYet", { value0: versionLabel })}
-                                                            className="flex size-[52px] items-center justify-center rounded-md border border-dashed border-[var(--studio-line-strong)] text-[var(--studio-muted)]"
+                                                            onClick={() => focusAssetVersion(versionId)}
+                                                            className="flex size-[52px] cursor-pointer items-center justify-center rounded-md border border-dashed border-[var(--studio-line-strong)] text-[var(--studio-muted)] hover:border-[var(--studio-action)]"
                                                         >
-                                                            <ImageIcon className="size-4" />
-                                                        </span>
+                                                            {generatingVersionIds.has(versionId) ? <Loader2 className="size-4 animate-spin" /> : <ImageIcon className="size-4" />}
+                                                        </button>
                                                     );
                                                 })}
+                                                <button
+                                                    type="button"
+                                                    title={translate("comicDrama.generateShotAssets")}
+                                                    disabled={assetBatchLoadingShotId === shot.id}
+                                                    onClick={() => void openAssetBatch(shot)}
+                                                    className="flex size-[52px] cursor-pointer items-center justify-center rounded-md border border-dashed border-[var(--studio-line-strong)] text-[var(--studio-muted)] hover:border-[var(--studio-action)] hover:text-[var(--studio-ink)]"
+                                                >
+                                                    {assetBatchLoadingShotId === shot.id ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                                                </button>
                                             </div>
                                         )}
                                     </div>
@@ -1039,6 +1124,12 @@ export function StageShots() {
             />
 
             {/* Shot Delete Impact Modal */}
+            <AssetImageBatchModal
+                open={Boolean(assetBatch)}
+                versionIds={assetBatch?.versionIds || []}
+                assetTypes={assetBatch?.types || []}
+                onClose={() => setAssetBatch(null)}
+            />
             <ShotDeleteImpactModal
                 shot={targetShotForDelete}
                 open={deleteModalOpen}

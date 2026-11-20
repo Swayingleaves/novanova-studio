@@ -13,6 +13,8 @@ import { Bot, Check, Copy, ExternalLink, ImagePlus, Layers, Plus, RefreshCw, Spa
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { estimateComicDramaGeneration, listComicDramaAssetVersions, readComicDramaMediaUrl } from "@/services/api/comic-drama";
+import { AssetImageBatchModal } from "./asset-image-batch-modal";
+import { assetImageShapeHint, defaultAssetGenSize, getAssetGenSizeOptions } from "../lib/asset-image-options";
 import { useMediaAutoRefresh } from "../hooks/use-media-auto-refresh";
 import { usePendingImpactTargets } from "../hooks/use-pending-impact-targets";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
@@ -46,38 +48,6 @@ type AssetVersionFormValues = Pick<ComicDramaAssetVersionInput, "id" | "versionN
 /** 生成一个不会与历史版本冲突的版本标识。 */
 function newVersionId(): string {
     return `ver_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/** 人物与道具输出多视角设定图，需要横构图容纳并排视角；场景为单幅环境设定。 */
-function isMultiViewAssetType(assetType: ComicDramaAssetType): boolean {
-    return assetType === "character" || assetType === "prop";
-}
-
-/** 按所选资产类型给出默认画面比例：人物/道具用 3:2 横构图容纳并排视角，场景用 16:9 全景，混合类型沿用项目画幅。 */
-function defaultAssetGenSize(assetTypes: ComicDramaAssetType[], projectAspectRatio: string): string {
-    if (assetTypes.length === 0) return projectAspectRatio || "1:1";
-    if (assetTypes.every(isMultiViewAssetType)) return "3:2";
-    if (assetTypes.every((assetType) => assetType === "scene")) return "16:9";
-    return projectAspectRatio || "1:1";
-}
-
-/** 资产图画面比例选项，单张与批量共用。 */
-const getAssetGenSizeOptions = (translate = translateMessage) => ([
-    { value: "1:1", label: translate("comicDrama.message11SquareReference") },
-    { value: "3:2", label: translate("comicDrama.message32LandscapeMultipleViews") },
-    { value: "16:9", label: translate("comicDrama.message169PanoramicScene") },
-    { value: "9:16", label: translate("comicDrama.message916FullBodyCharacter") },
-    { value: "3:4", label: translate("comicDrama.message34StandardCharacter") },
-]);
-
-/** 资产图固定形态说明，仅在整批类型一致时给出。 */
-function assetImageShapeHint(assetTypes: ComicDramaAssetType[], translate = translateMessage): string {
-    const [shared] = assetTypes;
-    if (!shared || assetTypes.some((assetType) => assetType !== shared)) return "";
-    if (shared === "character") return translate("comicDrama.charactersUseAThreeViewReferenceSheetOnAWhite");
-    if (shared === "prop") return translate("comicDrama.propsUseAMultiViewReferenceSheetOnAWhite");
-    if (shared === "scene") return translate("comicDrama.scenesUseAnEmptyEnvironmentReferenceWithNoCharactersOr");
-    return "";
 }
 
 /** 资产缩略图骨架屏：SkeletonNode 的 style 落在内层、styles.root 落在外层，两层都要给尺寸才能铺满父容器。 */
@@ -185,7 +155,6 @@ export function StageAssets() {
     const [genQuality, setGenQuality] = useState<string>("medium");
     const [genResolution, setGenResolution] = useState<string>("2K");
     const [genSize, setGenSize] = useState<string>("1:1");
-    const [estimating, setEstimating] = useState(false);
     const [generating, setGenerating] = useState(false);
     const [estimatedCredits, setEstimatedCredits] = useState<CreditAmount | null>(null);
     const [useReferenceAssets, setUseReferenceAssets] = useState(false);
@@ -202,14 +171,6 @@ export function StageAssets() {
     // 批量生成资产图
     const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
     const [batchModalOpen, setBatchModalOpen] = useState(false);
-    const [batchModel, setBatchModel] = useState<string>("");
-    const [batchQuality, setBatchQuality] = useState<string>("medium");
-    const [batchResolution, setBatchResolution] = useState<string>("2K");
-    const [batchSize, setBatchSize] = useState<string>("1:1");
-    const [batchEstimating, setBatchEstimating] = useState(false);
-    const [batchGenerating, setBatchGenerating] = useState(false);
-    const [batchCredits, setBatchCredits] = useState<CreditAmount | null>(null);
-
     const assets = useMemo(() => workspace?.assets || [], [workspace]);
     const mediaList = useMemo(() => workspace?.media || [], [workspace]);
     const shots = workspace?.shots;
@@ -238,6 +199,22 @@ export function StageAssets() {
             cancelled = true;
         };
     }, [workspaceId, assets, message]);
+
+    // 从镜头清单跳转而来：展开全部资产，滚动到目标卡片并短暂高亮
+    const focusAssetVersionId = useComicDramaStore((state) => state.focusAssetVersionId);
+    const focusAssetVersion = useComicDramaStore((state) => state.focusAssetVersion);
+    const [highlightAssetId, setHighlightAssetId] = useState<string | null>(null);
+    useEffect(() => {
+        if (!focusAssetVersionId || !versionsLoaded) return;
+        const target = Object.entries(versionsByAsset).find(([, versions]) => versions.some((version) => version.id === focusAssetVersionId));
+        focusAssetVersion(null);
+        if (!target) return;
+        setTypeFilter("all");
+        setSearchKeyword("");
+        setHighlightAssetId(target[0]);
+        setTimeout(() => document.getElementById(`asset-card-${target[0]}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+        setTimeout(() => setHighlightAssetId(null), 2500);
+    }, [focusAssetVersionId, versionsLoaded, versionsByAsset, focusAssetVersion]);
 
     // 同一镜头引用同一资产的多个版本只计一次，与卡片上的「引用 N 镜头」一致
     const shotReferenceCounts = useMemo(() => {
@@ -283,6 +260,19 @@ export function StageAssets() {
         size: genSize,
         ...(selectedReferenceVersionIds.length > 0 ? { referenceAssetVersionIds: selectedReferenceVersionIds } : {}),
     };
+
+    // 弹窗打开后按所选模型与参数实时估算积分
+    useEffect(() => {
+        if (!genModalOpen || !targetVersion || !genModel || !workspaceId) {
+            setEstimatedCredits(null);
+            return;
+        }
+        let cancelled = false;
+        estimateComicDramaGeneration({ projectId: workspaceId, targetType: "assetVersion", targetIds: [targetVersion.id], model: genModel, settings: assetImageSettings })
+            .then((res) => { if (!cancelled) setEstimatedCredits(res.estimatedCredits); })
+            .catch(() => { if (!cancelled) setEstimatedCredits(null); });
+        return () => { cancelled = true; };
+    }, [genModalOpen, targetVersion, genModel, genQuality, genResolution, genSize, selectedReferenceVersionIds.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
     if (!workspace) return null;
 
@@ -397,35 +387,6 @@ export function StageAssets() {
         setGenModalOpen(true);
     };
 
-    // Estimate credits for asset generation
-    const handleEstimateAssetGen = async () => {
-        if (!targetVersion) return;
-        if (!genModel) {
-            message.warning(translate("comicDrama.selectAGenerationModelFirst"));
-            return;
-        }
-        if (useReferenceAssets && selectedReferenceVersionIds.length === 0) {
-            message.warning(translate("comicDrama.selectReferenceAssetImages"));
-            return;
-        }
-        setEstimating(true);
-        try {
-            const res = await estimateComicDramaGeneration({
-                projectId: workspace.projectId,
-                targetType: "assetVersion",
-                targetIds: [targetVersion.id],
-                model: genModel,
-                settings: assetImageSettings,
-            });
-            setEstimatedCredits(res.estimatedCredits);
-            message.info(translate("comicDrama.estimatedCostCountCredits", { value0: res.estimatedCredits }));
-        } catch (error) {
-            if (error instanceof Error) message.error(error.message);
-        } finally {
-            setEstimating(false);
-        }
-    };
-
     // Trigger asset image generation
     const handleGenerateAssetImage = async () => {
         if (!targetVersion) return;
@@ -524,81 +485,7 @@ export function StageAssets() {
         setSelectedAssetIds(missing.map((asset) => asset.id));
     };
 
-    const openBatchGen = () => {
-        setBatchModel(config.imageModel || "");
-        setBatchQuality(config.quality || "medium");
-        setBatchResolution(config.imageResolution || "2K");
-        // 整批都是多视角类型时用横构图容纳并排视角，否则沿用项目比例
-        setBatchSize(defaultAssetGenSize(selectedAssets.map((asset) => asset.assetType), workspace.settings.aspectRatio));
-        setBatchCredits(null);
-        setBatchModalOpen(true);
-    };
-
-    // Estimate credits for batch asset generation
-    const handleBatchEstimate = async () => {
-        if (!batchModel) {
-            message.warning(translate("comicDrama.selectAGenerationModelFirst"));
-            return;
-        }
-        if (batchTargetVersionIds.length === 0) {
-            message.warning(translate("comicDrama.noneOfTheSelectedAssetsHaveVersions"));
-            return;
-        }
-        setBatchEstimating(true);
-        try {
-            const res = await estimateComicDramaGeneration({
-                projectId: workspace.projectId,
-                targetType: "assetVersion",
-                targetIds: batchTargetVersionIds,
-                model: batchModel,
-                settings: {
-                    mediaType: "image",
-                    quality: batchQuality,
-                    resolution: batchResolution,
-                    size: batchSize,
-                },
-            });
-            setBatchCredits(res.estimatedCredits);
-            message.info(translate("comicDrama.estimatedCostCountCredits", { value0: res.estimatedCredits }));
-        } catch (error) {
-            if (error instanceof Error) message.error(error.message);
-        } finally {
-            setBatchEstimating(false);
-        }
-    };
-
-    // Trigger batch asset image generation
-    const handleBatchGenerate = async () => {
-        if (!batchModel) {
-            message.warning(translate("comicDrama.selectAGenerationModelFirst"));
-            return;
-        }
-        if (batchTargetVersionIds.length === 0) {
-            message.warning(translate("comicDrama.noneOfTheSelectedAssetsHaveVersions"));
-            return;
-        }
-        setBatchGenerating(true);
-        try {
-            const result = await createGenerationTask({
-                targetType: "assetVersion",
-                targetIds: batchTargetVersionIds,
-                model: batchModel,
-                settings: {
-                    mediaType: "image",
-                    quality: batchQuality,
-                    resolution: batchResolution,
-                    size: batchSize,
-                },
-            });
-            message.success(translate("comicDrama.createdCountAssetImageTasksCheckProgressInTheMedia", { value0: result.taskCount }));
-            setBatchModalOpen(false);
-            setSelectedAssetIds([]);
-        } catch (error) {
-            if (error instanceof Error) message.error(error.message);
-        } finally {
-            setBatchGenerating(false);
-        }
-    };
+    const openBatchGen = () => setBatchModalOpen(true);
 
     const pickerImages = referenceAssetImages.filter((image) => {
         const keyword = referenceKeyword.trim().toLowerCase();
@@ -698,7 +585,8 @@ export function StageAssets() {
                         return (
                             <div
                                 key={asset.id}
-                                className="flex flex-col justify-between rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-4 shadow-sm transition-all hover:border-[var(--studio-line-strong)]"
+                                id={`asset-card-${asset.id}`}
+                                className={`flex flex-col justify-between rounded-xl border bg-[var(--studio-panel-solid)] p-4 shadow-sm transition-all hover:border-[var(--studio-line-strong)] ${highlightAssetId === asset.id ? "border-[var(--studio-action)] ring-2 ring-[var(--studio-action)]" : "border-[var(--studio-line)]"}`}
                             >
                                 <div className="flex flex-col gap-3">
                                     <div className="aspect-[4/3] w-full overflow-hidden rounded-lg">
@@ -1071,10 +959,7 @@ export function StageAssets() {
                             <div className="text-xs text-[var(--studio-muted)]">
                                 {estimatedCredits !== null ? (
                                     <span>{translate("comicDrama.estimatedCost_4225d2")}<strong className="text-amber-500">{estimatedCredits}</strong> {translate("comicDrama.credits")}</span>
-                                ) : (
-                                    <Button size="small" loading={estimating} onClick={handleEstimateAssetGen}>
-                                        {translate("comicDrama.estimatedCredits")}</Button>
-                                )}
+                                ) : null}
                             </div>
                             <Space>
                                 <Button onClick={() => {
@@ -1159,95 +1044,19 @@ export function StageAssets() {
                 </div>
             </Modal>
 
-            {/* Batch Asset Image Generation Modal */}
-            <Modal
-                title={translate("comicDrama.generateAssetImagesInBatch")}
+            <AssetImageBatchModal
                 open={batchModalOpen}
-                onCancel={() => setBatchModalOpen(false)}
-                footer={null}
-                width={600}
-            >
-                <div className="flex flex-col gap-4 py-2">
-                    <div className="rounded-lg bg-[var(--studio-panel-solid)] p-3 text-xs leading-5 text-[var(--studio-muted)]">
-                        {translate("comicDrama.batchAssetTargets", { value0: batchTargetVersionIds.length })}
+                versionIds={batchTargetVersionIds}
+                assetTypes={selectedAssets.map((asset) => asset.assetType)}
+                notice={(
+                    <>
                         {skippedAssetCount > 0 ? <span className="text-amber-500">{translate("comicDrama.batchAssetsSkipped", { value0: skippedAssetCount })}</span> : null}
                         {busyAssetCount > 0 ? <span className="text-amber-500">{translate("comicDrama.batchAssetsGeneratingSkipped", { value0: busyAssetCount })}</span> : null}
-                    </div>
-                    <div>
-                        <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.generationModel")}</label>
-                        <div className="mt-1">
-                            <ModelPicker
-                                config={config}
-                                capability="image"
-                                value={batchModel}
-                                onChange={setBatchModel}
-                                fullWidth
-                            />
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-3">
-                        <div>
-                            <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.imageQuality")}</label>
-                            <Select
-                                className="mt-1 w-full"
-                                value={batchQuality}
-                                onChange={setBatchQuality}
-                                options={[
-                                    { value: "low", label: translate("comicDrama.lowQuality") },
-                                    { value: "medium", label: translate("comicDrama.standardQuality") },
-                                    { value: "high", label: translate("comicDrama.highQuality") },
-                                ]}
-                            />
-                        </div>
-                        <div>
-                            <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.resolution")}</label>
-                            <Select
-                                className="mt-1 w-full"
-                                value={batchResolution}
-                                onChange={setBatchResolution}
-                                options={[
-                                    { value: "1K", label: "1K" },
-                                    { value: "2K", label: "2K" },
-                                    { value: "4K", label: "4K" },
-                                ]}
-                            />
-                        </div>
-                        <div>
-                            <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.aspectRatio")}</label>
-                            <Select
-                                className="mt-1 w-full"
-                                value={batchSize}
-                                onChange={setBatchSize}
-                                options={getAssetGenSizeOptions(translate)}
-                            />
-                        </div>
-                    </div>
-
-                    <div className="rounded-lg bg-[var(--studio-panel-solid)] p-3 text-xs leading-5 text-[var(--studio-muted)]">{translate("comicDrama.theServerBuildsPromptsFromAssetAndVersionNames_bcf6cd", { value0: workspace.settings.visualStyle || translate("comicDrama.notSet_55a04b"), value1: assetImageShapeHint(selectedAssets.map((asset) => asset.assetType), translate) })}</div>
-
-                    <div className="mt-2 flex items-center justify-between border-t border-[var(--studio-line)] pt-3">
-                        <div className="text-xs text-[var(--studio-muted)]">
-                            {batchCredits !== null ? (
-                                <span>{translate("comicDrama.estimatedCost_4225d2")}<strong className="text-amber-500">{batchCredits}</strong> {translate("comicDrama.credits")}</span>
-                            ) : (
-                                <Button size="small" loading={batchEstimating} onClick={handleBatchEstimate}>
-                                    {translate("comicDrama.estimatedCredits")}</Button>
-                            )}
-                        </div>
-                        <Space>
-                            <Button onClick={() => setBatchModalOpen(false)}>{translate("comicDrama.cancel")}</Button>
-                            <Button
-                                type="primary"
-                                loading={batchGenerating}
-                                disabled={batchTargetVersionIds.length === 0}
-                                icon={<Sparkles className="size-4" />}
-                                onClick={handleBatchGenerate}
-                            >{translate("comicDrama.generateCountImages_4f0a0a", { value0: batchTargetVersionIds.length })}</Button>
-                        </Space>
-                    </div>
-                </div>
-            </Modal>
+                    </>
+                )}
+                onClose={() => setBatchModalOpen(false)}
+                onSubmitted={() => setSelectedAssetIds([])}
+            />
         </div>
     );
 }
