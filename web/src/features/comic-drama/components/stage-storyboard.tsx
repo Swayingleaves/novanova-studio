@@ -1388,7 +1388,8 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                 assetType: asset?.assetType || "character",
                 versionName: version?.versionName || vId.split("_")[1] || vId,
                 variantType: version?.variantType || "default",
-                appearanceDescription: version?.appearanceDescription || asset?.description || "",
+                // 外观描述以资产为准，版本里的旧描述可能是模型改写过的值
+                appearanceDescription: asset?.description || version?.appearanceDescription || "",
                 imageUrl,
             };
         });
