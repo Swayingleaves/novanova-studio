@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.net.URLConnection;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Base64;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -33,6 +34,12 @@ import reactor.core.scheduler.Schedulers;
 @Component
 @Slf4j
 public class AiMediaSupport {
+
+    /** 生成图片转存时限：上游媒体站被限速时不能拖到任务等待超时。 */
+    private static final Duration IMAGE_TRANSFER_TIMEOUT = Duration.ofSeconds(150);
+
+    /** 转存失败后登记远程地址的时限。 */
+    private static final Duration MEDIA_REGISTER_TIMEOUT = Duration.ofSeconds(30);
 
     /** AI HTTP客户端 */
     private final AiHttpClient aiHttpClient;
@@ -255,7 +262,8 @@ public class AiMediaSupport {
                     log.error("AI生成媒体转存对象存储失败，回退登记原始链接: userId={}, kind={}, sourceUrl={}",
                             userId, kind, sanitizeMediaUrlForLog(trimmedUrl), error);
                     // 下载已经连不上，不再对同一个地址读响应头，避免任务多停一轮连接超时。
-                    return registerRemoteMedia(userId, kind, trimmedUrl, mimeType, null, width, height, durationMs);
+                    return registerRemoteMedia(userId, kind, trimmedUrl, mimeType, null, width, height, durationMs)
+                            .timeout(MEDIA_REGISTER_TIMEOUT);
                 });
     }
 
@@ -308,7 +316,8 @@ public class AiMediaSupport {
         if (AiTaskTypes.VIDEO.equals(kind)) {
             return storeRemoteVideoFile(userId, sourceUrl, resolvedMimeType, durationMs);
         }
-        return aiHttpClient.downloadRemoteBinary(sourceUrl, resolvedMimeType)
+        // 图片转存必须有时限：上游媒体站被限速时会一直读不完，任务只能等到轮询超时。
+        return aiHttpClient.downloadRemoteBinary(sourceUrl, resolvedMimeType, IMAGE_TRANSFER_TIMEOUT)
                 .flatMap(binary -> storeGeneratedMedia(userId, kind, "generated." + fileExtension(binary.mimeType(), "bin"),
                         binary, width, height, durationMs, sourceUrl));
     }
