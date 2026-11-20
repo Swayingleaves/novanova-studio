@@ -6,6 +6,7 @@ import com.novanovastudio.common.CreditAmounts;
 import com.novanovastudio.common.SystemMessage;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentScopeAgentFactory;
 import com.novanovastudio.agent.AgentScopeModelFactory;
 import com.novanovastudio.ai.AiTaskSources;
@@ -18,6 +19,7 @@ import com.novanovastudio.dto.StoryboardDtos;
 import com.novanovastudio.security.CurrentUserProvider;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
+import io.agentscope.core.message.Msg;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -27,6 +29,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -34,7 +37,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.util.retry.Retry;
 
 /**
@@ -103,6 +108,44 @@ public class StoryboardAgentService {
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> modelFactory.resolveTextModel(request.model())
                         .flatMap(model -> generateWithModel(userId, model, request)));
+    }
+
+    /**
+     * 在单次计费操作内按场次并发生成分镜片段，任一场次失败时整单全额退费。
+     * <p>
+     * 供漫剧整集拆分复用：将长剧本按场次切分后受控并发调用模型，既缩短整集等待时间，
+     * 也避免单次请求生成过多镜头触发上限或丢失局部剧情。
+     *
+     * @param requests 按场次顺序排列的分镜生成请求列表
+     * @param modelValue 用户选择的文本模型标识
+     * @return 按输入顺序排列的各片段生成结果与本次总扣费
+     */
+    Mono<StoryboardSegmentsResult> generateStoryboardSegments(
+            List<StoryboardDtos.GenerateStoryboardRequest> requests, String modelValue) {
+        if (requests == null || requests.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.storyboardGenerationRequestIsRequired"));
+        }
+        requests.forEach(this::validateGenerateRequest);
+        int concurrency = Math.max(1, properties.getAi().getStoryboardAgent().getComposeConcurrency());
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> modelFactory.resolveTextModel(modelValue)
+                        .flatMap(model -> executeChargedOperation(userId, model.ownerTeamId(), model.creditCost(), "分镜首次生成",
+                                operationId -> requests.size() == 1
+                                        ? generateNormalizedStoryboard(userId, operationId, model, requests.getFirst())
+                                                .map(item -> List.of(new StoryboardDtos.GenerateStoryboardResponse(
+                                                        item.shots(), item.assets(), model.creditCost())))
+                                        : Flux.fromIterable(requests).index()
+                                                .flatMapSequential(item -> generateNormalizedStoryboard(
+                                                                userId, operationId + ":s" + (item.getT1() + 1), model, item.getT2())
+                                                        .map(normalized -> new StoryboardDtos.GenerateStoryboardResponse(
+                                                                normalized.shots(), normalized.assets(), BigDecimal.ZERO))
+                                                        .subscribeOn(Schedulers.boundedElastic()), concurrency)
+                                                .collectList())
+                                .map(segments -> new StoryboardSegmentsResult(segments, model.creditCost()))));
+    }
+
+    /** 多片段并发分镜生成的聚合结果。 */
+    record StoryboardSegmentsResult(List<StoryboardDtos.GenerateStoryboardResponse> segments, BigDecimal chargedCredits) {
     }
 
     /**
@@ -219,8 +262,8 @@ public class StoryboardAgentService {
      */
     private Mono<StoryboardDtos.GenerateStoryboardResponse> generateWithModel(
             Long userId, AgentScopeModelFactory.TextModelSelection model, StoryboardDtos.GenerateStoryboardRequest request) {
-        return executeChargedOperation(userId, model.ownerTeamId(), model.creditCost(), "分镜首次生成", operationId -> callGenerateAgent(userId, operationId, model, request)
-                        .map(this::normalizeGeneratedStoryboard))
+        return executeChargedOperation(userId, model.ownerTeamId(), model.creditCost(), "分镜首次生成",
+                operationId -> generateNormalizedStoryboard(userId, operationId, model, request))
                 .map(result -> new StoryboardDtos.GenerateStoryboardResponse(result.shots(), result.assets(), model.creditCost()));
     }
 
@@ -237,8 +280,8 @@ public class StoryboardAgentService {
     private Mono<StoryboardDtos.ComposePromptsResponse> composeWithModel(
             Long userId, AgentScopeModelFactory.TextModelSelection model, StoryboardDtos.ComposePromptsRequest request, BigDecimal unitCredits, String operationId) {
         BigDecimal credits = multiplyCredits(unitCredits, request.shots().size());
-        return executeChargedOperation(userId, model.ownerTeamId(), credits, COMPOSE_OPERATION_NAME, operationId, identifier -> callComposeAgent(userId, identifier, model, request)
-                        .map(result -> validatePromptComposition(request.shots(), request.visualStyle(), result)))
+        return executeChargedOperation(userId, model.ownerTeamId(), credits, COMPOSE_OPERATION_NAME, operationId,
+                identifier -> composeValidatedPrompts(userId, identifier, model, request))
                 .map(prompts -> new StoryboardDtos.ComposePromptsResponse(prompts, credits));
     }
 
@@ -290,15 +333,15 @@ public class StoryboardAgentService {
     }
 
     /**
-     * 调用Agent生成首次分镜结构。
+     * 调用Agent生成分镜并完成结构化校验，单次模型输出格式不达标时自动按片段重试。
      *
      * @param userId Long 当前用户ID
      * @param operationId String 稳定操作标识
      * @param model TextModelSelection 已解析模型
      * @param request GenerateStoryboardRequest 生成请求
-     * @return Mono<GeneratedStoryboardResult> Agent结构化结果
+     * @return Mono<NormalizedStoryboard> 已规范化的镜头与资产
      */
-    private Mono<StoryboardDtos.GeneratedStoryboardResult> callGenerateAgent(
+    private Mono<NormalizedStoryboard> generateNormalizedStoryboard(
             Long userId, String operationId, AgentScopeModelFactory.TextModelSelection model,
             StoryboardDtos.GenerateStoryboardRequest request) {
         Map<String, Object> input = new LinkedHashMap<>();
@@ -306,19 +349,20 @@ public class StoryboardAgentService {
         input.put("scriptContent", request.scriptContent().trim());
         input.put("instruction", request.instruction().trim());
         input.put("visualStyle", request.visualStyle().trim());
-        return callAgent(userId, operationId, model, input, StoryboardDtos.GeneratedStoryboardResult.class);
+        return callValidatedAgent(userId, operationId, model, input,
+                StoryboardDtos.GeneratedStoryboardResult.class, this::normalizeGeneratedStoryboard);
     }
 
     /**
-     * 调用Agent合成全部镜头提示词。
+     * 调用Agent合成全部镜头提示词并完成格式校验，单次模型输出格式不达标时自动重试。
      *
      * @param userId Long 当前用户ID
      * @param operationId String 稳定操作标识
      * @param model TextModelSelection 已解析模型
      * @param request ComposePromptsRequest 合成请求
-     * @return Mono<PromptCompositionResult> Agent结构化结果
+     * @return Mono<List<StoryboardPrompt>> 已校验的镜头提示词列表
      */
-    private Mono<StoryboardDtos.PromptCompositionResult> callComposeAgent(
+    private Mono<List<StoryboardDtos.StoryboardPrompt>> composeValidatedPrompts(
             Long userId, String operationId, AgentScopeModelFactory.TextModelSelection model,
             StoryboardDtos.ComposePromptsRequest request) {
         Map<String, Object> input = new LinkedHashMap<>();
@@ -327,7 +371,9 @@ public class StoryboardAgentService {
         input.put("instruction", request.instruction().trim());
         input.put("visualStyle", request.visualStyle().trim());
         input.put("shots", buildComposeAgentShots(request));
-        return callAgent(userId, operationId, model, input, StoryboardDtos.PromptCompositionResult.class);
+        return callValidatedAgent(userId, operationId, model, input,
+                StoryboardDtos.PromptCompositionResult.class,
+                result -> validatePromptComposition(request.shots(), request.visualStyle(), result));
     }
 
     /**
@@ -358,36 +404,239 @@ public class StoryboardAgentService {
     }
 
     /**
-     * 使用固定分镜Agent执行结构化调用。
+     * 使用固定分镜Agent执行结构化调用与结果校验，对模型输出空结果或格式偏差自动重试最多两次。
+     * <p>
+     * 仅针对模型未提交结构化工具或返回内容未通过分镜结果校验的场景执行重试；
+     * 网络超时或渠道SDK底层报错直接失败并走外层全额退费，避免无效等待。
      *
      * @param userId Long 当前用户ID
      * @param operationId String 稳定操作标识
      * @param model TextModelSelection 已解析模型
      * @param input Map<String, Object> Agent输入
      * @param resultType Class<T> 期望结构化结果类型
-     * @return Mono<T> 结构化结果
-     * @param <T> 结构化结果类型
+     * @param validator Function<T, R> 结构化业务校验转换器
+     * @param <T> 原始结构化结果类型
+     * @param <R> 校验通过后的领域结果类型
+     * @return Mono<R> 校验通过后的结果
      */
-    private <T> Mono<T> callAgent(Long userId, String operationId, AgentScopeModelFactory.TextModelSelection model,
-                                  Map<String, Object> input, Class<T> resultType) {
+    private <T, R> Mono<R> callValidatedAgent(
+            Long userId, String operationId, AgentScopeModelFactory.TextModelSelection model,
+            Map<String, Object> input, Class<T> resultType, Function<T, R> validator) {
+        AtomicInteger attemptCounter = new AtomicInteger(0);
+        String requestPayload = JSON.toJSONString(input);
         return Mono.defer(() -> {
+                    int attemptNumber = attemptCounter.incrementAndGet();
+                    String sessionIdentifier = attemptNumber == 1
+                            ? "storyboard:" + operationId
+                            : "storyboard:" + operationId + ":retry" + (attemptNumber - 1);
                     ReActAgent agent = agentFactory.storyboardAgent(model.agentModel());
-                    return agent.call(JSON.toJSONString(input), resultType, RuntimeContext.builder()
-                                    .sessionId("storyboard:" + operationId)
+                    return agent.call(requestPayload, resultType, RuntimeContext.builder()
+                                    .sessionId(sessionIdentifier)
                                     .userId(String.valueOf(userId))
                                     .build())
                             .timeout(Duration.ofSeconds(properties.timeoutSettings().storyboardAgentTimeoutSeconds()))
-                            .map(message -> message.getStructuredData(resultType))
-                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedNoStructuredResult"))))
+                            .switchIfEmpty(Mono.error(new RetryableAgentOutputException(new BusinessException(
+                                    ErrorCode.THIRD_PARTY_CALL_ERROR,
+                                    SystemMessage.of("business.storyboardAgentReturnedNoStructuredResult")))))
+                            .onErrorMap(exception -> isMissingStructuredOutput(exception)
+                                    ? new RetryableAgentOutputException(new BusinessException(
+                                            ErrorCode.THIRD_PARTY_CALL_ERROR,
+                                            SystemMessage.of("business.storyboardAgentFailed", errorMessage(exception))))
+                                    : exception)
+                            .map(message -> {
+                                try {
+                                    T structuredResult = extractStructuredResult(message, resultType, operationId);
+                                    return validator.apply(structuredResult);
+                                } catch (BusinessException validationException) {
+                                    throw new RetryableAgentOutputException(validationException);
+                                }
+                            })
                             .doFinally(signal -> agent.close());
                 })
-                // 模型偶发不提交结构化结果时重跑一次；重试复用同一 operationId，不会重复扣费。
-                .retryWhen(Retry.max(1).filter(StoryboardAgentService::isMissingStructuredOutput)
-                        .doBeforeRetry(signal -> log.warn("分镜Agent未提交结构化结果，重试一次: operationId={}, reason={}",
-                                operationId, errorMessage(signal.failure()))))
-                .onErrorMap(exception -> exception instanceof BusinessException
-                        ? exception
-                        : new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentFailed", errorMessage(exception))));
+                // 兼容模型偶发返回空镜头、漏调结构化工具或单场字段偏差；复用同一计费操作标识重跑当前片段，不重复扣费。
+                .retryWhen(Retry.max(2).filter(RetryableAgentOutputException.class::isInstance)
+                        .doBeforeRetry(signal -> log.warn("分镜Agent输出未通过校验，准备重试: operationId={}, retryCount={}, reason={}",
+                                operationId, signal.totalRetries() + 1, errorMessage(signal.failure()))))
+                .onErrorMap(exception -> {
+                    if (exception instanceof RetryableAgentOutputException retryableException) {
+                        return retryableException.businessException();
+                    }
+                    if (exception.getCause() instanceof RetryableAgentOutputException retryableException) {
+                        return retryableException.businessException();
+                    }
+                    return exception instanceof BusinessException
+                            ? exception
+                            : new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
+                                    SystemMessage.of("business.storyboardAgentFailed", errorMessage(exception)));
+                });
+    }
+
+    /**
+     * 从Agent消息中提取结构化结果；兼容模型在工具参数中使用字符串化JSON数组或直接输出完整JSON文本。
+     *
+     * @param message Msg Agent返回消息
+     * @param resultType Class<T> 目标结构化类型
+     * @param operationId String 稳定操作标识
+     * @param <T> 结构化结果类型
+     * @return T 解析后的结构化结果
+     * @throws BusinessException 消息既无有效结构化输出也无可解析JSON文本时抛出
+     */
+    private <T> T extractStructuredResult(Msg message, Class<T> resultType, String operationId) {
+        T structuredResult = null;
+        RuntimeException structuredException = null;
+        try {
+            structuredResult = message.getStructuredData(resultType);
+        } catch (RuntimeException exception) {
+            structuredException = exception;
+        }
+        if (hasEffectiveStructuredItems(structuredResult)) {
+            return structuredResult;
+        }
+        // 部分OpenAI兼容模型会把工具参数中的数组序列化为字符串，尝试读取原始Map修复后重新转换。
+        if (message.hasStructuredData()) {
+            try {
+                Map<String, Object> rawStructuredData = message.getStructuredData(true);
+                T repairedResult = parseStructuredJsonObject(new JSONObject(rawStructuredData), resultType);
+                if (hasEffectiveStructuredItems(repairedResult)) {
+                    log.warn("分镜Agent结构化参数存在字符串化数组，已按JSON结构完成解析: operationId={}, resultType={}",
+                            operationId, resultType.getSimpleName());
+                    return repairedResult;
+                }
+            } catch (RuntimeException ignored) {
+                // 保留后续文本JSON解析机会。
+            }
+        }
+        // 兼容模型未调用_structured_output工具但在正文中输出完整JSON对象的场景。
+        String textContent = message.getTextContent();
+        String jsonObjectText = extractJsonObjectText(textContent);
+        if (jsonObjectText != null) {
+            try {
+                T textParsedResult = parseStructuredJsonObject(JSON.parseObject(jsonObjectText), resultType);
+                if (hasEffectiveStructuredItems(textParsedResult)) {
+                    log.warn("分镜Agent未通过结构化工具返回有效数据，已从正文JSON完成解析: operationId={}, resultType={}, textLength={}",
+                            operationId, resultType.getSimpleName(), textContent.length());
+                    return textParsedResult;
+                }
+            } catch (RuntimeException ignored) {
+                // 正文JSON无法转换时走统一空结果异常。
+            }
+        }
+        log.warn("分镜Agent未返回有效结构化内容: operationId={}, resultType={}, hasStructuredData={}, textLength={}",
+                operationId, resultType.getSimpleName(), message.hasStructuredData(),
+                textContent == null ? 0 : textContent.length());
+        if (structuredResult != null) {
+            return structuredResult;
+        }
+        if (structuredException != null && !isMissingStructuredOutput(structuredException)) {
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
+                    SystemMessage.of("business.storyboardAgentFailed", errorMessage(structuredException)));
+        }
+        throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
+                SystemMessage.of("business.storyboardAgentReturnedNoStructuredResult"));
+    }
+
+    /**
+     * 判断结构化结果是否已包含非空核心条目。
+     *
+     * @param result Object 待检查结果
+     * @return boolean 包含有效镜头或提示词时为true
+     */
+    private static boolean hasEffectiveStructuredItems(Object result) {
+        if (result == null) {
+            return false;
+        }
+        if (result instanceof StoryboardDtos.GeneratedStoryboardResult storyboardResult) {
+            return storyboardResult.shots() != null && !storyboardResult.shots().isEmpty();
+        }
+        if (result instanceof StoryboardDtos.PromptCompositionResult promptResult) {
+            return promptResult.prompts() != null && !promptResult.prompts().isEmpty();
+        }
+        return true;
+    }
+
+    /**
+     * 从模型正文中提取完整JSON对象字符串，支持去除Markdown代码块包裹。
+     *
+     * @param textContent String 模型原始正文
+     * @return String 合法JSON对象字符串，不是JSON对象时返回null
+     */
+    private static String extractJsonObjectText(String textContent) {
+        if (!StringUtils.hasText(textContent)) {
+            return null;
+        }
+        String candidate = textContent.trim();
+        if (candidate.startsWith("```")) {
+            int firstNewlineIndex = candidate.indexOf('\n');
+            int closingFenceIndex = candidate.lastIndexOf("```");
+            if (firstNewlineIndex > 0 && closingFenceIndex > firstNewlineIndex) {
+                candidate = candidate.substring(firstNewlineIndex + 1, closingFenceIndex).trim();
+            }
+        }
+        return JSON.isValidObject(candidate) ? candidate : null;
+    }
+
+    /**
+     * 将JSONObject逐层解析为目标结构化结果，兼容字符串化的数组字段。
+     *
+     * @param rootObject JSONObject 根JSON对象
+     * @param resultType Class<T> 目标结构化类型
+     * @param <T> 结构化结果类型
+     * @return T 转换后的强类型结果
+     */
+    private static <T> T parseStructuredJsonObject(JSONObject rootObject, Class<T> resultType) {
+        if (rootObject == null) {
+            return null;
+        }
+        normalizeStringifiedArrayField(rootObject, "shots");
+        normalizeStringifiedArrayField(rootObject, "assets");
+        normalizeStringifiedArrayField(rootObject, "prompts");
+        if (resultType == StoryboardDtos.GeneratedStoryboardResult.class) {
+            List<StoryboardDtos.GeneratedStoryboardShot> shots = parseTypedList(
+                    rootObject, "shots", StoryboardDtos.GeneratedStoryboardShot.class);
+            List<StoryboardDtos.GeneratedStoryboardAsset> assets = parseTypedList(
+                    rootObject, "assets", StoryboardDtos.GeneratedStoryboardAsset.class);
+            return resultType.cast(new StoryboardDtos.GeneratedStoryboardResult(shots, assets));
+        }
+        if (resultType == StoryboardDtos.PromptCompositionResult.class) {
+            List<StoryboardDtos.StoryboardPrompt> prompts = parseTypedList(
+                    rootObject, "prompts", StoryboardDtos.StoryboardPrompt.class);
+            return resultType.cast(new StoryboardDtos.PromptCompositionResult(prompts));
+        }
+        return JSON.parseObject(rootObject.toJSONString(), resultType);
+    }
+
+    /**
+     * 将误序列化为字符串的JSON数组字段还原为真实数组。
+     *
+     * @param rootObject JSONObject 根JSON对象
+     * @param fieldName String 数组字段名
+     */
+    private static void normalizeStringifiedArrayField(JSONObject rootObject, String fieldName) {
+        Object fieldValue = rootObject.get(fieldName);
+        if (fieldValue instanceof String rawArrayText && JSON.isValidArray(rawArrayText.trim())) {
+            rootObject.put(fieldName, JSON.parseArray(rawArrayText.trim()));
+        }
+    }
+
+    /**
+     * 逐项将JSON数组元素反序列化为强类型Record，避免Fastjson2嵌套泛型列表保留JSONObject。
+     *
+     * @param rootObject JSONObject 根JSON对象
+     * @param fieldName String 数组字段名
+     * @param elementType Class<E> 数组元素类型
+     * @param <E> 元素类型
+     * @return List<E> 强类型列表，字段缺失时返回null
+     */
+    private static <E> List<E> parseTypedList(JSONObject rootObject, String fieldName, Class<E> elementType) {
+        Object rawList = rootObject.get(fieldName);
+        if (!(rawList instanceof List<?> items)) {
+            return null;
+        }
+        List<E> parsedItems = new ArrayList<>(items.size());
+        for (Object item : items) {
+            parsedItems.add(item == null ? null : JSON.parseObject(JSON.toJSONString(item), elementType));
+        }
+        return parsedItems;
     }
 
     /**
@@ -398,7 +647,36 @@ public class StoryboardAgentService {
      */
     private static boolean isMissingStructuredOutput(Throwable exception) {
         String message = exception.getMessage();
-        return message != null && message.contains("_structured_output");
+        return message != null
+                && (message.contains("_structured_output") || message.contains("No structured data in message"));
+    }
+
+    /**
+     * 标记可按片段重跑的模型结构化输出异常。
+     */
+    private static final class RetryableAgentOutputException extends RuntimeException {
+
+        /** 原始业务异常。 */
+        private final BusinessException businessException;
+
+        /**
+         * 构造可重试的模型输出异常。
+         *
+         * @param businessException BusinessException 校验失败对应的业务异常
+         */
+        private RetryableAgentOutputException(BusinessException businessException) {
+            super(businessException.getMessage(), businessException);
+            this.businessException = businessException;
+        }
+
+        /**
+         * 获取原始业务异常。
+         *
+         * @return BusinessException 校验失败对应的业务异常
+         */
+        private BusinessException businessException() {
+            return businessException;
+        }
     }
 
     /**
@@ -441,12 +719,10 @@ public class StoryboardAgentService {
                 throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedAnEmptyShot"));
             }
             validateShotFields(shot.shotNumber(), shot.durationSeconds(), shot.visualDescription(), shot.shotSize(), shotNumbers, "分镜Agent返回的镜头");
-            if (shot.assetReferenceKeys() == null) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentShotAssetReferencesAreRequired"));
-            }
+            List<String> referenceKeyList = shot.assetReferenceKeys() == null ? List.of() : shot.assetReferenceKeys();
             Set<String> referencedAssetKeys = new LinkedHashSet<>();
             List<String> assetIds = new ArrayList<>();
-            for (String referenceKeyValue : shot.assetReferenceKeys()) {
+            for (String referenceKeyValue : referenceKeyList) {
                 String referenceKey = normalizeRequiredText(referenceKeyValue, "分镜Agent返回的镜头资产引用");
                 if (!referencedAssetKeys.add(referenceKey)) {
                     throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedDuplicateShotAssetReferences"));

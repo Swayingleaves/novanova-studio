@@ -58,6 +58,9 @@ class VideoCompositionTaskServiceTest {
     /** 服务配置 */
     private NovanovaProperties properties;
 
+    /** 平台导出视频开关服务 */
+    private VideoExportSettingsService videoExportSettingsService;
+
     /**
      * 初始化视频合成任务服务依赖。
      */
@@ -70,7 +73,9 @@ class VideoCompositionTaskServiceTest {
         taskDispatcher = mock(VideoCompositionTaskDispatcher.class);
         cancellation = mock(VideoCompositionTaskCancellation.class);
         properties = new NovanovaProperties();
-        taskService = new VideoCompositionTaskService(com.novanovastudio.TeamTestSupport.taskScope(), repository, currentUserProvider, persistenceService, mock(VideoCompositionMediaProcessor.class), mock(StoryboardVideoExportProcessor.class), mock(ComicDramaRepository.class), mock(ScriptService.class), mock(ComicDramaService.class), taskDispatcher, mock(VideoCompositionTaskQueue.class), cancellation, properties, com.novanovastudio.MediaAccessTestSupport.echo());
+        videoExportSettingsService = mock(VideoExportSettingsService.class);
+        when(videoExportSettingsService.requireVideoExportEnabled()).thenReturn(Mono.empty());
+        taskService = new VideoCompositionTaskService(com.novanovastudio.TeamTestSupport.taskScope(), repository, currentUserProvider, persistenceService, mock(VideoCompositionMediaProcessor.class), mock(StoryboardVideoExportProcessor.class), mock(ComicDramaRepository.class), mock(ScriptService.class), mock(ComicDramaService.class), taskDispatcher, mock(VideoCompositionTaskQueue.class), cancellation, properties, com.novanovastudio.MediaAccessTestSupport.echo(), videoExportSettingsService);
     }
 
     /**

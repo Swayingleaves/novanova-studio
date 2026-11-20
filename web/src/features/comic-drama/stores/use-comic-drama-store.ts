@@ -64,6 +64,8 @@ type ComicDramaState = {
     pendingStage: ComicDramaStage | null;
     selectedShotId: string | null;
     selectedAssetId: string | null;
+    /** 其他阶段请求在资产库定位的资产版本，资产库定位后清空。 */
+    focusAssetVersionId: string | null;
     selectedEpisodeId: string | null;
     selectedSceneId: string | null;
     /** 待生成信号：其他阶段点「生成」时写入，媒体生成中心消费后清空。 */
@@ -80,6 +82,8 @@ type ComicDramaState = {
     clearPendingStage: () => void;
     setSelectedShotId: (id: string | null) => void;
     setSelectedAssetId: (id: string | null) => void;
+    /** 跳转到资产库并定位到指定资产版本所属的资产卡片。 */
+    focusAssetVersion: (versionId: string | null) => void;
     setSelectedEpisodeId: (id: string | null) => void;
     setSelectedSceneId: (id: string | null) => void;
     /** 切到媒体生成中心并对指定镜头发起生成。 */
@@ -185,6 +189,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
     pendingStage: null,
     selectedShotId: null,
     selectedAssetId: null,
+    focusAssetVersionId: null,
     selectedEpisodeId: null,
     selectedSceneId: null,
     pendingGeneration: null,
@@ -245,6 +250,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
     clearPendingStage: () => set({ pendingStage: null }),
     setSelectedShotId: (selectedShotId) => set({ selectedShotId }),
     setSelectedAssetId: (selectedAssetId) => set({ selectedAssetId }),
+    focusAssetVersion: (focusAssetVersionId) => set({ focusAssetVersionId, ...(focusAssetVersionId ? { activeStage: "assets", pendingStage: null } : {}) }),
     setSelectedEpisodeId: (selectedEpisodeId) => set({ selectedEpisodeId }),
     setSelectedSceneId: (selectedSceneId) => set({ selectedSceneId }),
 
@@ -606,6 +612,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
         pendingStage: null,
         selectedShotId: null,
         selectedAssetId: null,
+        focusAssetVersionId: null,
         selectedEpisodeId: null,
         selectedSceneId: null,
         pendingGeneration: null,

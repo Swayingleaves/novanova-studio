@@ -89,6 +89,8 @@ public class MediaAccessService {
         LIST_THUMBNAIL,
         /** 卡片封面。支持的服务商在读取时把长边缩到 960 像素，供技能市场等大卡片展示 */
         CARD_COVER,
+        /** 首页作品墙缩略图。支持的服务商在读取时把长边缩到 720 像素，点击后再读取原图 */
+        HOME_CARD,
         /** 附件下载 */
         DOWNLOAD,
         /** 第三方模型拉取参考素材 */
@@ -313,9 +315,12 @@ public class MediaAccessService {
         String resolvedName = StringUtils.hasText(fileName) ? fileName : lastSegment(key);
         String resolvedMimeType = StringUtils.hasText(mimeType) ? mimeType : null;
         int edge = thumbnailEdge(purpose);
+        // PNG 截图缩到 720 之后仍然有 MB 级体积，首页卡片缩放时一并转成 JPEG；其他用途保持原格式。
+        boolean jpeg = purpose == Purpose.HOME_CARD && edge > 0 && "image/png".equalsIgnoreCase(resolvedMimeType);
+        String outputMimeType = jpeg ? "image/jpeg" : resolvedMimeType;
         return Mono.fromCallable(() -> edge > 0
-                        ? objectStorageService.createThumbnailReadUrl(config, key, resolvedName, resolvedMimeType, download, expiresAt, edge)
-                        : objectStorageService.createReadUrl(config, key, resolvedName, resolvedMimeType, download, expiresAt))
+                        ? objectStorageService.createThumbnailReadUrl(config, key, resolvedName, outputMimeType, download, expiresAt, edge, jpeg)
+                        : objectStorageService.createReadUrl(config, key, resolvedName, outputMimeType, download, expiresAt))
                 .subscribeOn(Schedulers.boundedElastic())
                 .doOnNext(url -> {
                     if (signedUrls.size() > SIGNED_URL_CACHE_LIMIT) {
@@ -335,6 +340,7 @@ public class MediaAccessService {
         return switch (purpose) {
             case LIST_THUMBNAIL -> 160;
             case CARD_COVER -> 960;
+            case HOME_CARD -> 720;
             default -> 0;
         };
     }

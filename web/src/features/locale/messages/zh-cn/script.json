@@ -927,5 +927,11 @@
     "templateNarrativeAdvertisement": "广告故事 · 以受众痛点、情境转折与品牌价值建立短篇广告骨架。",
     "templateNarrativeMusicVideo": "音乐视频 · 以音乐段落、情绪推进与视觉母题建立叙事骨架。",
     "templateNarrativePromotion": "宣传片 · 以核心信息、事实支撑与行动号召建立宣传片骨架。",
-    "templateNarrativeStoryShort": "故事短片 · 以人物目标、关键冲突与情感落点建立短片骨架。"
+    "templateNarrativeStoryShort": "故事短片 · 以人物目标、关键冲突与情感落点建立短片骨架。",
+    "episodeTargetDurationSecondsLabel": "单集目标时长（秒）",
+    "episodeDurationPreset1Min": "1 分钟",
+    "episodeDurationPreset2Min": "2 分钟",
+    "episodeDurationPreset3Min": "3 分钟",
+    "episodeDurationBudgetHint": "建议不超过 180 秒（3 分钟）：AI 将据此控制每集场次数与台词篇幅，下游漫剧拆镜也会按该时长估算镜头数量。",
+    "secondsUnit": "秒"
 }

@@ -3,6 +3,7 @@ package com.novanovastudio.agent;
 import com.novanovastudio.service.PromptTemplateType;
 import com.novanovastudio.service.SystemPromptTemplateService;
 import io.agentscope.core.ReActAgent;
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.Model;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -23,6 +24,8 @@ public class AgentScopeAgentFactory {
     private final SystemPromptTemplateService promptService;
     /** 主Agent思考事件中间件 */
     private final AgentThinkingEventMiddleware thinkingEventMiddleware;
+    /** 短剧回复流中间件 */
+    private final DramaReplyStreamMiddleware dramaReplyStreamMiddleware;
 
     /**
      * 创建主Agent。
@@ -95,6 +98,28 @@ public class AgentScopeAgentFactory {
     }
 
     /**
+     * 创建智能短剧导演Agent。
+     *
+     * @param model Model 用户选择的文本模型
+     * @return ReActAgent 短剧导演Agent
+     */
+    public ReActAgent dramaAgent(Model model) {
+        return build("drama-agent", promptService.get(PromptTemplateType.AGENT_DRAMA), model,
+                "只能返回当前请求对应的短剧结构化结果，不得调用工具、解释或输出额外文本。", false, dramaReplyStreamMiddleware);
+    }
+
+    /**
+     * 创建智能短剧提示词Agent，只负责把一个生成目标写成图片或视频提示词。
+     *
+     * @param model Model 用户选择的文本模型
+     * @return ReActAgent 短剧提示词Agent
+     */
+    public ReActAgent dramaMediaAgent(Model model) {
+        return build("drama-media-agent", promptService.get(PromptTemplateType.AGENT_DRAMA_MEDIA), model,
+                "只能返回 MediaPrompt 结构化结果，不得调用工具、解释或输出额外文本。", false);
+    }
+
+    /**
      * 创建剧本创作Agent。
      *
      * @param model Model 用户明确选择的文本模型
@@ -139,6 +164,22 @@ public class AgentScopeAgentFactory {
      * @return ReActAgent Agent实例
      */
     private ReActAgent build(String name, String prompt, Model model, String contract, boolean thinkingEnabled) {
+        return build(name, prompt, model, contract, thinkingEnabled, null);
+    }
+
+    /**
+     * 构建无业务工具权限的ReActAgent，并可追加一个额外的旁路中间件。
+     *
+     * @param name String Agent名称
+     * @param prompt String 外部系统提示词
+     * @param model Model AgentScope模型
+     * @param contract String Java固定的结构化契约补充
+     * @param thinkingEnabled boolean 是否转发思考事件
+     * @param middleware MiddlewareBase 额外中间件，可为空
+     * @return ReActAgent Agent实例
+     */
+    private ReActAgent build(String name, String prompt, Model model, String contract, boolean thinkingEnabled,
+                             MiddlewareBase middleware) {
         ReActAgent.Builder builder = ReActAgent.builder()
                 .name(name)
                 .sysPrompt(prompt + "\n\n" + contract)
@@ -147,6 +188,9 @@ public class AgentScopeAgentFactory {
                 .maxIters(4);
         if (thinkingEnabled) {
             builder.middleware(thinkingEventMiddleware);
+        }
+        if (middleware != null) {
+            builder.middleware(middleware);
         }
         return builder.build();
     }

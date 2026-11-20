@@ -9,7 +9,7 @@ import { App } from "antd";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/shared/components/ui/select";
 import { cn } from "@/shared/lib/utils";
-import { modelOptionLabel, modelOptionLabelWithRealName, modelOptionName, resolveModelRequestConfig, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/features/settings/stores/use-config-store";
+import { modelOptionLabel, modelOptionLabelWithRealName, modelOptionName, resolveModelRequestConfig, selectableModelsByCapability, sortModelOptions, type AiConfig, type ModelCapability } from "@/features/settings/stores/use-config-store";
 
 import { MODEL_ICON_MONOCHROME_KEYS, isMonochromeModelIcon, resolveModelIcon, resolveModelIconByKey } from "./model-icon";
 
@@ -107,7 +107,7 @@ function createModelOptions(config: AiConfig, capability: ModelCapability | unde
     const retainedLocalValue = config.channelMode === "local" && !capability ? [value] : [];
     const configured = selectableModelsByCapability(config, capability);
     const filtered = modelOptions ? configured.filter((model) => modelOptions.includes(model)) : configured;
-    return Array.from(new Set([...retainedLocalValue, ...filtered].filter(isFilledText)));
+    return sortModelOptions([...retainedLocalValue, ...filtered].filter(isFilledText), config);
 }
 
 function isFilledText(value: string | undefined): value is string {

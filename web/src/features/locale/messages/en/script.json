@@ -927,5 +927,11 @@
     "templateNarrativeAdvertisement": "Advertising story · Connect audience needs, a situational twist, and brand value.",
     "templateNarrativeMusicVideo": "Music video · Build a narrative through musical sections, emotional progression, and visual motifs.",
     "templateNarrativePromotion": "Promotional video · Structure the message around key information, supporting facts, and a call to action.",
-    "templateNarrativeStoryShort": "Short film · Build a story around a character goal, central conflict, and emotional resolution."
+    "templateNarrativeStoryShort": "Short film · Build a story around a character goal, central conflict, and emotional resolution.",
+    "episodeTargetDurationSecondsLabel": "Target episode duration (s)",
+    "episodeDurationPreset1Min": "1 min",
+    "episodeDurationPreset2Min": "2 min",
+    "episodeDurationPreset3Min": "3 min",
+    "episodeDurationBudgetHint": "Up to 180s (3 min) recommended: AI uses this budget to size scenes and dialogue, and downstream shot breakdown estimates shot counts from it.",
+    "secondsUnit": "s"
 }

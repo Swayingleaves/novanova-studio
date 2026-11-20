@@ -75,7 +75,7 @@ OAuth2 第三方登录（Google、linux.do）的启用状态与凭据从 `.env` 
 | 表 | 核心字段与用途 | 查询索引 |
 | --- | --- | --- |
 | `shared_works` | `share_code` 为公开标识；`user_id`、`team_id` 保存发布归属；`source_type`、`source_id` 只用于内部溯源；`snapshot_data` 保存公开字段白名单快照；`work_type` 区分图片、视频、画布；`request_id` 防重复投稿 | 已发布作品按 `published_at` 倒序的部分索引；空间、作者、创建时间索引；空间、状态、创建时间审核队列索引；空间、作者、请求标识唯一约束 |
-| `shared_work_media` | 分享内 `asset_id` 与 `share_code` 联合主键；`storage_id`、`object_key`、`file_bytes` 记录独立私有副本；`cleaned_at` 标记已交给异步删除队列 | 存储配置、对象键唯一约束 |
+| `shared_work_media` | 分享内 `asset_id` 与 `share_code` 联合主键；`storage_id`、`object_key`、`file_bytes` 记录独立私有副本；`cover_object_key`、`cover_mime_type` 记录视频副本封面，非视频或截帧失败时为空（企业版 V95，社区版 V98）；`cleaned_at` 标记已交给异步删除队列 | 存储配置、对象键唯一约束 |
 | `shared_work_reviews` | 记录操作人、前后状态、原因、操作时间，审核状态变更与记录写入在同一事务 | 分享标识、操作序号索引 |
 | `shared_work_copy_jobs` | 在上传前持久化目标媒体清单，复制全部完成后原子保存个人画布并标记完成，失败或进程中断后按清单回收 | 未完成任务更新时间部分索引 |
 | `fantastic_work_likes` | `target_key` 为首页内容标识（`official:精选内容ID` 或 `user:分享标识`），`user_id` 与内容组成联合主键，保证每人每内容仅一条点赞记录，取消点赞直接删除该行 | 内容标识、用户联合主键，按内容统计点赞总数 |
@@ -406,7 +406,7 @@ flowchart TB
 | `id` | `VARCHAR(64)` | 主 Agent 请求 ID，主键。 |
 | `user_id` | `BIGINT` | 请求所属用户 ID，关联 `users.id`。 |
 | `session_id` | `VARCHAR(64)` | 关联 Agent 会话 ID，关联 `agent_session.id`。 |
-| `entry_source` | `VARCHAR(20)` | 入口来源：`imagePage`、`videoPage`、`canvas`。 |
+| `entry_source` | `VARCHAR(20)` | 入口来源：`imagePage`、`videoPage`、`canvas`、`drama`。`drama` 是智能短剧工作台，与图片视频画布分开排队。 |
 | `request_data` | `JSONB` | 完整 `AgentChatRequest` 请求快照。 |
 | `status` | `VARCHAR(20)` | `queued`、`running`、`success`、`failed`、`canceled`、`interrupted`。 |
 | `plan_id` | `VARCHAR(64)` | 主 Agent 创建后的创作计划 ID，可为空。 |
@@ -632,7 +632,7 @@ CREATE TABLE creation_agent_request (
     completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT ck_creation_agent_request_entry_source CHECK (entry_source IN ('imagePage', 'videoPage', 'canvas')),
+    CONSTRAINT ck_creation_agent_request_entry_source CHECK (entry_source IN ('imagePage', 'videoPage', 'canvas', 'drama')),
     CONSTRAINT ck_creation_agent_request_status CHECK (status IN ('queued', 'running', 'success', 'failed', 'canceled', 'interrupted'))
 );
 
@@ -640,7 +640,7 @@ COMMENT ON TABLE creation_agent_request IS '统一主Agent请求队列持久化�
 COMMENT ON COLUMN creation_agent_request.id IS '主Agent请求ID';
 COMMENT ON COLUMN creation_agent_request.user_id IS '请求所属用户ID';
 COMMENT ON COLUMN creation_agent_request.session_id IS '关联Agent会话ID';
-COMMENT ON COLUMN creation_agent_request.entry_source IS '入口来源：imagePage、videoPage、canvas';
+COMMENT ON COLUMN creation_agent_request.entry_source IS '入口来源：imagePage、videoPage、canvas、drama';
 COMMENT ON COLUMN creation_agent_request.request_data IS '完整AgentChatRequest请求快照JSON';
 COMMENT ON COLUMN creation_agent_request.status IS '请求状态：queued排队、running运行、success成功、failed失败、canceled取消、interrupted重启中断';
 COMMENT ON COLUMN creation_agent_request.plan_id IS '主Agent创建后的创作计划ID';
@@ -661,6 +661,18 @@ CREATE INDEX idx_creation_agent_request_user_entry_created
 CREATE INDEX idx_creation_agent_request_session_created
     ON creation_agent_request(session_id, created_at DESC);
 ```
+
+### `drama_project` / `drama_stage_version` / `drama_client_request`
+
+智能短剧原型独立保存项目和阶段版本，不写入剧本或漫剧项目。对话和运行请求仍复用 `agent_session`、`creation_agent_request`。
+
+| 表 | 关键字段 | 说明 |
+| --- | --- | --- |
+| `drama_project` | `team_id`、`user_id`、`idea_text`、`story_text`、`text_model`、`session_id`、`current_stage`、`status`、`revision`、`active_request_id`、`duration_seconds`、`text_credits` | 当前用户和空间的单集项目。`revision` 用于确认和编辑，`text_credits` 是已发生的文本积分。 |
+| `drama_stage_version` | `stage`、`version_number`、`baseline_json`、`content_json`、`confirmation_status`、`freshness`、`source_request_id` | 某一阶段的一个版本。确认记录留在原版本上；上游改动后，下游最新版本的 `freshness` 为 `needs_update`。 |
+| `drama_client_request` | `client_request_id`、`operation`、`result_data` | 创建和确认的稳定请求号，重复提交返回同一结果。 |
+
+阶段取值：`plan`、`script`、`cast`、`storyboard`、`shot`、`audio`、`preview`。项目状态：`active`、`completed`。版本确认：`pending`、`confirmed`。新鲜度：`current`、`needs_update`。
 
 ### `api_logs`
 
@@ -1098,3 +1110,21 @@ V61 按空间、用户、原配置和对象键精确关联已有媒体及原文�
 新增单行表 `platform_payment_settings`（`id` 固定为 1）。后台入口为「支付配置」，支付宝和微信支付分成两个页签。接口为 `GET /api/v1/admin/payment/getPaymentSettings`、`POST /api/v1/admin/payment/updateAlipaySettings` 和 `POST /api/v1/admin/payment/updateWechatSettings`，仅平台空间的全局管理员可读写。服务端启动后读取该行，并每 5 秒刷新；保存后当前实例立即生效。这些配置不再通过环境变量或证书目录注入。
 
 支付宝保存应用标识、应用私钥、支付宝公钥、网关、异步通知地址和同步回跳地址。微信 Native 支付保存应用标识、商户号、商户 API 证书序列号、商户私钥 PEM、32 字节 APIv3 密钥、微信支付公钥 PEM、公钥 ID 和通知地址。应用私钥、商户私钥和 APIv3 密钥使用 `APP_SECRET_KEY` 加密；支付宝公钥和微信支付公钥按原文保存，但接口都不返回密钥正文，只返回是否已设置。保存时对应密钥留空表示不修改。启用某一渠道时，该渠道的必填项必须已经齐全。更换应用密钥后，已加密的密钥无法解密，需要重新填写。未启用微信支付时，后台不扫描微信待支付订单。
+
+## 平台导航菜单配置（企业版 V102、社区版 V103）
+
+| 表 | 关键字段及约束 |
+| --- | --- |
+| `platform_navigation_menu_configs` | `menu_key`（最长 64，主键，对应前端可配置导航工具键）、`enabled`（布尔值，默认 `TRUE`，控制是否展示）、`sort_order`（非负整数，按提交顺序从 0 递增）、`created_at`/`updated_at`；索引 `(sort_order, menu_key)` |
+
+导航菜单配置用于控制应用主界面桌面端左侧导航栏和移动端导航抽屉中普通菜单项的展示开关与排列顺序（`admin/system` 保持固定对管理员在底部显示，不纳入隐藏开关）。公开查询走 `GET /api/v1/platform/listNavigationMenuConfigs`，未登录及全部团队空间均可读取，服务端将已保存配置与默认菜单清单合并并按最终顺序返回；平台管理员保存走 `POST /api/v1/admin/platform/saveNavigationMenuConfigs`，必须覆盖全部可配置菜单项，数组顺序即展示顺序。
+
+保存时在事务内使用咨询锁 `pg_advisory_xact_lock(hashtext('platform-navigation-menu-configs'))` 串行化后整表重建，任何校验或写入失败整批回滚。团队作用域一律拒绝写入，仅平台空间的全局管理员可修改。
+
+## 平台导出视频配置（企业版 V103、社区版 V104）
+
+| 表 | 关键字段及约束 |
+| --- | --- |
+| `platform_video_export_settings` | 单行表，`id` 固定为 1；`enabled`（布尔值，默认 `TRUE`，控制漫剧创作视觉分镜板中是否显示「导出视频」按钮并允许合成下载）、`created_at`/`updated_at` |
+
+后台入口为「配置与用户偏好 · 导出视频」。公开读取走 `GET /api/v1/platform/getVideoExportSettings`，未登录及全部团队空间均可读取，无记录时默认返回 `enabled = true`；平台管理员保存走 `POST /api/v1/admin/platform/saveVideoExportSettings`，仅平台空间的全局管理员可修改。开启时漫剧创作视觉分镜板页面顶部展示「导出视频」按钮，支持后台合成视频并下载；关闭时页面隐藏该按钮，且服务端拒绝创建分镜导出任务与下载分镜导出视频。

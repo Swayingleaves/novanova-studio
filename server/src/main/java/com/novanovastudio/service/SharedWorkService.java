@@ -261,6 +261,33 @@ public class SharedWorkService {
     }
 
     /**
+     * 补齐已提交视频缺失的分享封面，供上线后一次性补偿，也可在截帧失败后重试。
+     *
+     * @param limit 单次最多处理条数
+     * @return 扫描、补齐和失败数量
+     */
+    public Mono<SharedWorkDtos.CoverRefreshResult> refreshMissingCovers(int limit) {
+        int batch = Math.max(1, Math.min(limit, 20));
+        Mono<SharedWorkDtos.CoverRefreshResult> refresh = repository.missingVideoCovers(batch)
+                .concatMap(asset -> mediaService.refreshCover(asset)
+                        .map(done -> Map.entry(done, asset))
+                        .onErrorResume(error -> {
+                            log.error("补充分享视频封面失败：shareCode={}, assetId={}", asset.getString("shareCode"), asset.getString("assetId"), error);
+                            return Mono.just(Map.entry(false, asset));
+                        }))
+                .collectList()
+                .map(results -> new SharedWorkDtos.CoverRefreshResult(results.size(),
+                        (int) results.stream().filter(Map.Entry::getKey).count(),
+                        (int) results.stream().filter(entry -> !entry.getKey()).count()))
+                .contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
+        // 补封面要跨空间读取并写回媒体记录，只允许平台管理员执行，空间管理员不应动到其它空间的作品。
+        return currentUserProvider.currentUser()
+                .filter(user -> "admin".equals(user.role()))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, "仅平台管理员可以补齐分享封面")))
+                .then(refresh);
+    }
+
+    /**
      * 登记分享视频封面的删除，没有封面时直接完成。
      *
      * @param asset 待清理的分享媒体
@@ -374,30 +401,42 @@ public class SharedWorkService {
             // 官方作品直接使用精选表里的媒体地址，私有桶下必须按公开页用途重签。
             String mediaUrl = row.getString("mediaUrl") == null ? "" : row.getString("mediaUrl");
             String thumbnailUrl = row.getString("thumbnailUrl") == null ? "" : row.getString("thumbnailUrl");
+            // 图片精选大多没有单独配封面，直接对原图按卡片尺寸缩放；视频不能叠加图片处理参数，保持空由前端回退。
+            String cardCover = thumbnailUrl.isBlank() && "image".equals(row.getString("workType")) ? mediaUrl : thumbnailUrl;
             return Mono.zip(
                             mediaAccessService.signUrl(mediaUrl, MediaAccessService.Purpose.PUBLIC_PAGE),
-                            mediaAccessService.signUrl(thumbnailUrl, MediaAccessService.Purpose.PUBLIC_PAGE))
+                            mediaAccessService.signUrl(cardCover, MediaAccessService.Purpose.HOME_CARD))
                     .map(urls -> card(row, urls.getT1(), urls.getT2()));
         }
         return repository.media(row.getString("shareCode")).filter(asset -> "canvas".equals(row.getString("workType"))
                         ? asset.getString("mimeType").startsWith("image/") : asset.getString("mimeType").startsWith(row.getString("workType") + "/"))
                 .next().flatMap(asset -> mediaService.access(asset)
-                        .flatMap(access -> coverAccess(asset).map(cover -> card(row, access.url(), cover)))
+                        .flatMap(access -> cardThumbnail(asset).map(cover -> card(row, access.url(), cover)))
                         .defaultIfEmpty(card(row, "", "")))
                 .defaultIfEmpty(card(row, "", ""));
     }
 
     /**
-     * 签发视频分享副本的封面地址，没有封面时返回空串。
+     * 签发首页卡片缩略图地址。
+     * <p>
+     * 视频用分享时截取的 720 封面；图片与画布对原对象按卡片尺寸缩放；其余媒体没有缩略图。
      *
      * @param asset 分享媒体记录
-     * @return Mono&lt;String&gt; 封面地址
+     * @return Mono&lt;String&gt; 缩略图地址，没有可用缩略图时为空串
      */
-    private Mono<String> coverAccess(JSONObject asset) {
+    private Mono<String> cardThumbnail(JSONObject asset) {
         String coverObjectKey = asset.getString("coverObjectKey");
-        if (coverObjectKey == null || coverObjectKey.isBlank()) return Mono.just("");
-        return mediaAccessService.signObject(asset.getString("storageId"), coverObjectKey, "cover.jpg", "image/jpeg",
-                        MediaAccessService.Purpose.PUBLIC_PAGE, false)
+        if (coverObjectKey != null && !coverObjectKey.isBlank()) {
+            return mediaAccessService.signObject(asset.getString("storageId"), coverObjectKey, "cover.jpg", "image/jpeg",
+                            MediaAccessService.Purpose.PUBLIC_PAGE, false)
+                    .map(MediaAccessService.Access::url)
+                    .defaultIfEmpty("")
+                    .onErrorResume(error -> Mono.just(""));
+        }
+        String mimeType = asset.getString("mimeType");
+        if (mimeType == null || !mimeType.startsWith("image/")) return Mono.just("");
+        return mediaAccessService.signObject(asset.getString("storageId"), asset.getString("objectKey"),
+                        asset.getString("fileName"), mimeType, MediaAccessService.Purpose.HOME_CARD, false)
                 .map(MediaAccessService.Access::url)
                 .defaultIfEmpty("")
                 .onErrorResume(error -> Mono.just(""));

@@ -119,6 +119,9 @@ public class VideoCompositionTaskService {
     /** 私有存储桶读地址签发。 */
     private final MediaAccessService mediaAccessService;
 
+    /** 平台导出视频功能开关配置服务。 */
+    private final VideoExportSettingsService videoExportSettingsService;
+
     /** 未完成任务恢复订阅 */
     private Disposable recoveryDisposable;
 
@@ -208,7 +211,7 @@ public class VideoCompositionTaskService {
      */
     public Mono<VideoCompositionDtos.VideoCompositionTaskResponse> exportStoryboardVideo(
             VideoCompositionDtos.ExportStoryboardVideoRequest request) {
-        return currentUserProvider.currentUserId().flatMap(userId -> persistenceService.requireStorageWritable(userId).then(Mono.defer(() -> comicDramaRepository.getProject(userId, request.projectId())
+        return videoExportSettingsService.requireVideoExportEnabled().then(currentUserProvider.currentUserId().flatMap(userId -> persistenceService.requireStorageWritable(userId).then(Mono.defer(() -> comicDramaRepository.getProject(userId, request.projectId())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "漫剧项目不存在")))
                 .flatMap(project -> Mono.zip(comicDramaRepository.getSettings(request.projectId()),
                         comicDramaRepository.listShots(request.projectId(), null, null).collectList(),
@@ -233,7 +236,7 @@ public class VideoCompositionTaskService {
                     log.info("创建分镜导出任务: taskId={}, projectId={}, episodeId={}", task.getId(), request.projectId(), request.episodeId());
                     return cancellation.clearCancellation(task.getId()).then(repository.createTask(task))
                             .then(taskDispatcher.enqueue(task.getId())).then(taskResponse(task));
-                }))));
+                })))));
     }
 
     /**
@@ -254,7 +257,7 @@ public class VideoCompositionTaskService {
      * @return 成片媒体键
      */
     public Mono<String> getStoryboardExportStorageKey(String taskId) {
-        return currentUserProvider.currentUserId().flatMap(userId -> repository.getTask(userId, taskId)
+        return videoExportSettingsService.requireVideoExportEnabled().then(currentUserProvider.currentUserId().flatMap(userId -> repository.getTask(userId, taskId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "分镜导出任务不存在")))
                 .map(task -> {
                     if (!"storyboardExport".equals(task.getTaskType()) || !STATUS_SUCCEEDED.equals(task.getStatus())) {
@@ -263,7 +266,7 @@ public class VideoCompositionTaskService {
                     String key = parseJsonObject(task.getResultData()).getString("storageKey");
                     if (!StringUtils.hasText(key)) throw new BusinessException(ErrorCode.BUSINESS_ERROR, "分镜视频媒体不存在");
                     return key;
-                }));
+                })));
     }
 
     /**

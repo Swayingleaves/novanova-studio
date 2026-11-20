@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 
+import { WatermarkBadge } from "@/features/watermark/components/watermark-badge";
 import type { Asset } from "../stores/use-asset-store";
 
 type AssetCoverProps = {
@@ -15,7 +16,12 @@ export function AssetCover({ asset, className, children }: AssetCoverProps) {
     const [failed, setFailed] = useState(false);
     useEffect(() => setFailed(false), [asset.id, asset.updatedAt]);
     const image = asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "");
-    if (image) return <img src={image} alt={asset.title} className={className} />;
+    if (image) return (
+        <span className="relative block size-full">
+            <img src={image} alt={asset.title} className={className} />
+            <WatermarkBadge />
+        </span>
+    );
     if (asset.kind === "video" && asset.data.url && !failed) {
         return (
             <span className="relative block">

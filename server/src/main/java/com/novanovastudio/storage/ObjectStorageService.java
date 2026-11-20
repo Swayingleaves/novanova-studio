@@ -170,10 +170,11 @@ public class ObjectStorageService {
      * @param download 是否作为附件下载
      * @param expiresAt 到期时间
      * @param edge 缩放后的长边像素
+     * @param jpeg 是否同时把结果转成 JPEG
      * @return 缩放后或原图的临时只读地址
      */
-    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge) {
-        String thumbnail = providerAdapter(config).createThumbnailReadUrl(config, key, fileName, mimeType, download, expiresAt, edge);
+    public String createThumbnailReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt, int edge, boolean jpeg) {
+        String thumbnail = providerAdapter(config).createThumbnailReadUrl(config, key, fileName, mimeType, download, expiresAt, edge, jpeg);
         if (StringUtils.hasText(thumbnail)) {
             return thumbnail;
         }

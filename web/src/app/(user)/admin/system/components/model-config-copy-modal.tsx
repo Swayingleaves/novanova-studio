@@ -5,7 +5,7 @@ import { Copy, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { useTranslation } from "@/features/locale/use-translation";
-import { createModelCapabilityOptions, modelOptionLabelWithRealName } from "@/features/settings/stores/use-config-store";
+import { compareModelOptions, createModelCapabilityOptions, modelOptionLabelWithRealName } from "@/features/settings/stores/use-config-store";
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
 import type { ServerModelConfig } from "@/services/api/server";
 
@@ -47,7 +47,10 @@ export function ModelConfigCopyModal({ target, configs, config, onCancel, onCopy
     const { modal } = App.useApp();
     const [query, setQuery] = useState("");
 
-    const sources = useMemo(() => copyableCustomSourceModels(configs, target), [configs, target]);
+    const sources = useMemo(
+        () => [...copyableCustomSourceModels(configs, target)].sort((first, second) => compareModelOptions(config, `${first.channelId}::${first.modelName}`, `${second.channelId}::${second.modelName}`)),
+        [config, configs, target],
+    );
     const modeOptions = useMemo(() => createModelCapabilityOptions(translate)[target.modelType], [translate.locale, target.modelType]);
     const modeLabel = (mode: CustomModelMode) => modeOptions.find((option) => option.value === mode)?.label || mode;
     const fieldLabels = customConfigFieldLabels(translate);

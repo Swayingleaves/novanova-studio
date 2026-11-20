@@ -1,5 +1,6 @@
 "use client";
 import { ShareResultButton } from "@/features/shared-work/components/share-result-button";
+import { WatermarkBadge } from "@/features/watermark/components/watermark-badge";
 import { useGenerationShareSources } from "@/features/shared-work/use-generation-share-sources";
 import { useInsufficientCreditsPrompt } from "@/features/credits/use-insufficient-credits-prompt";
 import { showInsufficientCredits } from "@/features/credits/insufficient-credits";
@@ -872,8 +873,9 @@ export default function ImagePage() {
         if (conversation.rounds.length) return;
         setConversationHistory({ id: conversation.id, messages: [], loading: true, error: "" });
         try {
-            const messages = await getAgentSessionHistory(conversation.id);
+            const historyMessages = await getAgentSessionHistory(conversation.id);
             if (requestVersion !== historyRequestVersion.current || activeIdRef.current !== conversation.id) return;
+            const messages: ChatMessageItem[] = historyMessages.map(({ id, role, text }) => ({ id, role, text }));
             setConversationHistory({ id: conversation.id, messages, loading: false, error: "" });
         } catch (error) {
             if (requestVersion !== historyRequestVersion.current || activeIdRef.current !== conversation.id) return;
@@ -1870,6 +1872,7 @@ function ResultCard({
                     <Image src={displaySrc} fallback={MEDIA_FALLBACK_IMAGE} alt={translate("image.result", { value0: index + 1 })} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} onError={media.onError} />
                 )}
                 <div className="absolute left-2 top-2 rounded-full bg-black/60 px-2.5 py-0.5 text-xs font-medium text-white">#{index + 1}</div>
+                <WatermarkBadge />
             </div>
             <div className="space-y-2.5 border-t border-[var(--studio-line)] px-3 py-2.5">
                 <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-[var(--studio-muted)]">

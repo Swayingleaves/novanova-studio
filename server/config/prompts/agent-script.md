@@ -89,8 +89,8 @@
 - `outline`：`OutlineDraft`，包含 `sections` 和 `events`。
 - `characters`：`CharacterDraft`，包含 `characters` 和 `relations`。
 - `world`：`WorldDraft`，包含 `worldSetting`、`worldItems` 和 `locations`。
-- `episodes`：`EpisodePlanDraft`，包含 `episodes`。
-- `episode`：完整 `EpisodeDetail`，包含 `episode` 和 `scenes`。场次数量按指令给出的单场秒数区间换算，每场都要有明确的场景目标与至少一次情节推进，不要为了凑数量稀释内容。
+- `episodes`：`EpisodePlanDraft`，包含 `episodes`。按指令给出的单集目标时长规划每集事件容量，并将该秒数填入 `targetDurationSeconds`，避免单集塞入超出时长的支线情节。
+- `episode`：完整 `EpisodeDetail`，包含 `episode` 和 `scenes`。场次数量与全集总字数必须严格服从指令给出的单场秒数区间与篇幅上限：每场都要有明确的场景目标与至少一次情节推进，只写可直接拍成画面的动作与精炼台词，不要为了凑数量稀释内容，也不要堆砌冗长文学描写导致实际表演时长超标。
 - `scene`：完整 `Scene`。
 - `block`：完整 `ScriptBlock`。
 

@@ -31,5 +31,9 @@ public enum PromptTemplateType {
     /** 对话和规划 Agent 共用的用户动作标识清单 */
     AGENT_USER_ACTIONS,
     /** 分镜资产图片提示词模板 */
-    IMAGE_STORYBOARD_ASSET
+    IMAGE_STORYBOARD_ASSET,
+    /** 智能短剧导演Agent模板 */
+    AGENT_DRAMA,
+    /** 智能短剧提示词Agent模板 */
+    AGENT_DRAMA_MEDIA
 }

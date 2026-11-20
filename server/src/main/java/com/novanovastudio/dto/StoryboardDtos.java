@@ -2,6 +2,7 @@ package com.novanovastudio.dto;
 
 import com.alibaba.fastjson2.annotation.JSONField;
 import com.novanovastudio.common.CreditAmountWriter;
+import io.agentscope.core.tool.ToolParam;
 import java.math.BigDecimal;
 
 import jakarta.validation.Valid;
@@ -147,9 +148,16 @@ public final class StoryboardDtos {
      * @param cameraMovement String 运镜
      * @param assetReferenceKeys List<String> 关联资产的稳定引用键
      */
-    public record GeneratedStoryboardShot(Integer shotNumber, Integer durationSeconds, String visualDescription,
-                                          String shotSize, String lightingAtmosphere, String dialogueVoiceover,
-                                          String soundEffect, String cameraMovement, List<String> assetReferenceKeys) {
+    public record GeneratedStoryboardShot(
+            @ToolParam(name = "shotNumber", required = true, description = "从1递增的连续镜号正整数") Integer shotNumber,
+            @ToolParam(name = "durationSeconds", required = true, description = "单镜头秒数正整数") Integer durationSeconds,
+            @ToolParam(name = "visualDescription", required = true, description = "具体可拍的中文画面描述") String visualDescription,
+            @ToolParam(name = "shotSize", required = true, description = "标准景别：大特写、特写、近景、头肩景、中景、中远景、全景、远景、大远景、大全景") String shotSize,
+            @ToolParam(name = "lightingAtmosphere", required = false, description = "光影氛围") String lightingAtmosphere,
+            @ToolParam(name = "dialogueVoiceover", required = false, description = "对白或旁白") String dialogueVoiceover,
+            @ToolParam(name = "soundEffect", required = false, description = "环境声或动作音效") String soundEffect,
+            @ToolParam(name = "cameraMovement", required = false, description = "运镜方式") String cameraMovement,
+            @ToolParam(name = "assetReferenceKeys", required = true, description = "当前镜头出现的资产referenceKey数组，无关联资产时传空数组[]") List<String> assetReferenceKeys) {
     }
 
     /**
@@ -160,7 +168,11 @@ public final class StoryboardDtos {
      * @param name String 资产名称
      * @param description String 资产描述
      */
-    public record GeneratedStoryboardAsset(String kind, String referenceKey, String name, String description) {
+    public record GeneratedStoryboardAsset(
+            @ToolParam(name = "kind", required = true, description = "资产类别：character、scene、prop") String kind,
+            @ToolParam(name = "referenceKey", required = true, description = "当前结果内唯一的稳定引用键") String referenceKey,
+            @ToolParam(name = "name", required = true, description = "中文资产名称") String name,
+            @ToolParam(name = "description", required = false, description = "中文外观或环境特征描述") String description) {
     }
 
     /**
@@ -169,7 +181,9 @@ public final class StoryboardDtos {
      * @param shots List<GeneratedStoryboardShot> 镜头列表
      * @param assets List<GeneratedStoryboardAsset> 资产列表
      */
-    public record GeneratedStoryboardResult(List<GeneratedStoryboardShot> shots, List<GeneratedStoryboardAsset> assets) {
+    public record GeneratedStoryboardResult(
+            @ToolParam(name = "shots", required = true, description = "非空分镜镜头数组，至少包含1个有效镜头") List<GeneratedStoryboardShot> shots,
+            @ToolParam(name = "assets", required = true, description = "提取的角色、场景、道具资产数组，无资产时传空数组[]") List<GeneratedStoryboardAsset> assets) {
     }
 
     /**
@@ -178,7 +192,9 @@ public final class StoryboardDtos {
      * @param shotId String 输入镜头稳定标识
      * @param finalPrompt String 最终中文提示词
      */
-    public record StoryboardPrompt(String shotId, String finalPrompt) {
+    public record StoryboardPrompt(
+            @ToolParam(name = "shotId", required = true, description = "与输入shots[].id严格一致的镜头标识") String shotId,
+            @ToolParam(name = "finalPrompt", required = true, description = "按固定八段格式生成的中文最终提示词") String finalPrompt) {
     }
 
     /**
@@ -186,7 +202,8 @@ public final class StoryboardDtos {
      *
      * @param prompts List<StoryboardPrompt> 镜头提示词映射
      */
-    public record PromptCompositionResult(List<StoryboardPrompt> prompts) {
+    public record PromptCompositionResult(
+            @ToolParam(name = "prompts", required = true, description = "与输入镜头数量一致的最终提示词数组") List<StoryboardPrompt> prompts) {
     }
 
     /**

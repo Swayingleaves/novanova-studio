@@ -357,7 +357,13 @@ public final class ScriptDtos {
             @NotBlank @Size(max = 64) String projectId, @Min(0) long expectedRevision,
             @NotBlank @Size(max = 40) String actionType, @NotBlank @Size(max = 32) String targetType,
             @Size(max = 64) String targetId, @Size(max = 12000) String instruction,
-            @NotBlank @Size(max = 256) String model) {
+            @NotBlank @Size(max = 256) String model,
+            @Min(value = 30, message = "单集时长不能少于30秒") @Max(value = 600, message = "单集时长不能超过600秒")
+            Integer episodeDurationSeconds) {
+        public GenerateDraftRequest(String projectId, long expectedRevision, String actionType, String targetType,
+                                    String targetId, String instruction, String model) {
+            this(projectId, expectedRevision, actionType, targetType, targetId, instruction, model, null);
+        }
     }
 
     /** Agent返回的通用结构化草稿。 */

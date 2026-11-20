@@ -22,8 +22,11 @@ public final class AiTaskSources {
     /** 分镜来源 */
     public static final String STORYBOARD = "storyboard";
 
+    /** 智能短剧来源 */
+    public static final String DRAMA = "drama";
+
     /** 支持记录的生成来源 */
-    private static final Set<String> SUPPORTED_SOURCES = Set.of(IMAGE_PAGE, VIDEO_PAGE, CANVAS, STORYBOARD);
+    private static final Set<String> SUPPORTED_SOURCES = Set.of(IMAGE_PAGE, VIDEO_PAGE, CANVAS, STORYBOARD, DRAMA);
 
     /**
      * 禁止实例化。

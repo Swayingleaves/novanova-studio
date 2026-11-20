@@ -155,6 +155,28 @@ public class AgentEventEmitter {
     }
 
     /**
+     * 推送事件给指定用户，调用方已知团队空间时跳过归属查询。
+     * <p>逐字流式会高频发事件，这条路径不再每条事件查一次库。</p>
+     *
+     * @param userId Long 用户ID
+     * @param teamId Long 团队空间ID
+     * @param event AgentEvent 事件
+     */
+    public void emit(Long userId, Long teamId, AgentEvent event) {
+        AgentEvent enriched = enrichRequestId(event);
+        if (redisTemplate == null) {
+            deliver("0:" + userId, enriched);
+            return;
+        }
+        redisTemplate.convertAndSend(EVENT_CHANNEL_PREFIX + teamId + ":" + userId, JSON.toJSONString(enriched))
+                .subscribe(
+                        ignored -> {
+                        },
+                        exception -> log.error("发布主Agent Redis事件失败: userId={}", userId, exception)
+                );
+    }
+
+    /**
      * 绑定正在执行的会话和本次主Agent请求。
      *
      * @param sessionId String Agent会话ID

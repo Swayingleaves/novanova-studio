@@ -6,7 +6,7 @@ import { Button, Checkbox, Input, Modal, Radio } from "antd";
 
 import { useTranslation } from "@/features/locale/use-translation";
 import { ModelIcon } from "@/features/settings/components/model-picker";
-import type { AiConfig } from "@/features/settings/stores/use-config-store";
+import { compareModelNames, type AiConfig } from "@/features/settings/stores/use-config-store";
 import { cn } from "@/shared/lib/utils";
 
 /** 一个渠道下的可选模型，供模型选择弹窗渲染。 */
@@ -36,15 +36,16 @@ export function ModelSelectModal({ config, title, groups, value, multiple = fals
     const [query, setQuery] = useState("");
     const [activeChannelId, setActiveChannelId] = useState(() => groups.find((group) => group.models.some((model) => value.includes(model.value)))?.channelId ?? groups[0]?.channelId ?? "");
     const keyword = query.trim().toLowerCase();
-    const matchedModels = useMemo(
-        () =>
-            groups.flatMap((group) =>
-                group.models
-                    .filter((model) => !keyword || group.channelName.toLowerCase().includes(keyword) || model.label.toLowerCase().includes(keyword))
-                    .map((model) => ({ ...model, channelId: group.channelId, channelName: group.channelName })),
-            ),
-        [groups, keyword],
-    );
+    const matchedModels = useMemo(() => {
+        const items = groups.flatMap((group) =>
+            group.models
+                .filter((model) => !keyword || group.channelName.toLowerCase().includes(keyword) || model.label.toLowerCase().includes(keyword))
+                .map((model) => ({ ...model, channelId: group.channelId, channelName: group.channelName })),
+        );
+        if (!keyword) return items;
+        // 跨渠道搜索时按模型展示名与渠道名聚合，避免同名模型分散在各渠道区块。
+        return items.sort((first, second) => compareModelNames(first.label, second.label) || compareModelNames(first.channelName, second.channelName) || compareModelNames(first.value, second.value));
+    }, [groups, keyword]);
     const visibleModels = keyword ? matchedModels : matchedModels.filter((model) => model.channelId === activeChannelId);
     const isSelected = (model: string) => selected.includes(model);
     const selectedCount = (channelId: string) => groups.find((group) => group.channelId === channelId)?.models.filter((model) => isSelected(model.value)).length || 0;

@@ -3,11 +3,12 @@
 import type { CreditAmount } from "@/shared/lib/credit-amounts";
 
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Empty, InputNumber, Select, Space, Tag } from "antd";
 import { RefreshCw } from "lucide-react";
 
+import { compareModelNames } from "@/features/settings/stores/use-config-store";
 import { getEpisodeBodiesPricing, saveEpisodeBodiesPricing } from "@/services/api/script";
 import type { EpisodeBodiesModelPricing } from "@/features/script/types";
 
@@ -18,7 +19,10 @@ export function EpisodeBodiesPricingManagement() {
     const [modelConfigId, setModelConfigId] = useState("");
     const [credits, setCredits] = useState<CreditAmount>(0);
     const [saving, setSaving] = useState(false);
-    const models = query.data || [];
+    const models = useMemo(
+        () => [...(query.data || [])].sort((first, second) => compareModelNames(first.displayName, second.displayName) || compareModelNames(first.model, second.model)),
+        [query.data],
+    );
     const current: EpisodeBodiesModelPricing | undefined = models.find((item) => item.modelConfigId === modelConfigId);
     // 未配置的模型 revision 为 0，服务端据此走新增分支；保存成功后会拿到新 revision。
     const configured = (current?.revision ?? 0) > 0;

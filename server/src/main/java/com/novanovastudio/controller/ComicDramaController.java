@@ -201,7 +201,7 @@ public class ComicDramaController {
         return execute("生成漫剧镜头草稿", httpRequest, request, service.generateShotDraft(request));
     }
 
-    /** 确认镜头草稿并追加正式镜头。 */
+    /** 确认镜头草稿并覆盖替换对应范围的正式镜头。 */
     @PostMapping("/confirmShotDraft")
     public Mono<ApiResponse<ComicDramaDtos.MutationResult>> confirmShotDraft(
             @Valid @RequestBody ComicDramaDtos.ConfirmShotDraftRequest request, ServerHttpRequest httpRequest) {

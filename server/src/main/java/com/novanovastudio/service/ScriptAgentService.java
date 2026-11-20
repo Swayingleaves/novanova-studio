@@ -170,12 +170,17 @@ public class ScriptAgentService {
         JSONObject sourceData = scriptService.targetSnapshot(snapshot, targetType, targetId);
         Map<String, Object> context = adaptationContext(request, snapshot, facts);
         validateContextSize(context, targetType);
+        int episodeSeconds = ScriptDurationBudget.clampEpisodeSeconds(request.settings().episodeDurationSeconds());
+        String durationBudget = "episodes".equals(targetType)
+                ? ScriptDurationBudget.episodePlanInstruction(episodeSeconds)
+                : "episode".equals(targetType) ? ScriptDurationBudget.episodeBodyInstruction(episodeSeconds) : "";
         String instruction = "根据confirmedFacts中的已确认事实改编。形式=" + request.settings().format()
                 + "；目标集数=" + request.settings().episodeCount()
-                + "；单集秒数=" + request.settings().episodeDurationSeconds()
+                + "；单集秒数=" + episodeSeconds
                 + "；节奏=" + request.settings().pacing()
                 + "；改编程度=" + request.settings().adaptationLevel()
-                + "。不得把推测当作原文事实；正文块origin填original表示来自原著事实，填adapted表示AI新增的情节或对白；"
+                + "。" + durationBudget
+                + "不得把推测当作原文事实；正文块origin填original表示来自原著事实，填adapted表示AI新增的情节或对白；"
                 + "正文内容里只写剧本本身，不要写【改编创作】之类的标记。"
                 + "只生成当前阶段的结构化草稿，不改动当前项目中非目标内容。"
                 + ("episode".equals(targetType)
@@ -186,10 +191,12 @@ public class ScriptAgentService {
                 + (Set.of("characters", "world").contains(targetType)
                         ? "证据少于3条的次要条目只填写名称、身份与简介，其余设定字段留空，不得编造。" : "");
         ScriptDtos.GenerateDraftRequest draftRequest = new ScriptDtos.GenerateDraftRequest(request.projectId(),
-                request.expectedRevision(), actionType, targetType, targetId, instruction, request.model());
+                request.expectedRevision(), actionType, targetType, targetId, instruction, request.model(), episodeSeconds);
         return currentUserProvider.currentUserId().flatMap(userId -> modelFactory.resolveTextModel(request.model())
                 .flatMap(model -> executeChargedOperation(userId, model.ownerTeamId(), prepaid ? BigDecimal.ZERO : model.creditCost(), "小说改编草稿生成", operationId ->
                         callDraftAgent(userId, operationId, model, draftRequest, context)
+                                .doOnNext(generated -> ScriptDurationBudget.applyEpisodeDuration(
+                                        generated == null ? null : generated.draftData(), targetType, episodeSeconds, true))
                                 .flatMap(generated -> validateGeneratedDraft(generated, actionType, targetType, targetId, snapshot))
                                 .flatMap(data -> {
                                     Mono<ScriptDtos.AiDraft> save = scriptService.saveAiDraft(userId,
@@ -280,17 +287,54 @@ public class ScriptAgentService {
                     JSONObject sourceData = scriptService.targetSnapshot(snapshot, request.targetType(), request.targetId());
                     Object context = buildContext(snapshot, request.targetType(), request.targetId());
                     validateContextSize(context, request.targetType());
+                    ScriptDtos.EpisodeSummary targetEpisode = "episode".equals(request.targetType())
+                            ? findTargetEpisode(snapshot, "episode", request.targetId()).episode() : null;
+                    int episodeSeconds = ScriptDurationBudget.resolveEpisodeSeconds(
+                            request.episodeDurationSeconds(), targetEpisode, snapshot.project().overview());
+                    boolean forceDuration = request.episodeDurationSeconds() != null && request.episodeDurationSeconds() > 0;
+                    ScriptDtos.GenerateDraftRequest effectiveRequest = withDurationBudgetInstruction(
+                            request, episodeSeconds);
                     return modelFactory.resolveTextModel(request.model())
                             .flatMap(model -> pricingService.requireCredits(model.modelConfigId(), request.actionType())
                                     .flatMap(credits -> executeChargedOperation(
                                             userId, model.ownerTeamId(), credits, "剧本AI草稿生成", operationId -> callDraftAgent(
-                                                    userId, operationId, model, request, context)
+                                                    userId, operationId, model, effectiveRequest, context)
+                                                    .doOnNext(generated -> {
+                                                        if (Set.of("episodePlan", "episodeDraft").contains(request.actionType())) {
+                                                            ScriptDurationBudget.applyEpisodeDuration(
+                                                                    generated == null ? null : generated.draftData(),
+                                                                    request.targetType(), episodeSeconds, forceDuration);
+                                                        }
+                                                    })
                                                     .flatMap(generated -> validateGeneratedDraft(generated, request.actionType(),
                                                             request.targetType(), request.targetId(), snapshot))
                                                     .flatMap(draftData -> scriptService.saveAiDraft(userId, request.projectId(),
                                                             request.expectedRevision(), request.actionType(), request.targetType(), request.targetId(),
-                                                            request.instruction(), model.modelValue(), credits, sourceData, draftData)))));
+                                                            effectiveRequest.instruction(), model.modelValue(), credits, sourceData, draftData)))));
                 }));
+    }
+
+    /**
+     * 为分集规划与单集正文动作追加单集时长与场次篇幅预算说明。
+     *
+     * @param request 原始草稿生成请求
+     * @param episodeSeconds 本次采用的单集目标秒数
+     * @return 追加了时长预算的草稿请求
+     */
+    private ScriptDtos.GenerateDraftRequest withDurationBudgetInstruction(
+            ScriptDtos.GenerateDraftRequest request, int episodeSeconds) {
+        String budget = switch (request.actionType()) {
+            case "episodePlan" -> ScriptDurationBudget.episodePlanInstruction(episodeSeconds);
+            case "episodeDraft" -> ScriptDurationBudget.episodeBodyInstruction(episodeSeconds);
+            default -> "";
+        };
+        if (budget.isEmpty()) {
+            return request;
+        }
+        String userInstruction = request.instruction() == null ? "" : request.instruction().trim();
+        String merged = userInstruction.isEmpty() ? budget : budget + "\n用户补充要求：" + userInstruction;
+        return new ScriptDtos.GenerateDraftRequest(request.projectId(), request.expectedRevision(),
+                request.actionType(), request.targetType(), request.targetId(), merged, request.model(), episodeSeconds);
     }
 
     /**

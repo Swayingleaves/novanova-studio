@@ -61,9 +61,9 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     },
 ];
 
-/** 侧栏在 `/canvas/{id}` 详情页整块隐藏，与 `app-shell.tsx` 的 hideSidebar 保持同一规则。 */
+/** 侧栏在画布详情和短剧工作台整块隐藏，与 `app-shell.tsx` 使用同一函数。 */
 export function hidesSidebar(pathname: string): boolean {
-    return /^\/canvas\/[^/]+/.test(pathname);
+    return /^\/canvas\/[^/]+/.test(pathname) || /^\/drama\/[^/]+/.test(pathname);
 }
 
 /** 引导只在桌面端出现，移动端侧栏是 display:none，无法定位。 */

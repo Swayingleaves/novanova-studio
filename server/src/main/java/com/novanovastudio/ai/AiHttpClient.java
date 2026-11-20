@@ -85,7 +85,7 @@ public class AiHttpClient {
             return ensureProviderRequestAccepted(normalizedMethod).then(callBlocking(() -> {
             String url = buildAiUrl(channel.baseUrl(), path);
             String jsonBody = "POST".equals(normalizedMethod) ? AiJsonUtils.toJson(payload) : "";
-            log.info("AI请求: {} {} body={}", normalizedMethod, url, jsonBody.length() > 2000 ? jsonBody.substring(0, 2000) + "..." : jsonBody);
+            log.info("AI请求: {} {} body={}", normalizedMethod, url, jsonBody.length() > 10000 ? jsonBody.substring(0, 10000) + "..." : jsonBody);
             HttpRequest.Builder builder = baseBearerRequest(channel, path).header("Content-Type", "application/json");
             applyRequestMethod(builder, normalizedMethod, jsonBody);
             HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());

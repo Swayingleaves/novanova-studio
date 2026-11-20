@@ -31,6 +31,47 @@ public class CreationAgentRequestRepository {
      * @param request CreationAgentRequest 请求实体
      * @return Mono<Void> 保存完成信号
      */
+    /**
+     * 回写请求快照。短剧在扣费前写入模型配置，中断退款时读取。
+     *
+     * @param requestId 请求ID
+     * @param requestData 快照JSON
+     * @return 完成信号
+     */
+    /**
+     * 标记短剧请求已退款，重复调用只有第一次返回true。
+     *
+     * @param requestId 请求ID
+     * @return 是否第一次标记
+     */
+    public Mono<Boolean> markDramaRefunded(String requestId) {
+        return databaseClient.sql("""
+                UPDATE creation_agent_request
+                SET request_data = jsonb_set(COALESCE(request_data, '{}'::jsonb), '{refunded}', 'true'::jsonb, true),
+                    updated_at = NOW()
+                WHERE id = :requestId AND COALESCE(request_data->>'refunded', '') <> 'true'
+                """)
+                .bind("requestId", requestId)
+                .fetch().rowsUpdated().map(count -> count > 0);
+    }
+
+    /**
+     * 回写请求快照。短剧在扣费前写入模型配置，中断退款时读取。
+     *
+     * @param requestId 请求ID
+     * @param requestData 快照JSON
+     * @return 完成信号
+     */
+    public Mono<Void> saveRequestData(String requestId, String requestData) {
+        return databaseClient.sql("""
+                UPDATE creation_agent_request SET request_data = :requestData::jsonb, updated_at = NOW()
+                WHERE id = :requestId
+                """)
+                .bind("requestId", requestId)
+                .bind("requestData", text(requestData))
+                .then();
+    }
+
     public Mono<Void> create(CreationAgentRequest request) {
         return databaseClient.sql("""
                 INSERT INTO creation_agent_request (

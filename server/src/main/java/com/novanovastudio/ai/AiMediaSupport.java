@@ -254,7 +254,8 @@ public class AiMediaSupport {
                 .onErrorResume(error -> {
                     log.error("AI生成媒体转存对象存储失败，回退登记原始链接: userId={}, kind={}, sourceUrl={}",
                             userId, kind, sanitizeMediaUrlForLog(trimmedUrl), error);
-                    return registerGeneratedMediaUrl(userId, kind, trimmedUrl, mimeType, width, height, durationMs);
+                    // 下载已经连不上，不再对同一个地址读响应头，避免任务多停一轮连接超时。
+                    return registerRemoteMedia(userId, kind, trimmedUrl, mimeType, null, width, height, durationMs);
                 });
     }
 
@@ -278,10 +279,15 @@ public class AiMediaSupport {
         }
         String trimmedUrl = sourceUrl.trim();
         return aiHttpClient.readRemoteMediaHeaders(trimmedUrl)
-                .flatMap(headers -> {
-                    String resolvedMimeType = AiTaskParameterReader.firstNonEmpty(mimeType, headers.mimeType(), "application/octet-stream");
-                    return persistenceService.registerRemoteMediaForUser(userId, new PersistenceDtos.RegisterRemoteMediaRequest(kind, trimmedUrl, null, resolvedMimeType, headers.bytes(), width, height, durationMs, null));
-                });
+                .flatMap(headers -> registerRemoteMedia(userId, kind, trimmedUrl,
+                        AiTaskParameterReader.firstNonEmpty(mimeType, headers.mimeType(), "application/octet-stream"),
+                        headers.bytes(), width, height, durationMs));
+    }
+
+    /** 只登记原始链接，不再访问该地址。 */
+    private Mono<PersistenceDtos.UploadedMediaResponse> registerRemoteMedia(Long userId, String kind, String sourceUrl, String mimeType, Long bytes, Integer width, Integer height, Integer durationMs) {
+        return persistenceService.registerRemoteMediaForUser(userId, new PersistenceDtos.RegisterRemoteMediaRequest(
+                kind, sourceUrl, null, mimeType, bytes, width, height, durationMs, null));
     }
 
     /**

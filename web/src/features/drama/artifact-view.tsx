@@ -1,0 +1,419 @@
+"use client";
+
+import { App, Button, InputNumber } from "antd";
+import { Check, Download, LoaderCircle, Minus, Play, Square } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useTranslation } from "@/features/locale/use-translation";
+import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
+import { downloadMedia } from "@/features/storage/services/media-download";
+import { saveDramaCut, type DramaMedia, type DramaStage, type DramaVersion, type DramaWorkspace } from "@/services/api/drama";
+import { composeVideo, waitVideoCompositionTask, type VideoCompositionTask } from "@/services/api/video-composition";
+import { DramaAspectPicker } from "./aspect-ratio";
+
+type Row = Record<string, unknown>;
+
+function rows(value: unknown): Row[] {
+    return Array.isArray(value) ? value.filter((item): item is Row => Boolean(item) && typeof item === "object") : [];
+}
+
+function text(value: unknown) {
+    return typeof value === "string" ? value : value == null ? "" : String(value);
+}
+
+function Field({ label, value, plain = false, className = "" }: { label: string; value: string; plain?: boolean; className?: string }) {
+    if (!value) return null;
+    return (
+        <div className={`${plain ? "" : "rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] px-4 py-3"} ${className}`}>
+            <p className="text-xs font-medium text-[var(--studio-faint)]">{label}</p>
+            <p className={`whitespace-pre-wrap text-sm leading-6 ${plain ? "mt-1 text-[var(--studio-text)]" : "mt-1.5 text-[var(--studio-ink)]"}`}>{value}</p>
+        </div>
+    );
+}
+
+function ZoomableMedia({ kind, url, storageKey, className }: { kind: "image" | "video"; url: string; storageKey?: string; className: string }) {
+    const [detail, setDetail] = useState<ResultDetail | null>(null);
+    const fileName = kind === "video" ? "drama-video.mp4" : "drama-image.png";
+    const key = storageKey || undefined;
+    return (
+        <>
+            <button type="button" className="relative block w-full cursor-zoom-in border-0 bg-transparent p-0" onClick={() => setDetail({
+                media: { kind, url, storageKey: key },
+                onDownload: () => downloadMedia({ storageKey: key, url }, fileName),
+            })}>
+                {kind === "image" ? <img src={url} alt="" className={`block ${className}`} /> : <video className={`pointer-events-none block ${className}`} src={url} muted playsInline preload="metadata" />}
+                {kind === "video" ? (
+                    <span className="pointer-events-none absolute inset-0 grid place-items-center">
+                        <span className="grid size-10 place-items-center rounded-full bg-black/55 text-white">
+                            <Play className="size-4 fill-current" aria-hidden="true" />
+                        </span>
+                    </span>
+                ) : null}
+            </button>
+            <ResultDetailDialog detail={detail} onClose={() => setDetail(null)} />
+        </>
+    );
+}
+
+function FramePreview({ label, media }: { label: string; media: DramaMedia | undefined }) {
+    const translate = useTranslation();
+    return (
+        <div>
+            <p className="mb-1 text-xs font-medium text-[var(--studio-faint)]">{label}</p>
+            {media?.status === "success" && media.url ? <ZoomableMedia kind="image" url={media.url} storageKey={media.storageKey} className="aspect-[4/3] w-full rounded-lg object-cover" /> : <div className="grid aspect-[4/3] place-items-center rounded-lg bg-[var(--studio-media)] text-xs text-[var(--studio-muted)]">{translate("drama.noImageYet")}</div>}
+        </div>
+    );
+}
+
+function refsOf(value: unknown) {
+    return rows(value).map((item) => text(item.ref)).filter(Boolean);
+}
+
+function EmptyStage() {
+    const translate = useTranslation();
+    return <div className="studio-empty px-6 py-12 text-center text-sm">{translate("drama.noVersion")}</div>;
+}
+
+function MediaFrame({
+    media,
+    kind,
+    targetKey,
+    pending,
+    aspect,
+    bare = false,
+    onGenerate,
+    onStop,
+    stoppingTaskId = "",
+}: {
+    media: DramaMedia | undefined;
+    kind: "image" | "video";
+    targetKey: string;
+    pending: boolean;
+    aspect: string;
+    bare?: boolean;
+    onGenerate?: (targetKey: string) => void;
+    onStop?: (media: DramaMedia) => void;
+    stoppingTaskId?: string;
+}) {
+    const translate = useTranslation();
+    const queued = media?.status === "pending" || media?.status === "running";
+    const running = pending || queued;
+    const ready = media?.status === "success" && Boolean(media.url);
+    const failed = media?.status === "failed" || media?.status === "canceled";
+    const canStop = queued && Boolean(media?.taskId) && Boolean(onStop);
+    const stopping = Boolean(media?.taskId) && media?.taskId === stoppingTaskId;
+    return (
+        <div className={`relative ${bare ? "bg-[var(--studio-media)]" : "overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-media)]"}`}>
+            {ready && kind === "image" ? <ZoomableMedia kind="image" url={media?.url || ""} storageKey={media?.storageKey} className={`${aspect} w-full object-cover`} /> : null}
+            {ready && kind === "video" ? <ZoomableMedia kind="video" url={media?.url || ""} storageKey={media?.storageKey} className={`${aspect} w-full bg-black object-cover`} /> : null}
+            {queued && (media?.progress || 0) > 0 ? (
+                <span className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium tabular-nums text-white">{media?.progress}%</span>
+            ) : null}
+            {!ready && running ? (
+                <div className={`${aspect} w-full`} role="status" aria-label={media?.status === "pending" ? translate("drama.mediaQueued") : translate("drama.mediaRunning")}>
+                    <div className="studio-skeleton studio-skeleton-media h-full w-full" aria-hidden="true" />
+                </div>
+            ) : null}
+            {!ready && !running ? (
+                <div className={`${aspect} grid w-full place-items-center px-4 text-center text-xs leading-5 text-[var(--studio-muted)]`}>
+                    {failed ? (media?.errorMessage || translate("drama.statusFailed")) : kind === "video" ? translate("drama.noVideoYet") : translate("drama.noImageYet")}
+                </div>
+            ) : null}
+            {onGenerate ? (
+                <div className="flex justify-end border-t border-[var(--studio-line)] bg-[var(--studio-surface)] px-3 py-2">
+                    {canStop ? (
+                        <button
+                            type="button"
+                            disabled={stopping}
+                            aria-label={translate("drama.stop")}
+                            onClick={() => media && onStop?.(media)}
+                            className="inline-flex h-6 items-center gap-1.5 rounded-full bg-[var(--studio-surface-hover)] px-2.5 text-xs font-medium text-[var(--studio-muted)] transition-colors hover:bg-[color-mix(in_srgb,var(--studio-danger)_14%,transparent)] hover:text-[var(--studio-danger)] disabled:cursor-progress disabled:opacity-60"
+                        >
+                            {stopping ? <LoaderCircle className="size-3 animate-spin" aria-hidden="true" /> : <Square className="size-2.5 fill-current" aria-hidden="true" />}
+                            {translate("drama.stop")}
+                        </button>
+                    ) : (
+                        <Button size="small" type={ready ? "default" : "primary"} loading={running} disabled={running} onClick={() => onGenerate(targetKey)}>
+                            {targetKey.startsWith("sheet:") ? translate("drama.generateSheet") : kind === "video" ? translate("drama.generateVideo") : translate("drama.generateImage")}
+                        </Button>
+                    )}
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+export function DramaArtifact({
+    stage,
+    version,
+    durationSeconds,
+    durationDisabled,
+    onDuration,
+    aspectRatio = "9:16",
+    onAspect,
+    mediaByKey = {},
+    pendingKeys = [],
+    shotRefs = [],
+    shotDurations = {},
+    onGenerate,
+    onStop,
+    stoppingTaskId = "",
+    projectId,
+    onWorkspace,
+}: {
+    stage: DramaStage;
+    version: DramaVersion | undefined;
+    durationSeconds: number;
+    durationDisabled: boolean;
+    onDuration: (seconds: number) => void;
+    aspectRatio?: string;
+    onAspect?: (ratio: string) => void;
+    mediaByKey?: Record<string, DramaMedia | undefined>;
+    pendingKeys?: string[];
+    shotRefs?: string[];
+    shotDurations?: Record<string, number>;
+    onGenerate?: (targetKey: string) => void;
+    onStop?: (media: DramaMedia) => void;
+    stoppingTaskId?: string;
+    projectId?: string;
+    onWorkspace?: (workspace: DramaWorkspace) => void;
+}) {
+    const translate = useTranslation();
+    const { message } = App.useApp();
+    const content = version?.content || {};
+    const [seconds, setSeconds] = useState(durationSeconds);
+    const [cut, setCut] = useState<VideoCompositionTask | null>(null);
+    const [composing, setComposing] = useState(false);
+    const [exporting, setExporting] = useState(false);
+    useEffect(() => setSeconds(durationSeconds), [durationSeconds]);
+    const shotVideos = shotRefs.map((ref) => mediaByKey[`shot-video:${ref}`]).filter((item): item is DramaMedia => Boolean(item));
+    const readyVideos = shotVideos.filter((item) => item.status === "success" && item.storageKey);
+    const compose = async () => {
+        if (readyVideos.length < shotRefs.length) {
+            message.warning(translate("drama.composeMissing"));
+            return;
+        }
+        if (readyVideos.length < 2 || new Set(readyVideos.map((item) => item.storageKey)).size !== readyVideos.length) {
+            message.warning(translate("drama.composeNeedShots"));
+            return;
+        }
+        setComposing(true);
+        try {
+            const created = await composeVideo(readyVideos.map((item) => item.storageKey));
+            setCut(created);
+            const done = await waitVideoCompositionTask(created.id, { onProgress: setCut });
+            setCut(done);
+            if (done.status !== "succeeded") {
+                message.error(done.errorMessage || translate("drama.composeFailed"));
+                return;
+            }
+            if (projectId) onWorkspace?.(await saveDramaCut({ projectId, taskId: done.id }));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("drama.composeFailed"));
+        } finally {
+            setComposing(false);
+        }
+    };
+    const savedCut = mediaByKey["cut"]?.status === "success" ? mediaByKey["cut"] : undefined;
+    const cutUrl = cut?.status === "succeeded" ? cut.resultData?.url || "" : savedCut?.url || "";
+    const cutStorageKey = cut?.status === "succeeded" ? cut.resultData?.storageKey || savedCut?.storageKey || "" : savedCut?.storageKey || "";
+    const exportCut = async () => {
+        if (!cutStorageKey && !cutUrl) return;
+        setExporting(true);
+        try {
+            await downloadMedia({ storageKey: cutStorageKey, url: cutUrl }, "drama-cut.mp4");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("drama.composeFailed"));
+        } finally {
+            setExporting(false);
+        }
+    };
+    if (stage === "plan") {
+        return (
+            <div className="flex flex-col gap-4">
+                <label className="flex flex-col gap-2 rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] px-4 py-3 text-sm text-[var(--studio-ink)] sm:flex-row sm:items-center sm:justify-between">
+                    <span>
+                        <span className="font-medium">{translate("drama.duration")}</span>
+                        <span className="mt-1 block text-xs font-normal leading-5 text-[var(--studio-muted)]">{translate("drama.durationHint")}</span>
+                    </span>
+                    <InputNumber className="w-28" min={15} max={180} suffix={translate("drama.secondUnit")} value={seconds} disabled={durationDisabled} onChange={(value) => value && setSeconds(value)} onBlur={() => { if (seconds !== durationSeconds) onDuration(seconds); }} />
+                </label>
+                <div className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] px-4 py-3">
+                    <p className="text-sm font-medium text-[var(--studio-ink)]">{translate("drama.aspectRatio")}</p>
+                    <p className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("drama.aspectHint")}</p>
+                    <div className="mt-3"><DramaAspectPicker value={aspectRatio} disabled={durationDisabled || !onAspect} onChange={(ratio) => onAspect?.(ratio)} /></div>
+                </div>
+                {version ? (
+                    <div className="grid gap-3 md:grid-cols-2">
+                        <Field label={translate("drama.genre")} value={text(content.genre)} />
+                        <Field label={translate("drama.style")} value={text(content.style)} />
+                        <Field className="md:col-span-2" label={translate("drama.understanding")} value={text(content.understanding)} />
+                        <Field className="md:col-span-2" label={translate("drama.storyDirection")} value={text(content.storyDirection)} />
+                        <p className="text-xs tabular-nums text-[var(--studio-muted)] md:col-span-2">{translate("drama.seconds", { value0: text(content.durationSeconds) || durationSeconds })}</p>
+                    </div>
+                ) : <EmptyStage />}
+            </div>
+        );
+    }
+    if (!version) return <EmptyStage />;
+    if (stage === "script") {
+        const scenes = rows(content.scenes);
+        return (
+            <div className="flex flex-col gap-4">
+                <Field label={translate("drama.synopsis")} value={text(content.synopsis)} />
+                {scenes.map((scene, index) => (
+                    <article key={text(scene.id) || text(scene.ref) || index} className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] p-4">
+                        <div className="flex items-start gap-3">
+                            <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-[var(--studio-primary-soft)] text-xs font-semibold tabular-nums text-[var(--studio-ink)]">{index + 1}</span>
+                            <h3 className="text-sm font-semibold leading-6 text-[var(--studio-ink)]">{text(scene.heading)}</h3>
+                        </div>
+                        {text(scene.action) ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--studio-text)]">{text(scene.action)}</p> : null}
+                        {rows(scene.lines).length ? (
+                            <div className="mt-3 flex flex-col gap-2">
+                                {rows(scene.lines).map((line, lineIndex) => (
+                                    <p key={lineIndex} className="rounded-lg bg-[var(--studio-surface-soft)] px-3 py-2 text-sm leading-6 text-[var(--studio-ink)]">
+                                        <span className="mr-2 text-xs font-semibold text-[var(--studio-action-emphasis)]">{text(line.speaker) || text(line.characterRef) || "—"}</span>
+                                        {text(line.text)}
+                                    </p>
+                                ))}
+                            </div>
+                        ) : null}
+                    </article>
+                ))}
+            </div>
+        );
+    }
+    if (stage === "cast") {
+        return (
+            <div className="flex flex-col gap-6">
+                <section className="flex flex-col gap-3">
+                    <h3 className="text-sm font-semibold text-[var(--studio-ink)]">{translate("drama.characters")}</h3>
+                    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                        {rows(content.characters).map((person, index) => {
+                            const targetKey = `character:${text(person.ref)}`;
+                            return (
+                                <article key={text(person.id) || targetKey || index} className="overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
+                                    <MediaFrame bare media={mediaByKey[targetKey]} kind="image" targetKey={targetKey} pending={pendingKeys.includes(targetKey)} aspect="aspect-[3/2]" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                                    <div className="flex flex-col gap-3 p-4">
+                                        <p className="text-sm font-semibold text-[var(--studio-ink)]">{text(person.name)}</p>
+                                        <Field plain label={translate("drama.personality")} value={text(person.personality)} />
+                                        <Field plain label={translate("drama.appearance")} value={text(person.appearance)} />
+                                    </div>
+                                </article>
+                            );
+                        })}
+                    </div>
+                </section>
+                <section className="flex flex-col gap-3">
+                    <h3 className="text-sm font-semibold text-[var(--studio-ink)]">{translate("drama.locations")}</h3>
+                    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                        {rows(content.locations).map((place, index) => {
+                            const targetKey = `location:${text(place.ref)}`;
+                            return (
+                                <article key={text(place.id) || targetKey || index} className="overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
+                                    <MediaFrame bare media={mediaByKey[targetKey]} kind="image" targetKey={targetKey} pending={pendingKeys.includes(targetKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                                    <div className="flex flex-col gap-3 p-4">
+                                        <p className="text-sm font-semibold text-[var(--studio-ink)]">{text(place.name)}</p>
+                                        <Field plain label={translate("drama.visual")} value={text(place.visual)} />
+                                    </div>
+                                </article>
+                            );
+                        })}
+                    </div>
+                </section>
+            </div>
+        );
+    }
+    if (stage === "storyboard") {
+        return (
+            <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    {rows(content.shots).map((shot, index) => {
+                        const targetKey = `board:${text(shot.ref)}`;
+                        return (
+                        <article key={text(shot.id) || targetKey || index} className="overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
+                            <MediaFrame bare media={mediaByKey[targetKey]} kind="image" targetKey={targetKey} pending={pendingKeys.includes(targetKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                            <div className="flex flex-col gap-3 p-4">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="inline-flex size-6 items-center justify-center rounded-full bg-[var(--studio-primary-soft)] text-xs font-semibold tabular-nums text-[var(--studio-ink)]">{text(shot.order) || index + 1}</span>
+                                    {[text(shot.size), text(shot.camera)].filter(Boolean).map((chip, chipIndex) => (
+                                        <span key={`${chip}-${chipIndex}`} className="rounded-full bg-[var(--studio-surface-soft)] px-2 py-0.5 text-xs text-[var(--studio-text)]">{chip}</span>
+                                    ))}
+                                    <span className="ml-auto text-xs tabular-nums text-[var(--studio-muted)]">{translate("drama.seconds", { value0: text(shot.durationSeconds) })}</span>
+                                </div>
+                                <Field plain label={translate("drama.picture")} value={text(shot.picture)} />
+                                <Field plain label={translate("drama.dialogue")} value={text(shot.dialogue)} />
+                            </div>
+                        </article>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    }
+    if (stage === "shot") {
+        const prompts = new Map(rows(content.shots).map((shot) => [text(shot.ref), shot]));
+        return (
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                {(shotRefs.length ? shotRefs : refsOf(content.shots)).map((ref) => {
+                    const sheetKey = `sheet:${ref}`;
+                    const shot = prompts.get(ref);
+                    return (
+                        <article key={ref} className="overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
+                            <div className="flex items-center justify-between gap-2 px-3 pt-3">
+                                <p className="text-sm font-semibold text-[var(--studio-ink)]">{ref}</p>
+                                {shotDurations[ref] ? <span className="text-xs tabular-nums text-[var(--studio-muted)]">{translate("drama.seconds", { value0: shotDurations[ref] })}</span> : null}
+                            </div>
+                            <MediaFrame bare media={mediaByKey[sheetKey]} kind="image" targetKey={sheetKey} pending={pendingKeys.includes(sheetKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                            <div className="grid grid-cols-2 gap-2 p-3">
+                                <FramePreview label={translate("drama.firstFrame")} media={mediaByKey[`cut:first:${ref}`]} />
+                                <FramePreview label={translate("drama.lastFrame")} media={mediaByKey[`cut:last:${ref}`]} />
+                            </div>
+                            <div className="flex flex-col gap-3 px-3 pb-3">
+                                <Field plain label={translate("drama.videoPrompt")} value={text(shot?.videoPrompt)} />
+                            </div>
+                            <MediaFrame media={mediaByKey[`shot-video:${ref}`]} kind="video" targetKey={`shot-video:${ref}`} pending={pendingKeys.includes(`shot-video:${ref}`)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                        </article>
+                    );
+                })}
+            </div>
+        );
+    }
+    return (
+        <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-2">
+                <Button type="primary" loading={composing} onClick={() => void compose()}>{translate("drama.composeCut")}</Button>
+                {cutUrl ? <Button icon={<Download className="size-3.5" />} loading={exporting} onClick={() => void exportCut()}>{translate("drama.exportCut")}</Button> : null}
+                {composing ? <span className="text-xs tabular-nums text-[var(--studio-muted)]">{translate("drama.composing", { value0: cut?.progress || 0 })}</span> : null}
+            </div>
+            {cutUrl ? <ZoomableMedia kind="video" url={cutUrl} storageKey={cutStorageKey} className="aspect-video w-full rounded-xl bg-black object-contain" /> : null}
+            {shotRefs.length ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                    {shotRefs.map((ref) => {
+                        const targetKey = `shot-video:${ref}`;
+                        return <MediaFrame key={targetKey} media={mediaByKey[targetKey]} kind="video" targetKey={targetKey} pending={pendingKeys.includes(targetKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />;
+                    })}
+                </div>
+            ) : <p className="text-sm leading-6 text-[var(--studio-muted)]">{translate("drama.noVideoYet")}</p>}
+            <Field label={translate("drama.summary")} value={text(content.summary)} />
+            <section className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] p-4">
+                <h3 className="text-sm font-semibold text-[var(--studio-ink)]">{translate("drama.checklist")}</h3>
+                <ul className="mt-3 flex flex-col gap-2">
+                    {rows(content.checklist).map((item, index) => {
+                        const passed = item.passed === true;
+                        return (
+                            <li key={index} className="flex items-start gap-2 text-sm leading-6 text-[var(--studio-ink)]">
+                                <span className={`mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full ${passed ? "bg-[color-mix(in_srgb,var(--studio-success)_16%,transparent)] text-[var(--studio-success)]" : "bg-[var(--studio-surface-raised)] text-[var(--studio-muted)]"}`}>
+                                    {passed ? <Check className="size-3" aria-hidden="true" /> : <Minus className="size-3" aria-hidden="true" />}
+                                </span>
+                                <span>
+                                    <span className="mr-2 text-xs font-medium text-[var(--studio-muted)]">{passed ? translate("drama.passed") : translate("drama.notPassed")}</span>
+                                    {text(item.item)}
+                                </span>
+                            </li>
+                        );
+                    })}
+                </ul>
+            </section>
+        </div>
+    );
+}

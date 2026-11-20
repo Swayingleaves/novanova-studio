@@ -1046,11 +1046,17 @@ html[data-theme="purple"] {
     }
 
     .studio-skeleton {
+        --studio-skeleton-highlight: var(--studio-surface-hover);
         min-height: 100%;
         border-radius: 8px;
-        background: linear-gradient(110deg, var(--studio-surface-raised) 25%, var(--studio-surface-hover) 45%, var(--studio-surface-raised) 65%);
+        background: linear-gradient(110deg, var(--studio-surface-raised) 25%, var(--studio-skeleton-highlight) 45%, var(--studio-surface-raised) 65%);
         background-size: 220% 100%;
         animation: studio-skeleton-shimmer 1.6s ease-in-out infinite;
+    }
+
+    .studio-skeleton-media {
+        --studio-skeleton-highlight: var(--studio-line-strong);
+        border-radius: 0;
     }
 
     .studio-media-frame {

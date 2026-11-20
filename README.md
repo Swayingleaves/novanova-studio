@@ -51,7 +51,7 @@
         <img src="github_images/wechat_me.png" alt="作者微信二维码" width="220" />
       </td>
       <td align="center" width="33%">
-        <img src="github_images/wechat-group-1113.png" alt="交流群二维码" width="220" />
+        <img src="github_images/wechat-group4.png" alt="交流群二维码" width="220" />
       </td>
     </tr>
   </tbody>
@@ -67,6 +67,16 @@
     </tr>
   </thead>
   <tbody>
+    <tr>
+      <td align="center" width="33%">
+        <img src="logo/novanovastudio-108x108.png" alt="Novanova Studio" width="220" />
+      </td>
+      <td align="left" width="33%">
+       https://api.novanovastudio.cn <br>
+        nana官方API <br>
+        seedance2.0、wan3.0渠道超低折扣;官链返回~
+      </td>
+    </tr>
     <tr>
       <td align="center" width="33%">
         <img src="github_images/sponsor/notoken.png" alt="notoken" width="220" />
@@ -145,16 +155,6 @@ flowchart LR
 - **对象存储接入**：支持腾讯云 COS、阿里云 OSS、七牛云 Kodo 和 [Cloudflare R2](docs-api/cloudflare-r2.md)，用于上传素材与保存生成结果。
 - **用户与运营能力**：邮箱登录、OAuth2 登录、积分、通知、提示词库、首页展示和管理员后台。
 - **异步任务机制**：Redis Stream 消费组、任务锁、失败恢复与 SSE 事件流支撑可追踪的长耗时任务。
-
-### 🚀 当前分支新增能力
-
-- **视频生成技能与工作流**：管理员可维护图片、视频生成技能；视频页支持技能引导式多轮澄清、提示词草案确认，以及首帧、尾帧图片生成后再合成视频。
-- **首尾帧视频模式**：新增 `first-last-frame-to-video` 能力，支持将首帧和尾帧作为带角色的参考素材传入兼容渠道。
-- **自定义模型调用**：图片和视频模型可配置自有 API 的请求/响应模板、异步查询路径和占位符，适配自建模型服务。
-- **模型展示配置**：管理员可为模型设置展示名称和展示图标；Evolink 渠道支持拉取模型列表。
-- **视频分档计费**：可按视频模型的分辨率、时长等规格配置积分价格，工作流会展示各阶段报价。
-- **积分流水与快捷入口**：用户可从画布顶部查看积分余额并进入积分记录，流水支持增加、消耗和退款方向及来源筛选。
-- **管理与可观测性**：新增技能管理、风格封面分类、提示词封面、结果详情和接口访问日志；AI 异步任务轮询间隔支持统一配置。
 
 ## 🌟 项目优势特点
 

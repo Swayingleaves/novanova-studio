@@ -10,6 +10,7 @@ import { type BatchImagePreview, useNodeActions } from "./node-action-context";
 import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface, NodeMediaUnavailable } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
+import { WatermarkBadge } from "@/features/watermark/components/watermark-badge";
 
 const BATCH_COLLAPSE_TRANSITION_MS = 260;
 
@@ -235,6 +236,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                         ) : hasContent ? (
                             <div className="relative h-full w-full">
                                 <img src={displaySource} alt={data.title || ""} className="h-full w-full object-contain" draggable={false} onError={() => { if (data.content.storageKey) media.onError(); else setFailedSource(data.content.source); }} />
+                                <WatermarkBadge />
                             </div>
                         ) : (
                             <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-sm" style={{ color: theme.node.placeholder }}>

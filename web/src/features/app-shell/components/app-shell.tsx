@@ -18,10 +18,12 @@ import { AuthModal } from "@/features/auth/components/auth-modal";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { MobileNavDrawer } from "@/features/app-shell/components/mobile-nav-drawer";
 import { ProductTour } from "@/features/onboarding/components/product-tour";
+import { hidesSidebar } from "@/features/onboarding/onboarding-steps";
 import { navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
 import { creditAmount } from "@/shared/lib/credit-amounts";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { ShareWorkDialog } from "@/features/shared-work/components/share-work-dialog";
+import { WatermarkSettingsDialog } from "@/features/watermark/components/watermark-settings-dialog";
 
 export function AppShell({ children }: { children: ReactNode }) {
     const translate = useTranslation();
@@ -32,7 +34,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     const teamSpaceLabel = team ? translate("appShell.currentTeamSpace", { name: team.name }) : "";
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
     const floatingActionsRef = useRef<HTMLDivElement>(null);
-    const hideSidebar = /^\/canvas\/[^/]+/.test(pathname);
+    const hideSidebar = hidesSidebar(pathname);
 
     useLayoutEffect(() => {
         const element = floatingActionsRef.current;
@@ -124,6 +126,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             <AuthModal />
             <ShareWorkDialog />
+            <WatermarkSettingsDialog />
             <WelcomeModal />
             <ProductTour />
         </div>
