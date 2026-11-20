@@ -51,7 +51,7 @@
         <img src="github_images/wechat_me.png" alt="作者微信二维码" width="220" />
       </td>
       <td align="center" width="33%">
-        <img src="github_images/wechat-group-1113.png" alt="交流群二维码" width="220" />
+        <img src="github_images/wechat-group4.png" alt="交流群二维码" width="220" />
       </td>
     </tr>
   </tbody>
