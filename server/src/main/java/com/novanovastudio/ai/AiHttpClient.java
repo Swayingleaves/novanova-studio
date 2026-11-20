@@ -712,7 +712,7 @@ public class AiHttpClient {
             throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.aPIFormatIsRequired"));
         }
         String normalizedFormat = apiFormat.trim().toLowerCase(Locale.ROOT);
-        Set<String> supportedFormats = Set.of("openai", "newapi", "evolink", "gemini", "anthropic", "agnes", "seedance", "minimax", "custom");
+        Set<String> supportedFormats = Set.of("openai", "nana", "newapi", "evolink", "gemini", "anthropic", "agnes", "seedance", "minimax", "custom");
         if (!supportedFormats.contains(normalizedFormat)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedAPIFormat", normalizedFormat));
         }
@@ -734,6 +734,7 @@ public class AiHttpClient {
         String url = switch (apiFormat) {
             case "gemini" -> buildGeminiUrl(baseUrl, "/models");
             case "anthropic" -> buildAnthropicUrl(baseUrl, "/v1/models");
+            case "nana" -> buildAiUrl(buildNanaBaseUrl(baseUrl), "/models");
             default -> buildAiUrl(baseUrl, "/models");
         };
         try {
@@ -941,6 +942,28 @@ public class AiHttpClient {
     public static String buildAiUrl(String baseUrl, String path) {
         String normalized = baseUrl == null ? "" : baseUrl.trim().replaceAll("/+$", "");
         return normalized + path;
+    }
+
+    /**
+     * 构建 NANA-API 的 OpenAI 兼容基础地址，缺少版本前缀时补 /v1。
+     *
+     * @param baseUrl String 渠道基础地址
+     * @return String 带 /v1 的基础地址
+     */
+    public static String buildNanaBaseUrl(String baseUrl) {
+        String normalized = baseUrl == null ? "" : baseUrl.trim().replaceAll("/+$", "");
+        return normalized.toLowerCase(Locale.ROOT).endsWith("/v1") ? normalized : normalized + "/v1";
+    }
+
+    /**
+     * 构建 NANA-API 的站点根地址，用于不带 /v1 前缀的视频协议路径。
+     *
+     * @param baseUrl String 渠道基础地址
+     * @return String 站点根地址
+     */
+    public static String buildNanaOriginUrl(String baseUrl) {
+        String normalized = buildNanaBaseUrl(baseUrl);
+        return normalized.substring(0, normalized.length() - 3);
     }
 
     /**

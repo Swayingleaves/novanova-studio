@@ -81,6 +81,7 @@
     "fetchModels": "Fetch models",
     "channelName": "Channel name",
     "aPIFormat": "API format",
+    "official": "Official",
     "models_ea4bf0": "Models",
     "enterMiniMaxH3": "Enter MiniMax-H3",
     "enterModelNameCustomFormatsCannotFetchModels": "Enter model name (custom formats cannot fetch models)",

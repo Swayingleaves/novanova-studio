@@ -30,7 +30,7 @@ A channel is an entry point for calling an AI service: one base URL plus one set
 | Field | Notes |
 | --- | --- |
 | Channel name | A recognisable label; an empty name shows as "未命名渠道" |
-| Call format | OpenAI / New API / Evolink / Gemini / Agnes / Anthropic / Seedance / MiniMax / 自定义 |
+| Call format | OpenAI / NANA-API / New API / Evolink / Gemini / Agnes / Anthropic / Seedance / MiniMax / 自定义 |
 | Base URL | The service address. When you switch call format, an empty value or the previous format's default is replaced with the new format's default |
 | API Key | Masked by default, with an eye icon to reveal it |
 | Model list | Model names available on this channel; type them manually or fetch them |
@@ -40,6 +40,7 @@ Default base URLs per call format:
 | Call format | Default base URL |
 | --- | --- |
 | OpenAI | `https://api.openai.com/v1` |
+| NANA-API | `https://api.novanovastudio.cn/v1` |
 | New API | No default; fill it in yourself |
 | Evolink | `https://api.evolink.ai/v1` |
 | Gemini | An address ending in `/v1beta` |
@@ -48,6 +49,8 @@ Default base URLs per call format:
 | Seedance | `https://ark.cn-beijing.volces.com/api/v3` |
 | MiniMax | `https://api.minimaxi.com` |
 | 自定义 | No default; fill it in yourself |
+
+NANA-API is the dedicated format for the project's official relay: text uses the OpenAI-compatible protocol, images use the OpenAI image endpoints, and video picks the Seedance, Wan, or MiniMax protocol from the model name. After filling in the address and key, fetching models and saving, you only need to enable the model and set credits in "My models" — no request paths or templates to configure.
 
 **Fetching models**: after filling in the base URL and API key, click "拉取模型". The result is written into the model list with the hint "<channel> 模型列表已更新，请点击保存"; missing inputs report "请先填写该渠道的 Base URL 和 API Key". For MiniMax and 自定义 the button is disabled ("MiniMax 请手动配置 MiniMax-H3", "自定义格式请手动配置模型列表"), so you maintain the model names yourself.
 

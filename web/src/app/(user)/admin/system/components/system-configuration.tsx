@@ -12,7 +12,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 import { Alert, App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Tabs } from "antd";
 import { nanoid } from "nanoid";
 import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Copy, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Upload, Video, Wifi } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { ModelIcon } from "@/features/settings/components/model-picker";
@@ -197,8 +197,14 @@ const modelIconSelectOptions = MODEL_ICON_OPTIONS.map((option) => ({
     ),
 }));
 
-const createApiFormatOptions = (translator: typeof translate = translate): Array<{ label: string; value: ApiCallFormat }> => [
+const createApiFormatOptions = (translator: typeof translate = translate): Array<{ label: ReactNode; value: ApiCallFormat }> => [
     { label: "OpenAI", value: "openai" },
+    {
+        get label() {
+            return apiFormatLabelNode("nana");
+        },
+        value: "nana",
+    },
     { label: "New API", value: "newapi" },
     { label: "Evolink", value: "evolink" },
     { label: "Gemini", value: "gemini" },
@@ -614,7 +620,9 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             message.warning(translate("appShell.addModelsInMyChannelsBeforeConfiguringOptions"));
             return false;
         }
-        setDraftModelConfigs((configs) => updateModelConfigSelection(configs, modelConfigBaseline, group.capability, values, createDraftModelConfig));
+        setDraftModelConfigs((configs) => updateModelConfigSelection(configs, modelConfigBaseline, group.capability, values,
+            (channelId, modelName, modelType) => createDraftModelConfig(channelId, modelName, modelType,
+                draftChannels.find((channel) => channel.id === channelId)?.apiFormat)));
         return true;
     };
 
@@ -1242,7 +1250,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                                         <div className="min-w-0">
                                                             <div className="truncate text-sm font-semibold">{channel.name || translate("appShell.unnamedChannel")}</div>
                                                             <div className="mt-1 text-xs text-[var(--studio-muted)]">
-                                                                {apiFormatLabel(channel.apiFormat)} {translate("appShell.configured")}
+                                                                {apiFormatLabelNode(channel.apiFormat)} {translate("appShell.configured")}
                                                                 {channel.models.length} {translate("appShell.models")}
                                                             </div>
                                                         </div>
@@ -2408,13 +2416,13 @@ function cloneObjectStorages(storages: ObjectStorageConfig[]) {
     return storages.map((storage) => ({ ...storage }));
 }
 
-function createDraftModelConfig(channelId: string, modelName: string, modelType: ModelCapability): ServerModelConfig {
+function createDraftModelConfig(channelId: string, modelName: string, modelType: ModelCapability, apiFormat?: ApiCallFormat): ServerModelConfig {
     return {
         id: `draft-${nanoid()}`,
         channelId,
         modelName,
         modelType,
-        capabilities: [],
+        capabilities: apiFormat === "nana" ? nanaDefaultCapabilities(modelName, modelType) : [],
         defaultModel: false,
         enabled: true,
         sortOrder: 0,
@@ -2433,6 +2441,17 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         isCustomModel: false,
         customModelConfig: {},
     };
+}
+
+/** NANA-API 模型按名称预置推荐能力，减少新增模型时的手工勾选；保存前仍可在模型弹窗中调整。 */
+function nanaDefaultCapabilities(modelName: string, modelType: ModelCapability): string[] {
+    if (modelType === "text") return ["chat"];
+    if (modelType === "image") return ["text-to-image", "image-to-image"];
+    const name = modelName.trim().toLowerCase();
+    if (name.includes("seedance")) return ["text-to-video", "image-to-video", "reference-to-video"];
+    if (name.includes("minimax")) return name.includes("ref") ? ["reference-to-video"] : ["text-to-video"];
+    if (/(?:^|[^a-z0-9])wan(?:x|\d)/.test(name)) return ["text-to-video", "image-to-video", "reference-to-video", "first-last-frame-to-video"];
+    return [];
 }
 
 function sameValue(first: unknown, second: unknown) {
@@ -2785,6 +2804,7 @@ function CustomModelGroupEditor({ label, group, isVideo, onAutoFill, onChange }:
 }
 
 function apiFormatLabel(apiFormat: ApiCallFormat) {
+    if (apiFormat === "nana") return "NANA-API";
     if (apiFormat === "newapi") return "New API";
     if (apiFormat === "evolink") return "Evolink";
     if (apiFormat === "agnes") return "Agnes";
@@ -2794,6 +2814,21 @@ function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "minimax") return "MiniMax";
     if (apiFormat === "custom") return translate("appShell.custom");
     return "OpenAI";
+}
+
+/** 调用格式显示名；NANA-API 额外带「官方」标记，区分官方中转站与其他兼容渠道。 */
+function apiFormatLabelNode(apiFormat: ApiCallFormat): ReactNode {
+    const label = apiFormatLabel(apiFormat);
+    if (apiFormat !== "nana") return label;
+    return (
+        <span className="inline-flex items-center gap-1.5">
+            {label}
+            <span className="inline-flex items-center gap-0.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-1.5 py-px text-[10px] font-medium leading-4 text-[var(--studio-primary)]">
+                <CheckCircle2 className="size-2.5" />
+                {translate("appShell.official")}
+            </span>
+        </span>
+    );
 }
 
 function formatTimestamp(value: string) {

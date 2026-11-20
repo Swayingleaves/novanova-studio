@@ -108,7 +108,7 @@ export function RevenueStatistics({ userId, startDate, endDate }: RevenueStatist
             dataIndex: "baseCredits",
             width: 170,
             render: (baseCredits: ServerAdminRevenueRecord["baseCredits"], record) => {
-                const productBonus = creditAmount(record.credits).minus(baseCredits).max(0);
+                const productBonus = creditAmount(record.credits).minus(baseCredits);
                 const firstPurchase = creditAmount(record.changeAmount).greaterThan(record.credits);
                 return (
                     <div>

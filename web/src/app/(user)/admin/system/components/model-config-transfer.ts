@@ -225,7 +225,7 @@ function parseConstraints(value: unknown): VideoGenerationConstraints | null {
 }
 
 /** 解析视频计费配置，只保留已启用模式与界面支持的清晰度。 */
-function parseVideoBilling(value: unknown, capabilities: string[]): VideoBillingConfiguration | null | undefined {
+function parseVideoBilling(value: unknown, capabilities: string[]): VideoBillingConfiguration | undefined {
     if (value === undefined) return createVideoBillingConfiguration();
     if (value === null) return createVideoBillingConfiguration();
     if (!isRecord(value)) return undefined;
