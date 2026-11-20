@@ -7,13 +7,13 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useEffect, useRef } from "react";
 import * as echarts from "echarts/core";
 import type { EChartsCoreOption } from "echarts/core";
-import { BarChart, PieChart } from "echarts/charts";
+import { BarChart, LineChart, PieChart } from "echarts/charts";
 import { GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 
-echarts.use([BarChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
+echarts.use([BarChart, LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
 type CreditChartDataItem = {
     name: string;
@@ -21,9 +21,11 @@ type CreditChartDataItem = {
 };
 
 type CreditChartProps = {
-    type: "pie" | "bar";
+    type: "pie" | "bar" | "line";
     data: CreditChartDataItem[];
     ariaLabel: string;
+    /** 自定义数值提示文案，默认按积分展示。 */
+    formatValue?: (value: number) => string;
 };
 
 type ChartTheme = {
@@ -44,7 +46,7 @@ type ChartTheme = {
  * @param props 图表类型、数据和无障碍说明
  * @return 图表容器
  */
-export function CreditChart({ type, data, ariaLabel }: CreditChartProps) {
+export function CreditChart({ type, data, ariaLabel, formatValue }: CreditChartProps) {
     const chartElementReference = useRef<HTMLDivElement>(null);
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
 
@@ -54,16 +56,29 @@ export function CreditChart({ type, data, ariaLabel }: CreditChartProps) {
 
         const chart = echarts.init(chartElement);
         const theme = readChartTheme(chartElement);
-        chart.setOption(type === "pie" ? createPieOption(data, theme) : createBarOption(data, theme));
+        const valueFormatter = formatValue || formatCreditValue;
+        chart.setOption(type === "pie" ? createPieOption(data, theme, valueFormatter)
+            : type === "bar" ? createBarOption(data, theme, valueFormatter)
+                : createLineOption(data, theme, valueFormatter));
         const resizeObserver = new ResizeObserver(() => chart.resize());
         resizeObserver.observe(chartElement);
         return () => {
             resizeObserver.disconnect();
             chart.dispose();
         };
-    }, [ariaLabel, data, resolvedTheme, type]);
+    }, [ariaLabel, data, formatValue, resolvedTheme, type]);
 
     return <div ref={chartElementReference} className="h-72 w-full" role="img" aria-label={ariaLabel} />;
+}
+
+/**
+ * 按积分格式化图表数值提示。
+ *
+ * @param value 图表数值
+ * @return 积分提示文案
+ */
+function formatCreditValue(value: number) {
+    return translate("credits.credits", { value0: Number(value).toLocaleString(currentLanguageTag()) });
 }
 
 /**
@@ -94,7 +109,7 @@ function readChartTheme(element: HTMLElement): ChartTheme {
  * @param theme 当前主题颜色
  * @return ECharts 配置
  */
-function createPieOption(data: CreditChartDataItem[], theme: ChartTheme): EChartsCoreOption {
+function createPieOption(data: CreditChartDataItem[], theme: ChartTheme, formatValue: (value: number) => string): EChartsCoreOption {
     return {
         backgroundColor: "transparent",
         color: [theme.action, theme.accent, theme.info, theme.success, theme.warning],
@@ -103,7 +118,7 @@ function createPieOption(data: CreditChartDataItem[], theme: ChartTheme): EChart
             backgroundColor: theme.surface,
             borderColor: theme.line,
             textStyle: { color: theme.text },
-            valueFormatter: (value: string | number) => translate("credits.credits", { value0: Number(value).toLocaleString(currentLanguageTag()) }),
+            valueFormatter: (value: string | number) => formatValue(Number(value)),
         },
         legend: {
             type: "scroll",
@@ -130,7 +145,7 @@ function createPieOption(data: CreditChartDataItem[], theme: ChartTheme): EChart
  * @param theme 当前主题颜色
  * @return ECharts 配置
  */
-function createBarOption(data: CreditChartDataItem[], theme: ChartTheme): EChartsCoreOption {
+function createBarOption(data: CreditChartDataItem[], theme: ChartTheme, formatValue: (value: number) => string): EChartsCoreOption {
     return {
         backgroundColor: "transparent",
         tooltip: {
@@ -138,7 +153,7 @@ function createBarOption(data: CreditChartDataItem[], theme: ChartTheme): EChart
             backgroundColor: theme.surface,
             borderColor: theme.line,
             textStyle: { color: theme.text },
-            valueFormatter: (value: string | number) => translate("credits.credits", { value0: Number(value).toLocaleString(currentLanguageTag()) }),
+            valueFormatter: (value: string | number) => formatValue(Number(value)),
         },
         grid: { left: 12, right: 12, top: 18, bottom: 32, containLabel: true },
         xAxis: {
@@ -159,6 +174,49 @@ function createBarOption(data: CreditChartDataItem[], theme: ChartTheme): EChart
             data: data.map((item) => item.value),
             barMaxWidth: 36,
             itemStyle: { color: theme.action, borderRadius: [4, 4, 0, 0] },
+        }],
+    };
+}
+
+/**
+ * 创建趋势折线图配置。
+ *
+ * @param data 图表数据
+ * @param theme 当前主题颜色
+ * @param formatValue 数值提示格式化
+ * @return ECharts 配置
+ */
+function createLineOption(data: CreditChartDataItem[], theme: ChartTheme, formatValue: (value: number) => string): EChartsCoreOption {
+    return {
+        backgroundColor: "transparent",
+        tooltip: {
+            trigger: "axis",
+            backgroundColor: theme.surface,
+            borderColor: theme.line,
+            textStyle: { color: theme.text },
+            valueFormatter: (value: string | number) => formatValue(Number(value)),
+        },
+        grid: { left: 12, right: 12, top: 18, bottom: 32, containLabel: true },
+        xAxis: {
+            type: "category",
+            boundaryGap: false,
+            data: data.map((item) => item.name),
+            axisTick: { show: false },
+            axisLine: { lineStyle: { color: theme.line } },
+            axisLabel: { color: theme.muted, hideOverlap: true },
+        },
+        yAxis: {
+            type: "value",
+            splitLine: { lineStyle: { color: theme.line } },
+            axisLabel: { color: theme.muted },
+        },
+        series: [{
+            type: "line",
+            data: data.map((item) => item.value),
+            symbol: "circle",
+            symbolSize: 6,
+            lineStyle: { color: theme.action, width: 2 },
+            itemStyle: { color: theme.action },
         }],
     };
 }

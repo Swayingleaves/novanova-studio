@@ -6,6 +6,7 @@ import com.novanovastudio.dto.CreditDtos;
 import com.novanovastudio.security.AdminGuard;
 import com.novanovastudio.security.RequireRole;
 import com.novanovastudio.service.CreditCardService;
+import com.novanovastudio.service.CreditPurchaseService;
 import com.novanovastudio.service.CreditService;
 import jakarta.validation.Valid;
 import java.time.LocalDate;
@@ -36,6 +37,9 @@ public class AdminCreditController {
 
     /** 卡密管理服务 */
     private final CreditCardService creditCardService;
+
+    /** 积分购买订单服务 */
+    private final CreditPurchaseService creditPurchaseService;
 
     /** 管理员校验 */
     private final AdminGuard adminGuard;
@@ -87,6 +91,46 @@ public class AdminCreditController {
             @RequestParam(defaultValue = "20") int pageSize) {
         return adminGuard.requireAdmin()
                 .then(Mono.defer(() -> creditService.listAdminCreditTransactions(userId, startDate, endDate, direction, source, keyword, page, pageSize)))
+                .map(ApiResponse::ok);
+    }
+
+    /**
+     * 查询管理员可见的收入概览。
+     *
+     * @param userId Long 用户ID，可为空表示全部用户
+     * @param startDate LocalDate 筛选起始日期
+     * @param endDate LocalDate 筛选结束日期
+     * @return Mono<ApiResponse<RevenueOverviewResponse>> 收入概览
+     */
+    @GetMapping("/getRevenueOverview")
+    public Mono<ApiResponse<CreditDtos.RevenueOverviewResponse>> getRevenueOverview(
+            @RequestParam(required = false) Long userId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return adminGuard.requireAdmin()
+                .then(Mono.defer(() -> creditPurchaseService.getAdminRevenueOverview(userId, startDate, endDate)))
+                .map(ApiResponse::ok);
+    }
+
+    /**
+     * 分页查询管理员可见的收入明细。
+     *
+     * @param userId Long 用户ID，可为空表示全部用户
+     * @param startDate LocalDate 筛选起始日期
+     * @param endDate LocalDate 筛选结束日期
+     * @param page int 页码
+     * @param pageSize int 每页数量
+     * @return Mono<ApiResponse<AdminRevenueRecordListResponse>> 收入明细
+     */
+    @GetMapping("/listRevenueRecords")
+    public Mono<ApiResponse<CreditDtos.AdminRevenueRecordListResponse>> listRevenueRecords(
+            @RequestParam(required = false) Long userId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int pageSize) {
+        return adminGuard.requireAdmin()
+                .then(Mono.defer(() -> creditPurchaseService.listAdminRevenueRecords(userId, startDate, endDate, page, pageSize)))
                 .map(ApiResponse::ok);
     }
 

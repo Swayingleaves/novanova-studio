@@ -90,7 +90,11 @@ Three default selectors decide what the generation pages start with: the default
 
 Models on a channel whose call format is "自定义" need custom JSON here (request template and response parsing). Available variables: `{{prompt}}`, `{{model}}`, `{{references}}`, `{{videoReferences}}`, `{{audioReferences}}`, `{{size}}`, `{{resolution}}`, `{{seconds}}`, `{{count}}`, `{{taskId}}`; the request method can be POST or GET. Invalid JSON reports "模型自定义JSON必须是对象" or "模型自定义JSON格式不正确".
 
-### 6. Common blocks
+### 6. Copy and import configuration
+
+With "自定义模型" enabled, "复制配置" at the top of the dialog exports the whole model configuration as JSON to the clipboard, including display name, icon, billing, concurrency, capabilities, resolution prices, and each capability's request/query templates and constraints. "导入配置" pastes JSON shared by someone else into the current model. Imports only accept the same model type (image to image, video to video); channel, real model name, enabled state and sort order are not imported, and you can keep editing before confirming.
+
+### 7. Common blocks
 
 - "模型配置引用了未保存的渠道或模型，请先保存“我的渠道”": save the channels tab first, then save the models.
 - Video billing requires a per-run or per-second choice, prices must be integers no smaller than 0, and only the modes you ticked and resolutions the model supports can be priced — the server rejects anything else.

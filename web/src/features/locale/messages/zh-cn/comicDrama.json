@@ -738,6 +738,7 @@
     "exportAgain": "重新导出",
     "startExport": "开始导出",
     "downloadMp4": "下载 MP4",
+    "downloadVideo": "下载视频",
     "cancelExport": "取消导出",
     "thisEpisodeHasNoShotsYetCompleteShotBreakdownFirst": "当前分集暂无镜头画面，请先进行镜头拆分",
     "goToShotBreakdown": "前往镜头拆分",

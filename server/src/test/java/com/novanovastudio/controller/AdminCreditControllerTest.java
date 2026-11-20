@@ -11,6 +11,7 @@ import com.novanovastudio.dto.CreditCardDtos;
 import com.novanovastudio.dto.CreditDtos;
 import com.novanovastudio.service.CreditCardService;
 import com.novanovastudio.security.AdminGuard;
+import com.novanovastudio.service.CreditPurchaseService;
 import com.novanovastudio.service.CreditService;
 import java.time.LocalDate;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +33,9 @@ class AdminCreditControllerTest {
     /** 卡密管理服务 */
     private CreditCardService creditCardService;
 
+    /** 积分购买订单服务 */
+    private CreditPurchaseService creditPurchaseService;
+
     /** 管理员校验 */
     private AdminGuard adminGuard;
 
@@ -45,8 +49,9 @@ class AdminCreditControllerTest {
     void setUp() {
         creditService = mock(CreditService.class);
         creditCardService = mock(CreditCardService.class);
+        creditPurchaseService = mock(CreditPurchaseService.class);
         adminGuard = mock(AdminGuard.class);
-        adminCreditController = new AdminCreditController(creditService, creditCardService, adminGuard);
+        adminCreditController = new AdminCreditController(creditService, creditCardService, creditPurchaseService, adminGuard);
     }
 
     /**

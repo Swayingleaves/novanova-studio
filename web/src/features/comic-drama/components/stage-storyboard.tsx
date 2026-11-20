@@ -45,10 +45,11 @@ import {
     ZoomOut,
 } from "lucide-react";
 
-import { exportComicDramaVideo, getLatestComicDramaVideoExport, listComicDramaAssetVersions, readComicDramaMediaUrl } from "@/services/api/comic-drama";
+import { exportComicDramaVideo, getLatestComicDramaVideoExport, listComicDramaAssetVersions, readComicDramaMediaSource, readComicDramaMediaUrl } from "@/services/api/comic-drama";
 import { downloadComicDramaExportVideo, getServerMediaInfo } from "@/services/api/server";
 import { cancelCompositionTask, waitVideoCompositionTask, type VideoCompositionTask } from "@/services/api/video-composition";
 import { readAudioMetadata, uploadAudioFile } from "@/features/storage/services/audio-storage";
+import { downloadMedia } from "@/features/storage/services/media-download";
 import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
 import { nanoid } from "nanoid";
 import { useMediaAutoRefresh } from "../hooks/use-media-auto-refresh";
@@ -316,6 +317,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
     const [exportTask, setExportTask] = useState<VideoCompositionTask | null>(null);
     const [exportSubmitting, setExportSubmitting] = useState(false);
     const [exportDownloading, setExportDownloading] = useState(false);
+    const [shotDownloadingIds, setShotDownloadingIds] = useState<string[]>([]);
     const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
     const [audioErrors, setAudioErrors] = useState<Record<string, string>>({});
     const [previewRatio, setPreviewRatio] = useState(0);
@@ -411,6 +413,26 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             message.error(error instanceof Error ? error.message : translate("comicDrama.videoDownloadFailed"));
         } finally {
             setExportDownloading(false);
+        }
+    };
+
+    // 下载单个镜头已生成的视频：优先用存储键走后端代理，直链只作为兜底
+    const downloadShotVideo = async (media: ComicDramaMediaResult | undefined) => {
+        if (!media) return;
+        const source = readComicDramaMediaSource(media.resultData);
+        if (!source.storageKey && !source.url) {
+            message.error(translate("comicDrama.videoDownloadFailed"));
+            return;
+        }
+        if (shotDownloadingIds.includes(media.id)) return;
+        setShotDownloadingIds((prev) => [...prev, media.id]);
+        try {
+            const extension = source.mimeType === "video/webm" ? "webm" : source.mimeType === "video/quicktime" ? "mov" : "mp4";
+            await downloadMedia({ storageKey: source.storageKey, url: source.url }, createMediaDownloadFileName("video", extension));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("comicDrama.videoDownloadFailed"));
+        } finally {
+            setShotDownloadingIds((prev) => prev.filter((id) => id !== media.id));
         }
     };
 
@@ -1604,16 +1626,28 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                         )}
                                         <div className="mt-2.5 flex items-center justify-between border-t border-[var(--studio-line)] pt-2">
                                             <span className="text-[11px] text-[var(--studio-muted)]">{productionParameterLabel(shot.cameraMovement || "", translate) || translate("comicDrama.staticCamera")}</span>
-                                            <Button
-                                                size="small"
-                                                type="text"
-                                                className="!text-[var(--studio-primary)] hover:!text-[var(--studio-primary-hover)]"
-                                                onClick={() => {
-                                                    seekToShotStart(timelineShots.findIndex((item) => item.id === shot.id));
-                                                    setViewMode("timeline");
-                                                }}
-                                            >
-                                                {translate("comicDrama.previewInWorkspace")}</Button>
+                                            <div className="flex items-center gap-0.5">
+                                                {isVid && url ? (
+                                                    <Button
+                                                        size="small"
+                                                        type="text"
+                                                        icon={<Download className="size-3.5" />}
+                                                        loading={shotDownloadingIds.includes(media?.id ?? "")}
+                                                        title={translate("comicDrama.downloadVideo")}
+                                                        onClick={() => void downloadShotVideo(media)}
+                                                    />
+                                                ) : null}
+                                                <Button
+                                                    size="small"
+                                                    type="text"
+                                                    className="!text-[var(--studio-primary)] hover:!text-[var(--studio-primary-hover)]"
+                                                    onClick={() => {
+                                                        seekToShotStart(timelineShots.findIndex((item) => item.id === shot.id));
+                                                        setViewMode("timeline");
+                                                    }}
+                                                >
+                                                    {translate("comicDrama.previewInWorkspace")}</Button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -1907,6 +1941,21 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     <Volume2 className="size-3.5 text-[var(--studio-primary)]" />
                                                 )}
                                             </button>
+
+                                            {/* 当前镜头视频下载 */}
+                                            {isVideo && activeMediaUrl ? (
+                                                <button
+                                                    type="button"
+                                                    className="flex size-6 items-center justify-center rounded-md text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] transition-colors disabled:opacity-50"
+                                                    onClick={() => void downloadShotVideo(activeMedia)}
+                                                    disabled={shotDownloadingIds.includes(activeMedia?.id ?? "")}
+                                                    title={translate("comicDrama.downloadVideo")}
+                                                >
+                                                    {shotDownloadingIds.includes(activeMedia?.id ?? "")
+                                                        ? <Spin size="small" />
+                                                        : <Download className="size-3.5" />}
+                                                </button>
+                                            ) : null}
                                         </div>
                                     </div>
                                 </section>
