@@ -7,6 +7,7 @@ import com.novanovastudio.common.SystemMessage;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
+import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -231,6 +232,10 @@ public class AgentScopeModelFactory {
             case "openai" -> new StructuredOutputFallbackModel(OpenAIChatModel.builder()
                     .apiKey(channel.apiKey()).baseUrl(channel.baseUrl()).endpointPath("/chat/completions")
                     .modelName(modelName).stream(true).generateOptions(openAiGenerateOptions(thinkingEnabled, reasoningEffort, customBodyParameters)).build());
+            case "nana" -> new StructuredOutputFallbackModel(OpenAIChatModel.builder()
+                    .apiKey(channel.apiKey()).baseUrl(AiHttpClient.buildNanaBaseUrl(channel.baseUrl())).endpointPath("/chat/completions")
+                    .modelName(modelName).stream(true)
+                    .generateOptions(GenerateOptions.builder().additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters).build()).build());
             case "gemini" -> GeminiChatModel.builder()
                     .apiKey(channel.apiKey()).baseUrl(channel.baseUrl()).modelName(modelName).streamEnabled(true)
                     .defaultOptions(GenerateOptions.builder().additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters).build()).build();

@@ -645,6 +645,58 @@ export type ServerAdminCreditTransactionList = {
     total: number;
 };
 
+export type ServerRevenueDistributionItem = {
+    name: string;
+    revenueAmount: string;
+    orderCount: number;
+};
+
+export type ServerRevenueTrendItem = {
+    period: string;
+    revenueAmount: string;
+};
+
+export type ServerRevenueOverview = {
+    /** 本期收入合计，单位元。 */
+    totalRevenue: string;
+    /** 本期已支付订单数。 */
+    orderCount: number;
+    /** 本期售出积分合计。 */
+    totalCredits: CreditAmount;
+    /** 支付方式收入分布。 */
+    paymentMethodDistribution: ServerRevenueDistributionItem[];
+    /** 按月收入趋势。 */
+    trend: ServerRevenueTrendItem[];
+};
+
+export type ServerAdminRevenueRecord = {
+    orderId: number;
+    orderNo: string;
+    userId: number;
+    username: string;
+    nickname: string | null;
+    email: string;
+    /** 下单时的商品基础积分。 */
+    baseCredits: CreditAmount;
+    /** 订单到账积分，含商品赠送。 */
+    credits: CreditAmount;
+    /** 商品赠送积分。 */
+    bonusCredits: CreditAmount;
+    /** 该订单带来的积分变动，含首充赠送。 */
+    changeAmount: CreditAmount;
+    /** 支付金额，单位元。 */
+    priceAmount: string;
+    paymentMethod: string;
+    /** 到账后的余额快照，流水缺失时为空。 */
+    balanceAfter: CreditAmount | null;
+    paidAt: string;
+};
+
+export type ServerAdminRevenueRecordList = {
+    records: ServerAdminRevenueRecord[];
+    total: number;
+};
+
 export type ServerCheckInStatus = {
     today: string;
     checkedInToday: boolean;
@@ -1831,6 +1883,23 @@ export function listAdminCreditTransactions(params: { filterTeamId?: number; use
     if (params.source) query.set("source", params.source);
     if (params.keyword) query.set("keyword", params.keyword);
     return serverGet<ServerAdminCreditTransactionList>(`/admin/credit/listCreditTransactions?${query}`);
+}
+
+export function getAdminRevenueOverview(params: { userId?: number; startDate: string; endDate: string }) {
+    const query = new URLSearchParams({ startDate: params.startDate, endDate: params.endDate });
+    if (params.userId !== undefined) query.set("userId", String(params.userId));
+    return serverGet<ServerRevenueOverview>(`/admin/credit/getRevenueOverview?${query}`);
+}
+
+export function listAdminRevenueRecords(params: { userId?: number; startDate: string; endDate: string; page: number; pageSize: number }) {
+    const query = new URLSearchParams({
+        startDate: params.startDate,
+        endDate: params.endDate,
+        page: String(params.page),
+        pageSize: String(params.pageSize),
+    });
+    if (params.userId !== undefined) query.set("userId", String(params.userId));
+    return serverGet<ServerAdminRevenueRecordList>(`/admin/credit/listRevenueRecords?${query}`);
 }
 
 export function generateCreditCards(input: { quantity?: number; creditsPerCard: CreditAmount }) {

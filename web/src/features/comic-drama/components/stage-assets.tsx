@@ -42,8 +42,8 @@ const getVariantTypeLabels = (translate = translateMessage): Record<string, stri
     status: translate("comicDrama.damageTransformation"),
 });
 
-/** 版本表单只维护可编辑字段，其余字段在提交时补齐。 */
-type AssetVersionFormValues = Pick<ComicDramaAssetVersionInput, "id" | "versionName" | "variantType" | "appearanceDescription">;
+/** 版本表单只维护可编辑字段，其余字段在提交时补齐；外观描述统一取资产描述，不在版本表单里单独编辑。 */
+type AssetVersionFormValues = Pick<ComicDramaAssetVersionInput, "id" | "versionName" | "variantType">;
 
 /** 生成一个不会与历史版本冲突的版本标识。 */
 function newVersionId(): string {
@@ -331,7 +331,6 @@ export function StageAssets() {
             id: newVersionId(),
             versionName: "",
             variantType: "costume",
-            appearanceDescription: "",
         });
     };
 
@@ -352,6 +351,8 @@ export function StageAssets() {
             await saveAssetVersion({
                 ...values,
                 assetId: activeAssetForVersions.id,
+                // 版本描述统一取资产描述，表单不再单独维护，避免与页面展示值分叉
+                appearanceDescription: activeAssetForVersions.description ?? "",
                 // 表单未维护的字段必须补全，后端 AssetVersion 的 status 为必填
                 referenceMedia: [],
                 attributes: {},
@@ -754,15 +755,6 @@ export function StageAssets() {
                                         options={Object.entries(getVariantTypeLabels(translate)).map(([value, label]) => ({ value, label }))}
                                     />
                                 </Form.Item>
-                                <Form.Item
-                                    name="appearanceDescription"
-                                    label={translate("comicDrama.versionSpecificAppearance")}
-                                >
-                                    <Input.TextArea
-                                        rows={3}
-                                        placeholder={translate("comicDrama.describeHowThisVersionDiffersFromTheDefaultBaseline")}
-                                    />
-                                </Form.Item>
                                 <Button type="primary" onClick={handleSaveVersion}>
                                     {translate("comicDrama.saveVersion")}</Button>
                             </Form>
@@ -810,7 +802,7 @@ export function StageAssets() {
                                                         </Tag>
                                                     </div>
                                                     <p className="mt-1 line-clamp-2 text-xs text-[var(--studio-muted)]">
-                                                        {version.appearanceDescription || translate("comicDrama.noVersionAppearanceDescription")}
+                                                        {activeAssetForVersions.description || translate("comicDrama.noVersionAppearanceDescription")}
                                                     </p>
                                                 </div>
                                             </div>

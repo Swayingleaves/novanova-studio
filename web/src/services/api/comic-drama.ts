@@ -245,6 +245,19 @@ export function readComicDramaMediaUrl(resultData: Record<string, unknown>): str
     return typeof url === "string" ? url : "";
 }
 
+/** 读取漫剧媒体结果里的首个媒体来源，供下载时优先走存储键。 */
+export function readComicDramaMediaSource(resultData: Record<string, unknown>) {
+    const items = Array.isArray(resultData.items) ? (resultData.items as Record<string, unknown>[]) : [];
+    const candidate = resultData.item && typeof resultData.item === "object"
+        ? resultData.item as Record<string, unknown>
+        : items[0];
+    return {
+        url: typeof candidate?.url === "string" ? candidate.url : "",
+        storageKey: typeof candidate?.storageKey === "string" ? candidate.storageKey : undefined,
+        mimeType: typeof candidate?.mimeType === "string" ? candidate.mimeType : undefined,
+    };
+}
+
 /** 将通用 AI 任务结果转成媒体来源，供工作台轮询完成后落库。 */
 export function readComicDramaTaskMedia(task: ServerAiTask) {
     const result = task.resultData && typeof task.resultData === "object" ? task.resultData as Record<string, unknown> : {};

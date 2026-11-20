@@ -2,6 +2,7 @@
 
 import { creditText } from "@/shared/lib/credit-amounts";
 import type { CreditAmount } from "@/shared/lib/credit-amounts";
+import { useCopyText } from "@/shared/hooks/use-copy-text";
 
 import { currentLanguageTag } from "@/features/locale/translate";
 
@@ -10,8 +11,8 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { Alert, App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Tabs } from "antd";
 import { nanoid } from "nanoid";
-import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Copy, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Copy, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Upload, Video, Wifi } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { ModelIcon } from "@/features/settings/components/model-picker";
@@ -73,6 +74,8 @@ import { cloneImageSizeMappings, IMAGE_RESOLUTIONS, normalizeImageSizeMappings, 
 import { ImageSizeMappingsEditor } from "./image-size-mappings-editor";
 import { ModelSelectModal, type ChannelModelGroup } from "./model-select-modal";
 import { ModelConfigCopyModal } from "./model-config-copy-modal";
+import { ModelConfigImportModal } from "./model-config-import-modal";
+import { buildCustomModelTransferJson } from "./model-config-transfer";
 import { ModelConfigTextArea } from "./model-config-textarea";
 import { applyCustomConfigCopy } from "./model-config-copy";
 import type { CustomGroupField, CustomModelMode } from "./model-config-copy";
@@ -194,8 +197,14 @@ const modelIconSelectOptions = MODEL_ICON_OPTIONS.map((option) => ({
     ),
 }));
 
-const createApiFormatOptions = (translator: typeof translate = translate): Array<{ label: string; value: ApiCallFormat }> => [
+const createApiFormatOptions = (translator: typeof translate = translate): Array<{ label: ReactNode; value: ApiCallFormat }> => [
     { label: "OpenAI", value: "openai" },
+    {
+        get label() {
+            return apiFormatLabelNode("nana");
+        },
+        value: "nana",
+    },
     { label: "New API", value: "newapi" },
     { label: "Evolink", value: "evolink" },
     { label: "Gemini", value: "gemini" },
@@ -339,6 +348,7 @@ const createObjectStorageProviderFields = (
 export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChange }: { activeTab?: ConfigurationTabKey; onTabChange?: (tabKey: ConfigurationTabKey) => void }) {
     const translate = useTranslation();
     const { message, modal } = App.useApp();
+    const copyText = useCopyText();
     const team = useTeamStore((state) => state.team);
     const config = useConfigStore((state) => state.config);
     const modelConfigs = useConfigStore((state) => state.modelConfigs);
@@ -387,6 +397,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
     const [collapsedEditingCapabilities, setCollapsedEditingCapabilities] = useState<string[]>([]);
     const [modelConfigCopyTarget, setModelConfigCopyTarget] = useState<ServerModelConfig | null>(null);
+    const [modelConfigImportTarget, setModelConfigImportTarget] = useState<ServerModelConfig | null>(null);
     const [autoFillConfigMode, setAutoFillConfigMode] = useState<VideoGenerationMode | null>(null);
     const editingModelIsMedia = Boolean(editingModelConfig && (editingModelConfig.modelType === "image" || editingModelConfig.modelType === "video"));
 
@@ -609,7 +620,9 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             message.warning(translate("appShell.addModelsInMyChannelsBeforeConfiguringOptions"));
             return false;
         }
-        setDraftModelConfigs((configs) => updateModelConfigSelection(configs, modelConfigBaseline, group.capability, values, createDraftModelConfig));
+        setDraftModelConfigs((configs) => updateModelConfigSelection(configs, modelConfigBaseline, group.capability, values,
+            (channelId, modelName, modelType) => createDraftModelConfig(channelId, modelName, modelType,
+                draftChannels.find((channel) => channel.id === channelId)?.apiFormat)));
         return true;
     };
 
@@ -618,6 +631,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
         setEditingCustomBodyParameters(JSON.stringify(configItem.customBodyParameters || {}, null, 2));
         setCollapsedEditingCapabilities(defaultCollapsedEditingCapabilities(configItem));
         setModelConfigCopyTarget(null);
+        setModelConfigImportTarget(null);
     };
 
     const toggleEditingCapabilityCollapsed = (capability: string) => {
@@ -626,6 +640,33 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
 
     const updateEditingModelConfig = (patch: Partial<ServerModelConfig>) => {
         setEditingModelConfig((configItem) => (configItem ? { ...configItem, ...patch } : configItem));
+    };
+
+    /** 把当前编辑中的完整配置复制成 JSON，便于在其他实例直接导入。 */
+    const copyEditingModelConfig = () => {
+        if (!editingModelConfig) return;
+        let customBodyParameters = editingModelConfig.customBodyParameters;
+        try {
+            const parsed = JSON.parse(editingCustomBodyParameters.trim() || "{}");
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+                message.error(translate("appShell.customModelJSONMustBeAnObject"));
+                return;
+            }
+            customBodyParameters = parsed as Record<string, unknown>;
+        } catch {
+            message.error(translate("appShell.invalidCustomModelJSON"));
+            return;
+        }
+        copyText(buildCustomModelTransferJson({ ...editingModelConfig, customBodyParameters }), translate("appShell.customModelConfigCopied"));
+    };
+
+    /** 把导入的配置写入编辑副本，用户点确定后才会进入草稿。 */
+    const importEditingModelConfig = (patch: Partial<ServerModelConfig>) => {
+        if (!editingModelConfig) return;
+        setEditingModelConfig((configItem) => (configItem ? { ...configItem, ...patch } : configItem));
+        if (patch.customBodyParameters) setEditingCustomBodyParameters(JSON.stringify(patch.customBodyParameters, null, 2));
+        setModelConfigImportTarget(null);
+        message.success(translate("appShell.importConfigApplied"));
     };
 
     /** 从其他同类型自定义模型复制指定模式的调用配置，覆盖目标已有内容。 */
@@ -1209,7 +1250,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                                         <div className="min-w-0">
                                                             <div className="truncate text-sm font-semibold">{channel.name || translate("appShell.unnamedChannel")}</div>
                                                             <div className="mt-1 text-xs text-[var(--studio-muted)]">
-                                                                {apiFormatLabel(channel.apiFormat)} {translate("appShell.configured")}
+                                                                {apiFormatLabelNode(channel.apiFormat)} {translate("appShell.configured")}
                                                                 {channel.models.length} {translate("appShell.models")}
                                                             </div>
                                                         </div>
@@ -1800,7 +1841,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                 {editingModelConfig?.modelType === "video" && editingModelIsMedia ? (
                     <div className="space-y-5">
                         <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
-                            <div className="flex items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div>
                                     <div className="flex items-center gap-1.5 text-sm font-semibold">
                                         {translate("appShell.customModel")}
@@ -1808,7 +1849,19 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                     </div>
                                     <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.useRequestAndResponseExamplesForEachModeTo")}</p>
                                 </div>
-                                <Switch checked={Boolean(editingModelConfig.isCustomModel)} onChange={(checked) => updateEditingModelConfig({ isCustomModel: checked })} />
+                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                    {editingModelConfig.isCustomModel ? (
+                                        <>
+                                            <Button size="small" icon={<Copy className="size-3.5" />} disabled={isSaving} onClick={copyEditingModelConfig}>
+                                                {translate("appShell.copyConfig")}
+                                            </Button>
+                                            <Button size="small" icon={<Upload className="size-3.5" />} disabled={isSaving} onClick={() => setModelConfigImportTarget(editingModelConfig)}>
+                                                {translate("appShell.importConfig")}
+                                            </Button>
+                                        </>
+                                    ) : null}
+                                    <Switch checked={Boolean(editingModelConfig.isCustomModel)} onChange={(checked) => updateEditingModelConfig({ isCustomModel: checked })} />
+                                </div>
                             </div>
                         </section>
 
@@ -1897,7 +1950,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                 <div className="flex flex-wrap items-center gap-2">
                                     {editingModelConfig.isCustomModel ? (
                                         <Button size="small" icon={<Copy className="size-3.5" />} disabled={isSaving} onClick={() => setModelConfigCopyTarget(editingModelConfig)}>
-                                            {translate("appShell.copyConfig")}
+                                            {translate("appShell.copyConfigFromModel")}
                                         </Button>
                                     ) : null}
                                     <span className="rounded-md border border-[var(--studio-line)] px-2.5 py-1 text-xs text-[var(--studio-muted)]">
@@ -2102,7 +2155,19 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                     <Form layout="vertical" requiredMark={false}>
                         {editingModelConfig.modelType !== "text" ? (
                             <Form.Item label={translate("appShell.customModel")} extra={translate("appShell.useRequestAndResponseExamplesForEachCapabilityTo")}>
-                                <Switch checked={Boolean(editingModelConfig.isCustomModel)} onChange={(checked) => updateEditingModelConfig({ isCustomModel: checked })} />
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <Switch checked={Boolean(editingModelConfig.isCustomModel)} onChange={(checked) => updateEditingModelConfig({ isCustomModel: checked })} />
+                                    {editingModelConfig.isCustomModel ? (
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <Button size="small" icon={<Copy className="size-3.5" />} disabled={isSaving} onClick={copyEditingModelConfig}>
+                                                {translate("appShell.copyConfig")}
+                                            </Button>
+                                            <Button size="small" icon={<Upload className="size-3.5" />} disabled={isSaving} onClick={() => setModelConfigImportTarget(editingModelConfig)}>
+                                                {translate("appShell.importConfig")}
+                                            </Button>
+                                        </div>
+                                    ) : null}
+                                </div>
                             </Form.Item>
                         ) : null}
                         <Form.Item label={translate("appShell.displayName")} extra={translate("appShell.userFacingNameDefaultsToModelNameAndDoes")}>
@@ -2151,7 +2216,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                 <div className="space-y-3">
                                     <div className="flex flex-wrap items-center justify-end gap-2">
                                         <Button size="small" icon={<Copy className="size-3.5" />} disabled={isSaving} onClick={() => setModelConfigCopyTarget(editingModelConfig)}>
-                                            {translate("appShell.copyConfig")}
+                                            {translate("appShell.copyConfigFromModel")}
                                         </Button>
                                     </div>
                                     {createModelCapabilityOptions(translate).image.map((option) => (
@@ -2257,6 +2322,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                 ) : null}
             </Modal>
             {modelConfigCopyTarget ? <ModelConfigCopyModal target={modelConfigCopyTarget} configs={draftModelConfigs} config={draftConfig} onCancel={() => setModelConfigCopyTarget(null)} onCopy={copyCustomConfigFromModel} /> : null}
+            {modelConfigImportTarget ? <ModelConfigImportModal target={modelConfigImportTarget} onCancel={() => setModelConfigImportTarget(null)} onImport={importEditingModelConfig} /> : null}
             {autoFillConfigMode && editingModelConfig ? <ModelConfigAutoFillModal config={editingModelConfig} mode={autoFillConfigMode} onCancel={() => setAutoFillConfigMode(null)} onFill={autoFillCustomConfig} /> : null}
         </div>
     );
@@ -2350,13 +2416,13 @@ function cloneObjectStorages(storages: ObjectStorageConfig[]) {
     return storages.map((storage) => ({ ...storage }));
 }
 
-function createDraftModelConfig(channelId: string, modelName: string, modelType: ModelCapability): ServerModelConfig {
+function createDraftModelConfig(channelId: string, modelName: string, modelType: ModelCapability, apiFormat?: ApiCallFormat): ServerModelConfig {
     return {
         id: `draft-${nanoid()}`,
         channelId,
         modelName,
         modelType,
-        capabilities: [],
+        capabilities: apiFormat === "nana" ? nanaDefaultCapabilities(modelName, modelType) : [],
         defaultModel: false,
         enabled: true,
         sortOrder: 0,
@@ -2375,6 +2441,17 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         isCustomModel: false,
         customModelConfig: {},
     };
+}
+
+/** NANA-API 模型按名称预置推荐能力，减少新增模型时的手工勾选；保存前仍可在模型弹窗中调整。 */
+function nanaDefaultCapabilities(modelName: string, modelType: ModelCapability): string[] {
+    if (modelType === "text") return ["chat"];
+    if (modelType === "image") return ["text-to-image", "image-to-image"];
+    const name = modelName.trim().toLowerCase();
+    if (name.includes("seedance")) return ["text-to-video", "image-to-video", "reference-to-video"];
+    if (name.includes("minimax")) return name.includes("ref") ? ["reference-to-video"] : ["text-to-video"];
+    if (/(?:^|[^a-z0-9])wan(?:x|\d)/.test(name)) return ["text-to-video", "image-to-video", "reference-to-video", "first-last-frame-to-video"];
+    return [];
 }
 
 function sameValue(first: unknown, second: unknown) {
@@ -2727,6 +2804,7 @@ function CustomModelGroupEditor({ label, group, isVideo, onAutoFill, onChange }:
 }
 
 function apiFormatLabel(apiFormat: ApiCallFormat) {
+    if (apiFormat === "nana") return "NANA-API";
     if (apiFormat === "newapi") return "New API";
     if (apiFormat === "evolink") return "Evolink";
     if (apiFormat === "agnes") return "Agnes";
@@ -2736,6 +2814,21 @@ function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "minimax") return "MiniMax";
     if (apiFormat === "custom") return translate("appShell.custom");
     return "OpenAI";
+}
+
+/** 调用格式显示名；NANA-API 额外带「官方」标记，区分官方中转站与其他兼容渠道。 */
+function apiFormatLabelNode(apiFormat: ApiCallFormat): ReactNode {
+    const label = apiFormatLabel(apiFormat);
+    if (apiFormat !== "nana") return label;
+    return (
+        <span className="inline-flex items-center gap-1.5">
+            {label}
+            <span className="inline-flex items-center gap-0.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-1.5 py-px text-[10px] font-medium leading-4 text-[var(--studio-primary)]">
+                <CheckCircle2 className="size-2.5" />
+                {translate("appShell.official")}
+            </span>
+        </span>
+    );
 }
 
 function formatTimestamp(value: string) {

@@ -330,4 +330,82 @@ public final class CreditDtos {
      */
     public record AdminTaskRecordListResponse(List<AdminTaskRecordItem> records, Long total) {
     }
+
+    /**
+     * 收入支付方式分布项。
+     *
+     * @param name String 支付方式：alipay/wechat
+     * @param revenueAmount String 该支付方式的收入金额，单位元
+     * @param orderCount Long 该支付方式的已支付订单数
+     */
+    public record RevenueDistributionItem(String name, String revenueAmount, Long orderCount) {
+    }
+
+    /**
+     * 收入月度趋势项。
+     *
+     * @param period String 月份，格式 yyyy-MM
+     * @param revenueAmount String 当月收入金额，单位元
+     */
+    public record RevenueTrendItem(String period, String revenueAmount) {
+    }
+
+    /**
+     * 管理员收入概览响应。
+     *
+     * @param totalRevenue String 本期收入合计，单位元
+     * @param orderCount Long 本期已支付订单数
+     * @param totalCredits BigDecimal 本期售出积分合计
+     * @param paymentMethodDistribution List<RevenueDistributionItem> 支付方式收入分布
+     * @param trend List<RevenueTrendItem> 月度收入趋势
+     */
+    public record RevenueOverviewResponse(String totalRevenue,
+                                          Long orderCount,
+                                          @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal totalCredits,
+                                          List<RevenueDistributionItem> paymentMethodDistribution,
+                                          List<RevenueTrendItem> trend) {
+    }
+
+    /**
+     * 管理员收入明细项。
+     *
+     * @param orderId Long 订单内部标识
+     * @param orderNo String 平台订单号
+     * @param userId Long 用户ID
+     * @param username String 用户名
+     * @param nickname String 用户昵称，可为空
+     * @param email String 用户邮箱
+     * @param baseCredits BigDecimal 下单时的商品基础积分
+     * @param credits BigDecimal 订单到账积分，含商品赠送
+     * @param bonusCredits BigDecimal 商品赠送积分
+     * @param changeAmount BigDecimal 该订单带来的积分变动，含首充赠送
+     * @param priceAmount String 支付金额，单位元
+     * @param paymentMethod String 支付渠道：alipay/wechat
+     * @param balanceAfter BigDecimal 到账后的余额快照，流水缺失时为空
+     * @param paidAt String 支付时间
+     */
+    public record AdminRevenueRecordItem(Long orderId,
+                                         String orderNo,
+                                         Long userId,
+                                         String username,
+                                         String nickname,
+                                         String email,
+                                         @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal baseCredits,
+                                         @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits,
+                                         @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal bonusCredits,
+                                         @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal changeAmount,
+                                         String priceAmount,
+                                         String paymentMethod,
+                                         @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal balanceAfter,
+                                         String paidAt) {
+    }
+
+    /**
+     * 管理员收入明细列表响应。
+     *
+     * @param records List<AdminRevenueRecordItem> 当前页明细
+     * @param total Long 符合筛选条件的总数
+     */
+    public record AdminRevenueRecordListResponse(List<AdminRevenueRecordItem> records, Long total) {
+    }
 }

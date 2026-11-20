@@ -18,7 +18,7 @@ import { cloneImageSizeMappings } from "@/features/generation/lib/image-size-map
 import type { ImageResolution } from "@/features/generation/lib/image-size-mappings";
 import { refreshModelConfigurationSnapshot } from "../lib/model-configuration-refresh";
 
-export type ApiCallFormat = "openai" | "newapi" | "evolink" | "gemini" | "agnes" | "anthropic" | "seedance" | "minimax" | "custom";
+export type ApiCallFormat = "openai" | "nana" | "newapi" | "evolink" | "gemini" | "agnes" | "anthropic" | "seedance" | "minimax" | "custom";
 export type ModelCapability = "image" | "video" | "text";
 export type ModelCreditUnit = "generation" | "second";
 export type VideoGenerationMode = "text-to-video" | "image-to-video" | "reference-to-video" | "first-last-frame-to-video";
@@ -372,6 +372,7 @@ export function buildApiUrl(baseUrl: string, path: string) {
 }
 
 export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
+    if (apiFormat === "nana") return "https://api.novanovastudio.cn/v1";
     if (apiFormat === "newapi") return "";
     if (apiFormat === "evolink") return "https://api.evolink.ai/v1";
     if (apiFormat === "gemini") return "https://generativelanguage.googleapis.com/v1beta";
@@ -692,7 +693,7 @@ function parseModelOption(value: string) {
 }
 
 function normalizeApiFormat(value: unknown): ApiCallFormat {
-    if (value === "newapi" || value === "evolink" || value === "gemini" || value === "agnes" || value === "anthropic" || value === "seedance" || value === "minimax" || value === "custom") return value;
+    if (value === "nana" || value === "newapi" || value === "evolink" || value === "gemini" || value === "agnes" || value === "anthropic" || value === "seedance" || value === "minimax" || value === "custom") return value;
     return "openai";
 }
 

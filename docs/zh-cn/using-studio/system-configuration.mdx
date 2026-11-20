@@ -30,7 +30,7 @@ description: 管理员配置模型渠道、模型能力、对象存储、初始�
 | 字段 | 说明 |
 | --- | --- |
 | 渠道名称 | 便于识别的名字；留空时列表显示「未命名渠道」 |
-| 调用格式 | OpenAI / New API / Evolink / Gemini / Agnes / Anthropic / Seedance / MiniMax / 自定义 |
+| 调用格式 | OpenAI / NANA-API / New API / Evolink / Gemini / Agnes / Anthropic / Seedance / MiniMax / 自定义 |
 | Base URL | 服务地址。切换调用格式时，如果地址为空或仍是旧格式的默认值，会自动替换为新格式的默认地址 |
 | API Key | 密钥，界面默认打码，可以点眼睛图标查看 |
 | 模型列表 | 该渠道可用的模型名，可以手动输入，也可以拉取 |
@@ -40,6 +40,7 @@ description: 管理员配置模型渠道、模型能力、对象存储、初始�
 | 调用格式 | 默认 Base URL |
 | --- | --- |
 | OpenAI | `https://api.openai.com/v1` |
+| NANA-API | `https://api.novanovastudio.cn/v1` |
 | New API | 无默认值，需自行填写 |
 | Evolink | `https://api.evolink.ai/v1` |
 | Gemini | 以 `/v1beta` 结尾的地址 |
@@ -48,6 +49,8 @@ description: 管理员配置模型渠道、模型能力、对象存储、初始�
 | Seedance | `https://ark.cn-beijing.volces.com/api/v3` |
 | MiniMax | `https://api.minimaxi.com` |
 | 自定义 | 无默认值，需自行填写 |
+
+NANA-API 是项目官方中转站的专用格式：文本走 OpenAI 兼容协议，图片走 OpenAI 图片接口，视频按模型名自动选择 Seedance、Wan 或 MiniMax 协议。填好地址与密钥、拉取模型并保存后，只需在「我的模型」中启用模型并配置积分即可使用，不需要额外填写请求路径或模板。
 
 **拉取模型**：填好 Base URL 与 API Key 后点「拉取模型」，结果会写入模型列表并提示「<渠道名> 模型列表已更新，请点击保存」；缺少参数时提示「请先填写该渠道的 Base URL 和 API Key」。MiniMax 与自定义格式的按钮是禁用的（「MiniMax 请手动配置 MiniMax-H3」「自定义格式请手动配置模型列表」），模型名需要手动维护。
 
@@ -90,7 +93,11 @@ description: 管理员配置模型渠道、模型能力、对象存储、初始�
 
 调用格式选了「自定义」的渠道，其模型要在这里填写自定义 JSON（请求模板与响应解析）。模板可用变量：`{{prompt}}`、`{{model}}`、`{{references}}`、`{{videoReferences}}`、`{{audioReferences}}`、`{{size}}`、`{{resolution}}`、`{{seconds}}`、`{{count}}`、`{{taskId}}`，请求方法可选 POST 或 GET。JSON 格式不对时会提示「模型自定义JSON必须是对象」或「模型自定义JSON格式不正确」。
 
-### 6. 常见拦截
+### 6. 复制与导入配置
+
+开启「自定义模型」后，配置弹窗顶部的「复制配置」会把当前模型的完整配置导出成 JSON 复制到剪贴板，包含展示名称、图标、计费方式、并发数、能力开关、分辨率价格以及各能力的请求/查询模板与限制；「导入配置」粘贴对方给出的 JSON 即可写入当前模型。导入只接受同类型模型（图片对图片、视频对视频），渠道、真实模型名、启用状态和排序不会随配置一起导入，确认前还可以继续修改。
+
+### 7. 常见拦截
 
 - 「模型配置引用了未保存的渠道或模型，请先保存“我的渠道”」：先去渠道页保存，再回来保存模型。
 - 视频模型的计费方式必选、价格必须是不小于 0 的整数，且只能配置已勾选的生成模式与模型支持的分辨率，否则服务端会拒绝保存。

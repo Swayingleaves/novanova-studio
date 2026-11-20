@@ -3,6 +3,7 @@ package com.novanovastudio.service;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.CreditAmounts;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.common.SystemMessage;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.CreditDtos;
@@ -19,7 +20,12 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.URI;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -56,6 +62,10 @@ public class CreditPurchaseService {
     private static final int MAX_ORDER_PAGE_SIZE = 100;
     /** 平台积分兑换口径：1 元等于 10 积分。 */
     private static final BigDecimal CREDITS_PER_YUAN = BigDecimal.TEN;
+    /** 收入统计业务时区。 */
+    private static final ZoneId REVENUE_TIME_ZONE = ZoneId.of("Asia/Shanghai");
+    /** 收入月度趋势的月份格式。 */
+    private static final DateTimeFormatter REVENUE_MONTH_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM");
 
     /** 商品订单仓储。 */
     private final CreditPurchaseRepository purchaseRepository;
@@ -214,6 +224,102 @@ public class CreditPurchaseService {
         return requirePlatform().then(Mono.defer(() -> currentUserProvider.currentUserId()
                 .flatMap(userId -> purchaseRepository.listOrders(userId, pageSize))
                 .map(orders -> new PaymentDtos.CreditOrderListResponse(orders.stream().map(this::orderItem).toList()))));
+    }
+
+    /**
+     * 查询管理员可见的收入概览。
+     *
+     * @param userId Long 用户ID，可为空表示全部用户
+     * @param startDate LocalDate 筛选起始日期
+     * @param endDate LocalDate 筛选结束日期
+     * @return Mono<RevenueOverviewResponse> 收入合计、支付方式分布和月度趋势
+     */
+    public Mono<CreditDtos.RevenueOverviewResponse> getAdminRevenueOverview(Long userId, LocalDate startDate, LocalDate endDate) {
+        return requirePlatform().then(Mono.defer(() -> {
+            CreditPurchaseRepository.RevenueQuery query = createRevenueQuery(userId, startDate, endDate);
+            return Mono.zip(
+                            purchaseRepository.getRevenueSummary(query),
+                            purchaseRepository.listRevenueByPaymentMethod(query).collectList(),
+                            purchaseRepository.listMonthlyRevenue(query).collectList())
+                    .map(result -> new CreditDtos.RevenueOverviewResponse(
+                            moneyText(result.getT1().totalRevenue()),
+                            result.getT1().orderCount(),
+                            result.getT1().totalCredits(),
+                            result.getT2(),
+                            completeMonthlyRevenue(query.startDate(), query.endDate(), result.getT3())));
+        })).contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
+    }
+
+    /**
+     * 分页查询管理员可见的收入明细。
+     *
+     * @param userId Long 用户ID，可为空表示全部用户
+     * @param startDate LocalDate 筛选起始日期
+     * @param endDate LocalDate 筛选结束日期
+     * @param page int 页码
+     * @param pageSize int 每页数量
+     * @return Mono<AdminRevenueRecordListResponse> 收入明细
+     */
+    public Mono<CreditDtos.AdminRevenueRecordListResponse> listAdminRevenueRecords(Long userId, LocalDate startDate, LocalDate endDate, int page, int pageSize) {
+        if (page < 1 || pageSize < 1 || pageSize > MAX_ORDER_PAGE_SIZE) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidPaginationParameters")));
+        }
+        return requirePlatform().then(Mono.defer(() -> {
+            CreditPurchaseRepository.RevenueQuery query = createRevenueQuery(userId, startDate, endDate);
+            return Mono.zip(
+                            purchaseRepository.listRevenueRecords(query, page, pageSize).collectList(),
+                            purchaseRepository.countRevenueRecords(query))
+                    .map(result -> new CreditDtos.AdminRevenueRecordListResponse(result.getT1(), result.getT2()));
+        })).contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
+    }
+
+    /**
+     * 构建并校验收入统计查询条件。
+     *
+     * @param userId Long 用户ID，可为空表示全部用户
+     * @param startDate LocalDate 筛选起始日期
+     * @param endDate LocalDate 筛选结束日期
+     * @return RevenueQuery 已校验的查询条件
+     */
+    private CreditPurchaseRepository.RevenueQuery createRevenueQuery(Long userId, LocalDate startDate, LocalDate endDate) {
+        if (startDate == null || endDate == null || startDate.isAfter(endDate)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidCreditDateFilter"));
+        }
+        return new CreditPurchaseRepository.RevenueQuery(userId, startDate, endDate,
+                startDate.atStartOfDay(REVENUE_TIME_ZONE).toOffsetDateTime(),
+                endDate.plusDays(1).atStartOfDay(REVENUE_TIME_ZONE).toOffsetDateTime());
+    }
+
+    /**
+     * 为没有收入的月份补零。
+     *
+     * @param startDate LocalDate 筛选起始日期
+     * @param endDate LocalDate 筛选结束日期
+     * @param items List<RevenueTrendItem> 已产生收入的月份
+     * @return List<RevenueTrendItem> 完整连续的月度趋势
+     */
+    private static List<CreditDtos.RevenueTrendItem> completeMonthlyRevenue(LocalDate startDate, LocalDate endDate, List<CreditDtos.RevenueTrendItem> items) {
+        Map<String, String> revenueByPeriod = new HashMap<>();
+        items.forEach(item -> revenueByPeriod.put(item.period(), item.revenueAmount()));
+        LocalDate month = startDate.withDayOfMonth(1);
+        LocalDate lastMonth = endDate.withDayOfMonth(1);
+        List<CreditDtos.RevenueTrendItem> completed = new ArrayList<>();
+        while (!month.isAfter(lastMonth)) {
+            String period = month.format(REVENUE_MONTH_FORMATTER);
+            completed.add(new CreditDtos.RevenueTrendItem(period, revenueByPeriod.getOrDefault(period, "0.00")));
+            month = month.plusMonths(1);
+        }
+        return completed;
+    }
+
+    /**
+     * 将金额格式化为两位小数的普通文本。
+     *
+     * @param amount BigDecimal 金额
+     * @return String 两位小数金额文本
+     */
+    private static String moneyText(BigDecimal amount) {
+        return amount == null ? "0.00" : amount.setScale(2).toPlainString();
     }
 
     /**

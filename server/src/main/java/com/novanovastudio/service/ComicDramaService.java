@@ -218,8 +218,12 @@ public class ComicDramaService {
      * @return 资产版本列表
      */
     public Mono<List<ComicDramaDtos.AssetVersion>> listAssetVersions(ComicDramaDtos.ListAssetVersionsRequest request) {
-        return withProject(request.projectId(), () -> repository.listAssetVersions(request.projectId(), request.assetId()).collectList())
-                .flatMap(versions -> Flux.fromIterable(versions).concatMap(this::signedAssetVersion).collectList());
+        return withProject(request.projectId(), () -> Mono.zip(
+                        repository.getAsset(request.projectId(), request.assetId()).switchIfEmpty(notFound("视觉资产不存在")),
+                        repository.listAssetVersions(request.projectId(), request.assetId()).collectList()))
+                .flatMap(tuple -> Flux.fromIterable(tuple.getT2())
+                        .concatMap(version -> signedAssetVersion(withAssetDescription(version, tuple.getT1().description())))
+                        .collectList());
     }
 
     /** 按版本标识批量查询当前项目内的资产版本。 */
@@ -239,10 +243,23 @@ public class ComicDramaService {
         return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
                 requireProjectRevision(userId, request.projectId(), request.expectedRevision())
                         .then(repository.getAsset(request.projectId(), request.version().assetId()).switchIfEmpty(notFound("视觉资产不存在")))
-                        .then(repository.saveAssetVersion(request.version()).switchIfEmpty(conflict()))
+                        .flatMap(asset -> repository.saveAssetVersion(withAssetDescription(request.version(), asset.description())).switchIfEmpty(conflict()))
                         .then(repository.markUpstreamChanges(request.projectId(), "assetVersion", List.of(request.version().id()), "视觉资产版本发生变化"))
                         .then(advance(userId, request.projectId(), request.expectedRevision()))
                         .then(repository.getAssetVersion(request.projectId(), request.version().id()))).flatMap(this::signedAssetVersion));
+    }
+
+    /**
+     * 版本外观描述统一取资产描述，避免版本里残留模型改写过的文案。
+     *
+     * @param version ComicDramaDtos.AssetVersion 待保存版本
+     * @param description String 资产当前外观描述
+     * @return ComicDramaDtos.AssetVersion 描述已对齐的版本
+     */
+    private ComicDramaDtos.AssetVersion withAssetDescription(ComicDramaDtos.AssetVersion version, String description) {
+        return new ComicDramaDtos.AssetVersion(version.id(), version.assetId(), version.versionName(), version.variantType(),
+                text(description), version.referenceMedia(), version.attributes(), version.status(), version.revision(),
+                version.createdAt(), version.updatedAt());
     }
 
     /**
@@ -1255,10 +1272,11 @@ public class ComicDramaService {
         } else if ("assetVersion".equals(request.targetType())) {
             List<String> referenceVersionIds = "image".equals(mediaType) ? referenceAssetVersionIds(request.settings()) : List.of();
             return repository.getAssetVersion(request.projectId(), targetId).switchIfEmpty(notFound("资产版本不存在"))
-                    .flatMap(version -> generatedAssetImageReferences(request.projectId(), referenceVersionIds)
-                            .flatMap(references -> (references.isEmpty() ? Mono.<Void>empty() : aiTaskService.requireImageToImage(request.model()))
-                                    .thenReturn(generationPlan(request, targetId, mediaType,
-                                            version.versionName() + "\n" + text(version.appearanceDescription()), references, new JSONObject(), null))));
+                    .flatMap(version -> repository.getAsset(request.projectId(), version.assetId()).switchIfEmpty(notFound("视觉资产不存在"))
+                            .flatMap(asset -> generatedAssetImageReferences(request.projectId(), referenceVersionIds)
+                                    .flatMap(references -> (references.isEmpty() ? Mono.<Void>empty() : aiTaskService.requireImageToImage(request.model()))
+                                            .thenReturn(generationPlan(request, targetId, mediaType,
+                                                    version.versionName() + "\n" + text(asset.description()), references, new JSONObject(), null)))));
         } else {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成目标仅支持shot或assetVersion"));
         }
@@ -1369,7 +1387,7 @@ public class ComicDramaService {
                     .flatMap(tuple -> repository.getAsset(request.projectId(), tuple.getT1().assetId()).flatMap(asset ->
                             storyboardAgentService.createAssetImageTask(new StoryboardDtos.CreateAssetImageTaskRequest(
                                     request.projectId(), new StoryboardDtos.StoryboardAsset(targetId, asset.assetType(),
-                                    asset.name() + "-" + tuple.getT1().versionName(), tuple.getT1().appearanceDescription()),
+                                    asset.name() + "-" + tuple.getT1().versionName(), text(asset.description())),
                                     StringUtils.hasText(request.settings().getString("visualStyle"))
                                             ? request.settings().getString("visualStyle") : tuple.getT2().visualStyle(),
                                     request.model(), new StoryboardDtos.AssetImageSettings(
@@ -1443,14 +1461,16 @@ public class ComicDramaService {
                     reused = byName.get(source.kind() + "\u0000" + name);
                 }
                 String assetId = reused == null ? source.id() : reused.id();
+                // 复用已有资产时沿用用户当前看到的外观描述，分镜 Agent 的新文案只记录在草稿里，不再覆盖版本描述。
+                String description = text(reused == null ? source.description() : reused.description());
                 JSONObject attributes = new JSONObject();
                 attributes.put("source", "shotDraft");
                 attributes.put("draftId", draftId);
                 ComicDramaDtos.Asset asset = new ComicDramaDtos.Asset(assetId, source.kind(), sourceEntityId, name,
-                        text(source.description()), new JSONObject(), "active",
+                        description, new JSONObject(), "active",
                         reused == null ? 0 : reused.revision(), null, null);
                 ComicDramaDtos.AssetVersion version = new ComicDramaDtos.AssetVersion(id(), assetId, "初始版本",
-                        "default", text(source.description()), List.of(), attributes, "active", 0, null, null);
+                        "default", description, List.of(), attributes, "active", 0, null, null);
                 plans.put(source.id(), new DraftAssetPlan(asset, version, reused != null));
             }
             return plans;
