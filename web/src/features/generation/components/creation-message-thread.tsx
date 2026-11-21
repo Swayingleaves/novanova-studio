@@ -5,14 +5,13 @@ import { useActionLabel } from "@/features/locale/use-action-label";
 
 
 import { Button, Input, Modal, Tooltip } from "antd";
-import { ArrowRight, Copy, LoaderCircle, PenLine } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { ArrowRight, Copy, PenLine } from "lucide-react";
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "@/shared/lib/team-navigation";
 
-import { AgentActivityTimeline } from "@/features/generation/components/agent-activity-timeline";
+import { composeDialogueText } from "@/features/generation/components/agent-activity";
+import { StreamingReplyBubble } from "@/features/generation/components/streaming-reply-bubble";
 import type { CreationMessageThreadProps } from "@/features/generation/components/creation-workspace-types";
-import { ThinkingBlock } from "@/features/chat";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import { storeInitialPromptForNavigation } from "@/shared/lib/initial-prompt";
 
@@ -70,6 +69,12 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
         onAtBottomChange?.(atBottom);
     };
 
+    const handleBubbleHeightChange = useCallback(() => {
+        if (keepPinnedToBottomRef.current) {
+            scrollToBottom();
+        }
+    }, []);
+
     return (
         <div ref={scrollRef} className="thin-scrollbar min-h-0 flex-1 overflow-y-auto" onScroll={handleScroll}>
             {sections.length ? (
@@ -97,27 +102,37 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                             </div>
                                         ) : null}
                                         <div className="space-y-3">
-                                            {round.thinkings?.map((thinking) => (
-                                                <ThinkingBlock key={thinking.id} block={thinking} streaming={round.activeThinkingId === thinking.id} />
-                                            ))}
-                                            {round.awaitingReply ? (
-                                                <div className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
-                                                    <LoaderCircle className="size-3.5 animate-spin" />
-                                                    <span>{translate("generation.waitingForReply")}</span>
-                                                </div>
-                                            ) : null}
-                                            {round.activities?.length ? <AgentActivityTimeline activities={round.activities} /> : null}
-                                            {round.statusText ? <div className="text-xs font-medium text-[var(--studio-muted)]">{round.statusText}</div> : null}
-                                            {round.assistantText ? (
-                                                <div className="group inline-flex max-w-3xl items-start gap-2">
-                                                    <div className="min-w-0 flex-1">
-                                                        <div className="prose prose-sm max-w-none text-sm leading-7 text-[var(--studio-ink)] dark:prose-invert">
-                                                            <ReactMarkdown>{round.assistantText}</ReactMarkdown>
-                                                        </div>
-                                                    </div>
-                                                    <MessageCopyButton side="right" placement="inline" onClick={() => copyText(round.assistantText || "", translate("generation.assistantMessageCopied"))} />
-                                                </div>
-                                            ) : null}
+                                            {(() => {
+                                                const dialogueText = composeDialogueText(round.assistantText, round.activities);
+                                                const showAnimatedBubble = Boolean(round.streamingReply || round.thinkingReply || round.awaitingReply);
+                                                const isThinkingState = Boolean((round.thinkingReply || round.awaitingReply) && !dialogueText);
+                                                const showStatusText = Boolean(round.statusText && (!dialogueText || round.statusText.startsWith("❌")));
+                                                return (
+                                                    <>
+                                                        {showAnimatedBubble ? (
+                                                            <StreamingReplyBubble
+                                                                animated
+                                                                text={dialogueText}
+                                                                thinking={isThinkingState}
+                                                                thinkingLabel={translate("chat.thinking")}
+                                                                onHeightChange={handleBubbleHeightChange}
+                                                            />
+                                                        ) : dialogueText ? (
+                                                            <div className="group inline-flex max-w-3xl items-start gap-2">
+                                                                <div className="min-w-0 flex-1">
+                                                                    <StreamingReplyBubble animated={false} text={dialogueText} />
+                                                                </div>
+                                                                <MessageCopyButton
+                                                                    side="right"
+                                                                    placement="inline"
+                                                                    onClick={() => copyText(dialogueText, translate("generation.assistantMessageCopied"))}
+                                                                />
+                                                            </div>
+                                                        ) : null}
+                                                        {showStatusText ? <div className="text-xs font-medium text-[var(--studio-muted)]">{round.statusText}</div> : null}
+                                                    </>
+                                                );
+                                            })()}
                                             {round.resultContent}
                                             {round.choiceSettingsContent ? <div className="max-w-3xl">{round.choiceSettingsContent}</div> : null}
                                             {round.action?.type === "navigate" && round.action.href ? (

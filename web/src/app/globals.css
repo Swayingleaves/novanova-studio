@@ -2222,3 +2222,31 @@ body[data-onboarding="active"] .ant-tooltip {
 body[data-onboarding="active"] [data-tour="user-menu"] {
     pointer-events: none;
 }
+
+/* 创作流式回复气泡“思考中”扫光动效。 */
+@keyframes streaming-reply-shine {
+    to {
+        background-position: -200% 0;
+    }
+}
+
+.streaming-reply-think-shine {
+    background: linear-gradient(
+        90deg,
+        var(--studio-muted) 20%,
+        var(--studio-ink) 50%,
+        var(--studio-muted) 80%
+    ) 0 0 / 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: streaming-reply-shine 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .streaming-reply-think-shine {
+        animation: none;
+        background: none;
+        color: var(--studio-muted);
+    }
+}

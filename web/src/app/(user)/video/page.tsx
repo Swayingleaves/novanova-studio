@@ -690,17 +690,20 @@ export default function VideoPage() {
             const streamed = streamingTextRef.current;
             setChatMessages((prev) => {
                 let next = finishRoundAgentActivities(prev, text || translate("video.completed"));
+                const lastUserIndex = next.findLastIndex((item) => item.role === "user");
+                const currentRoundAssistantIndex = next.findLastIndex((item, index) => index > lastUserIndex && item.role === "assistant");
                 if (streamed && streamed.text) {
-                    const assistantMessage = { id: streamed.messageId, role: "assistant" as const, text: streamed.text, ...(action ? { action } : {}) };
-                    next = next.some((item) => item.id === streamed.messageId) ? next.map((item) => (item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)) : [...next, assistantMessage];
+                    const finalText = text && text.length >= streamed.text.length ? text : streamed.text;
+                    const assistantMessage = { id: streamed.messageId, role: "assistant" as const, text: finalText, ...(action ? { action } : {}) };
+                    next = next.some((item) => item.id === streamed.messageId)
+                        ? next.map((item) => (item.id === streamed.messageId ? { ...item, text: finalText, ...(action ? { action } : {}) } : item))
+                        : [...next, assistantMessage];
+                } else if (currentRoundAssistantIndex >= 0) {
+                    if (action) {
+                        next = next.map((item, index) => (index === currentRoundAssistantIndex ? { ...item, action } : item));
+                    }
                 } else if (text || action) {
-                    const lastMessage = next.at(-1);
-                    next =
-                        lastMessage?.role === "assistant" && lastMessage.text === text
-                            ? action
-                                ? next.map((item, index) => (index === next.length - 1 ? { ...item, action } : item))
-                                : next
-                            : [...next, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
+                    next = [...next, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
                 }
                 chatMessagesRef.current = next;
                 return next;

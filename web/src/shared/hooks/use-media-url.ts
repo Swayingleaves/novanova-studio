@@ -29,6 +29,8 @@ export function useMediaUrl(input: MediaUrlInput) {
     const initialUrl = input.url || input.objectStorage?.url || "";
     const [url, setUrl] = useState(initialUrl);
     const [failed, setFailed] = useState(false);
+    const urlRef = useRef(initialUrl);
+    urlRef.current = url;
     const retryCount = useRef(0);
     const storageKey = input.storageKey?.trim() || "";
     const kind = input.kind || "media";
@@ -46,27 +48,44 @@ export function useMediaUrl(input: MediaUrlInput) {
     useEffect(() => {
         let cancelled = false;
         retryCount.current = 0;
+        setFailed(false);
         if (!storageKey) {
             setUrl(input.url || "");
             return;
         }
-        void resolve(false).then((next) => {
-            if (!cancelled && next) {
-                setUrl(next);
-                setFailed(false);
-            }
-        });
+        void resolve(false)
+            .then((next) => {
+                if (!cancelled && next) {
+                    setUrl(next);
+                    setFailed(false);
+                }
+            })
+            .catch(() => {
+                if (!cancelled && !urlRef.current) {
+                    setFailed(true);
+                }
+            });
         return () => {
             cancelled = true;
         };
     }, [input.url, resolve, storageKey]);
 
     const refresh = useCallback(async () => {
-        if (!storageKey) return;
-        const next = await resolve(true);
-        if (next) {
-            setUrl(next);
-            setFailed(false);
+        if (!storageKey) {
+            setFailed(true);
+            return;
+        }
+        try {
+            const next = await resolve(true);
+            // 续签返回空地址或与已失败地址完全相同时，浏览器不会再次触发 onError，必须立即进入失败态以展示默认图标。
+            if (next && next !== urlRef.current) {
+                setUrl(next);
+                setFailed(false);
+            } else {
+                setFailed(true);
+            }
+        } catch {
+            setFailed(true);
         }
     }, [resolve, storageKey]);
 

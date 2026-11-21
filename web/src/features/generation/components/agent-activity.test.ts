@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { AgentActivityState, ToolCallState } from "@/features/chat/types";
 
-import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, getPlanTaskActivityStatus, mergePlanTaskActivityMessage, normalizeAgentActivities, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "./agent-activity.ts";
+import { buildActivityDialogueLines, composeDialogueText, createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, getPlanTaskActivityStatus, mergePlanTaskActivityMessage, normalizeAgentActivities, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "./agent-activity.ts";
 
 test("upsertAgentActivityMessage 对重复 SSE 活动执行幂等覆盖", () => {
     const firstActivity = {
@@ -138,4 +138,75 @@ test("normalizeHistoricalAgentActivities 根据轮次终态收尾旧的运行中
     }], "failed");
 
     assert.equal(activities[0]?.status, "failed");
+});
+
+test("composeDialogueText 将执行活动转为自然对话句并与流式规划去重", () => {
+    const activities: AgentActivityState[] = [
+        {
+            id: "plan-1",
+            type: "plan-created",
+            title: "创建创作计划",
+            description: "将生成 1 张高保真中文音乐 App 播放器界面截图，共 1 个任务",
+            status: "success",
+        },
+        {
+            id: "task-1",
+            type: "plan-task-status",
+            title: "执行创作任务",
+            description: "子Agent正在准备任务",
+            status: "running",
+        },
+        {
+            id: "prompt-1",
+            type: "prompt-prepared",
+            title: "准备生成提示词",
+            description: "沿用原始提示词",
+            status: "success",
+        },
+        {
+            id: "tool-1",
+            type: "tool-execute",
+            title: "调用图片生成工具",
+            description: "16:9 / 1K / 标准质量 / 1 个结果",
+            status: "running",
+        },
+    ];
+
+    const text = composeDialogueText("将生成 1 张高保真中文音乐 App 播放器界面截图", activities);
+    assert.equal(
+        text,
+        "将生成 1 张高保真中文音乐 App 播放器界面截图\n沿用原始提示词。\n正在调用图片生成工具（16:9 / 1K / 标准质量 / 1 个结果）…",
+    );
+
+    const linesWithoutPrimary = buildActivityDialogueLines(activities, "");
+    assert.equal(linesWithoutPrimary.length, 3);
+    assert.equal(linesWithoutPrimary[0], "将生成 1 张高保真中文音乐 App 播放器界面截图，共 1 个任务");
+
+    const completedText = composeDialogueText("生成计划已完成：成功 1 个，未成功 0 个。", [
+        {
+            id: "plan-2",
+            type: "plan-created",
+            title: "创建创作计划",
+            description: "将基于上一张生成图片进行编辑，把画面里的狗全部替换成猫咪。，共 1 个任务",
+            status: "success",
+        },
+        {
+            id: "prompt-2",
+            type: "prompt-prepared",
+            title: "准备生成提示词",
+            description: "沿用原始提示词",
+            status: "success",
+        },
+        {
+            id: "tool-2",
+            type: "tool-execute",
+            title: "调用图片编辑工具",
+            description: "16:9 / 1K / 标准质量 / 1 个结果",
+            status: "success",
+        },
+    ]);
+    assert.equal(
+        completedText,
+        "将基于上一张生成图片进行编辑，把画面里的狗全部替换成猫咪。 共 1 个任务\n沿用原始提示词。\n已调用图片编辑工具（16:9 / 1K / 标准质量 / 1 个结果）。",
+    );
 });

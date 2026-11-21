@@ -456,20 +456,24 @@ export default function ImagePage() {
             });
         },
         onTaskComplete: (messageId, text, action) => {
-            // 将流式文本保存为持久消息
+            // 将流式文本保存为持久消息；若本轮工具阶段已保存规划文本，则保留不覆写，避免完成瞬间文案跳变。
             const streamed = streamingTextRef.current;
             setChatMessages((prev) => {
                 let next = finishRoundAgentActivities(prev, text || translate("image.completed"));
+                const lastUserIndex = next.findLastIndex((item) => item.role === "user");
+                const currentRoundAssistantIndex = next.findLastIndex((item, index) => index > lastUserIndex && item.role === "assistant");
                 if (streamed && streamed.text) {
-                    const assistantMessage = { id: streamed.messageId, role: "assistant" as const, text: streamed.text, ...(action ? { action } : {}) };
+                    const finalText = text && text.length >= streamed.text.length ? text : streamed.text;
+                    const assistantMessage = { id: streamed.messageId, role: "assistant" as const, text: finalText, ...(action ? { action } : {}) };
                     next = next.some((item) => item.id === streamed.messageId)
-                        ? next.map((item) => item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)
+                        ? next.map((item) => item.id === streamed.messageId ? { ...item, text: finalText, ...(action ? { action } : {}) } : item)
                         : [...next, assistantMessage];
+                } else if (currentRoundAssistantIndex >= 0) {
+                    if (action) {
+                        next = next.map((item, index) => index === currentRoundAssistantIndex ? { ...item, action } : item);
+                    }
                 } else if (text || action) {
-                    const lastMessage = next.at(-1);
-                    next = lastMessage?.role === "assistant" && lastMessage.text === text
-                        ? action ? next.map((item, index) => index === next.length - 1 ? { ...item, action } : item) : next
-                        : [...next, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
+                    next = [...next, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
                 }
                 chatMessagesRef.current = next;
                 return next;
@@ -1638,6 +1642,7 @@ function buildImageThreadSections(
                                 key={result.id}
                                 image={result.image}
                                 index={index}
+                                aspectRatioHint={round.config.size}
                                 uploadingObjectStorage={handlers.uploadingObjectStorageId === result.image.id}
                                 onEdit={handlers.onEdit}
                                 onDownload={handlers.onDownload}
@@ -1786,6 +1791,7 @@ function formatThreadSectionLabel(value: number): string {
 function ResultCard({
     image,
     index,
+    aspectRatioHint,
     uploadingObjectStorage,
     onEdit,
     onDownload,
@@ -1796,6 +1802,8 @@ function ResultCard({
 }: {
     image: GeneratedImage;
     index: number;
+    /** 轮次配置的宽高比（如 9:16）：历史记录没存图片尺寸时用它预留位置，避免先撑满再缩回 */
+    aspectRatioHint?: string;
     uploadingObjectStorage: boolean;
     onEdit: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
@@ -1816,13 +1824,17 @@ function ResultCard({
         media.onError();
         preview.onError();
     };
-    const displayWidth = image.width > 0 ? image.width : loadedMeta.width;
-    const displayHeight = image.height > 0 ? image.height : loadedMeta.height;
+    const displayWidth = positiveImageSize(image.width) || positiveImageSize(loadedMeta.width);
+    const displayHeight = positiveImageSize(image.height) || positiveImageSize(loadedMeta.height);
     const displayBytes = image.bytes > 0 ? image.bytes : loadedMeta.bytes;
     const hasSize = displayWidth > 0 && displayHeight > 0;
     const hasBytes = displayBytes > 0;
-    const previewAspectRatio = hasSize ? `${displayWidth}/${displayHeight}` : "1 / 1";
-    const previewWidth = buildImagePreviewWidth(displayWidth, displayHeight);
+    // 尺寸未知时按轮次比例占位，卡片首屏就是最终大小；仍未取到比例才退回正方形。
+    const sizeHint = hasSize ? null : parseAspectRatioSize(aspectRatioHint);
+    const layoutWidth = hasSize ? displayWidth : sizeHint?.width ?? 0;
+    const layoutHeight = hasSize ? displayHeight : sizeHint?.height ?? 0;
+    const previewAspectRatio = layoutWidth > 0 && layoutHeight > 0 ? `${layoutWidth}/${layoutHeight}` : "1 / 1";
+    const previewWidth = buildImagePreviewWidth(layoutWidth, layoutHeight);
 
     useEffect(() => {
         let cancelled = false;
@@ -1913,11 +1925,25 @@ function ResultCard({
 }
 
 function buildImagePreviewWidth(width: number, height: number): number {
-    if (width <= 0 || height <= 0) {
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
         return IMAGE_PREVIEW_BASE_HEIGHT;
     }
     const ratio = width / height;
     return Math.round(Math.min(IMAGE_PREVIEW_MAX_WIDTH, Math.max(IMAGE_PREVIEW_MIN_WIDTH, IMAGE_PREVIEW_BASE_HEIGHT * ratio)));
+}
+
+/** 历史记录只存图片地址，尺寸字段可能缺失，统一归一成有限正数再参与布局。 */
+function positiveImageSize(value: number | undefined): number {
+    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/** 把轮次配置的 "9:16" 这类比例转成可参与布局的宽高，非法或缺失时返回 null。 */
+function parseAspectRatioSize(value: string | undefined): { width: number; height: number } | null {
+    const match = /^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/.exec(value?.trim() || "");
+    if (!match) return null;
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    return width > 0 && height > 0 ? { width, height } : null;
 }
 
 async function readImageContentLength(url: string): Promise<number> {

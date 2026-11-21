@@ -26,6 +26,8 @@ public class AgentScopeAgentFactory {
     private final AgentThinkingEventMiddleware thinkingEventMiddleware;
     /** 短剧回复流中间件 */
     private final DramaReplyStreamMiddleware dramaReplyStreamMiddleware;
+    /** 创作对话回复流中间件 */
+    private final CreationReplyStreamMiddleware creationReplyStreamMiddleware;
 
     /**
      * 创建主Agent。
@@ -50,7 +52,7 @@ public class AgentScopeAgentFactory {
             prompt = prompt + "\n\n" + extraSystemPrompt;
         }
         return build("main-agent", prompt, model,
-                "只能返回 CreationPlan 结构化结果，不得调用工具。", true);
+                "只能返回 CreationPlan 结构化结果，不得调用工具。", true, creationReplyStreamMiddleware);
     }
 
     /**
@@ -150,7 +152,7 @@ public class AgentScopeAgentFactory {
      */
     public ReActAgent workflowConversationAgent(Model model, String conversationPrompt) {
         return build("workflow-conversation-agent", conversationPrompt + "\n\n" + promptService.get(PromptTemplateType.AGENT_USER_ACTIONS), model,
-                "只能返回 VideoWorkflowConversationTurn 结构化结果，不得调用工具，不得创建生成任务。", true);
+                "只能返回 VideoWorkflowConversationTurn 结构化结果，不得调用工具，不得创建生成任务。", true, creationReplyStreamMiddleware);
     }
 
     /**
