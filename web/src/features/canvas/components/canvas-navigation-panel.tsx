@@ -389,12 +389,15 @@ function NodePreview({ node }: { node: CanvasNode }) {
     const theme = useCanvasTheme();
     const imageSource = isImageNode(node) ? node.content.source : "";
     const videoSource = isVideoNode(node) ? node.content.source : "";
+    const [failedSource, setFailedSource] = useState<string | null>(null);
+    const showImage = Boolean(imageSource) && failedSource !== imageSource;
+    const showVideo = Boolean(videoSource) && failedSource !== videoSource;
     return (
         <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md" style={{ background: theme.node.fill, color: theme.node.muted }}>
-            {imageSource ? (
-                <img src={imageSource} alt="" loading="lazy" className="size-full object-cover" />
-            ) : videoSource ? (
-                <video src={videoSource} aria-hidden="true" muted playsInline preload="auto" className="pointer-events-none size-full object-cover" />
+            {showImage ? (
+                <img src={imageSource} alt="" loading="lazy" className="size-full object-cover" onError={() => setFailedSource(imageSource)} />
+            ) : showVideo ? (
+                <video src={videoSource} aria-hidden="true" muted playsInline preload="auto" className="pointer-events-none size-full object-cover" onError={() => setFailedSource(videoSource)} />
             ) : isBackgroundNode(node) ? <Boxes className="size-4" /> : (
                 <NodeKindIcon kind={node.kind} className="size-4" />
             )}
@@ -407,9 +410,11 @@ function AssetPreview({ asset }: { asset: CanvasNavigationAsset }) {
     const cover = asset.source === "library"
         ? asset.asset.coverUrl || (asset.asset.kind === "image" ? asset.asset.data.dataUrl : "")
         : asset.asset.image?.source || "";
+    const [failedCover, setFailedCover] = useState<string | null>(null);
+    const showCover = Boolean(cover) && failedCover !== cover;
     return (
         <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md" style={{ background: theme.node.fill, color: theme.node.muted }}>
-            {cover ? <img src={cover} alt="" loading="lazy" className="size-full object-cover" /> : <AssetKindIcon asset={asset} className="size-4" />}
+            {showCover ? <img src={cover} alt="" loading="lazy" className="size-full object-cover" onError={() => setFailedCover(cover)} /> : <AssetKindIcon asset={asset} className="size-4" />}
         </span>
     );
 }

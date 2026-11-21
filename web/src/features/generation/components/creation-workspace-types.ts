@@ -39,6 +39,10 @@ export type CreationThreadRound = {
     activeThinkingId?: string;
     /** 思考已结束或尚未开始，请求仍在进行且回复还没到达。 */
     awaitingReply?: boolean;
+    /** 当前轮次是否启用流式弹簧气泡动效（实时对话进行中）。 */
+    streamingReply?: boolean;
+    /** 当前轮次是否处于扫光“思考中”胶囊阶段。 */
+    thinkingReply?: boolean;
     activities?: AgentActivityState[];
     statusText: string;
     assistantText?: string;

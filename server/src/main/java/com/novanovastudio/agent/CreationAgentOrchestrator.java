@@ -1078,11 +1078,15 @@ public class CreationAgentOrchestrator {
         input.put("history", historyForAgent(request, session));
         input.put("message", request.message());
         ReActAgent agent = agentFactory.workflowConversationAgent(model, workflowConversationPrompt(definition, context));
+        String streamAssistantId = UUID.randomUUID().toString();
         return agent.call(JSON.toJSONString(input), VideoWorkflowConversationTurn.class, RuntimeContext.builder()
                         .sessionId(session.id() + ":workflow")
                         .userId(String.valueOf(userId))
                         .put(AgentThinkingEventMiddleware.ThinkingEventContext.class,
                                 new AgentThinkingEventMiddleware.ThinkingEventContext(userId, session.id()))
+                        .put(CreationReplyStreamMiddleware.CreationReplyStreamContext.class,
+                                new CreationReplyStreamMiddleware.CreationReplyStreamContext(
+                                        userId, session.id(), streamAssistantId, List.of("message")))
                         .build())
                 .timeout(Duration.ofSeconds(60))
                 .map(message -> parseWorkflowConversationTurn(message, definition.clarificationQuestion()))
@@ -1568,12 +1572,18 @@ public class CreationAgentOrchestrator {
      * @return Mono<CreationPlan> 候选计划
      */
     private Mono<CreationPlan> callMainAgentWith(ReActAgent agent, Long userId, AgentSession session, Map<String, Object> input) {
-        return agent.call(JSON.toJSONString(input), CreationPlan.class, RuntimeContext.builder()
-                        .sessionId(session.id() + ":main")
-                        .userId(String.valueOf(userId))
-                        .put(AgentThinkingEventMiddleware.ThinkingEventContext.class,
-                                new AgentThinkingEventMiddleware.ThinkingEventContext(userId, session.id()))
-                        .build())
+        RuntimeContext.Builder contextBuilder = RuntimeContext.builder()
+                .sessionId(session.id() + ":main")
+                .userId(String.valueOf(userId))
+                .put(AgentThinkingEventMiddleware.ThinkingEventContext.class,
+                        new AgentThinkingEventMiddleware.ThinkingEventContext(userId, session.id()));
+        if (CreationEntrySource.supported(session.profile())) {
+            contextBuilder.put(CreationReplyStreamMiddleware.CreationReplyStreamContext.class,
+                    new CreationReplyStreamMiddleware.CreationReplyStreamContext(
+                            userId, session.id(), UUID.randomUUID().toString(),
+                            List.of("summary", "clarificationQuestion")));
+        }
+        return agent.call(JSON.toJSONString(input), CreationPlan.class, contextBuilder.build())
                 .timeout(Duration.ofSeconds(60))
                 .map(message -> message.getStructuredData(CreationPlan.class))
                 .doFinally(signal -> agent.close());

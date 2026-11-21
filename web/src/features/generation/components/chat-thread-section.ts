@@ -121,16 +121,45 @@ export function buildChatThreadSection(
         rounds.push(makeRound(currentRoundId, currentUserText, currentUserStyles, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, buildResultContent(), currentAction, choiceDisabledReasons, isChoiceConfirmRound(currentAction) ? renderChoiceSettings?.(currentRoundId) : null, renderUserContent?.({ id: currentRoundId, userText: currentUserText, attachments: currentRawAttachments })));
     }
 
-    if (streamingText) {
-        rounds.push({ id: "loading", userText: "", statusText: translate("generation.aIIsTyping"), assistantText: streamingText.text, resultContent: null } as CreationThreadRound);
-    }
-
     const latestConversationRound = rounds.findLast((round) => Boolean(round.userText || round.userAttachments));
     if (latestConversationRound && allThinkings.length) {
         latestConversationRound.thinkings = allThinkings;
         latestConversationRound.activeThinkingId = activeThinking?.id;
     }
-    // 思考流已经结束、正文和工具都还没到时，页面会停在折叠后的「思考过程」上。这时请求通常还在跑。
+
+    // 流式正文直接归入最新用户轮次，避免拆出孤立 loading 轮次导致气泡断开。
+    if (streamingText?.text) {
+        if (latestConversationRound) {
+            latestConversationRound.assistantText = streamingText.text;
+            latestConversationRound.streamingReply = true;
+        } else {
+            rounds.push({
+                id: "loading",
+                userText: "",
+                statusText: "",
+                assistantText: streamingText.text,
+                resultContent: null,
+                streamingReply: true,
+            } as CreationThreadRound);
+        }
+    }
+
+    const hasRunningActivities = Boolean(
+        latestConversationRound?.activities?.some((activity) => activity.status === "running" || activity.status === "pending"),
+    );
+
+    if (latestConversationRound) {
+        const hasAnyDialogue = Boolean(latestConversationRound.assistantText || latestConversationRound.activities?.length);
+        const isInFlight = Boolean(awaitingReply || activeThinking || streamingText || hasRunningActivities);
+        if (isInFlight) {
+            latestConversationRound.streamingReply = true;
+        }
+        if (isInFlight && !hasAnyDialogue && !latestConversationRound.resultContent && !latestConversationRound.statusText) {
+            latestConversationRound.thinkingReply = true;
+        }
+    }
+
+    // 保留 awaitingReply 语义供现有单测与外部判断兼容。
     if (
         awaitingReply
         && !activeThinking

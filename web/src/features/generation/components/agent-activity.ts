@@ -194,6 +194,24 @@ function toolTitle(toolName: string): string {
         generate_video: translate("generation.callVideoGenerationTool"),
         edit_video: translate("generation.callVideoEditingTool"),
         query_history: translate("generation.creationHistory"),
+        canvas_generate_image: translate("generation.callImageGenerationTool"),
+        canvas_generate_video: translate("generation.callVideoGenerationTool"),
+        canvas_generate_text: "调用文本生成工具",
+        canvas_create_generation_flow: "创建生成工作流",
+        canvas_run_generation: "执行画布生成任务",
+        canvas_create_node: "创建画布节点",
+        canvas_create_text_node: "创建文本节点",
+        canvas_create_text_nodes: "创建文本节点",
+        canvas_create_image_prompt_flow: "创建生图工作流",
+        canvas_update_node: "更新画布节点",
+        canvas_update_node_text: "更新节点文本",
+        canvas_move_nodes: "调整节点位置",
+        canvas_resize_node: "调整节点尺寸",
+        canvas_delete_nodes: "删除画布节点",
+        canvas_connect_nodes: "连接画布节点",
+        canvas_select_nodes: "选中画布节点",
+        canvas_set_viewport: "调整画布视角",
+        canvas_apply_ops: "应用画布操作",
     };
     return titles[toolName] || translate("generation.callingTool", { value0: toolName });
 }
@@ -216,4 +234,119 @@ function toolDescription(argumentsValue: Record<string, unknown>): string | unde
         parts.push(translate("generation.results", { value0: argumentsValue.count }));
     }
     return parts.length ? parts.join(" / ") : undefined;
+}
+
+const NOISE_TASK_STATUS_PATTERNS = [
+    /^子\s*agent\s*正在准备任务$/i,
+    /^agent\s+is\s+preparing\s+the\s+task$/i,
+    /^正在执行/,
+    /^已完成$/,
+    /^completed$/i,
+];
+
+const GENERIC_COMPLETION_SUMMARY_PATTERNS = [
+    /^生成计划已完成[：:]/,
+    /^generation\s+plan\s+completed/i,
+    /^已完成\s*\d+\s*张图片/,
+    /^正在生成/,
+];
+
+/**
+ * 将执行活动列表转换为自然对话语句，并与已流式输出的正文做去重。
+ * 供实时流式气泡与历史轮次共用，确保刷新前后展示风格一致。
+ */
+export function buildActivityDialogueLines(activities: AgentActivityState[] | undefined, existingText?: string): string[] {
+    if (!activities?.length) {
+        return [];
+    }
+    const normalizedExisting = (existingText || "").trim();
+    const lines: string[] = [];
+
+    const pushUnique = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        if (normalizedExisting && (normalizedExisting.includes(trimmed) || isSubstantialOverlap(normalizedExisting, trimmed))) {
+            return;
+        }
+        if (lines.some((item) => item === trimmed || item.includes(trimmed))) {
+            return;
+        }
+        lines.push(trimmed);
+    };
+
+    for (const activity of activities) {
+        if (activity.type === "plan-created") {
+            const desc = cleanPlanDescription(activity.description || "");
+            if (desc) {
+                pushUnique(desc);
+            }
+            continue;
+        }
+        if (activity.type === "prompt-prepared") {
+            const desc = (activity.description || activity.title || "").trim();
+            if (desc) {
+                pushUnique(ensureSentenceEnding(desc));
+            }
+            continue;
+        }
+        if (activity.type === "tool-execute") {
+            const detail = activity.description ? `（${activity.description}）` : "";
+            if (activity.status === "running" || activity.status === "pending") {
+                pushUnique(`正在${activity.title}${detail}…`);
+            } else if (activity.status === "failed") {
+                pushUnique(`${activity.title}${detail}失败。`);
+            } else if (activity.status === "canceled") {
+                pushUnique(`已停止${activity.title}。`);
+            } else if (activity.status === "success") {
+                pushUnique(`已${activity.title}${detail}。`);
+            }
+            continue;
+        }
+        if (activity.type === "plan-task-status") {
+            const desc = (activity.description || "").trim();
+            if (!desc || NOISE_TASK_STATUS_PATTERNS.some((pattern) => pattern.test(desc))) {
+                continue;
+            }
+            if (activity.status === "failed" || activity.status === "canceled" || activity.status === "running") {
+                pushUnique(ensureSentenceEnding(desc));
+            }
+        }
+    }
+
+    return lines;
+}
+
+/**
+ * 将主助手文本与执行活动对话句合成为连贯的多段气泡文本。
+ * 当轮次已有结构化执行活动且主文本只是服务端通用完成汇总时，优先保持活动对话行，避免完成瞬间在顶部插入冗余汇总句。
+ */
+export function composeDialogueText(primaryText: string | undefined, activities: AgentActivityState[] | undefined): string {
+    const rawPrimary = (primaryText || "").trim();
+    const isGenericSummary = Boolean(
+        activities?.length
+        && rawPrimary
+        && GENERIC_COMPLETION_SUMMARY_PATTERNS.some((pattern) => pattern.test(rawPrimary)),
+    );
+    const primary = isGenericSummary ? "" : rawPrimary;
+    const activityLines = buildActivityDialogueLines(activities, primary);
+    if (!primary) {
+        return activityLines.join("\n");
+    }
+    if (!activityLines.length) {
+        return primary;
+    }
+    return `${primary}\n${activityLines.join("\n")}`;
+}
+
+function cleanPlanDescription(text: string): string {
+    return text.trim().replace(/([。！？])，\s*共/g, "$1 共");
+}
+
+function ensureSentenceEnding(text: string): string {
+    return /[。！？.!?…]$/.test(text) ? text : `${text}。`;
+}
+
+function isSubstantialOverlap(existing: string, candidate: string): boolean {
+    const head = candidate.slice(0, Math.min(14, candidate.length));
+    return head.length >= 6 && existing.includes(head);
 }

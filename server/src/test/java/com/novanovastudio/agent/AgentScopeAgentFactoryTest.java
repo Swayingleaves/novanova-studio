@@ -36,7 +36,8 @@ class AgentScopeAgentFactoryTest {
         when(promptService.get(PromptTemplateType.AGENT_VIDEO)).thenReturn("视频Agent模板");
         AgentThinkingEventMiddleware thinkingEventMiddleware = mock(AgentThinkingEventMiddleware.class);
         DramaReplyStreamMiddleware dramaReplyStreamMiddleware = mock(DramaReplyStreamMiddleware.class);
-        AgentScopeAgentFactory factory = new AgentScopeAgentFactory(promptService, thinkingEventMiddleware, dramaReplyStreamMiddleware);
+        CreationReplyStreamMiddleware creationReplyStreamMiddleware = mock(CreationReplyStreamMiddleware.class);
+        AgentScopeAgentFactory factory = new AgentScopeAgentFactory(promptService, thinkingEventMiddleware, dramaReplyStreamMiddleware, creationReplyStreamMiddleware);
         Model model = mock(Model.class);
         when(model.getModelName()).thenReturn("test-model");
 

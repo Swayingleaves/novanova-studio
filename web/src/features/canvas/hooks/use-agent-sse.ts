@@ -22,7 +22,7 @@ type CanvasAgentApplyResult = {
 interface UseAgentSSEProps {
   snapshot: CanvasAgentSnapshot;
   onApplyOps: (ops: CanvasAgentOp[] | undefined, signal: AbortSignal) => Promise<CanvasAgentApplyResult>;
-  onToolExecute?: () => void;
+  onToolExecute?: (call: { callId: string; name: string; arguments: Record<string, unknown> }) => void;
   onTextDelta: (messageId: string, delta: string) => void;
   onThoughtDelta?: (thoughtId: string, delta: string) => void;
   onThoughtComplete?: (thoughtId: string, durationMs: number) => void;
@@ -193,7 +193,11 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
         const controller = new AbortController();
         activeToolControllersRef.current.set(data.callId!, controller);
         try {
-          onToolExecuteRef.current?.();
+          onToolExecuteRef.current?.({
+            callId: data.callId!,
+            name: data.name!,
+            arguments: (data.arguments as Record<string, unknown> | undefined) || {},
+          });
           const execution = resolveCanvasAgentTool(data.name!, data.arguments);
           if (!execution) throw new Error(translate("canvas.unsupportedCanvasTool", { value0: data.name! }));
           let result = execution.result;

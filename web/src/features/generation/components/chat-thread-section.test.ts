@@ -158,3 +158,30 @@ test("buildChatThreadSection 将画布引导动作绑定到助手所在轮次", 
 
     assert.deepEqual(section?.rounds[0]?.action, action);
 });
+
+test("buildChatThreadSection 将流式文本归入最新用户轮次并标记流式与思考态", () => {
+    const messages: ChatMessageItem[] = [{ id: "user-8", role: "user", text: "画一只橘猫" }];
+
+    const thinkingSection = buildChatThreadSection(messages, [], null, null, [], () => null, undefined, undefined, undefined, undefined, true);
+    assert.equal(thinkingSection?.rounds.length, 1);
+    assert.equal(thinkingSection?.rounds[0]?.thinkingReply, true);
+    assert.equal(thinkingSection?.rounds[0]?.streamingReply, true);
+
+    const streamingSection = buildChatThreadSection(
+        messages,
+        [],
+        null,
+        { messageId: "assistant-8", text: "将为你生成一只阳光下的橘猫" },
+        [],
+        () => null,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+    );
+    assert.equal(streamingSection?.rounds.length, 1);
+    assert.equal(streamingSection?.rounds[0]?.assistantText, "将为你生成一只阳光下的橘猫");
+    assert.equal(streamingSection?.rounds[0]?.streamingReply, true);
+    assert.equal(streamingSection?.rounds[0]?.thinkingReply, undefined);
+});
