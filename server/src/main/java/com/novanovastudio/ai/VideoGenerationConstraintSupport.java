@@ -62,7 +62,9 @@ public final class VideoGenerationConstraintSupport {
             throw invalid("business.videoConstraintsInvalid", mode);
         }
         int billingMinimum = billing == null || billing.minimumDurationSeconds() == null ? 1 : billing.minimumDurationSeconds();
-        if (Math.max(billingMinimum, constraints.minimumDurationSeconds()) > constraints.maximumDurationSeconds()) {
+        Integer billingMaximum = billing == null ? null : billing.effectiveMaximumDurationSeconds();
+        int effectiveMaximum = billingMaximum == null ? constraints.maximumDurationSeconds() : Math.min(billingMaximum, constraints.maximumDurationSeconds());
+        if (Math.max(billingMinimum, constraints.minimumDurationSeconds()) > effectiveMaximum) {
             throw invalid("business.videoConstraintsBillingConflict", mode);
         }
         boolean reference = VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode);
@@ -99,8 +101,10 @@ public final class VideoGenerationConstraintSupport {
         VideoGenerationConstraints constraints = group == null ? null : group.videoGenerationConstraints();
         validateConfiguration(mode, constraints, capabilities, billing);
         int minimum = Math.max(constraints.minimumDurationSeconds(), billing == null || billing.minimumDurationSeconds() == null ? 1 : billing.minimumDurationSeconds());
-        if (seconds < minimum || seconds > constraints.maximumDurationSeconds()) {
-            throw invalid("business.videoConstraintDurationRange", minimum, constraints.maximumDurationSeconds(), seconds);
+        Integer billingMaximum = billing == null ? null : billing.effectiveMaximumDurationSeconds();
+        int maximum = billingMaximum == null ? constraints.maximumDurationSeconds() : Math.min(constraints.maximumDurationSeconds(), billingMaximum);
+        if (seconds < minimum || seconds > maximum) {
+            throw invalid("business.videoConstraintDurationRange", minimum, maximum, seconds);
         }
         if (size == null || !constraints.supportedAspectRatios().contains(size)) {
             throw invalid("business.videoConstraintAspectRatio", String.join("、", constraints.supportedAspectRatios()), size);

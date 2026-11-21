@@ -54,4 +54,13 @@ public final class ScriptSourceDtos {
 
     /** 校对完成后的修订号。 */
     public record MutationResult(long revision) { }
+
+    /** AI识别章节请求。 */
+    public record DetectChaptersRequest(String projectId, long expectedRevision, String model) { }
+
+    /** AI识别章节响应。 */
+    public record DetectChaptersResult(long revision, Long confirmedRevision, int chapterCount, String warning) { }
+
+    /** 模型返回的小说章节候选行序号列表。 */
+    public record DetectedChapters(List<Integer> candidateIds) { }
 }

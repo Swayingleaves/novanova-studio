@@ -31,19 +31,30 @@ public class ScriptSourceParser {
     private static final int MAX_TEXT_LENGTH = 12_000_000;
     /** 单个文本片段最大UTF-16字符数。 */
     private static final int MAX_CHUNK_LENGTH = 4000;
+    /** 无章节标题时按段落自动分段的单段目标字符数。 */
+    private static final int AUTO_SEGMENT_LENGTH = 6000;
+    /** AI章节识别候选短行最大字符数。 */
+    private static final int MAX_CANDIDATE_LENGTH = 40;
+    /** AI章节识别单次提交的候选短行上限。 */
+    private static final int MAX_CANDIDATE_LINES = 600;
     /** 行首空白，不含换行符。 */
     private static final String INDENT = "[ \\t\\u3000]*";
     /** 章节标题格式。 */
     private static final Pattern CHAPTER = Pattern.compile(
             "(?m)^" + INDENT + "(?:第[0-9一二三四五六七八九十百千万零〇两]+[章节卷回]|Chapter[ \\t]+[0-9]+)[^\\n]{0,100}$",
             Pattern.CASE_INSENSITIVE);
+    /** 纯中文数字独立行章节标题格式，如“一”“十一”。 */
+    private static final Pattern BARE_CHINESE_CHAPTER = Pattern.compile(
+            "(?m)^" + INDENT + "[一二三四五六七八九十百千万零〇两]+" + INDENT + "$");
+    /** 纯阿拉伯数字独立行章节标题格式，如“1”“01”。 */
+    private static final Pattern BARE_ARABIC_CHAPTER = Pattern.compile(
+            "(?m)^" + INDENT + "[0-9]{1,4}" + INDENT + "$");
     /** 剧本场次标题格式。 */
     private static final Pattern SCRIPT_SCENE = Pattern.compile(
             "(?m)^" + INDENT + "(?:第[0-9一二三四五六七八九十百千万零〇两]+场|场次[：:]?[ \\t]*[0-9]+|(?:INT|EXT)\\.[^\\n]{1,100})[^\\n]{0,100}$",
             Pattern.CASE_INSENSITIVE);
-    /** 小说中明确的场景分隔符整行。 */
-    private static final Pattern SCENE_DIVIDER = Pattern.compile(
-            "(?m)^" + INDENT + "(?:\\*[ \\t]*\\*[ \\t]*\\*|[-—–]{3,})[ \\t\\u3000]*$");
+    /** 纯装饰分隔线，不作为AI章节候选行。 */
+    private static final Pattern PURE_DIVIDER = Pattern.compile("^[\\-*—–=_~·•\\s]+$");
 
     /** 解析后的结构段。 */
     public record ParsedSection(String sectionType, String title, int startOffset, int endOffset,
@@ -54,6 +65,9 @@ public class ScriptSourceParser {
 
     /** 解析结果。 */
     public record ParsedSource(String text, List<ParsedSection> sections, String warning) { }
+
+    /** AI章节识别使用的候选短行（序号从1起）。 */
+    public record CandidateLine(int index, int lineNumber, int startOffset, String text) { }
 
     /**
      * 从暂存文件提取正文并切分结构。
@@ -171,64 +185,163 @@ public class ScriptSourceParser {
     private ParsedSource split(String text, String sourceType) {
         boolean novel = "novel".equals(sourceType);
         String sectionType = novel ? "chapter" : "scene";
-        Pattern pattern = novel ? CHAPTER : SCRIPT_SCENE;
-        Matcher matcher = pattern.matcher(text);
         List<Integer> starts = new ArrayList<>();
         List<String> titles = new ArrayList<>();
-        while (matcher.find()) {
-            starts.add(matcher.start());
-            titles.add(matcher.group().trim());
+        collectMatches(novel ? CHAPTER : SCRIPT_SCENE, text, starts, titles);
+        if (novel && starts.isEmpty()) {
+            // 未命中“第X章/Chapter”时，再按纯数字独立行识别常见无前缀章节（至少2章，避免正文孤立数字误切）。
+            collectBareNumeralChapters(BARE_CHINESE_CHAPTER, text, starts, titles);
+            if (starts.isEmpty()) {
+                collectBareNumeralChapters(BARE_ARABIC_CHAPTER, text, starts, titles);
+            }
         }
         if (starts.isEmpty()) {
-            // 无可识别标题时保存为单个待校对结构段，由用户人工划线。
-            String message = novel ? "未识别到章节标题，请人工校对结构" : "未识别到场次标题，请人工校对结构";
-            return new ParsedSource(text, List.of(new ParsedSection(sectionType, "待校对原文", 0, text.length(), -1, true)), message);
+            // 未识别到章节/场次标题时，按段落边界与目标字数自动分段，保证可直接阅读与分析。
+            List<ParsedChunk> segments = chunks(text, 0, text.length(), AUTO_SEGMENT_LENGTH);
+            List<ParsedSection> autoSections = new ArrayList<>(segments.size());
+            for (int index = 0; index < segments.size(); index++) {
+                ParsedChunk segment = segments.get(index);
+                autoSections.add(new ParsedSection(sectionType, "片段 " + (index + 1),
+                        segment.startOffset(), segment.endOffset(), -1, false));
+            }
+            String message = novel
+                    ? "未检测到明确章节标题，已按段落自动分为 " + autoSections.size() + " 个片段，可直接分析或使用「AI 识别章节」"
+                    : "未检测到场次标题，已按段落自动分为 " + autoSections.size() + " 个片段";
+            return new ParsedSource(text, autoSections, message);
         }
-        List<ParsedSection> sections = new ArrayList<>();
+        return buildSections(text, sectionType, starts, titles);
+    }
+
+    /**
+     * 提取全书可能作为章节标题的短独立行，供AI低成本识别非标章节格式。
+     * <p>
+     * 过滤对话行、纯分隔线和以句末标点结尾的正文短句，显著压缩输入规模；序号从1起。
+     *
+     * @param text String 规范化正文
+     * @return List&lt;CandidateLine&gt; 候选短行列表
+     */
+    public List<CandidateLine> extractChapterCandidates(String text) {
+        List<CandidateLine> candidates = new ArrayList<>();
+        int offset = 0;
+        int lineNumber = 1;
+        int length = text.length();
+        while (offset < length && candidates.size() < MAX_CANDIDATE_LINES) {
+            int newline = text.indexOf('\n', offset);
+            int end = newline < 0 ? length : newline;
+            String raw = text.substring(offset, end);
+            String trimmed = raw.trim();
+            if (isChapterCandidate(trimmed)) {
+                candidates.add(new CandidateLine(candidates.size() + 1, lineNumber, offset, trimmed));
+            }
+            offset = newline < 0 ? length : newline + 1;
+            lineNumber++;
+        }
+        return candidates;
+    }
+
+    /**
+     * 根据AI选中的候选行序号切分章节结构。
+     *
+     * @param text String 规范化正文
+     * @param sourceType String 原文类型
+     * @param candidates List&lt;CandidateLine&gt; 候选短行列表
+     * @param selectedIndexes List&lt;Integer&gt; 模型选中的1起序号
+     * @return ParsedSource 重建后的结构化结果
+     */
+    public ParsedSource splitByCandidateIndexes(String text, String sourceType,
+                                                List<CandidateLine> candidates, List<Integer> selectedIndexes) {
+        String sectionType = "novel".equals(sourceType) ? "chapter" : "scene";
+        List<Integer> validSorted = selectedIndexes.stream()
+                .filter(index -> index != null && index >= 1 && index <= candidates.size())
+                .distinct()
+                .sorted()
+                .toList();
+        if (validSorted.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "AI 未在原文中识别到有效的章节标题");
+        }
+        List<Integer> starts = new ArrayList<>(validSorted.size());
+        List<String> titles = new ArrayList<>(validSorted.size());
+        for (int candidateIndex : validSorted) {
+            CandidateLine candidate = candidates.get(candidateIndex - 1);
+            starts.add(candidate.startOffset());
+            titles.add(candidate.text());
+        }
+        return buildSections(text, sectionType, starts, titles);
+    }
+
+    /**
+     * 按已确定的标题位置列表生成顶层结构段，首个标题前的前言并入第一段。
+     *
+     * @param text String 规范化正文
+     * @param sectionType String 结构段类型
+     * @param starts List&lt;Integer&gt; 各标题起始偏移
+     * @param titles List&lt;String&gt; 各标题文本
+     * @return ParsedSource 结构化结果
+     */
+    private ParsedSource buildSections(String text, String sectionType, List<Integer> starts, List<String> titles) {
+        List<ParsedSection> sections = new ArrayList<>(starts.size());
         for (int index = 0; index < starts.size(); index++) {
             // 首个标题之前的文字并入第一段，避免前言、书名页被丢弃。
             int start = index == 0 ? 0 : starts.get(index);
             int end = index + 1 < starts.size() ? starts.get(index + 1) : text.length();
-            int chapterIndex = sections.size();
             sections.add(new ParsedSection(sectionType, titles.get(index), start, end, -1, false));
-            if (novel) {
-                appendScenes(sections, text, start, end, chapterIndex);
-            }
         }
         return new ParsedSource(text, sections,
                 starts.getFirst() > 0 ? "首个标题之前的文字已并入第一段，请核对边界" : "");
     }
 
     /**
-     * 在章节范围内按明确分隔标记切分场景。
+     * 判断一行去除首尾空白后的文本是否具备章节标题特征。
      *
-     * @param sections List&lt;ParsedSection&gt; 待追加的结构段列表
-     * @param text String 规范化正文
-     * @param start int 章节起点
-     * @param end int 章节终点
-     * @param chapterIndex int 所属章节在结构段列表中的下标
+     * @param trimmed String 去除首尾空白的行文本
+     * @return boolean 是否纳入AI候选
      */
-    private void appendScenes(List<ParsedSection> sections, String text, int start, int end, int chapterIndex) {
-        Matcher divider = SCENE_DIVIDER.matcher(text);
-        // 只在当前章节范围内匹配，避免跨章节匹配造成的重复扫描与越界。
-        divider.region(start, end);
-        List<Integer> boundaries = new ArrayList<>();
-        while (divider.find()) {
-            boundaries.add(divider.start());
+    private boolean isChapterCandidate(String trimmed) {
+        if (trimmed.isEmpty() || trimmed.length() > MAX_CANDIDATE_LENGTH) {
+            return false;
         }
-        if (boundaries.isEmpty()) {
-            return;
+        char first = trimmed.charAt(0);
+        if (first == '“' || first == '"' || first == '「' || first == '『') {
+            return false;
         }
-        int segmentStart = start;
-        int sceneNumber = 1;
-        for (int boundary : boundaries) {
-            if (boundary > segmentStart) {
-                sections.add(new ParsedSection("scene", "场景 " + sceneNumber++, segmentStart, boundary, chapterIndex, false));
-            }
-            segmentStart = boundary;
+        char last = trimmed.charAt(trimmed.length() - 1);
+        if ("。！？，；”’\"'…—".indexOf(last) >= 0) {
+            return false;
         }
-        if (segmentStart < end) {
-            sections.add(new ParsedSection("scene", "场景 " + sceneNumber, segmentStart, end, chapterIndex, false));
+        return !PURE_DIVIDER.matcher(trimmed).matches();
+    }
+
+    /**
+     * 按正则收集标题的起始偏移与去空白后的标题文本。
+     *
+     * @param pattern Pattern 标题匹配正则
+     * @param text String 规范化正文
+     * @param starts List&lt;Integer&gt; 输出的起始偏移列表
+     * @param titles List&lt;String&gt; 输出的标题文本列表
+     */
+    private void collectMatches(Pattern pattern, String text, List<Integer> starts, List<String> titles) {
+        Matcher matcher = pattern.matcher(text);
+        while (matcher.find()) {
+            starts.add(matcher.start());
+            titles.add(matcher.group().trim());
+        }
+    }
+
+    /**
+     * 按纯数字独立行识别无前缀章节标题，至少命中两处才生效，避免正文中偶发孤立数字误切。
+     *
+     * @param pattern Pattern 纯数字章节正则
+     * @param text String 规范化正文
+     * @param starts List&lt;Integer&gt; 输出的起始偏移列表
+     * @param titles List&lt;String&gt; 输出的标题文本列表
+     */
+    private void collectBareNumeralChapters(Pattern pattern, String text, List<Integer> starts, List<String> titles) {
+        List<Integer> candidateStarts = new ArrayList<>();
+        List<String> candidateTitles = new ArrayList<>();
+        collectMatches(pattern, text, candidateStarts, candidateTitles);
+        if (candidateStarts.size() >= 2) {
+            starts.addAll(candidateStarts);
+            titles.addAll(candidateTitles);
         }
     }
 }

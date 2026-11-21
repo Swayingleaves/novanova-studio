@@ -127,6 +127,49 @@ class AgentScopeModelFactoryTest {
     }
 
     /**
+     * Nana、Gemini与Anthropic渠道应按各自协议映射思考模式开关与强度。
+     */
+    @Test
+    void shouldConfigureThinkingParametersAcrossAllTextFormats() throws Exception {
+        AiProviderAdapterRegistry adapterRegistry = mock(AiProviderAdapterRegistry.class);
+        when(adapterRegistry.normalizeApiFormat("nana")).thenReturn("nana");
+        when(adapterRegistry.normalizeApiFormat("gemini")).thenReturn("gemini");
+        when(adapterRegistry.normalizeApiFormat("anthropic")).thenReturn("anthropic");
+        AgentScopeModelFactory factory = new AgentScopeModelFactory(null, com.novanovastudio.TeamTestSupport.teamRepository(), com.novanovastudio.TeamTestSupport.taskScope(), adapterRegistry);
+
+        GenerateOptions nanaEnabled = configuredOptions(factory.createModel(channel("nana", "deepseek-chat"), true, "high"));
+        GenerateOptions nanaDisabled = configuredOptions(factory.createModel(channel("nana", "deepseek-chat"), false, "high"));
+        Assertions.assertEquals("enabled", ((java.util.Map<?, ?>) nanaEnabled.getAdditionalBodyParams().get("thinking")).get("type"));
+        Assertions.assertEquals("high", nanaEnabled.getReasoningEffort());
+        Assertions.assertEquals("disabled", ((java.util.Map<?, ?>) nanaDisabled.getAdditionalBodyParams().get("thinking")).get("type"));
+        Assertions.assertNull(nanaDisabled.getReasoningEffort());
+
+        GenerateOptions geminiEnabled = defaultOptions(factory.createModel(channel("gemini", "gemini-2.5-pro"), true, "max"), GeminiChatModel.class);
+        GenerateOptions geminiDisabled = defaultOptions(factory.createModel(channel("gemini", "gemini-2.5-pro"), false, "max"), GeminiChatModel.class);
+        Assertions.assertEquals(24576, geminiEnabled.getThinkingBudget());
+        Assertions.assertNull(geminiDisabled.getThinkingBudget());
+
+        GenerateOptions anthropicEnabled = defaultOptions(factory.createModel(channel("anthropic", "claude-sonnet-4"), true, "high"), AnthropicChatModel.class);
+        GenerateOptions anthropicDisabled = defaultOptions(factory.createModel(channel("anthropic", "claude-sonnet-4"), false, "high"), AnthropicChatModel.class);
+        Assertions.assertEquals(8192, ((java.util.Map<?, ?>) anthropicEnabled.getAdditionalBodyParams().get("thinking")).get("budget_tokens"));
+        Assertions.assertFalse(anthropicDisabled.getAdditionalBodyParams().containsKey("thinking"));
+    }
+
+    /**
+     * 读取Gemini或Anthropic模型的默认生成参数。
+     *
+     * @param model Model AgentScope模型
+     * @param modelClass Class&lt;?&gt; 目标模型实现类
+     * @return GenerateOptions 默认生成参数
+     * @throws ReflectiveOperationException 反射读取失败时抛出
+     */
+    private GenerateOptions defaultOptions(Model model, Class<?> modelClass) throws ReflectiveOperationException {
+        Field field = modelClass.getDeclaredField("defaultOptions");
+        field.setAccessible(true);
+        return (GenerateOptions) field.get(model);
+    }
+
+    /**
      * 从结构化输出包装器中读取OpenAI模型生成参数。
      *
      * @param model Model AgentScope模型

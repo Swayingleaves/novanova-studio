@@ -17,6 +17,9 @@ const EMPTY_QUICK_CONFIGURATION: StoryBibleQuickConfiguration = {
     maximumSupplementCalls: 0,
 };
 
+/** 「预留输出 Token」的悬停说明。 */
+const OUTPUT_TOKENS_HINT = "单次请求传给模型的 max_tokens 上限。开启思考模式时，思考过程与结构化 JSON 共用该额度；若设置过小（如 1024），模型会在思考阶段被截断并返回空回复，建议填写 16384～65536（或模型支持的最大输出 Token）。";
+
 /** 「最多补分析调用次数」的悬停说明。 */
 const SUPPLEMENT_CALLS_HINT = "模型输出不合格（片段缺失、标识重复或被截断）时，允许把该批拆成两个更小的子批重新调用的总次数上限，全任务共用；额度用尽后该片段记为缺口并跳过。不影响扣费。";
 
@@ -111,9 +114,10 @@ export function StoryBiblePricingManagement() {
                     ] as const).map(([key, label, min, max]) => <label key={key} className="space-y-1 text-xs text-[var(--studio-muted)]">
                         <span className="flex items-center gap-1">
                             {label}
+                            {key === "maximumOutputTokens" ? <Tooltip placement="top" title={OUTPUT_TOKENS_HINT}><HelpCircle className="size-3.5 cursor-help" aria-label="预留输出Token说明" /></Tooltip> : null}
                             {key === "maximumSupplementCalls" ? <Tooltip placement="top" title={SUPPLEMENT_CALLS_HINT}><HelpCircle className="size-3.5 cursor-help" aria-label="补分析调用次数说明" /></Tooltip> : null}
                         </span>
-                        <InputNumber className="w-full" min={min} max={max} value={quickConfiguration[key]}
+                        <InputNumber className="w-full!" min={min} max={max} value={quickConfiguration[key]}
                             onChange={(value) => setQuickConfiguration((current) => current ? { ...current, [key]: value ?? 0 } : current)} />
                     </label>)}
                 </div> : null}

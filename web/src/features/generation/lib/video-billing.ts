@@ -66,6 +66,16 @@ type VideoGenerationQuoteInput = {
     requireReferences?: boolean;
 };
 
+export const DEFAULT_VIDEO_MAXIMUM_DURATION_SECONDS = 15;
+export const UNLIMITED_VIDEO_DURATION_SECONDS = -1;
+
+/** 返回生效的最长时间（秒）；未填或为空默认 15 秒，-1 表示不限制并返回 null。 */
+export function resolveBillingMaximumDurationSeconds(configuration?: Pick<VideoBillingConfiguration, "maximumDurationSeconds"> | null): number | null {
+    const value = configuration?.maximumDurationSeconds;
+    if (value === undefined || value === null) return DEFAULT_VIDEO_MAXIMUM_DURATION_SECONDS;
+    return value === UNLIMITED_VIDEO_DURATION_SECONDS ? null : value;
+}
+
 export function readVideoModelBillingConfiguration(config: AiConfig, model: string) {
     return config.videoModelBillingConfigurations.find((item) => item.model === model) || null;
 }
@@ -111,8 +121,18 @@ export function quoteVideoGeneration(input: VideoGenerationQuoteInput): VideoGen
     if (!Number.isSafeInteger(configuration.minimumDurationSeconds) || configuration.minimumDurationSeconds < 1) {
         return { available: false, reason: translate("generation.invalidMinimumVideoDuration") };
     }
+    const rawMaximum = configuration.maximumDurationSeconds;
+    if (rawMaximum !== undefined && rawMaximum !== null && rawMaximum !== UNLIMITED_VIDEO_DURATION_SECONDS) {
+        if (!Number.isSafeInteger(rawMaximum) || rawMaximum < 1 || rawMaximum < configuration.minimumDurationSeconds) {
+            return { available: false, reason: translate("generation.invalidMaximumVideoDuration") };
+        }
+    }
+    const effectiveMaximum = resolveBillingMaximumDurationSeconds(configuration);
     if (seconds < configuration.minimumDurationSeconds) {
         return { available: false, reason: translate("generation.videoDurationMustBeAtLeastSeconds", { value0: configuration.minimumDurationSeconds }) };
+    }
+    if (effectiveMaximum !== null && seconds > effectiveMaximum) {
+        return { available: false, reason: translate("generation.videoDurationMustNotExceedSeconds", { value0: effectiveMaximum }) };
     }
     const taskCount = parsePositiveInteger(input.taskCount ?? 1);
     if (taskCount === null) return { available: false, reason: translate("generation.videoTaskCountMustBeAPositiveInteger") };
@@ -125,6 +145,7 @@ export function createVideoBillingConfiguration(): VideoBillingConfiguration {
     return {
         billingUnit: "generation",
         minimumDurationSeconds: 3,
+        maximumDurationSeconds: DEFAULT_VIDEO_MAXIMUM_DURATION_SECONDS,
         modePrices: {
             "text-to-video": {},
             "image-to-video": {},

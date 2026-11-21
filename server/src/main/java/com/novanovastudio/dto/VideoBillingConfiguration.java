@@ -11,6 +11,7 @@ import java.util.Map;
  *
  * @param billingUnit String 计费方式，generation 按次或 second 按秒
  * @param minimumDurationSeconds Integer 最短可生成时长秒数
+ * @param maximumDurationSeconds Integer 最长可生成时长秒数，-1 表示不限制，为空时默认 15 秒
  * @param modePrices Map<String, Map<String, BigDecimal>> 模式到分辨率单价表，接口单价使用十进制字符串
  * @author zhenglin.cn.cq@gmail.com
  * @date 2026-08-18 00:00
@@ -18,7 +19,26 @@ import java.util.Map;
 public record VideoBillingConfiguration(
         String billingUnit,
         Integer minimumDurationSeconds,
+        Integer maximumDurationSeconds,
         @JSONField(serializeFeatures = {JSONWriter.Feature.WriteNonStringValueAsString, JSONWriter.Feature.WriteBigDecimalAsPlain})
         Map<String, Map<String, BigDecimal>> modePrices
 ) {
+    /** 未填写最长时间时的默认上限秒数。 */
+    public static final int DEFAULT_MAXIMUM_DURATION_SECONDS = 15;
+    /** 最长时间为 -1 时表示不限制上限。 */
+    public static final int UNLIMITED_MAXIMUM_DURATION_SECONDS = -1;
+
+    /**
+     * 返回实际生效的最长可生成时长秒数。
+     * <p>
+     * 未配置时默认返回 15 秒，配置为 -1 时表示不限制并返回 null。
+     *
+     * @return Integer 生效的最长可生成时长秒数，不限制时返回 null
+     */
+    public Integer effectiveMaximumDurationSeconds() {
+        if (maximumDurationSeconds == null) {
+            return DEFAULT_MAXIMUM_DURATION_SECONDS;
+        }
+        return maximumDurationSeconds == UNLIMITED_MAXIMUM_DURATION_SECONDS ? null : maximumDurationSeconds;
+    }
 }

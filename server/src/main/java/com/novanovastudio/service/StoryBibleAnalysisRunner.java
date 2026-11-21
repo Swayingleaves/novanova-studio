@@ -393,7 +393,8 @@ public class StoryBibleAnalysisRunner {
                     return agent.call(JSON.toJSONString(input), resultType, RuntimeContext.builder()
                                     .sessionId("story-bible:" + context.job().id()).userId(String.valueOf(context.job().userId())).build())
                             .timeout(Duration.ofSeconds(properties.timeoutSettings().storyBibleAgentTimeoutSeconds()))
-                            .map(message -> parseAgentResult(message, resultType, context.job().id()))
+                            .map(message -> parseAgentResult(message, resultType, context.job().id(),
+                                    context.job().quickConfiguration().maximumOutputTokens()))
                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "故事知识库Agent未返回结构化结果")))
                             .doFinally(signal -> agent.close());
                 });
@@ -405,17 +406,24 @@ public class StoryBibleAnalysisRunner {
      * @param message Msg 模型返回消息
      * @param resultType Class&lt;T&gt; 目标结果类型
      * @param jobId String 分析任务标识
+     * @param maximumOutputTokens int 本次请求配置的max_tokens上限
      * @param <T> T 结果类型
      * @return T 经过类型转换的结果
      * @throws InvalidQuickResultException 模型正文不是完整JSON对象或无法按结果类型解析
      */
-    private <T> T parseAgentResult(Msg message, Class<T> resultType, String jobId) {
+    private <T> T parseAgentResult(Msg message, Class<T> resultType, String jobId, int maximumOutputTokens) {
         if (message.hasStructuredData()) {
             return message.getStructuredData(resultType);
         }
         String text = message.getTextContent();
         if (text == null || !JSON.isValidObject(text)) {
-            log.warn("故事知识库Agent未返回完整JSON响应: jobId={}, responseLength={}", jobId, text == null ? 0 : text.length());
+            int textLength = text == null ? 0 : text.length();
+            int thinkingLength = thinkingLength(message);
+            log.warn("故事知识库Agent未返回完整JSON响应: jobId={}, responseLength={}, thinkingLength={}, maxTokens={}",
+                    jobId, textLength, thinkingLength, maximumOutputTokens);
+            if (textLength == 0 && thinkingLength > 0) {
+                throw new InvalidQuickResultException("模型输出额度(" + maximumOutputTokens + ")已被思考过程耗尽，请调大故事知识库配置中的预留输出Token");
+            }
             throw new InvalidQuickResultException("模型未返回完整JSON结果");
         }
         try {
@@ -428,6 +436,25 @@ public class StoryBibleAnalysisRunner {
         } catch (com.alibaba.fastjson2.JSONException error) {
             throw new InvalidQuickResultException("模型JSON结果不符合结构化要求");
         }
+    }
+
+    /**
+     * 统计模型回复中思考块的字符数，用于识别思考过程耗尽 max_tokens 导致的空可见回复。
+     *
+     * @param message Msg 模型返回消息
+     * @return int 思考内容总字符数
+     */
+    private int thinkingLength(Msg message) {
+        if (message == null || message.getContent() == null) {
+            return 0;
+        }
+        int total = 0;
+        for (io.agentscope.core.message.ContentBlock block : message.getContent()) {
+            if (block instanceof io.agentscope.core.message.ThinkingBlock thinkingBlock && thinkingBlock.getThinking() != null) {
+                total += thinkingBlock.getThinking().length();
+            }
+        }
+        return total;
     }
 
     /**

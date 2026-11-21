@@ -299,6 +299,10 @@ export function mergeScriptSourceSections(projectId: string, firstSectionId: str
     return serverPost<MutationResult>(`${SOURCE_PATH}/mergeSections`, { projectId, firstSectionId, secondSectionId, expectedRevision });
 }
 
+export function detectScriptSourceChapters(projectId: string, expectedRevision: number, model: string) {
+    return serverPost<{ revision: number; confirmedRevision: number | null; chapterCount: number; warning: string }>(`${SOURCE_PATH}/detectChapters`, { projectId, expectedRevision, model });
+}
+
 const STORY_BIBLE_PATH = `${SCRIPT_PATH}/storyBible`;
 
 export function quoteStoryBibleAnalysis(projectId: string, model: string, sectionIds: string[]) {

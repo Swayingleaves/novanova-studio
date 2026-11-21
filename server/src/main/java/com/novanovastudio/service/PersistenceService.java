@@ -490,6 +490,17 @@ public class PersistenceService {
         if (minimumDurationSeconds == null || minimumDurationSeconds < 1) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.minimumVideoDurationMustBePositiveIntegerSeconds"));
         }
+        Integer maximumDurationSeconds = configuration.maximumDurationSeconds() == null
+                ? VideoBillingConfiguration.DEFAULT_MAXIMUM_DURATION_SECONDS
+                : configuration.maximumDurationSeconds();
+        if (maximumDurationSeconds != VideoBillingConfiguration.UNLIMITED_MAXIMUM_DURATION_SECONDS) {
+            if (maximumDurationSeconds < 1) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.maximumVideoDurationMustBePositiveIntegerSeconds"));
+            }
+            if (maximumDurationSeconds < minimumDurationSeconds) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.maximumVideoDurationMustNotBeLessThanMinimum"));
+            }
+        }
         Map<String, Map<String, BigDecimal>> inputPrices = configuration.modePrices() == null ? Map.of() : configuration.modePrices();
         if (inputPrices.keySet().stream().anyMatch(mode -> !VideoGenerationMode.isSupported(mode))) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoPriceTableContainsAnUnsupportedMode"));
@@ -515,7 +526,7 @@ public class PersistenceService {
             }
             normalizedPrices.put(mode, Map.copyOf(normalizedModePrices));
         }
-        return new VideoBillingConfiguration(billingUnit, minimumDurationSeconds, Map.copyOf(normalizedPrices));
+        return new VideoBillingConfiguration(billingUnit, minimumDurationSeconds, maximumDurationSeconds, Map.copyOf(normalizedPrices));
     }
 
     /**

@@ -3,7 +3,7 @@ import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { IMAGE_RESOLUTIONS } from "@/features/generation/lib/image-size-mappings";
 import type { ImageResolution, ImageSizeMappings } from "@/features/generation/lib/image-size-mappings";
 import { VIDEO_ASPECT_RATIOS } from "@/features/generation/lib/video-generation-constraints";
-import { VIDEO_RESOLUTION_OPTIONS, createVideoBillingConfiguration } from "@/features/generation/lib/video-billing";
+import { DEFAULT_VIDEO_MAXIMUM_DURATION_SECONDS, UNLIMITED_VIDEO_DURATION_SECONDS, VIDEO_RESOLUTION_OPTIONS, createVideoBillingConfiguration } from "@/features/generation/lib/video-billing";
 import { MODEL_ICON_OPTIONS } from "@/features/settings/components/model-icon";
 import type { CustomModelGroupConfig, ImageBillingConfiguration, ModelCreditUnit, VideoBillingConfiguration, VideoGenerationConstraints, VideoGenerationMode, VideoResolution } from "@/features/settings/stores/use-config-store";
 import type { ServerModelConfig } from "@/services/api/server";
@@ -232,6 +232,16 @@ function parseVideoBilling(value: unknown, capabilities: string[]): VideoBilling
     const billingUnit: ModelCreditUnit = value.billingUnit === "second" ? "second" : "generation";
     const minimumDurationSeconds = value.minimumDurationSeconds === undefined ? 3 : readInteger(value.minimumDurationSeconds, 1);
     if (minimumDurationSeconds === null) return undefined;
+    let maximumDurationSeconds: number;
+    if (value.maximumDurationSeconds === undefined || value.maximumDurationSeconds === null) {
+        maximumDurationSeconds = DEFAULT_VIDEO_MAXIMUM_DURATION_SECONDS;
+    } else if (value.maximumDurationSeconds === UNLIMITED_VIDEO_DURATION_SECONDS) {
+        maximumDurationSeconds = UNLIMITED_VIDEO_DURATION_SECONDS;
+    } else {
+        const parsedMax = readInteger(value.maximumDurationSeconds, 1);
+        if (parsedMax === null || parsedMax < minimumDurationSeconds) return undefined;
+        maximumDurationSeconds = parsedMax;
+    }
     const modePrices: VideoBillingConfiguration["modePrices"] = {};
     const sourcePrices = isRecord(value.modePrices) ? value.modePrices : {};
     for (const mode of VIDEO_MODES) {
@@ -245,7 +255,7 @@ function parseVideoBilling(value: unknown, capabilities: string[]): VideoBilling
         }
         modePrices[mode] = resolutionPrices;
     }
-    return { billingUnit, minimumDurationSeconds, modePrices };
+    return { billingUnit, minimumDurationSeconds, maximumDurationSeconds, modePrices };
 }
 
 /** 导出时把视频价格统一成普通十进制字符串。 */
@@ -260,9 +270,18 @@ function normalizeVideoBilling(configuration: VideoBillingConfiguration): VideoB
         }
         if (Object.keys(normalized).length) modePrices[mode] = normalized;
     }
+    const minimumDurationSeconds = Math.max(1, Math.floor(configuration.minimumDurationSeconds || 1));
+    const rawMaximum = configuration.maximumDurationSeconds;
+    const maximumDurationSeconds =
+        rawMaximum === undefined || rawMaximum === null
+            ? DEFAULT_VIDEO_MAXIMUM_DURATION_SECONDS
+            : rawMaximum === UNLIMITED_VIDEO_DURATION_SECONDS
+              ? UNLIMITED_VIDEO_DURATION_SECONDS
+              : Math.max(minimumDurationSeconds, Math.floor(rawMaximum));
     return {
         billingUnit: configuration.billingUnit === "second" ? "second" : "generation",
-        minimumDurationSeconds: Math.max(1, Math.floor(configuration.minimumDurationSeconds || 1)),
+        minimumDurationSeconds,
+        maximumDurationSeconds,
         modePrices,
     };
 }

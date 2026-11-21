@@ -10,7 +10,7 @@ import { nanoid } from "nanoid";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-configuration-guard";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
-import { advanceWholeBookAdaptation, cancelWholeBookAdaptation, confirmWholeBookAdaptation, listActiveWholeBookAdaptation, quoteWholeBookAdaptation, retryWholeBookAdaptation, startWholeBookAdaptation, wholeBookAdaptationStatus } from "@/services/api/script";
+import { advanceWholeBookAdaptation, cancelWholeBookAdaptation, confirmWholeBookAdaptation, listActiveWholeBookAdaptation, listStoryBibleItems, quoteWholeBookAdaptation, retryWholeBookAdaptation, startWholeBookAdaptation, wholeBookAdaptationStatus } from "@/services/api/script";
 import { useScriptStore } from "../stores/use-script-store";
 import type { EpisodeBodiesJob, WholeBookAdaptationJob, WholeBookAdaptationOptions } from "../types";
 import { EpisodeBodiesPanel } from "./episode-bodies-panel";
@@ -78,7 +78,7 @@ function adaptationStepIndex(job: WholeBookAdaptationJob | null, bodiesJob: Epis
 }
 
 /** 全书改编：设置改编参数、启动后台任务，并在集数与应用两个停点确认。 */
-export function NovelAdaptationPanel() {
+export function NovelAdaptationPanel({ onOpenStoryBible }: { onOpenStoryBible?: () => void }) {
     const translate = useTranslation();
     const { message, modal } = App.useApp();
     const project = useScriptStore((state) => state.project);
@@ -101,6 +101,8 @@ export function NovelAdaptationPanel() {
     const [episodeCount, setEpisodeCount] = useState(0);
     // 点选步骤后固定查看该步，为空时跟随真实进度。
     const [pinnedStep, setPinnedStep] = useState<number | null>(null);
+    // 统计故事知识库中已确认的事件与故事线总数，用于启动前引导。
+    const [confirmedCoreFactCount, setConfirmedCoreFactCount] = useState<number | null>(null);
 
     useEffect(() => { if (!model && config.textModel) setModel(config.textModel); }, [config.textModel, model]);
     useEffect(() => {
@@ -125,6 +127,15 @@ export function NovelAdaptationPanel() {
         void listActiveWholeBookAdaptation(projectId)
             .then((jobs) => { if (active) setJob(jobs[0] || null); })
             .catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : translate("script.couldNotLoadAdaptationTasks")); });
+        setConfirmedCoreFactCount(null);
+        void Promise.all([
+            listStoryBibleItems({ projectId, itemType: "event", status: "confirmed", page: 1, pageSize: 1 }),
+            listStoryBibleItems({ projectId, itemType: "storyline", status: "confirmed", page: 1, pageSize: 1 }),
+        ]).then(([events, storylines]) => {
+            if (active) setConfirmedCoreFactCount((events.total || 0) + (storylines.total || 0));
+        }).catch(() => {
+            if (active) setConfirmedCoreFactCount(null);
+        });
         return () => { active = false; };
     }, [hasSource, jobLoadKey, projectId]);
 
@@ -351,6 +362,15 @@ export function NovelAdaptationPanel() {
     return <section className="min-h-0 overflow-y-auto p-4 sm:p-6"><div className="mx-auto max-w-6xl space-y-5">
         <header><h2 className="text-lg font-semibold text-[var(--studio-ink)]">{translate("script.novelAdaptation")}</h2><p className="mt-1 text-sm text-[var(--studio-muted)]">{translate("script.synthesizeTheBookCreateAUnifiedStrategyConfirmTheEpisode")}</p></header>
         {loadError ? <Alert type="error" showIcon title={loadError} action={<Button size="small" onClick={() => setJobLoadKey((value) => value + 1)}>{translate("script.retry")}</Button>} /> : null}
+        {confirmedCoreFactCount === 0 && !job ? (
+            <Alert
+                type="warning"
+                showIcon
+                title="尚未确认故事事件或故事线"
+                description="全书改编基于故事知识库中已确认的事实。请先前往「故事知识库」完成分析，并确认至少一条故事事件或故事线后再启动改编。"
+                action={onOpenStoryBible ? <Button size="small" type="primary" onClick={onOpenStoryBible}>前往故事知识库</Button> : undefined}
+            />
+        ) : null}
         <div className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-4">
             <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-semibold">{translate("script.fullBookAdaptation")}</h3>
@@ -360,8 +380,8 @@ export function NovelAdaptationPanel() {
                 {job && (job.status === "queued" || job.status === "running" || job.status === "awaiting")
                     ? <Button size="small" danger loading={jobBusy} onClick={cancelJob}>{translate("script.cancelTask")}</Button>
                     : job?.status === "failed"
-                        ? <div className="flex gap-2"><Button size="small" loading={jobBusy} onClick={() => void runWholeBook()}>{startLabel}</Button><Button type="primary" size="small" loading={jobBusy} onClick={retryJob}>{translate("script.resumeFromFailure")}</Button></div>
-                        : <Button type="primary" loading={jobBusy} onClick={() => void runWholeBook()}>{startLabel}</Button>}
+                        ? <div className="flex gap-2"><Button size="small" loading={jobBusy} disabled={confirmedCoreFactCount === 0} onClick={() => void runWholeBook()}>{startLabel}</Button><Button type="primary" size="small" loading={jobBusy} onClick={retryJob}>{translate("script.resumeFromFailure")}</Button></div>
+                        : <Button type="primary" loading={jobBusy} disabled={confirmedCoreFactCount === 0} onClick={() => void runWholeBook()}>{startLabel}</Button>}
             </div>
             <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("script.usesAllConfirmedFactsCoveringTheMainPlotCharacterDevelopment")}</p>
             <Steps className="mt-3" size="small" titlePlacement="vertical" current={Math.max(0, flowStep)} status={flowStatus} items={stepItems} onChange={setPinnedStep} />

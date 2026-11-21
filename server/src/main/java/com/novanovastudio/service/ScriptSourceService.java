@@ -1,6 +1,9 @@
 package com.novanovastudio.service;
 
-import com.novanovastudio.service.TeamTaskScopeService;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
+import com.novanovastudio.agent.AgentScopeAgentFactory;
+import com.novanovastudio.agent.AgentScopeModelFactory;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.ScriptSourceDtos;
@@ -8,6 +11,9 @@ import com.novanovastudio.repository.ScriptSourceRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.storage.ObjectStorageService;
 import com.novanovastudio.task.ScriptSourceImportQueue;
+import io.agentscope.core.ReActAgent;
+import io.agentscope.core.agent.RuntimeContext;
+import io.agentscope.core.message.Msg;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -108,6 +114,15 @@ public class ScriptSourceService {
 
     /** 响应式事务操作器。 */
     private final TransactionalOperator transactionalOperator;
+
+    /** AgentScope文本模型解析工厂。 */
+    private final AgentScopeModelFactory modelFactory;
+
+    /** AgentScope Agent工厂。 */
+    private final AgentScopeAgentFactory agentFactory;
+
+    /** AI章节识别单次调用超时时间。 */
+    private static final Duration CHAPTER_DETECT_TIMEOUT = Duration.ofSeconds(90);
 
     /**
      * 上传原文文件并创建空白剧本项目。
@@ -298,6 +313,139 @@ public class ScriptSourceService {
                                     .flatMap(second -> mergeSections(documentId, mutation.text(), first, second)))
                             .thenReturn(new ScriptSourceDtos.MutationResult(mutation.revision()));
                 }));
+    }
+
+    /**
+     * 提取全书短行候选清单并调用文本模型识别非标章节标题，随后原子重建章节结构并自动确认。
+     * <p>
+     * 仅向模型发送过滤后的短独立行列表，不传输正文，降低延迟与Token开销；模型调用在事务外完成。
+     *
+     * @param request DetectChaptersRequest 识别请求（包含项目标识、期望修订号与可选文本模型）
+     * @return Mono&lt;DetectChaptersResult&gt; 重建后的修订号与章节数量
+     */
+    public Mono<ScriptSourceDtos.DetectChaptersResult> detectChapters(ScriptSourceDtos.DetectChaptersRequest request) {
+        return document(request.projectId()).flatMap(document -> {
+            if (!"completed".equals(document.status())) {
+                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "原文尚未解析完成，暂不能识别章节"));
+            }
+            if (document.revision() != request.expectedRevision()) {
+                return Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT, "原文结构已被其他页面修改，请刷新后重试"));
+            }
+            return repository.normalizedText(document.id())
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR, "原文正文缺失，请重新导入")))
+                    .flatMap(text -> {
+                        List<ScriptSourceParser.CandidateLine> candidates = parser.extractChapterCandidates(text);
+                        if (candidates.isEmpty()) {
+                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
+                                    "原文中未找到可作为章节标题的短行，当前自动分段可直接用于分析"));
+                        }
+                        List<JSONObject> payloadCandidates = candidates.stream()
+                                .map(line -> JSONObject.of("id", line.index(), "text", line.text()))
+                                .toList();
+                        JSONObject input = JSONObject.of("candidates", payloadCandidates);
+                        return modelFactory.resolveTextModel(request.model())
+                                .flatMap(selection -> callChapterDetectAgent(document, selection.agentModel(), input))
+                                .flatMap(detected -> {
+                                    List<Integer> ids = detected == null || detected.candidateIds() == null
+                                            ? List.of() : detected.candidateIds();
+                                    if (ids.isEmpty()) {
+                                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
+                                                "AI 未在原文中识别到明确的章节标题，当前自动分段可直接用于分析"));
+                                    }
+                                    ScriptSourceParser.ParsedSource parsed =
+                                            parser.splitByCandidateIndexes(text, document.sourceType(), candidates, ids);
+                                    return rebuildDetectedSections(document.id(), request.expectedRevision(), text, parsed);
+                                });
+                    });
+        });
+    }
+
+    /**
+     * 调用章节识别Agent并解析结构化候选行序号列表。
+     *
+     * @param document Document 原文记录
+     * @param model Model 文本模型
+     * @param input JSONObject 候选行输入
+     * @return Mono&lt;DetectedChapters&gt; 识别结果
+     */
+    private Mono<ScriptSourceDtos.DetectedChapters> callChapterDetectAgent(
+            ScriptSourceRepository.Document document, io.agentscope.core.model.Model model, JSONObject input) {
+        return Mono.defer(() -> {
+            ReActAgent agent = agentFactory.chapterDetectAgent(model);
+            return agent.call(JSON.toJSONString(input), ScriptSourceDtos.DetectedChapters.class,
+                            RuntimeContext.builder()
+                                    .sessionId("chapter-detect:" + document.id())
+                                    .userId(String.valueOf(document.userId()))
+                                    .build())
+                    .timeout(CHAPTER_DETECT_TIMEOUT)
+                    .map(this::parseDetectedChapters)
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "章节识别模型未返回结果")))
+                    .doFinally(signal -> agent.close());
+        });
+    }
+
+    /**
+     * 读取Agent返回的章节序号结果，兼容未走结构化工具而直接输出JSON正文的模型。
+     *
+     * @param message Msg 模型返回消息
+     * @return DetectedChapters 解析后的序号列表
+     */
+    private ScriptSourceDtos.DetectedChapters parseDetectedChapters(Msg message) {
+        if (message.hasStructuredData()) {
+            return message.getStructuredData(ScriptSourceDtos.DetectedChapters.class);
+        }
+        String text = message.getTextContent();
+        if (!StringUtils.hasText(text)) {
+            return new ScriptSourceDtos.DetectedChapters(List.of());
+        }
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return JSON.parseObject(text.substring(start, end + 1), ScriptSourceDtos.DetectedChapters.class);
+        }
+        throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "章节识别模型返回格式无效，请重试");
+    }
+
+    /**
+     * 在单个事务内按AI识别结果替换整份原文的章节与片段，并同步推进且确认修订号。
+     *
+     * @param documentId String 原文标识
+     * @param expectedRevision long 期望修订号
+     * @param text String 规范化正文
+     * @param parsed ParsedSource 重建后的章节结构
+     * @return Mono&lt;DetectChaptersResult&gt; 重建结果
+     */
+    private Mono<ScriptSourceDtos.DetectChaptersResult> rebuildDetectedSections(
+            String documentId, long expectedRevision, String text, ScriptSourceParser.ParsedSource parsed) {
+        long nextRevision = expectedRevision + 1;
+        List<ScriptSourceParser.ParsedSection> sections = parsed.sections();
+        List<ScriptSourceDtos.Section> inserts = new ArrayList<>(sections.size());
+        for (int index = 0; index < sections.size(); index++) {
+            ScriptSourceParser.ParsedSection section = sections.get(index);
+            String sectionId = UUID.nameUUIDFromBytes((documentId + ":r" + nextRevision + ":" + index)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+            inserts.add(new ScriptSourceDtos.Section(sectionId, null, section.sectionType(), section.title(),
+                    section.startOffset(), section.endOffset(), index, false));
+        }
+        return transactionalOperator.transactional(
+                repository.replaceRevisionAndConfirm(documentId, expectedRevision, parsed.warning(), inserts.size())
+                        .flatMap(updated -> {
+                            if (!updated) {
+                                return Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT, "原文结构已被其他页面修改，请刷新后重试"));
+                            }
+                            return repository.deleteAllChunks(documentId)
+                                    .then(repository.deleteAllSections(documentId))
+                                    .thenMany(Flux.fromIterable(inserts)
+                                            .concatMap(section -> repository.insertSection(documentId, section)
+                                                    .then(writeChunks(documentId, text, section.id(),
+                                                            section.startOffset(), section.endOffset()))))
+                                    .then(Mono.fromSupplier(() -> {
+                                        log.info("AI识别章节完成: documentId={}, revision={}, chapters={}",
+                                                documentId, nextRevision, inserts.size());
+                                        return new ScriptSourceDtos.DetectChaptersResult(
+                                                nextRevision, nextRevision, inserts.size(), parsed.warning());
+                                    }));
+                        }));
     }
 
     /**

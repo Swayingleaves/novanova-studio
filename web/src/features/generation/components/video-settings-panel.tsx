@@ -12,7 +12,7 @@ import { isMiniMaxH3VideoConfig, normalizeMiniMaxH3Duration, normalizeMiniMaxH3R
 import { isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/features/generation/lib/seedance-video";
 import { readVideoDurationRange } from "@/features/generation/lib/video-duration";
 import { readCustomVideoConstraints, readVideoGenerationConstraintIssue, readVideoModelConfiguration } from "@/features/generation/lib/video-generation-constraints";
-import { createVideoGenerationModeOptions, VIDEO_RESOLUTION_OPTIONS, availableVideoResolutions } from "@/features/generation/lib/video-billing";
+import { createVideoGenerationModeOptions, VIDEO_RESOLUTION_OPTIONS, availableVideoResolutions, resolveBillingMaximumDurationSeconds } from "@/features/generation/lib/video-billing";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import { resolveModelRequestConfig, type AiConfig, type VideoGenerationMode, type VideoResolution } from "@/features/settings/stores/use-config-store";
 
@@ -90,19 +90,23 @@ export function VideoSettingsPanel({
         ...(!pricedResolutions.includes(resolution as (typeof pricedResolutions)[number]) && VIDEO_RESOLUTION_OPTIONS.some((item) => item.value === resolution) ? VIDEO_RESOLUTION_OPTIONS.filter((item) => item.value === resolution) : []),
     ];
     const providerDurationRange = readVideoDurationRange(config);
-    const billingMinimumDuration = config.videoModelBillingConfigurations.find((item) => item.model === (config.videoModel || config.model))?.videoBillingConfiguration?.minimumDurationSeconds || 1;
+    const billingConfig = config.videoModelBillingConfigurations.find((item) => item.model === (config.videoModel || config.model))?.videoBillingConfiguration;
+    const billingMinimumDuration = billingConfig?.minimumDurationSeconds || 1;
+    const billingMaximumDuration = resolveBillingMaximumDurationSeconds(billingConfig);
     const customMinimumDuration = constraints?.minimumDurationSeconds;
     const customMaximumDuration = constraints?.maximumDurationSeconds;
     const customDurationConfigured = !customVideo || typeof customMinimumDuration === "number" && Number.isSafeInteger(customMinimumDuration)
         && typeof customMaximumDuration === "number" && Number.isSafeInteger(customMaximumDuration);
+    const durationUnlimited = !customVideo && billingMaximumDuration === null;
     const durationRange = customVideo && typeof customMinimumDuration === "number" && Number.isSafeInteger(customMinimumDuration)
         && typeof customMaximumDuration === "number" && Number.isSafeInteger(customMaximumDuration)
-        ? { min: Math.max(customMinimumDuration, billingMinimumDuration), max: customMaximumDuration }
-        : { min: Math.max(providerDurationRange.min, billingMinimumDuration), max: providerDurationRange.max };
-    const durationRangeAvailable = customDurationConfigured && durationRange.min <= durationRange.max;
+        ? { min: Math.max(customMinimumDuration, billingMinimumDuration), max: billingMaximumDuration !== null ? Math.min(customMaximumDuration, billingMaximumDuration) : customMaximumDuration, unlimited: false }
+        : { min: Math.max(providerDurationRange.min, billingMinimumDuration), max: billingMaximumDuration ?? providerDurationRange.max, unlimited: durationUnlimited };
+    const durationRangeAvailable = customDurationConfigured && (durationRange.unlimited || durationRange.min <= durationRange.max);
     const displayDurationRange = durationRangeAvailable ? durationRange : providerDurationRange;
     const seconds = resolveSeconds(resolved, seedance, agnes, miniMaxH3, displayDurationRange);
     const [durationDraft, setDurationDraft] = useState(seconds);
+    const sliderMax = durationRange.unlimited ? Math.max(durationRange.min, durationRange.max, durationDraft, 60) : durationRange.max;
     const count = normalizeVideoGenerationCount(config.canvasVideoCount);
 
     useEffect(() => setDurationDraft(seconds), [seconds]);
@@ -187,12 +191,12 @@ export function VideoSettingsPanel({
                         ) : (
                             <div className="flex h-8 items-center gap-3">
                                 <div className="min-w-0 flex-1 px-0.5" onMouseDown={stopDown}>
-                                    <Slider min={durationRange.min} max={durationRange.max} step={1} tooltip={{ open: false }} value={durationDraft} onChange={setDurationDraft} onChangeComplete={commitDuration} />
+                                    <Slider min={durationRange.min} max={sliderMax} step={1} tooltip={{ open: false }} value={durationDraft} onChange={setDurationDraft} onChangeComplete={commitDuration} />
                                 </div>
                                 <input
                                     type="number"
                                     min={durationRange.min}
-                                    max={durationRange.max}
+                                    max={durationRange.unlimited ? undefined : durationRange.max}
                                     value={durationDraft}
                                     aria-label={translate("generation.videoDuration")}
                                     className="h-8 w-14 rounded-lg border bg-transparent px-2 text-center text-sm font-medium outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
@@ -342,9 +346,9 @@ function nearestRatio(value: number): RatioPreset["value"] {
     return RATIO_PRESETS.filter((item) => item.value !== "adaptive").reduce((best, item) => (Math.abs(item.width / item.height - value) < Math.abs(best.width / best.height - value) ? item : best)).value;
 }
 
-function normalizeDurationDraft(value: string, range: { min: number; max: number }) {
+function normalizeDurationDraft(value: string, range: { min: number; max: number; unlimited?: boolean }) {
     const seconds = Math.floor(Number(value) || range.min);
-    return Math.max(range.min, Math.min(range.max, seconds));
+    return range.unlimited ? Math.max(range.min, seconds) : Math.max(range.min, Math.min(range.max, seconds));
 }
 
 function stopDown(event: MouseEvent) {
@@ -378,7 +382,10 @@ export function videoSecondsLabel(value: string, config?: AiConfig): string {
     if (String(value).trim() === "-1") return translate("generation.smart");
     if (config && isMiniMaxH3VideoConfig(config)) return `${normalizeMiniMaxH3Duration(value)}s`;
     if (config && isAgnesVideoConfig(config)) return `${normalizeAgnesVideoSeconds(value, config.vquality)}s`;
-    return `${Math.max(1, Math.min(15, Math.floor(Number(value) || 6)))}s`;
+    const seconds = Math.max(1, Math.floor(Number(value) || 6));
+    if (!config) return `${seconds}s`;
+    const range = readVideoDurationRange(config);
+    return `${range.unlimited ? seconds : Math.min(range.max, seconds)}s`;
 }
 
 export function normalizeVideoSizeValue(value: string): string {

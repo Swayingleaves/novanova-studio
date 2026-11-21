@@ -136,7 +136,7 @@ class AiTaskServiceTest {
                 new PersistenceDtos.ModelConfig("model-config-1", "channel-1", "model-1", AiTaskTypes.IMAGE, List.of(), true, 0, java.math.BigDecimal.valueOf(0), true, "high"),
                 new PersistenceDtos.ModelConfig("model-config-2", "channel-1", "model-1", AiTaskTypes.VIDEO,
                         List.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO, VideoGenerationMode.REFERENCE_TO_VIDEO), true, 0, java.math.BigDecimal.valueOf(0), true, "high", "generation", 1,
-                        new com.alibaba.fastjson2.JSONObject(), new VideoBillingConfiguration("generation", 3,
+                        new com.alibaba.fastjson2.JSONObject(), new VideoBillingConfiguration("generation", 3, null,
                         Map.of(VideoGenerationMode.TEXT_TO_VIDEO, Map.of("720p", java.math.BigDecimal.valueOf(6)),
                                 VideoGenerationMode.IMAGE_TO_VIDEO, Map.of("720p", java.math.BigDecimal.valueOf(8)),
                                 VideoGenerationMode.REFERENCE_TO_VIDEO, Map.of("720p", java.math.BigDecimal.valueOf(10)))), null, null, false, null),
@@ -494,7 +494,7 @@ class AiTaskServiceTest {
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(new PersistenceDtos.ModelConfig(
                 "model-config-2", "channel-1", "model-1", AiTaskTypes.VIDEO, List.of("reference-to-video", "audio-input"),
                 true, 0, java.math.BigDecimal.ZERO, false, "high", "generation", 1, new JSONObject(),
-                new VideoBillingConfiguration("generation", 3, Map.of("reference-to-video", Map.of("720p", java.math.BigDecimal.TEN))),
+                new VideoBillingConfiguration("generation", 3, null, Map.of("reference-to-video", Map.of("720p", java.math.BigDecimal.TEN))),
                 null, null, true, Map.of("reference-to-video", group)))));
         var request = new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.VIDEO, "参考音频", "channel-1::model-1",
                 Map.of("seconds", 5, "size", "16:9", "resolution", "720p"), List.of(), List.of(),
@@ -522,7 +522,7 @@ class AiTaskServiceTest {
                 "channel-1", "音频测试渠道", "https://example.com", "key", format, List.of("model-1")))));
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(new PersistenceDtos.ModelConfig(
                 "model-config-2", "channel-1", "model-1", AiTaskTypes.VIDEO, List.of("reference-to-video", "audio-input"), true, 0, java.math.BigDecimal.valueOf(0), true, "high", "generation", 1,
-                new com.alibaba.fastjson2.JSONObject(), new VideoBillingConfiguration("generation", 3, Map.of("reference-to-video", Map.of("720p", java.math.BigDecimal.valueOf(10)))), null, null, false, null))));
+                new com.alibaba.fastjson2.JSONObject(), new VideoBillingConfiguration("generation", 3, null, Map.of("reference-to-video", Map.of("720p", java.math.BigDecimal.valueOf(10)))), null, null, false, null))));
     }
 
     /**
@@ -641,7 +641,7 @@ class AiTaskServiceTest {
         var referenceGroup = new PersistenceDtos.CustomModelGroupConfig("/video", "POST", "video", "{}", null, null, "url", null, null, null, null, null, null, reference, null);
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(new PersistenceDtos.ModelConfig(
                 "model-config-2", "channel-1", "model-1", "video", List.of("text-to-video", "reference-to-video"), true, 0, java.math.BigDecimal.ZERO,
-                false, "high", "generation", 1, new JSONObject(), new VideoBillingConfiguration("generation", 3,
+                false, "high", "generation", 1, new JSONObject(), new VideoBillingConfiguration("generation", 3, null,
                 Map.of("text-to-video", Map.of("720p", java.math.BigDecimal.ONE), "reference-to-video", Map.of("720p", java.math.BigDecimal.ONE))),
                 null, null, true, Map.of("text-to-video", textGroup, "reference-to-video", referenceGroup)))));
     }

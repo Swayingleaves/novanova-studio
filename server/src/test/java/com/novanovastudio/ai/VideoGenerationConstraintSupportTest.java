@@ -23,7 +23,7 @@ class VideoGenerationConstraintSupportTest {
     /** 含音频输入的全能参考能力。 */
     private static final List<String> CAPABILITIES = List.of("reference-to-video", "audio-input");
     /** 计费最低时长。 */
-    private static final VideoBillingConfiguration BILLING = new VideoBillingConfiguration("second", 3, Map.of());
+    private static final VideoBillingConfiguration BILLING = new VideoBillingConfiguration("second", 3, null, Map.of());
 
     /** 保存后的配置必须能完整回读，小数、溢出和非数字不能静默转换。 */
     @Test

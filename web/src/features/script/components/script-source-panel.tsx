@@ -4,11 +4,15 @@ import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { App, Alert, Button, Empty, Input, Progress, Spin, Tag } from "antd";
-import { CheckCircle2, ChevronRight, FileText, RefreshCw, Scissors } from "lucide-react";
+import { App, Alert, Button, Empty, Input, Modal, Progress, Spin, Tag } from "antd";
+import { CheckCircle2, ChevronRight, FileText, RefreshCw, Scissors, Sparkles } from "lucide-react";
 
+import { ModelPicker } from "@/features/settings/components/model-picker";
+import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-configuration-guard";
+import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import {
     confirmScriptSourceStructure,
+    detectScriptSourceChapters,
     getScriptSourceImportStatus,
     getScriptSourceSection,
     getScriptSourceTree,
@@ -71,6 +75,11 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
     const [titleDraft, setTitleDraft] = useState("");
     const [splitMode, setSplitMode] = useState(false);
     const [retryEncoding, setRetryEncoding] = useState<ScriptSourceFileEncoding>("UTF-8");
+    const [detectOpen, setDetectOpen] = useState(false);
+    const [detectModel, setDetectModel] = useState("");
+    const [detecting, setDetecting] = useState(false);
+    const config = useEffectiveConfig();
+    const ensureModelConfiguration = useModelConfigurationGuard();
     const statusRef = useRef<ScriptSourceImportStatus | null>(null);
     const treeRef = useRef<ScriptSourceTree | null>(null);
     /* 项目没有原文等终止性错误只需查询一次，避免固定间隔反复请求。 */
@@ -162,6 +171,26 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
     useEffect(() => {
         if (status?.textEncoding === "UTF-8" || status?.textEncoding === "GB18030") setRetryEncoding(status.textEncoding);
     }, [status?.textEncoding]);
+    useEffect(() => {
+        if (!detectModel && config.textModel) setDetectModel(config.textModel);
+    }, [config.textModel, detectModel]);
+
+    /** 提取全书短行候选并调用文本模型识别非标章节标题，重建后自动确认目录。 */
+    const runDetectChapters = async () => {
+        if (!tree) return;
+        if (!ensureModelConfiguration("text", detectModel)) return;
+        setDetecting(true);
+        try {
+            const result = await detectScriptSourceChapters(projectId, tree.revision, detectModel);
+            setDetectOpen(false);
+            message.success(`已通过 AI 识别出 ${result.chapterCount} 个章节并自动确认结构`);
+            await Promise.all([loadStatus(), loadTree()]);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "AI 识别章节失败，请稍后重试");
+        } finally {
+            setDetecting(false);
+        }
+    };
 
     /** 确认当前结构修订，确认后才能启动故事知识库分析。 */
     const confirmStructure = async () => {
@@ -298,9 +327,28 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
                     </div>
                 </div>
                 {polling ? <Progress percent={percent} showInfo={false} size="small" className="w-32" strokeColor="var(--studio-primary)" /> : null}
+                {tree && tree.sourceType === "novel" && status.status === "completed" ? <Button size="small" icon={<Sparkles className="size-3.5" />} disabled={mutating || detecting} onClick={() => setDetectOpen(true)}>AI 识别章节</Button> : null}
                 {tree && tree.confirmedRevision !== tree.revision ? <Button size="small" type="primary" icon={<CheckCircle2 className="size-3.5" />} loading={mutating} onClick={() => void confirmStructure()}>{translate("script.confirmStructure")}</Button> : null}
-                <Button size="small" icon={<RefreshCw className="size-3.5" />} disabled={mutating} onClick={() => void loadStatus().then(() => (statusRef.current?.status === "completed" ? loadTree() : undefined))}>{translate("script.refresh")}</Button>
+                <Button size="small" icon={<RefreshCw className="size-3.5" />} disabled={mutating || detecting} onClick={() => void loadStatus().then(() => (statusRef.current?.status === "completed" ? loadTree() : undefined))}>{translate("script.refresh")}</Button>
             </header>
+            <Modal
+                title="AI 识别章节标题"
+                open={detectOpen}
+                confirmLoading={detecting}
+                mask={{ closable: !detecting }}
+                okText="开始识别并重建目录"
+                cancelText="取消"
+                onOk={() => void runDetectChapters()}
+                onCancel={() => { if (!detecting) setDetectOpen(false); }}
+            >
+                <div className="mt-3 space-y-3">
+                    <p className="text-xs text-[var(--studio-muted)]">仅提取全书短独立行候选清单交由模型筛选真实章节标题（不发送正文），自动过滤试读声明、广告与无关短句，并按识别结果重建目录。</p>
+                    <label className="block text-sm">
+                        文本模型
+                        <div className="mt-1"><ModelPicker config={config} value={detectModel} onChange={setDetectModel} capability="text" fullWidth /></div>
+                    </label>
+                </div>
+            </Modal>
 
             {status?.status === "failed" ? (
                 <Alert

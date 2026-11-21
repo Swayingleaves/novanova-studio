@@ -15,6 +15,7 @@ function configFor(billingUnit: "generation" | "second" = "generation") {
                 videoBillingConfiguration: {
                     billingUnit,
                     minimumDurationSeconds: 3,
+                    maximumDurationSeconds: null as number | null,
                     modePrices: {
                         "text-to-video": { auto: 6, "480p": 6, "720p": 14, "1080p": 22, "1088p": 24, "1440p": 30 },
                         "image-to-video": { auto: 6, "480p": 8, "720p": 16, "1080p": 25 },
@@ -141,4 +142,35 @@ test("服务端音频能力下发到画布配置时保留能力，价格维度�
     assert.deepEqual(Object.keys(config.videoModelBillingConfigurations[0].videoBillingConfiguration!.modePrices), ["reference-to-video"]);
     serverConfig.capabilities = ["reference-to-video"];
     assert.equal(configFromModelConfigs(config.channels, [serverConfig]).modelCapabilities[0].capabilities.includes("audio-input"), false);
+});
+
+test("配置最长时间后超出上限不可报价，默认15秒、-1不限制、非法上限直接拦截", () => {
+    const config = configFor("second");
+    // 未填（null）时默认上限为 15 秒
+    assertQuoteCredits(quoteVideoGeneration({ config, model: "video-model", mode: "text-to-video", resolution: "720p", seconds: 15 }), 210);
+    assert.deepEqual(
+        quoteVideoGeneration({ config, model: "video-model", mode: "text-to-video", resolution: "720p", seconds: 16 }),
+        { available: false, reason: "视频时长不能超过 15 秒" },
+    );
+    // 设置为 -1 表示不限制
+    config.videoModelBillingConfigurations[0].videoBillingConfiguration!.maximumDurationSeconds = -1;
+    assertQuoteCredits(quoteVideoGeneration({ config, model: "video-model", mode: "text-to-video", resolution: "720p", seconds: 30 }), 420);
+    // 设置为具体正整数
+    config.videoModelBillingConfigurations[0].videoBillingConfiguration!.maximumDurationSeconds = 10;
+    assertQuoteCredits(quoteVideoGeneration({ config, model: "video-model", mode: "text-to-video", resolution: "720p", seconds: 10 }), 140);
+    assert.deepEqual(
+        quoteVideoGeneration({ config, model: "video-model", mode: "text-to-video", resolution: "720p", seconds: 11 }),
+        { available: false, reason: "视频时长不能超过 10 秒" },
+    );
+    // 0 或小于最短时间均视为非法
+    config.videoModelBillingConfigurations[0].videoBillingConfiguration!.maximumDurationSeconds = 0;
+    assert.deepEqual(
+        quoteVideoGeneration({ config, model: "video-model", mode: "text-to-video", resolution: "720p", seconds: 3 }),
+        { available: false, reason: "当前模型最长时间配置无效" },
+    );
+    config.videoModelBillingConfigurations[0].videoBillingConfiguration!.maximumDurationSeconds = 2;
+    assert.deepEqual(
+        quoteVideoGeneration({ config, model: "video-model", mode: "text-to-video", resolution: "720p", seconds: 3 }),
+        { available: false, reason: "当前模型最长时间配置无效" },
+    );
 });

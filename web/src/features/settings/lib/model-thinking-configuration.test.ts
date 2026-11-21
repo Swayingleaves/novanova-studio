@@ -1,17 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isOpenAiTextModel, isReasoningEffortDisabled, reasoningEffortOptions } from "./model-thinking-configuration.ts";
+import { isReasoningEffortDisabled, reasoningEffortOptions, supportsThinkingConfiguration } from "./model-thinking-configuration.ts";
 
-test("仅OpenAI文本模型显示思考配置", () => {
-    const channels = [
-        { id: "openai", apiFormat: "openai" },
-        { id: "gemini", apiFormat: "gemini" },
-    ];
-
-    assert.equal(isOpenAiTextModel({ modelType: "text", channelId: "openai" }, channels), true);
-    assert.equal(isOpenAiTextModel({ modelType: "text", channelId: "gemini" }, channels), false);
-    assert.equal(isOpenAiTextModel({ modelType: "image", channelId: "openai" }, channels), false);
+test("所有文本模型均显示思考配置，非文本模型不显示", () => {
+    assert.equal(supportsThinkingConfiguration({ modelType: "text" }), true);
+    assert.equal(supportsThinkingConfiguration({ modelType: "image" }), false);
+    assert.equal(supportsThinkingConfiguration({ modelType: "video" }), false);
 });
 
 test("关闭思考模式时保留强度但禁止编辑", () => {

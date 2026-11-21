@@ -875,7 +875,7 @@ class PersistenceServiceTest {
         }
         JSONObject data = JSONObject.of("channelId", "channel-1", "modelName", "video-model", "modelType", "video",
                 "capabilities", List.copyOf(groups.keySet()), "isCustomModel", true, "customModelConfig", groups,
-                "creditCost", 0, "videoBillingConfiguration", new VideoBillingConfiguration("generation", 3, prices));
+                "creditCost", 0, "videoBillingConfiguration", new VideoBillingConfiguration("generation", 3, null, prices));
         var created = service.createModelConfig(data.to(PersistenceDtos.CreateModelConfigRequest.class)).block();
         Assertions.assertNotNull(created);
         Assertions.assertEquals(groups, created.customModelConfig());
@@ -901,7 +901,7 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
         JSONObject data = JSONObject.of("channelId", "channel-1", "modelName", "video-model", "modelType", "video",
                 "capabilities", List.of("text-to-video"), "isCustomModel", true, "creditCost", 0,
-                "videoBillingConfiguration", new VideoBillingConfiguration("generation", 3, java.util.Map.of("text-to-video", java.util.Map.of("720p", java.math.BigDecimal.ONE))));
+                "videoBillingConfiguration", new VideoBillingConfiguration("generation", 3, null, java.util.Map.of("text-to-video", java.util.Map.of("720p", java.math.BigDecimal.ONE))));
         Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(data.to(PersistenceDtos.CreateModelConfigRequest.class)).block());
         verify(repository, org.mockito.Mockito.never()).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
     }
@@ -983,7 +983,7 @@ class PersistenceServiceTest {
         channel.setApiFormat("openai");
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
-        VideoBillingConfiguration configuration = new VideoBillingConfiguration("generation", 3,
+        VideoBillingConfiguration configuration = new VideoBillingConfiguration("generation", 3, null,
                 java.util.Map.of(VideoGenerationMode.REFERENCE_TO_VIDEO, java.util.Map.of(
                         "720p", java.math.BigDecimal.valueOf(10),
                         "1088p", java.math.BigDecimal.valueOf(20),
@@ -1033,7 +1033,7 @@ class PersistenceServiceTest {
 
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
                 "channel-1", "video-model", "video", List.of(VideoGenerationMode.TEXT_TO_VIDEO), 0, java.math.BigDecimal.valueOf(0), true, "high",
-                "generation", 1, new JSONObject(), new VideoBillingConfiguration("generation", 3,
+                "generation", 1, new JSONObject(), new VideoBillingConfiguration("generation", 3, null,
                 java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", java.math.BigDecimal.valueOf(6)))), null, null, false, null, false, null)).block();
 
         Assertions.assertNotNull(created);
@@ -1060,7 +1060,7 @@ class PersistenceServiceTest {
         record.setCapabilities("[]");
         when(repository.getPlatformAiModelConfig("model-1")).thenReturn(Mono.just(record));
 
-        VideoBillingConfiguration configuration = new VideoBillingConfiguration("generation", 3,
+        VideoBillingConfiguration configuration = new VideoBillingConfiguration("generation", 3, null,
                 java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", java.math.BigDecimal.valueOf(6))));
 
         Assertions.assertThrows(BusinessException.class, () -> service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
@@ -1076,13 +1076,37 @@ class PersistenceServiceTest {
         channel.setModels("[\"video-model\"]");
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
 
-        VideoBillingConfiguration configuration = new VideoBillingConfiguration("invalid", 3,
+        VideoBillingConfiguration configuration = new VideoBillingConfiguration("invalid", 3, null,
                 java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", java.math.BigDecimal.valueOf(6))));
 
         Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
                 "channel-1", "video-model", "video", List.of(VideoGenerationMode.TEXT_TO_VIDEO), 0, java.math.BigDecimal.valueOf(0),
                 true, "high", "generation", 1, new JSONObject(), configuration, null, null, false, null, false, null)).block());
         verify(repository, times(0)).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
+    }
+
+    /** 视频模型最长时间小于最短时间或为0时应拒绝保存，未填默认15秒、-1表示不限制。 */
+    @Test
+    void shouldValidateAndDefaultMaximumDurationSeconds() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"video-model\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+
+        var lessThanMin = new VideoBillingConfiguration("second", 5, 3,
+                java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", java.math.BigDecimal.valueOf(6))));
+        Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "video-model", "video", List.of(VideoGenerationMode.TEXT_TO_VIDEO), 0, java.math.BigDecimal.valueOf(0),
+                true, "high", "second", 1, new JSONObject(), lessThanMin, null, null, false, null, false, null)).block());
+
+        var zeroMax = new VideoBillingConfiguration("second", 3, 0,
+                java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", java.math.BigDecimal.valueOf(6))));
+        Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "video-model", "video", List.of(VideoGenerationMode.TEXT_TO_VIDEO), 0, java.math.BigDecimal.valueOf(0),
+                true, "high", "second", 1, new JSONObject(), zeroMax, null, null, false, null, false, null)).block());
+        verify(repository, times(0)).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
+
+        Assertions.assertEquals(15, new VideoBillingConfiguration("second", 3, null, java.util.Map.of()).effectiveMaximumDurationSeconds());
+        Assertions.assertNull(new VideoBillingConfiguration("second", 3, -1, java.util.Map.of()).effectiveMaximumDurationSeconds());
     }
 
     /** 模型自定义JSON请求体参数应在创建、更新和查询间完整往返。 */

@@ -1,5 +1,6 @@
 import { translateMessage as translate } from "@/features/locale/translate";
 import type { AiConfig, VideoGenerationConstraints, VideoGenerationMode } from "@/features/settings/stores/use-config-store";
+import { resolveBillingMaximumDurationSeconds } from "./video-billing";
 
 /** 比例值同时用于配置、任务参数和模板，自动比例统一使用 auto。 */
 export const VIDEO_ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto"] as const;
@@ -17,7 +18,7 @@ export function videoConstraintFieldLabel(field: VideoConstraintField) {
 }
 
 /** 校验配置草稿，保留字段位置供表单显示错误。 */
-export function videoConstraintConfigurationIssues(mode: VideoGenerationMode, constraints: VideoGenerationConstraints | null | undefined, audioEnabled: boolean, billingMinimum = 1): VideoConstraintIssue[] {
+export function videoConstraintConfigurationIssues(mode: VideoGenerationMode, constraints: VideoGenerationConstraints | null | undefined, audioEnabled: boolean, billingMinimum = 1, billingMaximum: number | null = null): VideoConstraintIssue[] {
     const issues: VideoConstraintIssue[] = [];
     const add = (field: VideoConstraintField, message: string) => issues.push({ field, message });
     const fields: VideoConstraintField[] = ["minimumDurationSeconds", "maximumDurationSeconds", "minimumImageCount", "maximumImageCount"];
@@ -35,7 +36,7 @@ export function videoConstraintConfigurationIssues(mode: VideoGenerationMode, co
     if (issues.length || !constraints) return issues;
     const { minimumDurationSeconds: minimum, maximumDurationSeconds: maximum, minimumImageCount: minimumImages, maximumImageCount: maximumImages } = constraints as Required<VideoGenerationConstraints>;
     if (minimum! > maximum!) add("maximumDurationSeconds", translate("generation.videoConstraintRangeOrder"));
-    else if (Math.max(minimum!, billingMinimum) > maximum!) add("maximumDurationSeconds", translate("generation.videoConstraintBillingConflict", { minimum: billingMinimum }));
+    else if (Math.max(minimum!, billingMinimum) > (billingMaximum ? Math.min(maximum!, billingMaximum) : maximum!)) add("maximumDurationSeconds", translate("generation.videoConstraintBillingConflict", { minimum: billingMinimum }));
     if (minimumImages! > maximumImages!) add("maximumImageCount", translate("generation.videoConstraintRangeOrder"));
     if (mode === "text-to-video" && (minimumImages !== 0 || maximumImages !== 0)
         || mode === "first-last-frame-to-video" && (minimumImages !== 2 || maximumImages !== 2)
@@ -75,12 +76,15 @@ export function readVideoGenerationConstraintIssue(input: VideoConstraintInput):
     const mode = input.mode || config.videoGenerationMode;
     if (!model.capabilities.includes(mode)) return translate("generation.selectedVideoModeIsNotConfigured");
     const constraints = model.videoGenerationConstraints?.[mode];
-    const configurationIssue = videoConstraintConfigurationIssues(mode, constraints, model.capabilities.includes("audio-input"), model.videoBillingConfiguration?.minimumDurationSeconds || 1)[0];
+    const billingMinimum = model.videoBillingConfiguration?.minimumDurationSeconds || 1;
+    const billingMaximum = resolveBillingMaximumDurationSeconds(model.videoBillingConfiguration);
+    const configurationIssue = videoConstraintConfigurationIssues(mode, constraints, model.capabilities.includes("audio-input"), billingMinimum, billingMaximum)[0];
     if (configurationIssue || !constraints) return translate("generation.videoConstraintConfigurationMissing", { mode, reason: configurationIssue?.message || "" });
     if (!input.addingReferences) {
-        const minimum = Math.max(constraints.minimumDurationSeconds!, model.videoBillingConfiguration?.minimumDurationSeconds || 1);
+        const minimum = Math.max(constraints.minimumDurationSeconds!, billingMinimum);
+        const maximum = billingMaximum ? Math.min(constraints.maximumDurationSeconds!, billingMaximum) : constraints.maximumDurationSeconds!;
         const seconds = Number(input.seconds ?? config.videoSeconds);
-        if (!Number.isSafeInteger(seconds) || seconds < minimum || seconds > constraints.maximumDurationSeconds!) return translate("generation.videoConstraintDurationRange", { minimum, maximum: constraints.maximumDurationSeconds!, current: String(input.seconds ?? config.videoSeconds) });
+        if (!Number.isSafeInteger(seconds) || seconds < minimum || seconds > maximum) return translate("generation.videoConstraintDurationRange", { minimum, maximum, current: String(input.seconds ?? config.videoSeconds) });
         const size = input.size ?? config.size;
         if (!constraints.supportedAspectRatios!.includes(size)) return translate("generation.videoConstraintAspectRatio", { supported: constraints.supportedAspectRatios!.map((ratio) => ratio === "auto" ? translate("generation.videoConstraintAutomatic") : ratio).join("、"), current: size });
     }

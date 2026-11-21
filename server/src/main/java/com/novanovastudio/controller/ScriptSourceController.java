@@ -176,6 +176,19 @@ public class ScriptSourceController {
     }
 
     /**
+     * 使用文本模型按候选短行识别非标章节标题并重建原文目录。
+     *
+     * @param request 识别请求
+     * @param httpRequest 当前HTTP请求
+     * @return 重建后的修订号与章节数
+     */
+    @PostMapping("/detectChapters")
+    public Mono<ApiResponse<ScriptSourceDtos.DetectChaptersResult>> detectChapters(
+            @Valid @RequestBody ScriptSourceDtos.DetectChaptersRequest request, ServerHttpRequest httpRequest) {
+        return execute("AI识别原文章节", httpRequest, request, scriptSourceService.detectChapters(request));
+    }
+
+    /**
      * 统一记录请求内容与响应内容。
      *
      * @param operationName String 操作名称

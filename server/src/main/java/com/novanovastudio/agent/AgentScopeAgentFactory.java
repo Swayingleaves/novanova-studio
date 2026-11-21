@@ -144,6 +144,22 @@ public class AgentScopeAgentFactory {
     }
 
     /**
+     * 创建小说章节目录识别Agent，仅根据提取出的短行候选列表筛选真正的章节标题。
+     *
+     * @param model Model 用户选择的文本模型
+     * @return ReActAgent 章节目录识别Agent
+     */
+    public ReActAgent chapterDetectAgent(Model model) {
+        String prompt = """
+                你是小说章节目录识别专家。输入包含从小说原文中提取的候选短行列表（每行包含 id 和 text）。
+                请判断哪些候选行是真正的小说章节、卷、回、序章、楔子、尾声或番外标题，过滤掉试读声明、广告、作者感言、正文中偶发的短句或对话。
+                只返回属于章节标题的候选行 id 列表（按原文顺序升序排列）；如果原文确实没有章节标题，返回空列表。
+                """;
+        return build("chapter-detect-agent", prompt, model,
+                "只能返回结构化结果，不得调用工具、不得解释或输出额外文本。", false);
+    }
+
+    /**
      * 创建视频技能工作流对话Agent，负责多轮理解意图并起草阶段提示词。
      *
      * @param model Model 用户明确选择的文本模型

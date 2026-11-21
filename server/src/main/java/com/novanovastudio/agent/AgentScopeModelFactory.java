@@ -235,15 +235,54 @@ public class AgentScopeModelFactory {
             case "nana" -> new StructuredOutputFallbackModel(OpenAIChatModel.builder()
                     .apiKey(channel.apiKey()).baseUrl(AiHttpClient.buildNanaBaseUrl(channel.baseUrl())).endpointPath("/chat/completions")
                     .modelName(modelName).stream(true)
-                    .generateOptions(GenerateOptions.builder().additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters).build()).build());
+                    .generateOptions(openAiGenerateOptions(thinkingEnabled, reasoningEffort, customBodyParameters)).build());
             case "gemini" -> GeminiChatModel.builder()
                     .apiKey(channel.apiKey()).baseUrl(channel.baseUrl()).modelName(modelName).streamEnabled(true)
-                    .defaultOptions(GenerateOptions.builder().additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters).build()).build();
+                    .defaultOptions(geminiGenerateOptions(thinkingEnabled, reasoningEffort, customBodyParameters)).build();
             case "anthropic" -> AnthropicChatModel.builder()
                     .apiKey(channel.apiKey()).baseUrl(channel.baseUrl()).modelName(modelName).stream(true)
-                    .defaultOptions(GenerateOptions.builder().additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters).build()).build();
+                    .defaultOptions(anthropicGenerateOptions(thinkingEnabled, reasoningEffort, customBodyParameters)).build();
             default -> throw new IllegalStateException("AgentScope暂不支持该文本渠道格式: " + channel.apiFormat());
         };
+    }
+
+    /**
+     * 构建Gemini文本调用的思考参数。
+     * <p>
+     * Gemini 2.5 Pro及非思考模型传入 thinkingBudget=0 会触发400错误，因此关闭思考模式时不设置 thinkingBudget。
+     *
+     * @param thinkingEnabled boolean 是否开启思考模式
+     * @param reasoningEffort String 思考强度
+     * @param customBodyParameters JSONObject 自定义JSON请求体参数
+     * @return GenerateOptions AgentScope生成参数
+     */
+    private GenerateOptions geminiGenerateOptions(boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters) {
+        GenerateOptions.Builder builder = GenerateOptions.builder()
+                .additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters);
+        if (thinkingEnabled) {
+            builder.thinkingBudget("max".equals(reasoningEffort(reasoningEffort)) ? 24576 : 8192);
+        }
+        return builder.build();
+    }
+
+    /**
+     * 构建Anthropic文本调用的思考参数。
+     * <p>
+     * 开启时按官方 Messages API 写入 thinking.type=enabled 与 budget_tokens；关闭时不注入该字段以兼容非思考模型。
+     *
+     * @param thinkingEnabled boolean 是否开启思考模式
+     * @param reasoningEffort String 思考强度
+     * @param customBodyParameters JSONObject 自定义JSON请求体参数
+     * @return GenerateOptions AgentScope生成参数
+     */
+    private GenerateOptions anthropicGenerateOptions(boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters) {
+        GenerateOptions.Builder builder = GenerateOptions.builder()
+                .additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters);
+        if (thinkingEnabled) {
+            int budgetTokens = "max".equals(reasoningEffort(reasoningEffort)) ? 16384 : 8192;
+            builder.additionalBodyParam("thinking", Map.of("type", "enabled", "budget_tokens", budgetTokens));
+        }
+        return builder.build();
     }
 
     /**

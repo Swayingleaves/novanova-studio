@@ -3,11 +3,10 @@ export const reasoningEffortOptions: Array<{ value: "high" | "max"; label: strin
     { value: "max", label: "max" },
 ];
 
-export function isOpenAiTextModel(
-    model: { modelType: string; channelId: string },
-    channels: Array<{ id: string; apiFormat: string }>,
+export function supportsThinkingConfiguration(
+    model: { modelType: string },
 ) {
-    return model.modelType === "text" && channels.find((channel) => channel.id === model.channelId)?.apiFormat === "openai";
+    return model.modelType === "text";
 }
 
 export function isReasoningEffortDisabled(isSaving: boolean, thinkingEnabled: boolean) {

@@ -155,7 +155,7 @@ class AiTaskCreditCalculationTest {
             constructor.setAccessible(true);
             boolean video = "video".equals(request.taskType());
             VideoBillingConfiguration videoBillingConfiguration = video
-                    ? new VideoBillingConfiguration(creditUnit, 1,
+                    ? new VideoBillingConfiguration(creditUnit, 1, null,
                     Map.of(VideoGenerationMode.TEXT_TO_VIDEO, Map.of("720p", java.math.BigDecimal.valueOf(creditCost))))
                     : null;
             Object resolvedModel = constructor.newInstance(

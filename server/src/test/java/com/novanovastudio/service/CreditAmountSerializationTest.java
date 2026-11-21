@@ -131,7 +131,7 @@ class CreditAmountSerializationTest {
     /** 模型价格表的金额为字符串，时长和自定义模型参数仍为数值。 */
     @Test
     void shouldSerializeModelPricesWithoutChangingParameters() {
-        var pricing = new VideoBillingConfiguration("second", 5, Map.of("textToVideo", Map.of(
+        var pricing = new VideoBillingConfiguration("second", 5, 15, Map.of("textToVideo", Map.of(
                 "720p", new BigDecimal("1E-6"), "1080p", new BigDecimal("999999999999999999.123456"))));
         JSONObject parameters = JSON.parseObject("{\"temperature\":0.123456789}");
         var model = new PersistenceDtos.ModelConfig("model", "channel", "模型", "video", List.of(), false, 1,
@@ -141,6 +141,7 @@ class CreditAmountSerializationTest {
         assertEquals(parameters, returned.getJSONObject("customBodyParameters"));
         JSONObject videoPricing = returned.getJSONObject("videoBillingConfiguration");
         assertEquals(5, videoPricing.get("minimumDurationSeconds"));
+        assertEquals(15, videoPricing.get("maximumDurationSeconds"));
         JSONObject prices = videoPricing.getJSONObject("modePrices").getJSONObject("textToVideo");
         assertEquals("0.000001", prices.get("720p"));
         assertEquals("999999999999999999.123456", prices.get("1080p"));

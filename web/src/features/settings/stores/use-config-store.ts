@@ -26,6 +26,7 @@ export type VideoResolution = "auto" | "480p" | "720p" | "768p" | "1080p" | "108
 export type VideoBillingConfiguration = {
     billingUnit: ModelCreditUnit;
     minimumDurationSeconds: number;
+    maximumDurationSeconds?: number | null;
     modePrices: Partial<Record<VideoGenerationMode, Partial<Record<VideoResolution, CreditAmount>>>>;
 };
 /** 图片模型按 1K、2K、4K 清晰度配置的积分单价，空表示沿用模型单价。 */

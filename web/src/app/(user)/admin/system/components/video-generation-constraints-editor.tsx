@@ -6,11 +6,12 @@ import { VIDEO_ASPECT_RATIOS, videoConstraintConfigurationIssues, videoConstrain
 import type { VideoGenerationConstraints, VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 
 /** 在模式调用配置中编辑可直接传给生成入口的限制。 */
-export function VideoGenerationConstraintsEditor({ mode, constraints, audioEnabled, billingMinimum, onChange }: {
+export function VideoGenerationConstraintsEditor({ mode, constraints, audioEnabled, billingMinimum, billingMaximum = null, onChange }: {
     mode: VideoGenerationMode;
     constraints: VideoGenerationConstraints | null | undefined;
     audioEnabled: boolean;
     billingMinimum: number;
+    billingMaximum?: number | null;
     onChange: (constraints: VideoGenerationConstraints) => void;
 }) {
     const translate = useTranslation();
@@ -20,7 +21,7 @@ export function VideoGenerationConstraintsEditor({ mode, constraints, audioEnabl
         ...(fixedImages === undefined ? {} : { minimumImageCount: fixedImages, maximumImageCount: fixedImages }),
         ...(mode === "reference-to-video" && !audioEnabled ? { maximumAudioCount: 0 } : {}),
     };
-    const issues = videoConstraintConfigurationIssues(mode, constraints, audioEnabled, billingMinimum);
+    const issues = videoConstraintConfigurationIssues(mode, constraints, audioEnabled, billingMinimum, billingMaximum);
     const ratioIssue = issues.find((item) => item.field === "supportedAspectRatios");
     const fields: Array<{ field: VideoConstraintField; minimum: number; maximum?: number }> = [
         { field: "minimumDurationSeconds", minimum: 1 }, { field: "maximumDurationSeconds", minimum: 1 },

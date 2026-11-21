@@ -260,12 +260,12 @@ public class ScriptSourceRepository {
     }
 
     /**
-     * 标记导入完成。
+     * 标记导入完成并默认确认当前结构修订，解析后即可直接进入故事知识库分析。
      * @param documentId String 原文标识
      * @return Mono<Void> 更新结果
      */
     public Mono<Void> complete(String documentId) {
-        return databaseClient.sql("UPDATE script_source_documents SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=:documentId")
+        return databaseClient.sql("UPDATE script_source_documents SET status='completed',confirmed_revision=revision,updated_at=CURRENT_TIMESTAMP WHERE id=:documentId")
                 .bind("documentId", documentId).fetch().rowsUpdated()
                 .then(databaseClient.sql("UPDATE script_source_import_tasks SET status='completed',stage='completed',error_message='',updated_at=CURRENT_TIMESTAMP WHERE document_id=:documentId")
                         .bind("documentId", documentId).fetch().rowsUpdated()).then();
@@ -492,6 +492,49 @@ public class ScriptSourceRepository {
     public Mono<Boolean> confirmStructure(String documentId, long revision) {
         return databaseClient.sql("UPDATE script_source_documents SET confirmed_revision=revision,updated_at=CURRENT_TIMESTAMP WHERE id=:id AND revision=:revision AND status='completed'")
                 .bind("id", documentId).bind("revision", revision).fetch().rowsUpdated().map(count -> count > 0);
+    }
+
+    /**
+     * 删除整份原文的所有文本片段，供AI章节重切时重建。
+     *
+     * @param documentId String 原文标识
+     * @return Mono&lt;Void&gt; 删除结果
+     */
+    public Mono<Void> deleteAllChunks(String documentId) {
+        return databaseClient.sql("DELETE FROM script_source_chunks WHERE document_id=:documentId")
+                .bind("documentId", documentId).fetch().rowsUpdated().then();
+    }
+
+    /**
+     * 删除整份原文的所有结构段，供AI章节重切时重建。
+     *
+     * @param documentId String 原文标识
+     * @return Mono&lt;Void&gt; 删除结果
+     */
+    public Mono<Void> deleteAllSections(String documentId) {
+        return databaseClient.sql("DELETE FROM script_source_sections WHERE document_id=:documentId")
+                .bind("documentId", documentId).fetch().rowsUpdated().then();
+    }
+
+    /**
+     * 以乐观锁推进修订号、同步自动确认并更新提示与章节总数。
+     *
+     * @param documentId String 原文标识
+     * @param expectedRevision long 期望修订号
+     * @param warning String 新解析提示
+     * @param totalSections int 新顶层章节数量
+     * @return Mono&lt;Boolean&gt; 是否更新成功
+     */
+    public Mono<Boolean> replaceRevisionAndConfirm(String documentId, long expectedRevision, String warning, int totalSections) {
+        return databaseClient.sql("UPDATE script_source_documents SET revision=revision+1,confirmed_revision=revision+1,warning=:warning,updated_at=CURRENT_TIMESTAMP WHERE id=:id AND revision=:revision AND status='completed'")
+                .bind("warning", warning == null ? "" : warning)
+                .bind("id", documentId)
+                .bind("revision", expectedRevision)
+                .fetch().rowsUpdated()
+                .flatMap(count -> count > 0
+                        ? databaseClient.sql("UPDATE script_source_import_tasks SET total_sections=:total,processed_sections=:total,updated_at=CURRENT_TIMESTAMP WHERE document_id=:id")
+                                .bind("total", totalSections).bind("id", documentId).fetch().rowsUpdated().thenReturn(true)
+                        : Mono.just(false));
     }
 
     /**

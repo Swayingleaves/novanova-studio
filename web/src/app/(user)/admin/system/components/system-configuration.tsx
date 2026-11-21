@@ -9,7 +9,7 @@ import { currentLanguageTag } from "@/features/locale/translate";
 import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
-import { Alert, App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Tabs } from "antd";
+import { Alert, App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Select, Switch, Tabs } from "antd";
 import { nanoid } from "nanoid";
 import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Copy, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Upload, Video, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -38,9 +38,9 @@ import {
     type VideoGenerationMode,
     type VideoResolution,
 } from "@/features/settings/stores/use-config-store";
-import { createVideoGenerationCapabilityOptions, VIDEO_GENERATION_CAPABILITY_OPTIONS, VIDEO_RESOLUTION_OPTIONS, createVideoBillingConfiguration } from "@/features/generation/lib/video-billing";
+import { createVideoGenerationCapabilityOptions, DEFAULT_VIDEO_MAXIMUM_DURATION_SECONDS, resolveBillingMaximumDurationSeconds, UNLIMITED_VIDEO_DURATION_SECONDS, VIDEO_GENERATION_CAPABILITY_OPTIONS, VIDEO_RESOLUTION_OPTIONS, createVideoBillingConfiguration } from "@/features/generation/lib/video-billing";
 import { isObjectStorageReady, objectStorageReadyMessage, testObjectStorageUpload } from "@/features/storage/services/object-storage";
-import { isOpenAiTextModel, isReasoningEffortDisabled, reasoningEffortOptions } from "@/features/settings/lib/model-thinking-configuration";
+import { isReasoningEffortDisabled, reasoningEffortOptions, supportsThinkingConfiguration } from "@/features/settings/lib/model-thinking-configuration";
 import {
     createChannel,
     createModelConfig,
@@ -1888,7 +1888,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                             <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("appShell.displayIconAutoMatchDetectsItFromModelOr")}</p>
                         </section>
 
-                        <section className="grid gap-4 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4 md:grid-cols-2">
+                        <section className="grid gap-4 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4 md:grid-cols-3">
                             <div>
                                 <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
                                     {translate("appShell.billingMethod")}
@@ -1914,27 +1914,47 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                             </div>
                             <div>
                                 <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                    {editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.extensionDurationS") : translate("appShell.minimumDurationS")} <Info className="size-4 text-[var(--studio-muted)]" />
+                                    {translate("appShell.minimumDurationS")} <Info className="size-4 text-[var(--studio-muted)]" />
                                 </div>
-                                <Space.Compact className="w-full">
-                                    <InputNumber
-                                        min={1}
-                                        precision={0}
-                                        value={editingModelConfig.videoBillingConfiguration?.minimumDurationSeconds || 3}
-                                        style={{ width: "100%" }}
-                                        onChange={(value) =>
-                                            updateEditingModelConfig({
-                                                videoBillingConfiguration: {
-                                                    ...(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration()),
-                                                    minimumDurationSeconds: Math.max(1, Math.floor(Number(value) || 1)),
-                                                },
-                                            })
-                                        }
-                                    />
-                                    <Button disabled className="pointer-events-none">
-                                        {translate("appShell.s")}
-                                    </Button>
-                                </Space.Compact>
+                                <InputNumber
+                                    min={1}
+                                    precision={0}
+                                    suffix={translate("appShell.s")}
+                                    className="w-full!"
+                                    value={editingModelConfig.videoBillingConfiguration?.minimumDurationSeconds || 3}
+                                    onChange={(value) => {
+                                        const current = editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration();
+                                        const nextMin = Math.max(1, Math.floor(Number(value) || 1));
+                                        updateEditingModelConfig({
+                                            videoBillingConfiguration: {
+                                                ...current,
+                                                minimumDurationSeconds: nextMin,
+                                                ...(current.maximumDurationSeconds != null && current.maximumDurationSeconds !== UNLIMITED_VIDEO_DURATION_SECONDS && current.maximumDurationSeconds < nextMin ? { maximumDurationSeconds: nextMin } : {}),
+                                            },
+                                        });
+                                    }}
+                                />
+                            </div>
+                            <div>
+                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                                    {translate("appShell.maximumDurationS")} <Info className="size-4 text-[var(--studio-muted)]" />
+                                </div>
+                                <InputNumber
+                                    min={UNLIMITED_VIDEO_DURATION_SECONDS}
+                                    precision={0}
+                                    suffix={translate("appShell.s")}
+                                    placeholder={translate("appShell.maximumDurationPlaceholder")}
+                                    className="w-full!"
+                                    value={editingModelConfig.videoBillingConfiguration?.maximumDurationSeconds ?? null}
+                                    onChange={(value) =>
+                                        updateEditingModelConfig({
+                                            videoBillingConfiguration: {
+                                                ...(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration()),
+                                                maximumDurationSeconds: value === null || value === undefined ? null : Math.floor(Number(value)),
+                                            },
+                                        })
+                                    }
+                                />
                             </div>
                         </section>
 
@@ -2080,6 +2100,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                                         constraints={editingModelConfig.customModelConfig?.[mode.value]?.videoGenerationConstraints}
                                                         audioEnabled={editingModelConfig.capabilities.includes("audio-input")}
                                                         billingMinimum={editingModelConfig.videoBillingConfiguration?.minimumDurationSeconds || 1}
+                                                        billingMaximum={resolveBillingMaximumDurationSeconds(editingModelConfig.videoBillingConfiguration)}
                                                         onChange={(videoGenerationConstraints) =>
                                                             updateEditingModelConfig({
                                                                 customModelConfig: {
@@ -2278,7 +2299,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                 </div>
                             )}
                         </Form.Item>
-                        {editingModelConfig.modelType === "text" && isOpenAiTextModel(editingModelConfig, draftChannels) ? (
+                        {supportsThinkingConfiguration(editingModelConfig) ? (
                             <>
                                 <Form.Item label={translate("appShell.enableThinking")}>
                                     <Switch checked={editingModelConfig.thinkingEnabled} onChange={(thinkingEnabled) => updateEditingModelConfig({ thinkingEnabled })} />
@@ -2357,7 +2378,7 @@ function customVideoConfigurationIssue(config: ServerModelConfig) {
     if (!config.isCustomModel || config.modelType !== "video") return null;
     for (const { value: mode } of VIDEO_GENERATION_CAPABILITY_OPTIONS) {
         if (!config.capabilities.includes(mode)) continue;
-        const issue = videoConstraintConfigurationIssues(mode, config.customModelConfig?.[mode]?.videoGenerationConstraints, config.capabilities.includes("audio-input"), config.videoBillingConfiguration?.minimumDurationSeconds || 1)[0];
+        const issue = videoConstraintConfigurationIssues(mode, config.customModelConfig?.[mode]?.videoGenerationConstraints, config.capabilities.includes("audio-input"), config.videoBillingConfiguration?.minimumDurationSeconds || 1, resolveBillingMaximumDurationSeconds(config.videoBillingConfiguration))[0];
         if (issue) return { mode, ...issue };
     }
     return null;
@@ -2382,6 +2403,7 @@ function normalizeModelConfigForSave(config: ServerModelConfig): ServerModelConf
         config.modelType === "video" && config.videoBillingConfiguration
             ? {
                   ...config.videoBillingConfiguration,
+                  maximumDurationSeconds: config.videoBillingConfiguration.maximumDurationSeconds ?? DEFAULT_VIDEO_MAXIMUM_DURATION_SECONDS,
                   modePrices: Object.fromEntries(
                       Object.entries(config.videoBillingConfiguration.modePrices || {}).filter(([mode]) => mode !== "audio-input" && supportedCapabilities.has(mode) && capabilities.includes(mode)),
                   ) as VideoBillingConfiguration["modePrices"],

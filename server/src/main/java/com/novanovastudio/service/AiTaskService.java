@@ -1556,8 +1556,11 @@ public class AiTaskService {
         if (configuration == null) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoTierPricingIsNotConfigured"));
         }
+        Integer effectiveMaximumDuration = configuration.effectiveMaximumDurationSeconds();
         if ((!CREDIT_UNIT_GENERATION.equals(configuration.billingUnit()) && !CREDIT_UNIT_SECOND.equals(configuration.billingUnit()))
-                || configuration.minimumDurationSeconds() == null || configuration.minimumDurationSeconds() < 1) {
+                || configuration.minimumDurationSeconds() == null || configuration.minimumDurationSeconds() < 1
+                || (effectiveMaximumDuration != null
+                && (effectiveMaximumDuration < 1 || effectiveMaximumDuration < configuration.minimumDurationSeconds()))) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.invalidVideoTierPricing"));
         }
         String resolution = videoResolution(request.parameters());
@@ -1568,6 +1571,9 @@ public class AiTaskService {
         int seconds = videoSeconds(request.parameters());
         if (seconds < configuration.minimumDurationSeconds()) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoDurationMustBeAtLeastSeconds", configuration.minimumDurationSeconds()));
+        }
+        if (effectiveMaximumDuration != null && seconds > effectiveMaximumDuration) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoDurationMustNotExceedSeconds", effectiveMaximumDuration));
         }
         BigDecimal unitPrice = modePrices.get(resolution);
         if (unitPrice == null || CreditAmounts.of(unitPrice).compareTo(CreditAmounts.of(0)) < 0) {

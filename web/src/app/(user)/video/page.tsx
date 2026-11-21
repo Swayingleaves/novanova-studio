@@ -1100,7 +1100,7 @@ export default function VideoPage() {
         const parsed = Math.floor(Number(seconds));
         if (!Number.isSafeInteger(parsed) || parsed < 1) return;
         const range = readVideoDurationRange(config);
-        const next = range.max >= range.min && range.max >= 1 ? Math.min(range.max, Math.max(range.min, parsed)) : parsed;
+        const next = range.unlimited ? Math.max(range.min, parsed) : range.max >= range.min && range.max >= 1 ? Math.min(range.max, Math.max(range.min, parsed)) : parsed;
         updateVideoSettings("videoSeconds", String(next));
         setVideoDraftSettingsModified(true);
         const promptText = promptOverride?.trim() || [...chatMessagesRef.current].reverse().find((item) => item.role === "user" && item.text.trim())?.text || "";
