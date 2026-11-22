@@ -52,6 +52,7 @@ import type { RecentReferenceAsset } from "@/features/generation/lib/recent-refe
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
 import { formatImageGenerationSettingsSummary } from "@/features/generation/lib/generation-settings-summary";
 import { loadImageLastUsedSettings, saveImageLastUsedSettings, type ImageLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
+import { clearNewConversationDraft, loadNewConversationDraft, peekNewConversationDraft, sanitizeDraftReferences, saveNewConversationDraft } from "@/features/generation/lib/new-conversation-draft";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { formatBytes } from "@/features/generation/lib/image-utils";
 import type { ReferenceImage } from "@/features/generation/types/image";
@@ -69,7 +70,7 @@ import { consumeHomepageCreationHandoff, peekHomepageCreationHandoff } from "@/f
 import { useSkillCreationHandoff } from "@/features/skill-market/hooks/use-skill-creation-handoff";
 import { consumeSkillCreationHandoff, peekSkillCreationHandoff, skillMarketKickoff } from "@/features/skill-market/lib/skill-creation-handoff";
 import { ASK_USER_MODEL_CONFIG, CONTINUE_AFTER_MODEL_CONFIG, MODEL_CONFIG_CONFIRMED_MESSAGE } from "@/features/skill-market/lib/skill-prompt-actions";
-import { clearResumedSkillConversation, readResumedSkillConversation, skillOptionFromSnapshot, writeResumedSkillConversation } from "@/features/skill-market/lib/skill-conversation-resume";
+import { clearResumedSkillConversation, skillOptionFromSnapshot, writeResumedSkillConversation } from "@/features/skill-market/lib/skill-conversation-resume";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
@@ -165,6 +166,7 @@ export default function ImagePage() {
     const [skillError, setSkillError] = useState<string | null>(null);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
+    const newDraftHydratedRef = useRef(false);
     const { mode: creationMode, changeMode: changeCreationMode } = useCreationMode("image");
     const [skillMarketTaskActive, setSkillMarketTaskActive] = useState(false);
     const skillTaskLockedRef = useRef(false);
@@ -208,7 +210,6 @@ export default function ImagePage() {
     const skillHandoffStartedRef = useRef(false);
     const skillMarketEntryRef = useRef(false);
     if (skillHandoff || peekSkillCreationHandoff("image")) skillMarketEntryRef.current = true;
-    const skillResumeAppliedRef = useRef(false);
     const [homepageReady, setHomepageReady] = useState(false);
     const [focusInitialPrompt, setFocusInitialPrompt] = useState(false);
 
@@ -229,6 +230,21 @@ export default function ImagePage() {
         setFocusInitialPrompt(true);
         clearInitialPromptFromLocation();
     }, []);
+
+    useEffect(() => {
+        let active = true;
+        newDraftHydratedRef.current = false;
+        void loadNewConversationDraft("image", userId).then((draft) => {
+            if (!active) return;
+            newDraftHydratedRef.current = true;
+            if (!draft || activeIdRef.current || chatMessagesRef.current.length > 0 || homepageDraft || skillHandoff || initialPromptAppliedRef.current) return;
+            setPrompt(draft.prompt);
+            setReferences(draft.references);
+        });
+        return () => {
+            active = false;
+        };
+    }, [userId, homepageDraft, skillHandoff]);
 
     useEffect(() => {
         if (!homepageDraft) return;
@@ -359,6 +375,15 @@ export default function ImagePage() {
     const streamingTextRef = useRef(streamingText);
     const toolCallsRef = useRef(toolCalls);
     const chatMessagesRef = useRef(chatMessages);
+
+    useEffect(() => {
+        if (!newDraftHydratedRef.current) return;
+        if (activeId || chatMessages.length > 0 || homepageDraft || skillHandoff) return;
+        void saveNewConversationDraft("image", userId, {
+            prompt,
+            references: sanitizeDraftReferences(references, uploadingReferenceIds),
+        });
+    }, [activeId, chatMessages.length, prompt, references, uploadingReferenceIds, userId, homepageDraft, skillHandoff]);
 
     const { sessionId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, isSessionBusy, hasInflightWork, resetSession, restoreSession } = useAgentChatSSE({
         entrySource: "imagePage",
@@ -605,39 +630,10 @@ export default function ImagePage() {
         setActiveId(sessionId);
     }, [sessionId]);
 
-    // 离开页面会卸载状态。记住正在使用的技能会话，回来后继续引导，而不是把回答当成新图片直接生成。
-    useEffect(() => {
-        if (skillResumeAppliedRef.current || skillHandoff || peekSkillCreationHandoff("image") || peekHomepageCreationHandoff("image")) return;
-        const resumed = readResumedSkillConversation("image");
-        if (!resumed) return;
-        skillResumeAppliedRef.current = true;
-        setSelectedSkill(resumed.skill);
-        changeCreationMode("agent");
-        activeIdRef.current = resumed.sessionId;
-        setActiveId(resumed.sessionId);
-        restoreSession(resumed.sessionId);
-    }, [skillHandoff, changeCreationMode, restoreSession]);
-
     useEffect(() => {
         let cancelled = false;
         void refreshConversations().then((nextConversations) => {
             if (cancelled || activeIdRef.current || hasInflightWork() || skillHandoff || peekSkillCreationHandoff("image")) return;
-            if (!peekHomepageCreationHandoff("image")) {
-                const ongoing = [...nextConversations].sort((left, right) => right.updatedAt - left.updatedAt).find((conversation) => {
-                    const latest = conversation.rounds.at(-1);
-                    return Boolean(latest?.skill?.id) && !latest?.results?.some((result) => result.status === "success" || result.status === "pending" || Boolean(result.image?.dataUrl));
-                });
-                const skill = skillOptionFromSnapshot(ongoing?.rounds.at(-1)?.skill);
-                if (ongoing && skill) {
-                    skillResumeAppliedRef.current = true;
-                    setSelectedSkill(skill);
-                    changeCreationMode("agent");
-                    activeIdRef.current = ongoing.id;
-                    setActiveId(ongoing.id);
-                    restoreSession(ongoing.id);
-                    return;
-                }
-            }
             const pendingConversation = findLatestPendingConversation(nextConversations, hasPendingImageConversation);
             if (!pendingConversation) return;
             activeIdRef.current = pendingConversation.id;
@@ -752,6 +748,7 @@ export default function ImagePage() {
         resetThinkings();
         clearModelConfigContinue();
 
+        const isNewConversation = !activeIdRef.current && chatMessagesRef.current.length === 0;
         // Add user message to chat
         setChatMessages((prev) => {
             const next = [...prev, { id: nanoid(), role: "user" as const, text, generationStyles: selectedStyles, skill: selectedSkill }];
@@ -765,6 +762,7 @@ export default function ImagePage() {
         const attachments = selectGenerationAttachments(text, currentAttachments, previousAttachments);
         await sendMessage(text, attachments.length ? attachments : undefined, agentCreationSettings);
 
+        if (isNewConversation) void clearNewConversationDraft("image", userId);
         setPrompt("");
         setReferences([]);
         setSelectedStyles([]);
@@ -845,13 +843,14 @@ export default function ImagePage() {
     };
 
     const newConversation = () => {
+        const savedDraft = peekNewConversationDraft("image", userId);
         setActiveId(null);
         activeIdRef.current = null;
         historyRequestVersion.current += 1;
         setConversationHistory(null);
         setImageDraftSettingsModified(false);
-        setPrompt("");
-        setReferences([]);
+        setPrompt(savedDraft?.prompt || "");
+        setReferences(savedDraft?.references || []);
         setSelectedStyles([]);
         setSelectedSkill(null);
         setSkillMarketTaskActive(false);

@@ -54,8 +54,9 @@ import { consumeHomepageCreationHandoff, peekHomepageCreationHandoff } from "@/f
 import { useSkillCreationHandoff } from "@/features/skill-market/hooks/use-skill-creation-handoff";
 import { consumeSkillCreationHandoff, peekSkillCreationHandoff, skillMarketKickoff } from "@/features/skill-market/lib/skill-creation-handoff";
 import { ASK_USER_MODEL_CONFIG, CONTINUE_AFTER_MODEL_CONFIG, MODEL_CONFIG_CONFIRMED_MESSAGE } from "@/features/skill-market/lib/skill-prompt-actions";
-import { clearResumedSkillConversation, readResumedSkillConversation, skillOptionFromSnapshot, writeResumedSkillConversation } from "@/features/skill-market/lib/skill-conversation-resume";
+import { clearResumedSkillConversation, skillOptionFromSnapshot, writeResumedSkillConversation } from "@/features/skill-market/lib/skill-conversation-resume";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
+import { clearNewConversationDraft, loadNewConversationDraft, peekNewConversationDraft, sanitizeDraftReferences, saveNewConversationDraft } from "@/features/generation/lib/new-conversation-draft";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
@@ -264,6 +265,7 @@ export default function VideoPage() {
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
+    const newDraftHydratedRef = useRef(false);
     const { mode: creationMode, changeMode: changeCreationMode } = useCreationMode("video");
     const [skillMarketTaskActive, setSkillMarketTaskActive] = useState(false);
     const skillTaskLockedRef = useRef(false);
@@ -335,7 +337,6 @@ export default function VideoPage() {
     const skillHandoffStartedRef = useRef(false);
     const skillMarketEntryRef = useRef(false);
     if (skillHandoff || peekSkillCreationHandoff("video")) skillMarketEntryRef.current = true;
-    const skillResumeAppliedRef = useRef(false);
     const [homepageReady, setHomepageReady] = useState(false);
     const [focusInitialPrompt, setFocusInitialPrompt] = useState(false);
 
@@ -348,6 +349,22 @@ export default function VideoPage() {
         setFocusInitialPrompt(true);
         clearInitialPromptFromLocation();
     }, []);
+
+    useEffect(() => {
+        let active = true;
+        newDraftHydratedRef.current = false;
+        void loadNewConversationDraft("video", userId).then((draft) => {
+            if (!active) return;
+            newDraftHydratedRef.current = true;
+            if (!draft || activeIdRef.current || chatMessagesRef.current.length > 0 || homepageDraft || skillHandoff || initialPromptAppliedRef.current) return;
+            setPrompt(draft.prompt);
+            setReferences(draft.references);
+            setVideoReferences(draft.videoReferences || []);
+        });
+        return () => {
+            active = false;
+        };
+    }, [userId, homepageDraft, skillHandoff]);
 
     useEffect(() => {
         if (!homepageDraft) return;
@@ -489,6 +506,16 @@ export default function VideoPage() {
 
     // Agent chat state
     const [chatMessages, setChatMessages] = useState<ChatMessageItem[]>([]);
+
+    useEffect(() => {
+        if (!newDraftHydratedRef.current) return;
+        if (activeId || chatMessages.length > 0 || homepageDraft || skillHandoff) return;
+        void saveNewConversationDraft("video", userId, {
+            prompt,
+            references: sanitizeDraftReferences(references, uploadingReferenceIds),
+            videoReferences: sanitizeDraftReferences(videoReferences, uploadingReferenceIds),
+        });
+    }, [activeId, chatMessages.length, prompt, references, videoReferences, uploadingReferenceIds, userId, homepageDraft, skillHandoff]);
     const { completedThinkings, activeThinking, onThoughtDelta, onThoughtComplete, resetThinkings } = useAgentThinking();
     const [toolCalls, setToolCalls] = useState<ToolCallState[]>([]);
     const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null);
@@ -899,44 +926,9 @@ export default function VideoPage() {
         setActiveId(sessionId);
     }, [sessionId]);
 
-    // 离开页面会卸载状态。记住正在使用的技能会话，回来后继续引导，而不是把回答当成新视频直接生成。
     useEffect(() => {
-        if (skillResumeAppliedRef.current || skillHandoff || peekSkillCreationHandoff("video") || peekHomepageCreationHandoff("video")) return;
-        const resumed = readResumedSkillConversation("video");
-        if (!resumed) return;
-        skillResumeAppliedRef.current = true;
-        setSelectedSkill(resumed.skill);
-        changeCreationMode("agent");
-        activeIdRef.current = resumed.sessionId;
-        setActiveId(resumed.sessionId);
-        restoreSession(resumed.sessionId);
-    }, [skillHandoff, changeCreationMode, restoreSession]);
-
-    useEffect(() => {
-        let cancelled = false;
-        void refreshConversations().then((nextConversations) => {
-            if (cancelled || activeIdRef.current || hasInflightWork() || skillHandoff || peekHomepageCreationHandoff("video") || peekSkillCreationHandoff("video")) return;
-            const ongoing = [...nextConversations].sort((left, right) => right.updatedAt - left.updatedAt).find((conversation) => {
-                const latest = conversation.rounds.at(-1);
-                return Boolean(latest?.skill?.id) && latest?.result?.status !== "success" && latest?.result?.status !== "pending" && !latest?.result?.video?.url;
-            });
-            const skill = skillOptionFromSnapshot(ongoing?.rounds.at(-1)?.skill);
-            if (!ongoing || !skill) {
-                activeIdRef.current = null;
-                setActiveId(null);
-                return;
-            }
-            skillResumeAppliedRef.current = true;
-            setSelectedSkill(skill);
-            changeCreationMode("agent");
-            activeIdRef.current = ongoing.id;
-            setActiveId(ongoing.id);
-            restoreSession(ongoing.id);
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [changeCreationMode, hasInflightWork, refreshConversations, restoreSession, skillHandoff]);
+        void refreshConversations();
+    }, [refreshConversations]);
 
     useEffect(() => {
         if (!hasRunningGeneration(conversations)) return;
@@ -1199,6 +1191,7 @@ export default function VideoPage() {
                 }
             }
         }
+        const isNewConversation = !activeIdRef.current && chatMessagesRef.current.length === 0;
         const attachments = buildChatAttachments(allRefs);
         clearDurationContinue();
         clearModelConfigContinue();
@@ -1224,6 +1217,7 @@ export default function VideoPage() {
             ...(selectedStyles.length ? { generationStyleIds: selectedStyles.map((style) => style.id) } : {}),
         });
 
+        if (isNewConversation) void clearNewConversationDraft("video", userId);
         setPrompt("");
         setReferences([]);
         setVideoReferences([]);
@@ -1458,9 +1452,10 @@ export default function VideoPage() {
         setActiveId(null);
         activeIdRef.current = null;
         setVideoDraftSettingsModified(false);
-        setPrompt("");
-        setReferences([]);
-        setVideoReferences([]);
+        const savedDraft = peekNewConversationDraft("video", userId);
+        setPrompt(savedDraft?.prompt || "");
+        setReferences(savedDraft?.references || []);
+        setVideoReferences(savedDraft?.videoReferences || []);
         setSelectedStyles([]);
         setSelectedSkill(null);
         setSkillMarketTaskActive(false);
