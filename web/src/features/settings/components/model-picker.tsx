@@ -141,7 +141,7 @@ export function ModelPicker({
                         onWheel={(event) => event.stopPropagation()}
                     >
                         {channelGroups.length ? (
-                            <div className="flex max-h-80 min-h-[180px]">
+                            <div className="flex h-80 max-h-[calc(100vh-32px)]">
                                 <div className="w-40 shrink-0 overflow-y-auto border-r border-border/60 p-1.5 sm:w-44" role="listbox" aria-label="channels">
                                     {channelGroups.map((group) => {
                                         const active = group.channelId === activeGroup?.channelId;
@@ -152,6 +152,7 @@ export function ModelPicker({
                                                 type="button"
                                                 role="option"
                                                 aria-selected={active}
+                                                title={group.channelName}
                                                 className={cn(
                                                     "flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm! transition-colors",
                                                     active
