@@ -320,12 +320,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
      * @return int 进度，1 到 95
      */
     private static int providerProgress(JSONObject response, int fallback) {
-        Integer value = response == null ? null : response.getInteger("progress");
-        if (value == null && response != null) {
-            JSONObject data = response.getJSONObject("data");
-            value = data == null ? null : data.getInteger("progress");
-        }
-        int progress = value == null ? fallback : value;
+        int progress = AiTaskPollingSupport.readProgress(response, fallback);
         return Math.max(1, Math.min(95, progress));
     }
 

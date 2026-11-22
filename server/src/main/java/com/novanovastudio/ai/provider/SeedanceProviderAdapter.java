@@ -210,7 +210,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
                 .flatMap(response -> {
                     String status = AiTaskParameterReader.firstNonEmpty(response.getString("status"))
                             .toLowerCase(Locale.ROOT);
-                    int progress = Math.min(95, 20 + attempt);
+                    int progress = AiTaskPollingSupport.readProgress(response, Math.min(95, 20 + attempt));
                     return context.updateRunningProgress(progress).then(Mono.defer(() -> {
                         if ("succeeded".equals(status)) {
                             return Mono.just(response);

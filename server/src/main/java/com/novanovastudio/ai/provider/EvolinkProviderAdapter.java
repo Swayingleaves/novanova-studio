@@ -171,7 +171,8 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
                             .map(AiJsonUtils::responsePayload)
                             .flatMap(response -> {
                                 String status = AiTaskParameterReader.firstNonEmpty(response.getString("status")).toLowerCase(Locale.ROOT);
-                                return context.updateRunningProgress(Math.min(95, 10 + attempt)).then(Mono.defer(() -> {
+                                int progress = AiTaskPollingSupport.readProgress(response, Math.min(95, 10 + attempt));
+                                return context.updateRunningProgress(progress).then(Mono.defer(() -> {
                                     if ("completed".equals(status)) return Mono.just(response);
                                     if (PROCESSING_STATUSES.contains(status)) return Mono.empty();
                                     if ("failed".equals(status) || "cancelled".equals(status)) return Mono.error(AiErrorSupport.providerTaskFailure(response, "Evolink任务生成失败"));

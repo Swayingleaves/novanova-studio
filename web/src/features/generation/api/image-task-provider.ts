@@ -26,7 +26,10 @@ export async function requestServerGeneratedImages(config: AiConfig, prompt: str
         generationStyleSnapshots: options?.generationStyleSnapshots,
     });
     options?.onTaskCreated?.(task.id);
-    const completed = await waitAiTask(task.id, { signal: options?.signal });
+    const completed = await waitAiTask(task.id, {
+        signal: options?.signal,
+        onProgress: options?.onProgress ? (current) => options.onProgress?.(current.progress || 0) : undefined,
+    });
     const snapshots = readGenerationStyleSnapshots(completed.requestData);
     return normalizeImageTaskResult(completed.resultData, nanoid).map((item) => ({ ...item, generationStyleSnapshots: snapshots }));
 }

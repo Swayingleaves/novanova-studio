@@ -1,5 +1,6 @@
 package com.novanovastudio.ai;
 
+import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.config.NovanovaProperties;
 import java.time.Duration;
 
@@ -42,5 +43,49 @@ public final class AiTaskPollingSupport {
             throw new IllegalStateException("异步AI任务状态轮询间隔必须大于0秒");
         }
         return intervalSeconds;
+    }
+
+    /**
+     * 读取渠道响应中的进度字段，兼容数字、小数和带百分号的字符串，读取不到时返回兜底进度。
+     *
+     * @param response JSONObject 渠道查询响应
+     * @param fallback int 兜底进度
+     * @return int 规范化后的进度（0 到 99）
+     */
+    public static int readProgress(JSONObject response, int fallback) {
+        Integer parsed = parseProgressValue(response == null ? null : response.get("progress"));
+        if (parsed == null && response != null) {
+            JSONObject data = response.getJSONObject("data");
+            parsed = parseProgressValue(data == null ? null : data.get("progress"));
+        }
+        int value = parsed == null ? fallback : parsed;
+        return Math.max(0, Math.min(99, value));
+    }
+
+    /**
+     * 解析单个进度值。
+     *
+     * @param value Object 原始进度值
+     * @return Integer 整数进度，无法解析时返回空
+     */
+    private static Integer parseProgressValue(Object value) {
+        if (value instanceof Number number) {
+            return (int) Math.round(number.doubleValue());
+        }
+        if (value instanceof String text) {
+            String normalized = text.trim();
+            if (normalized.endsWith("%")) {
+                normalized = normalized.substring(0, normalized.length() - 1).trim();
+            }
+            if (normalized.isEmpty()) {
+                return null;
+            }
+            try {
+                return (int) Math.round(Double.parseDouble(normalized));
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 }

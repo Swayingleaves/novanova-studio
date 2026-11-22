@@ -92,6 +92,7 @@ type GenerationResult = {
     id: string;
     status: "pending" | "success" | "failed" | "canceled";
     taskId?: string;
+    progress?: number;
     image?: GeneratedImage;
     error?: string;
 };
@@ -1653,7 +1654,7 @@ function buildImageThreadSections(
                         ) : result.status === "failed" || result.status === "canceled" ? (
                             <FailedCard key={result.id} error={result.error || translate("image.generationFailed")} canceled={result.status === "canceled"} />
                         ) : result.status === "pending" ? (
-                            <ImageGeneratingCard key={result.id} size={round.config.size} />
+                            <ImageGeneratingCard key={result.id} size={round.config.size} progress={result.progress} />
                         ) : (
                             <FailedCard key={result.id} error={translate("generation.imageTaskCompletedWithoutImages")} />
                         ),

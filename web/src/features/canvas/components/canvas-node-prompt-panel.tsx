@@ -142,8 +142,10 @@ export function CanvasNodePromptPanel({
     const [prompt, setPrompt] = useState(nodePrompt);
     const filteredMentionCandidates = useMemo(() => {
         const query = mentionQuery.trim().toLowerCase();
-        return mentionCandidates.filter((reference) => reference.nodeId !== node.id).filter((reference) => !query || `${reference.title} ${reference.label} ${reference.kind}`.toLowerCase().includes(query));
-    }, [mentionCandidates, mentionQuery, node.id, translate.locale]);
+        // 图片/视频节点的 @ 仅允许引用与当前节点关联的素材（连线素材及节点已保存的参考素材）。
+        const source = mode === "image" || mode === "video" ? displayReferences.map((item) => item.reference) : mentionCandidates.filter((reference) => reference.nodeId !== node.id);
+        return source.filter((reference) => !query || `${reference.title} ${reference.label} ${reference.kind}`.toLowerCase().includes(query));
+    }, [displayReferences, mentionCandidates, mentionQuery, mode, node.id, translate.locale]);
     const videoReferenceCounts = displayReferences.reduce(
         (counts, item) => {
             if (item.reference.kind === "image") counts.images += 1;
@@ -232,9 +234,9 @@ export function CanvasNodePromptPanel({
         setPrompt("");
     }, [isEditingExistingContent, node.id, nodePrompt]);
 
-    // 从连线引用中提取非文本类型标签，用于点击缩略图后生成引用芯片
+    // 从连线及节点关联素材中提取标签，用于点击缩略图或 @ 选择后生成引用芯片
     const editorReferences = useMemo(() => {
-        const references = [...mentionReferences.filter((reference) => reference.kind !== "audio"), ...displayReferences.filter((item) => item.reference.kind === "audio").map((item) => item.reference)];
+        const references = [...displayReferences.map((item) => item.reference), ...mentionReferences.filter((reference) => reference.kind === "text")];
         if (!pendingMentionReference) return references;
         const hasReference = references.some((reference) => reference.nodeId === pendingMentionReference.nodeId);
         if (!hasReference) return [...references, pendingMentionReference];
@@ -280,18 +282,17 @@ export function CanvasNodePromptPanel({
     };
 
     const chooseMention = (reference: CanvasResourceReference) => {
-        if (!mentionRange || !onMentionSelect) return;
-        if (reference.kind === "audio") {
-            if (!modelSupportsAudio) {
-                message.error(translate("canvas.audioInputIsUnsupportedByThisModelOrMode"));
-                return;
-            }
+        if (!mentionRange) return;
+        if (reference.kind === "audio" && !modelSupportsAudio) {
+            message.error(translate("canvas.audioInputIsUnsupportedByThisModelOrMode"));
+            return;
         }
-        if (!onMentionSelect(reference)) return;
+        const isAssociatedMedia = mode === "image" || mode === "video";
+        if (!isAssociatedMedia && (!onMentionSelect || !onMentionSelect(reference))) return;
         if (reference.kind === "audio" && !audioModeAllowed && !isCustomVideoModel) {
             onConfigChange(node.id, { videoGenerationMode: "reference-to-video" });
         }
-        const existingReference = mentionReferences.find((item) => item.nodeId === reference.nodeId);
+        const existingReference = isAssociatedMedia ? reference : mentionReferences.find((item) => item.nodeId === reference.nodeId);
         const nextKindIndex = mentionReferences.filter((item) => item.active && item.kind === reference.kind).length;
         const label = existingReference?.label || labelForKind(reference.kind, nextKindIndex);
         setPendingMentionReference({ ...reference, active: true, label });
@@ -477,14 +478,14 @@ export function CanvasNodePromptPanel({
                 onBlur={handleBlur}
                 onMentionInput={(value, cursor, caretRect) => {
                     const beforeCursor = value.slice(0, cursor);
-                    const match = beforeCursor.match(/(^|\s)@([^\s@]*)$/);
+                    const match = beforeCursor.match(/@([^\s@]*)$/);
                     if (!match) {
                         if (mentionMenuOpen) closeMentionMenu();
                         return;
                     }
-                    const start = cursor - match[0].length + (match[1] ? match[1].length : 0);
+                    const start = cursor - match[0].length;
                     setMentionRange({ start, end: cursor });
-                    setMentionQuery(match[2]);
+                    setMentionQuery(match[1]);
                     setMentionHighlightedIndex(0);
                     const panelRect = promptPanelRef.current?.getBoundingClientRect();
                     if (caretRect && panelRect) {
@@ -1010,7 +1011,6 @@ function MentionAssetGroup({
 // @Param              onHighlight Function 更新高亮索引
 // @Return             JSX.Element 资产选项
 function MentionAssetOption({ reference, selected, highlighted, theme, onSelect, onHighlight }: { reference: CanvasResourceReference; selected: boolean; highlighted: boolean; theme: CanvasTheme; onSelect: () => void; onHighlight: () => void }) {
-    const translate = useTranslation();
     const Icon = reference.kind === "audio" ? AudioLines : reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
     return (
         <button
@@ -1018,9 +1018,9 @@ function MentionAssetOption({ reference, selected, highlighted, theme, onSelect,
             role="option"
             aria-selected={selected}
             className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition"
-            style={{ background: highlighted ? theme.node.fill : "transparent", color: theme.node.text, opacity: selected ? 0.65 : 1 }}
+            style={{ background: highlighted ? theme.node.fill : "transparent", color: theme.node.text }}
             onMouseEnter={onHighlight}
-            onClick={(event) => {
+            onMouseDown={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
                 onSelect();
@@ -1038,10 +1038,9 @@ function MentionAssetOption({ reference, selected, highlighted, theme, onSelect,
                 )}
             </span>
             <span className="min-w-0 flex-1 truncate">{reference.title}</span>
-            {selected ? (
-                <span className="text-[11px]" style={{ color: theme.node.muted }}>
-                    {translate("canvas.referenced")}</span>
-            ) : null}
+            <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>
+                {reference.label}
+            </span>
         </button>
     );
 }
@@ -1264,7 +1263,13 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
         let offset = 0;
         const walk = (node: Node): boolean => {
             if (node === anchorNode) {
-                if (node.nodeType === 3) offset += anchorOffset;
+                if (node.nodeType === 3) {
+                    offset += anchorOffset;
+                } else {
+                    for (let i = 0; i < anchorOffset && i < node.childNodes.length; i++) {
+                        walk(node.childNodes[i]);
+                    }
+                }
                 return true;
             }
             if (node.nodeType === 3) {

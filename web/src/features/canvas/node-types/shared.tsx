@@ -23,6 +23,32 @@ export function NodeLoading() {
     );
 }
 
+/** 媒体节点（图片/视频）生成中的骨架屏状态组件 */
+export function NodeMediaLoading({ progress }: { progress?: number }) {
+    const translate = useTranslation();
+    const t = useCanvasTheme();
+    const normalizedProgress = typeof progress === "number" && Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress))) : 0;
+    const showProgress = normalizedProgress > 0;
+    return (
+        <div
+            className="relative h-full min-h-0 w-full min-w-0 overflow-hidden rounded-[inherit]"
+            role="status"
+            aria-live="polite"
+            aria-label={showProgress ? `${translate("canvas.generating")} ${normalizedProgress}%` : translate("canvas.generating")}
+        >
+            <div className="studio-skeleton studio-skeleton-media h-full w-full" aria-hidden="true" />
+            {showProgress ? (
+                <span
+                    className="pointer-events-none absolute right-3 top-3 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums"
+                    style={{ background: t.node.panel, color: t.node.text, border: `1px solid ${t.node.stroke}` }}
+                >
+                    {normalizedProgress}%
+                </span>
+            ) : null}
+        </div>
+    );
+}
+
 /** 共享错误状态组件 */
 export function NodeError({ node, onRetry }: { node: CanvasNode; onRetry?: (node: CanvasNode) => void }) {
     const translate = useTranslation();

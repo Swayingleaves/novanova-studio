@@ -217,7 +217,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
                 .flatMap(task -> {
                     String status = AiTaskParameterReader.firstNonEmpty(task.getString("status"))
                             .toLowerCase(Locale.ROOT);
-                    int progress = Math.min(95, 20 + attempt);
+                    int progress = AiTaskPollingSupport.readProgress(task, Math.min(95, 20 + attempt));
                     return context.updateRunningProgress(progress).then(Mono.defer(() -> {
                         if ("succeeded".equals(status)) {
                             return Mono.just(task);

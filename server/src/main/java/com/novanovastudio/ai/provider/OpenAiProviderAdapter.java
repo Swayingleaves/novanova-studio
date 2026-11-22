@@ -272,7 +272,7 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
                                     .map(AiJsonUtils::responsePayload)
                                     .flatMap(response -> {
                                         String status = AiTaskParameterReader.firstNonEmpty(response.getString("status")).toLowerCase();
-                                        int progress = Math.min(95, 20 + attempt);
+                                        int progress = AiTaskPollingSupport.readProgress(response, Math.min(95, 20 + attempt));
                                         return context.updateRunningProgress(progress).then(Mono.defer(() -> {
                                             if (List.of("completed", "succeeded", "success").contains(status)) {
                                                 return Mono.just(response);

@@ -4,10 +4,10 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { memo, useLayoutEffect, useRef, useState } from "react";
 import { NodeResizer, useUpdateNodeInternals, type NodeProps, type Node } from "@xyflow/react";
-import { AlertTriangle, ChevronRight, Image as ImageIcon, Images, LoaderCircle, Sparkles } from "lucide-react";
+import { AlertTriangle, ChevronRight, Image as ImageIcon, Images, Sparkles } from "lucide-react";
 import type { CanvasImageNode } from "../types";
 import { type BatchImagePreview, useNodeActions } from "./node-action-context";
-import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface, NodeMediaUnavailable } from "./shared";
+import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface, NodeMediaLoading, NodeMediaUnavailable } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
 import { WatermarkBadge } from "@/features/watermark/components/watermark-badge";
@@ -222,10 +222,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                     <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.image_37e4e4")} onTitleChange={actions.onTitleChange} />
                     <div className="flex h-full w-full overflow-hidden rounded-[inherit]">
                         {isLoading ? (
-                            <div className="flex h-full w-full items-center justify-center gap-2" style={{ color: theme.node.muted }}>
-                                <LoaderCircle className="size-5 animate-spin" />
-                                <span className="text-sm">{translate("canvas.generating")}</span>
-                            </div>
+                            <NodeMediaLoading progress={data.execution.progress} />
                         ) : isError ? (
                             <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center" style={{ color: theme.node.muted }}>
                                 <AlertTriangle className="size-6 text-red-400" />

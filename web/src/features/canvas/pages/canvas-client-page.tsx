@@ -4086,18 +4086,25 @@ function CanvasWorkspacePage() {
                                 // 任务号写回节点，刷新后可以按任务号续订进度。
                                 const markTaskCreated = (taskId: string) =>
                                     setNodes((prev) => prev.map((node) => (node.id === targetId ? updateCanvasNodeExecution(node, { taskId }) : node)));
+                                const updateTargetProgress = (progress: number) => {
+                                    if (!controller.signal.aborted) {
+                                        setNodes((prev) => prev.map((node) => (node.id === targetId ? updateCanvasNodeExecution(node, { progress }) : node)));
+                                    }
+                                };
                                 const generationRequest = referenceImages.length
                                     ? requestEdit({ ...generationConfig, size: generationSize, count: "1" }, effectivePrompt, referenceImages, undefined, "canvas", {
                                           signal: controller.signal,
                                           generationStyleIds: styleSnapshots.length ? undefined : styleIds,
                                           generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined,
                                           onTaskCreated: markTaskCreated,
+                                          onProgress: updateTargetProgress,
                                       })
                                     : requestGeneration({ ...generationConfig, size: generationSize, count: "1" }, effectivePrompt, "canvas", {
                                           signal: controller.signal,
                                           generationStyleIds: styleSnapshots.length ? undefined : styleIds,
                                           generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined,
                                           onTaskCreated: markTaskCreated,
+                                          onProgress: updateTargetProgress,
                                       });
                                 const [image] = await generationRequest;
                                 if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
@@ -4507,7 +4514,7 @@ function CanvasWorkspacePage() {
             if (externalSignal?.aborted) return canceledCanvasGenerationResult();
 
             setRunningNodeId(node.id);
-            setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "running", errorMessage: "" }) : item)));
+            setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "running", progress: 0, errorMessage: "" }) : item)));
             const controller = startGenerationRequest(node.id, sourceNode.id, node.id);
             const detachExternalAbort = bindAbortSignal(externalSignal, controller);
 
@@ -4584,18 +4591,25 @@ function CanvasWorkspacePage() {
 
                 // 任务号写回节点，刷新后可以按任务号续订进度。
                 const markRetryTaskCreated = (taskId: string) => setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { taskId }) : item)));
+                const updateRetryProgress = (progress: number) => {
+                    if (!controller.signal.aborted) {
+                        setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { progress }) : item)));
+                    }
+                };
                 const image = useReferenceImages
                     ? await requestEdit(generationConfig, prompt, retryImages, undefined, "canvas", {
                           signal: controller.signal,
                           generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds,
                           generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined,
                           onTaskCreated: markRetryTaskCreated,
+                          onProgress: updateRetryProgress,
                       }).then((items) => items[0])
                     : await requestGeneration(generationConfig, prompt, "canvas", {
                           signal: controller.signal,
                           generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds,
                           generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined,
                           onTaskCreated: markRetryTaskCreated,
+                          onProgress: updateRetryProgress,
                       }).then((items) => items[0]);
                 if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                 const completedStyleSnapshots = image.generationStyleSnapshots?.length ? image.generationStyleSnapshots : savedStyleSnapshots;

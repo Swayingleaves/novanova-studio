@@ -27,16 +27,17 @@ export function renderPendingImageToolCall(call: ToolCallState): ReactNode {
     if (!isPendingImageToolCall(call)) {
         return null;
     }
-    return <ImageGeneratingCard size={readToolCallSize(call)} />;
+    return <ImageGeneratingCard size={readToolCallSize(call)} progress={call.progress} />;
 }
 
 /**
  * 图片生成中的本地动画卡片。
  *
  * @param size string 当前生图尺寸配置
+ * @param progress number | undefined 当前进度
  * @return ReactNode 执行中占位卡片
  */
-export function ImageGeneratingCard({ size }: { size?: string }) {
+export function ImageGeneratingCard({ size, progress }: { size?: string; progress?: number }) {
     const previewAspectRatio = parseImageAspectRatio(size);
     const previewWidth = buildPendingPreviewWidth(previewAspectRatio);
     return (
@@ -48,7 +49,7 @@ export function ImageGeneratingCard({ size }: { size?: string }) {
                 aspectRatio: `${previewAspectRatio}`,
             }}
         >
-            <PendingGenerationField variant="image" />
+            <PendingGenerationField variant="image" progress={progress} />
         </div>
     );
 }

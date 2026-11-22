@@ -50,7 +50,7 @@ export function renderPendingVideoToolCall(call: ToolCallState): ReactNode {
  * @param progress number | undefined 当前进度
  * @return ReactNode 执行中占位卡片
  */
-export function VideoGeneratingCard({ size }: { size?: string; resolution?: string; seconds?: string; progress?: number }) {
+export function VideoGeneratingCard({ size, progress }: { size?: string; resolution?: string; seconds?: string; progress?: number }) {
     const previewAspectRatio = parseVideoAspectRatio(size);
     const previewWidth = buildPendingPreviewWidth(previewAspectRatio);
 
@@ -63,7 +63,7 @@ export function VideoGeneratingCard({ size }: { size?: string; resolution?: stri
                 aspectRatio: `${previewAspectRatio}`,
             }}
         >
-            <PendingGenerationField variant="video" />
+            <PendingGenerationField variant="video" progress={progress} />
         </div>
     );
 }

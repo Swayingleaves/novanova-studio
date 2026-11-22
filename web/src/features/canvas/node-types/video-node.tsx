@@ -7,7 +7,7 @@ import { NodeResizer, type NodeProps, type Node } from "@xyflow/react";
 import { Play, Video } from "lucide-react";
 import type { CanvasVideoNode } from "../types";
 import { useNodeActions } from "./node-action-context";
-import { CanvasConnectionHandles, CanvasNodeTitle, NodeError, NodeHoverSurface, NodeLoading, NodeMediaUnavailable } from "./shared";
+import { CanvasConnectionHandles, CanvasNodeTitle, NodeError, NodeHoverSurface, NodeMediaLoading, NodeMediaUnavailable } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
 
@@ -55,7 +55,7 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
             >
                 <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.video")} onTitleChange={actions.onTitleChange} />
                 {isLoading ? (
-                    <NodeLoading />
+                    <NodeMediaLoading progress={data.execution.progress} />
                 ) : isError ? (
                     <NodeError node={data} />
                 ) : isMediaUnavailable ? (
