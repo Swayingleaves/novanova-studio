@@ -11,11 +11,12 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { Alert, App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Select, Switch, Tabs } from "antd";
 import { nanoid } from "nanoid";
-import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Copy, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Upload, Video, Wifi } from "lucide-react";
+import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Copy, Image, Info, Monitor, Pencil, Plus, RefreshCw, Search, Sparkles, TextCursorInput, Trash2, Upload, Video, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { ModelIcon } from "@/features/settings/components/model-picker";
+import { groupModelOptionsByChannel } from "@/features/settings/lib/model-picker-groups";
 import { MODEL_ICON_OPTIONS } from "@/features/settings/components/model-icon";
 import {
     createModelCapabilityOptions,
@@ -368,7 +369,9 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const [testedObjectStorageId, setTestedObjectStorageId] = useState("");
     const [objectStorageTestUrl, setObjectStorageTestUrl] = useState("");
     const [collapsedChannelIds, setCollapsedChannelIds] = useState<string[]>([]);
-    const [collapsedModelCapabilityTypes, setCollapsedModelCapabilityTypes] = useState<ModelCapability[]>([]);
+    const [activeModelCapabilityTab, setActiveModelCapabilityTab] = useState<ModelCapability>("image");
+    const [modelCapabilitySearch, setModelCapabilitySearch] = useState("");
+    const [modelCapabilityChannelFilter, setModelCapabilityChannelFilter] = useState<string>("");
     const [collapsedObjectStorageIds, setCollapsedObjectStorageIds] = useState<string[]>([]);
     const [channelBaseline, setChannelBaseline] = useState<ModelChannel[]>([]);
     const [draftChannels, setDraftChannels] = useState<ModelChannel[]>([]);
@@ -408,12 +411,10 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
         if (resetCollapsed) setCollapsedChannelIds(channels.map((channel) => channel.id));
     }, []);
 
-    const resetModelConfigDraft = useCallback((resetCollapsed = false) => {
+    const resetModelConfigDraft = useCallback(() => {
         const configs = cloneModelConfigs(useConfigStore.getState().modelConfigs);
         setModelConfigBaseline(configs);
         setDraftModelConfigs(cloneModelConfigs(configs));
-        // 只有首次进入页签（或重试加载）才默认收起全部能力分组，保存后保留用户当前的展开状态。
-        if (resetCollapsed) setCollapsedModelCapabilityTypes(createCapabilityGroups(translate).map((group) => group.capability));
     }, []);
 
     const resetObjectStorageDraft = useCallback(() => {
@@ -440,7 +441,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
 
     const resetAllDrafts = useCallback(() => {
         resetChannelDraft(true);
-        resetModelConfigDraft(true);
+        resetModelConfigDraft();
         resetObjectStorageDraft();
         resetCommunityDraft();
         resetExternalLinkDraft();
@@ -744,10 +745,6 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("appShell.invalidCustomModelJSON"));
         }
-    };
-
-    const toggleModelCapabilityCollapsed = (modelType: ModelCapability) => {
-        setCollapsedModelCapabilityTypes((types) => (types.includes(modelType) ? types.filter((type) => type !== modelType) : [...types, modelType]));
     };
 
     const setDefaultDraftModel = (modelType: ModelCapability, model: string) => {
@@ -1353,94 +1350,236 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                             }
                                         />
                                     ) : null}
-                                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
+                                    <div
+                                        className={`sticky top-2 z-20 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3.5 shadow-sm backdrop-blur-md transition-colors ${
+                                            modelConfigsDirty
+                                                ? "border-[var(--studio-primary-line)] bg-[var(--studio-panel)]/95"
+                                                : "border-[var(--studio-line)] bg-[var(--studio-surface-soft)]/95"
+                                        }`}
+                                    >
                                         <div>
-                                            <div className="text-sm font-semibold">{translate("appShell.defaultModelsOptions")}</div>
+                                            <div className="flex items-center gap-2 text-sm font-semibold">
+                                                <span>{translate("appShell.defaultModelsOptions")}</span>
+                                                {modelConfigsDirty ? (
+                                                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--studio-primary-soft)] px-2 py-0.5 text-xs font-medium text-[var(--studio-primary)]">
+                                                        <span className="size-1.5 rounded-full bg-[var(--studio-primary)]" />
+                                                        {translate("appShell.unsavedChanges")}
+                                                    </span>
+                                                ) : null}
+                                            </div>
                                             <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.optionsControlModelDropdownsDisplayOrChannelNamesDistinguish")}</div>
                                         </div>
                                         <Button type="primary" disabled={!modelConfigsDirty || isSaving} loading={savingTab === "models"} onClick={() => void saveModelConfigs()}>
                                             {translate("appShell.save")}
                                         </Button>
                                     </div>
-                                    <div className="grid gap-4 md:grid-cols-2">
-                                        {createModelGroups(translate).map((group) => (
-                                            <Form.Item key={group.modelsKey} label={group.optionsLabel} className="mb-0">
-                                                <ModelFieldTrigger
-                                                    config={draftConfig}
-                                                    models={draftConfig[group.modelsKey]}
-                                                    multiple
-                                                    placeholder={draftConfig.models.length ? translate("appShell.selectOrEnter", { value0: group.optionsLabel }) : translate("appShell.enterOrFetchChannelModelsFirst")}
-                                                    actionLabel={translate("appShell.selectModels")}
-                                                    disabled={isSaving}
-                                                    onOpen={() => setModelPicker({ capability: group.capability, mode: "options" })}
-                                                />
-                                            </Form.Item>
-                                        ))}
-                                    </div>
-                                    <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                                        {createModelGroups(translate).map((group) => (
-                                            <Form.Item key={group.modelKey} label={group.defaultLabel} className="mb-0">
-                                                <ModelFieldTrigger
-                                                    config={draftConfig}
-                                                    models={draftConfig[group.modelKey] ? [draftConfig[group.modelKey]] : []}
-                                                    placeholder={translate("settings.selectModel")}
-                                                    actionLabel={translate("appShell.selectModels")}
-                                                    disabled={isSaving}
-                                                    onOpen={() => setModelPicker({ capability: group.capability, mode: "default" })}
-                                                />
-                                            </Form.Item>
-                                        ))}
-                                    </div>
-                                    <div className="mt-6 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
-                                        <div className="text-sm font-semibold">{translate("appShell.modelCapabilities")}</div>
-                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.editAModelToConfigureItsDisplayNameCredits")}</div>
-                                        <div className="mt-3 space-y-4">
-                                            {createCapabilityGroups(translate).map((group) => {
-                                                const models = draftConfig[group.modelsKey];
-                                                if (!models.length) return null;
-                                                const collapsed = collapsedModelCapabilityTypes.includes(group.capability);
-                                                return (
-                                                    <div key={group.capability}>
-                                                        <div className="mb-2 flex items-center justify-between gap-3">
-                                                            <div className="text-xs font-medium text-[var(--studio-muted)]">{group.label}</div>
-                                                            <Button size="small" icon={collapsed ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />} onClick={() => toggleModelCapabilityCollapsed(group.capability)}>
-                                                                {collapsed ? translate("appShell.expand") : translate("appShell.collapse")}
-                                                            </Button>
+                                    <div className="grid gap-4 lg:grid-cols-3">
+                                        {createModelGroups(translate).map((group) => {
+                                            const GroupIcon = group.capability === "image" ? Image : group.capability === "video" ? Video : TextCursorInput;
+                                            const selectedCount = draftConfig[group.modelsKey].length;
+                                            return (
+                                                <section key={group.capability} className="flex flex-col gap-3 rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <div className="flex items-center gap-2 text-sm font-semibold text-[var(--studio-ink)]">
+                                                            <GroupIcon className="size-4 text-[var(--studio-muted)]" />
+                                                            <span>{group.optionsLabel.replace(/可选项$/, "")}</span>
                                                         </div>
-                                                        {collapsed ? null : (
-                                                            <div className="space-y-2">
-                                                                {models.map((model) => {
-                                                                    const modelConfig = draftModelConfigs.find((item) => item.modelType === group.capability && modelConfigValue(item) === model);
-                                                                    if (!modelConfig) return null;
-                                                                    return (
-                                                                        <div key={model} className="flex items-center justify-between gap-3 rounded border border-[var(--studio-line)] bg-[var(--studio-panel)] px-3 py-2">
-                                                                            <span className="min-w-0 truncate text-sm">{modelOptionLabelWithRealName(draftConfig, model)}</span>
-                                                                            <div className="flex shrink-0 items-center gap-2">
-                                                                                {modelConfig.defaultModel ? <span className="text-xs text-[var(--studio-muted)]">{translate("appShell.default")}</span> : null}
-                                                                                <span title={modelConfig.defaultModel ? translate("appShell.defaultModelCannotBeDisabled") : translate("appShell.disabledModelsHiddenFromUserDropdown")}>
-                                                                                    <Switch
-                                                                                        size="small"
-                                                                                        checked={modelConfig.enabled}
-                                                                                        checkedChildren={translate("appShell.modelEnabled")}
-                                                                                        unCheckedChildren={translate("appShell.modelDisabled")}
-                                                                                        disabled={isSaving || modelConfig.defaultModel}
-                                                                                        onChange={(checked) => setDraftModelEnabled(modelConfig.id, checked)}
-                                                                                    />
-                                                                                </span>
-                                                                                <Button size="small" icon={<Pencil className="size-3.5" />} disabled={isSaving} onClick={() => openModelConfigEditor(modelConfig)}>
-                                                                                    {translate("appShell.edit")}
-                                                                                </Button>
-                                                                            </div>
-                                                                        </div>
-                                                                    );
-                                                                })}
-                                                            </div>
-                                                        )}
+                                                        <span className="rounded-full border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2 py-0.5 text-xs text-[var(--studio-muted)]">
+                                                            {translate("appShell.configuredModelCount", { value0: selectedCount })}
+                                                        </span>
                                                     </div>
-                                                );
-                                            })}
-                                        </div>
+                                                    <Form.Item label={group.defaultLabel} className="mb-0">
+                                                        <ModelFieldTrigger
+                                                            config={draftConfig}
+                                                            models={draftConfig[group.modelKey] ? [draftConfig[group.modelKey]] : []}
+                                                            placeholder={translate("settings.selectModel")}
+                                                            actionLabel={translate("appShell.selectModels")}
+                                                            disabled={isSaving}
+                                                            onOpen={() => setModelPicker({ capability: group.capability, mode: "default" })}
+                                                        />
+                                                    </Form.Item>
+                                                    <Form.Item label={group.optionsLabel} className="mb-0">
+                                                        <ModelFieldTrigger
+                                                            config={draftConfig}
+                                                            models={draftConfig[group.modelsKey]}
+                                                            multiple
+                                                            placeholder={draftConfig.models.length ? translate("appShell.selectOrEnter", { value0: group.optionsLabel }) : translate("appShell.enterOrFetchChannelModelsFirst")}
+                                                            actionLabel={translate("appShell.selectModels")}
+                                                            disabled={isSaving}
+                                                            onOpen={() => setModelPicker({ capability: group.capability, mode: "options" })}
+                                                        />
+                                                    </Form.Item>
+                                                </section>
+                                            );
+                                        })}
                                     </div>
+                                    {(() => {
+                                        const capabilityGroups = createCapabilityGroups(translate);
+                                        const activeGroup = capabilityGroups.find((group) => group.capability === activeModelCapabilityTab) || capabilityGroups[0];
+                                        const activeModels = draftConfig[activeGroup.modelsKey];
+                                        const allChannelGroups = groupModelOptionsByChannel(activeModels, draftConfig, translate("settings.defaultChannel"));
+                                        const effectiveChannelFilter = allChannelGroups.some((group) => group.channelId === modelCapabilityChannelFilter) ? modelCapabilityChannelFilter : "";
+                                        const keyword = modelCapabilitySearch.trim().toLowerCase();
+                                        const filteredModels = activeModels.filter((model) => {
+                                            const modelConfig = draftModelConfigs.find((item) => item.modelType === activeGroup.capability && modelConfigValue(item) === model);
+                                            if (!modelConfig) return false;
+                                            if (effectiveChannelFilter) {
+                                                const channelId = modelOptionChannel(draftConfig, model)?.id || "__default__";
+                                                if (channelId !== effectiveChannelFilter) return false;
+                                            }
+                                            if (!keyword) return true;
+                                            const channelName = modelOptionChannel(draftConfig, model)?.name || "";
+                                            return [modelConfig.displayName || "", modelConfig.modelName, channelName, modelConfig.description || ""].some((text) => text.toLowerCase().includes(keyword));
+                                        });
+                                        const groupedByChannel = groupModelOptionsByChannel(filteredModels, draftConfig, translate("settings.defaultChannel"));
+                                        return (
+                                            <div className="mt-5 rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                                    <div>
+                                                        <div className="text-sm font-semibold">{translate("appShell.modelCapabilities")}</div>
+                                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.editAModelToConfigureItsDisplayNameCredits")}</div>
+                                                    </div>
+                                                    <Segmented
+                                                        value={activeGroup.capability}
+                                                        options={capabilityGroups.map((group) => ({
+                                                            value: group.capability,
+                                                            label: `${group.label} (${draftConfig[group.modelsKey].length})`,
+                                                        }))}
+                                                        onChange={(nextValue) => {
+                                                            setActiveModelCapabilityTab(nextValue as ModelCapability);
+                                                            setModelCapabilityChannelFilter("");
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div className="mt-3 flex flex-wrap items-center justify-between gap-2.5 border-b border-[var(--studio-line)] pb-3">
+                                                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" role="tablist" aria-label={translate("appShell.allChannels")}>
+                                                        <button
+                                                            type="button"
+                                                            role="tab"
+                                                            aria-selected={!effectiveChannelFilter}
+                                                            className={`cursor-pointer rounded-lg border px-2.5 py-1 text-xs! font-medium transition-colors ${
+                                                                !effectiveChannelFilter
+                                                                    ? "border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] text-[var(--studio-primary)]!"
+                                                                    : "border-transparent bg-[var(--studio-panel)] text-[var(--studio-muted)]! hover:border-[var(--studio-line)] hover:text-[var(--studio-ink)]!"
+                                                            }`}
+                                                            onClick={() => setModelCapabilityChannelFilter("")}
+                                                        >
+                                                            {translate("appShell.allChannels")} ({activeModels.length})
+                                                        </button>
+                                                        {allChannelGroups.map((group) => {
+                                                            const active = effectiveChannelFilter === group.channelId;
+                                                            return (
+                                                                <button
+                                                                    key={group.channelId}
+                                                                    type="button"
+                                                                    role="tab"
+                                                                    aria-selected={active}
+                                                                    className={`cursor-pointer rounded-lg border px-2.5 py-1 text-xs! font-medium transition-colors ${
+                                                                        active
+                                                                            ? "border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] text-[var(--studio-primary)]!"
+                                                                            : "border-transparent bg-[var(--studio-panel)] text-[var(--studio-muted)]! hover:border-[var(--studio-line)] hover:text-[var(--studio-ink)]!"
+                                                                    }`}
+                                                                    onClick={() => setModelCapabilityChannelFilter(group.channelId)}
+                                                                >
+                                                                    {group.channelName} ({group.models.length})
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    <Input
+                                                        allowClear
+                                                        prefix={<Search className="size-3.5 text-[var(--studio-muted)]" />}
+                                                        placeholder={translate("appShell.searchModels")}
+                                                        value={modelCapabilitySearch}
+                                                        onChange={(event) => setModelCapabilitySearch(event.target.value)}
+                                                        className="w-full shrink-0 sm:w-56!"
+                                                    />
+                                                </div>
+                                                <div className="mt-3 space-y-3">
+                                                    {groupedByChannel.length ? (
+                                                        groupedByChannel.map((channelGroup) => (
+                                                            <div key={channelGroup.channelId} className="overflow-hidden rounded-lg border border-[var(--studio-line)] bg-[var(--studio-panel)]">
+                                                                {!effectiveChannelFilter ? (
+                                                                    <div className="flex items-center justify-between gap-2 border-b border-[var(--studio-line)] bg-[var(--studio-surface-soft)]/80 px-4 py-2">
+                                                                        <span className="truncate text-xs font-semibold text-[var(--studio-ink)]">{channelGroup.channelName}</span>
+                                                                        <span className="shrink-0 rounded-full border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2 py-0.5 text-xs text-[var(--studio-muted)]">
+                                                                            {channelGroup.models.length}
+                                                                        </span>
+                                                                    </div>
+                                                                ) : null}
+                                                                <div className="divide-y divide-[var(--studio-line)]">
+                                                                    {channelGroup.models.map((model) => {
+                                                                        const modelConfig = draftModelConfigs.find((item) => item.modelType === activeGroup.capability && modelConfigValue(item) === model);
+                                                                        if (!modelConfig) return null;
+                                                                        const displayName = modelConfig.displayName || modelConfig.modelName;
+                                                                        const hasAlias = Boolean(modelConfig.displayName && modelConfig.displayName !== modelConfig.modelName);
+                                                                        const billingSummary = formatModelBillingSummary(modelConfig, translate);
+                                                                        return (
+                                                                            <div key={model} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-[var(--studio-surface-soft)]/70">
+                                                                                <div className="flex min-w-0 flex-1 items-start gap-3">
+                                                                                    <div className="mt-0.5 shrink-0">
+                                                                                        <ModelIcon config={draftConfig} model={model} />
+                                                                                    </div>
+                                                                                    <div className="min-w-0 flex-1">
+                                                                                        <div className="flex flex-wrap items-center gap-1.5">
+                                                                                            <span className="truncate text-sm font-medium text-[var(--studio-ink)]">{displayName}</span>
+                                                                                            {hasAlias ? <span className="truncate text-xs text-[var(--studio-muted)]">({modelConfig.modelName})</span> : null}
+                                                                                            {modelConfig.defaultModel ? (
+                                                                                                <span className="rounded bg-[var(--studio-primary-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--studio-primary)]">
+                                                                                                    {translate("appShell.default")}
+                                                                                                </span>
+                                                                                            ) : null}
+                                                                                            {modelConfig.isCustomModel ? (
+                                                                                                <span className="rounded border border-[var(--studio-line)] px-1.5 py-0.5 text-xs text-[var(--studio-muted)]">
+                                                                                                    {translate("appShell.customModel")}
+                                                                                                </span>
+                                                                                            ) : null}
+                                                                                        </div>
+                                                                                        {modelConfig.description ? (
+                                                                                            <div className="mt-1 truncate text-xs text-[var(--studio-muted)]" title={modelConfig.description}>
+                                                                                                {modelConfig.description}
+                                                                                            </div>
+                                                                                        ) : null}
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="flex shrink-0 items-center gap-3">
+                                                                                    <div className="hidden items-center gap-2 text-xs text-[var(--studio-muted)] md:flex">
+                                                                                        {billingSummary ? <span>{billingSummary}</span> : null}
+                                                                                        {modelConfig.capabilities.length ? (
+                                                                                            <span className="rounded bg-[var(--studio-surface-soft)] px-1.5 py-0.5">
+                                                                                                {translate("appShell.capabilityCount", { value0: modelConfig.capabilities.length })}
+                                                                                            </span>
+                                                                                        ) : null}
+                                                                                    </div>
+                                                                                    <span title={modelConfig.defaultModel ? translate("appShell.defaultModelCannotBeDisabled") : translate("appShell.disabledModelsHiddenFromUserDropdown")}>
+                                                                                        <Switch
+                                                                                            size="small"
+                                                                                            checked={modelConfig.enabled}
+                                                                                            checkedChildren={translate("appShell.modelEnabled")}
+                                                                                            unCheckedChildren={translate("appShell.modelDisabled")}
+                                                                                            disabled={isSaving || modelConfig.defaultModel}
+                                                                                            onChange={(checked) => setDraftModelEnabled(modelConfig.id, checked)}
+                                                                                        />
+                                                                                    </span>
+                                                                                    <Button size="small" icon={<Pencil className="size-3.5" />} disabled={isSaving} onClick={() => openModelConfigEditor(modelConfig)}>
+                                                                                        {translate("appShell.edit")}
+                                                                                    </Button>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        ))
+                                                    ) : (
+                                                        <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-panel)] px-4 py-8 text-center text-sm text-[var(--studio-muted)]">
+                                                            {translate("appShell.noMatchingModels")}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
                                 </Form>
                             ),
                         },
@@ -2507,6 +2646,21 @@ function nanaDefaultCapabilities(modelName: string, modelType: ModelCapability):
 
 function sameValue(first: unknown, second: unknown) {
     return JSON.stringify(first) === JSON.stringify(second);
+}
+
+/** 返回模型列表行的紧凑计费摘要（如「按秒 · 3~15秒」或「1 积分/次」）。 */
+function formatModelBillingSummary(config: ServerModelConfig, translator: typeof translate) {
+    if (config.modelType === "video") {
+        const billing = config.videoBillingConfiguration;
+        if (!billing) return "";
+        const unitLabel = billing.billingUnit === "second" ? translator("appShell.perSecond") : translator("appShell.perRun");
+        const min = billing.minimumDurationSeconds || 1;
+        const max = resolveBillingMaximumDurationSeconds(billing);
+        const range = max === null ? `${min}${translator("appShell.s")}+` : `${min}~${max}${translator("appShell.s")}`;
+        return `${unitLabel} · ${range}`;
+    }
+    const cost = creditText(config.creditCost || 0);
+    return `${cost} ${translator("appShell.creditsRun")}`;
 }
 
 function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelConfig) {
