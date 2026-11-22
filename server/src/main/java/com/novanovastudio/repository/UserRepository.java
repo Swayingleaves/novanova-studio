@@ -651,6 +651,28 @@ public class UserRepository {
     }
 
     /**
+     * 更新当前用户的绑定邮箱（仅当目标邮箱未被其他账号占用时更新）。
+     *
+     * @param userId Long 用户ID
+     * @param email String 新邮箱
+     * @return Mono<Boolean> 是否更新成功
+     */
+    public Mono<Boolean> updateCurrentUserEmail(Long userId, String email) {
+        return databaseClient.sql("""
+                UPDATE users
+                SET email = :email,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :userId
+                  AND NOT EXISTS (SELECT 1 FROM users WHERE email = :email AND id <> :userId)
+                """)
+                .bind("email", email)
+                .bind("userId", userId)
+                .fetch()
+                .rowsUpdated()
+                .map(updatedRows -> updatedRows > 0);
+    }
+
+    /**
      * 更新当前用户的密码哈希。
      *
      * @param userId Long 当前用户ID

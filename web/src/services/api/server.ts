@@ -858,6 +858,14 @@ export function changeCurrentUserPassword(input: { currentPassword: string; newP
     return serverPost("/auth/changePassword", input);
 }
 
+export function sendBindEmailCode(email: string) {
+    return serverPost("/auth/sendBindEmailCode", { email });
+}
+
+export function bindCurrentUserEmail(input: { email: string; code: string }) {
+    return serverPost<ServerUserProfile>("/auth/bindEmail", input);
+}
+
 export function listServerUsers(params: { page: number; pageSize: number; filterTeamId?: number; keyword?: string; userId?: string; role?: string; status?: number; createdAfter?: string; createdBefore?: string }) {
     const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
     if (params.filterTeamId !== undefined) query.set("filterTeamId", String(params.filterTeamId));

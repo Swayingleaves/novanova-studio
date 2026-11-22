@@ -95,8 +95,19 @@ public final class UserDtos {
      * @param creationTourVersion int 已完成创作页产品导览的版本
      * @param passwordLockedUntil String 密码锁定截止时间，仅管理端列表使用
      * @param canResetPassword 当前管理入口是否可重置无邮箱账号密码
+     * @param emailBindingRequired boolean 当前账号是否使用不可收信的隐私中转邮箱并需要强制绑定真实邮箱
      */
-    public record UserProfile(Long id, String email, String username, String nickname, String avatar, String role, Integer status, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditBalance, String createdAt, String lastLoginAt, boolean welcomeRead, int onboardingVersion, int creationTourVersion, String passwordLockedUntil, boolean canResetPassword) {
+    public record UserProfile(Long id, String email, String username, String nickname, String avatar, String role, Integer status, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditBalance, String createdAt, String lastLoginAt, boolean welcomeRead, int onboardingVersion, int creationTourVersion, String passwordLockedUntil, boolean canResetPassword, boolean emailBindingRequired) {
+    }
+
+    /**
+     * 绑定真实邮箱请求。
+     *
+     * @param email String 新邮箱
+     * @param code String 邮箱验证码
+     */
+    public record BindEmailRequest(@NotBlank(message = "business.emailIsRequired") String email,
+                                   @NotBlank(message = "business.verificationCodeIsRequired") String code) {
     }
 
     /**

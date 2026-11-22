@@ -15,6 +15,7 @@ import { GitHubLink } from "@/features/app-shell/components/github-link";
 import { UserCreditMenu } from "@/features/app-shell/components/user-credit-menu";
 import { WelcomeModal } from "@/features/app-shell/components/welcome-modal";
 import { AuthModal } from "@/features/auth/components/auth-modal";
+import { BindEmailModal } from "@/features/auth/components/bind-email-modal";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { MobileNavDrawer } from "@/features/app-shell/components/mobile-nav-drawer";
 import { ProductTour } from "@/features/onboarding/components/product-tour";
@@ -125,6 +126,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
 
             <AuthModal />
+            <BindEmailModal />
             <ShareWorkDialog />
             <WatermarkSettingsDialog />
             <WelcomeModal />

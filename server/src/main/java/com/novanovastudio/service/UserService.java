@@ -82,6 +82,12 @@ public class UserService {
     /** 注册验证码用途 */
     private static final String CODE_PURPOSE_REGISTER = "register";
 
+    /** 绑定邮箱验证码用途 */
+    private static final String CODE_PURPOSE_BIND_EMAIL = "bind_email";
+
+    /** LINUX DO 不可收信的隐私中转邮箱后缀 */
+    private static final String LINUX_DO_PRIVATE_RELAY_SUFFIX = "@privaterelay.linux.do";
+
     /** Bearer Token类型 */
     private static final String TOKEN_TYPE_BEARER = "Bearer";
 
@@ -386,6 +392,93 @@ public class UserService {
                 .flatMap(userRepository::findById)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.userNotFound"))))
                 .flatMap(this::userProfile);
+    }
+
+    /**
+     * 判断邮箱是否为不可收信的 LINUX DO 隐私中转邮箱（需强制引导绑定真实邮箱）。
+     *
+     * @param email String 用户邮箱
+     * @return boolean 是否需要绑定真实邮箱
+     */
+    public static boolean requiresEmailBinding(String email) {
+        return email != null && email.trim().toLowerCase(Locale.ROOT).endsWith(LINUX_DO_PRIVATE_RELAY_SUFFIX);
+    }
+
+    /**
+     * 为当前登录用户发送绑定真实邮箱验证码。
+     *
+     * @param request SendEmailCodeRequest 目标邮箱请求
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> sendBindEmailCode(UserDtos.SendEmailCodeRequest request) {
+        String email = normalizeEmail(request.email());
+        if (requiresEmailBinding(email)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "请填写可正常收信的常用邮箱，不能使用隐私中转邮箱"));
+        }
+        emailRegistrationPolicy.validate(email);
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> {
+                    log.info("发送绑定邮箱验证码: userId={}, email={}", userId, email);
+                    return userRepository.findByEmail(email)
+                            .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered"))))
+                            .switchIfEmpty(Mono.defer(() -> {
+                                String code = randomNumericCode();
+                                return encodePassword(code)
+                                        .flatMap(codeHash -> {
+                                            EmailVerificationCode record = new EmailVerificationCode();
+                                            record.setEmail(email);
+                                            record.setCodeHash(codeHash);
+                                            record.setPurpose(CODE_PURPOSE_BIND_EMAIL);
+                                            record.setSendCount(1);
+                                            record.setStatus(0);
+                                            record.setExpiresAt(OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(EMAIL_CODE_EXPIRE_MINUTES));
+                                            return userRepository.createEmailCode(record)
+                                                    .flatMap(codeId -> sendEmailVerificationCode(email, code)
+                                                            .onErrorResume(exception -> userRepository.markEmailCodeUsed(codeId)
+                                                                    .then(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.failedToSendVerificationCode", exception.getMessage()))))));
+                                        });
+                            }));
+                })
+                .then();
+    }
+
+    /**
+     * 校验邮箱验证码并为当前登录用户绑定真实邮箱。
+     *
+     * @param request BindEmailRequest 绑定邮箱请求
+     * @return Mono<UserProfile> 更新后的用户资料
+     */
+    public Mono<UserDtos.UserProfile> bindEmail(UserDtos.BindEmailRequest request) {
+        String email = normalizeEmail(request.email());
+        if (requiresEmailBinding(email)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "请填写可正常收信的常用邮箱，不能使用隐私中转邮箱"));
+        }
+        emailRegistrationPolicy.validate(email);
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> userRepository.findById(userId)
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.userNotFound"))))
+                        .flatMap(existing -> userRepository.findByEmail(email)
+                                .flatMap(conflict -> Mono.<UserDtos.UserProfile>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered"))))
+                                .switchIfEmpty(userRepository.latestValidEmailCode(email, CODE_PURPOSE_BIND_EMAIL)
+                                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailCodeIsInvalidOrExpired"))))
+                                        .flatMap(codeRecord -> matchesPassword(request.code().trim(), codeRecord.getCodeHash())
+                                                .flatMap(matches -> {
+                                                    if (!matches) {
+                                                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailCodeIsInvalidOrExpired")));
+                                                    }
+                                                    return userRepository.updateCurrentUserEmail(userId, email)
+                                                            .flatMap(updated -> {
+                                                                if (!updated) {
+                                                                    return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered")));
+                                                                }
+                                                                return userRepository.markEmailCodeUsed(codeRecord.getId())
+                                                                        .then(userRepository.findById(userId))
+                                                                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.userNotFound"))))
+                                                                        .flatMap(this::userProfile)
+                                                                        .doOnSuccess(profile -> log.info("用户已绑定真实邮箱: userId={}, email={}", userId, email));
+                                                            });
+                                                })))))
+                .onErrorMap(DataIntegrityViolationException.class, exception -> new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered")));
     }
 
     /**
@@ -781,7 +874,8 @@ public class UserService {
                         user.getOnboardingVersion() == null ? 0 : user.getOnboardingVersion(),
                         user.getCreationTourVersion() == null ? 0 : user.getCreationTourVersion(),
                         passwordLockedUntil == null ? null : formatTime(passwordLockedUntil),
-                        canResetPassword
+                        canResetPassword,
+                        requiresEmailBinding(user.getEmail())
                 ));
     }
 

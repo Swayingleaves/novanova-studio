@@ -168,4 +168,29 @@ public class AuthController {
     public Mono<ApiResponse<String>> changePassword(@Valid @RequestBody UserDtos.ChangeCurrentUserPasswordRequest request) {
         return userService.changeCurrentUserPassword(request).thenReturn(ApiResponse.ok("ok"));
     }
+
+    /**
+     * 发送绑定真实邮箱验证码。
+     *
+     * @param request SendEmailCodeRequest 邮箱请求
+     * @param httpRequest ServerHttpRequest HTTP请求
+     * @return Mono<ApiResponse<String>> 操作响应
+     */
+    @PostMapping("/sendBindEmailCode")
+    public Mono<ApiResponse<String>> sendBindEmailCode(@Valid @RequestBody UserDtos.SendEmailCodeRequest request, ServerHttpRequest httpRequest) {
+        return authenticationRateLimitService.checkEmailCode(httpRequest, request.email())
+                .then(userService.sendBindEmailCode(request))
+                .thenReturn(ApiResponse.ok("ok"));
+    }
+
+    /**
+     * 为当前登录用户绑定真实邮箱。
+     *
+     * @param request BindEmailRequest 绑定请求
+     * @return Mono<ApiResponse<UserProfile>> 更新后的用户资料
+     */
+    @PostMapping("/bindEmail")
+    public Mono<ApiResponse<UserDtos.UserProfile>> bindEmail(@Valid @RequestBody UserDtos.BindEmailRequest request) {
+        return userService.bindEmail(request).map(ApiResponse::ok);
+    }
 }

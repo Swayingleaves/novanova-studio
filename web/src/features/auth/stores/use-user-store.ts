@@ -26,6 +26,7 @@ export type ServerUserProfile = {
     creationTourVersion: number;
     passwordLockedUntil: string | null;
     canResetPassword: boolean;
+    emailBindingRequired?: boolean;
 };
 
 export type LocalUser = {
@@ -40,6 +41,7 @@ export type LocalUser = {
     welcomeRead: boolean;
     onboardingVersion: number;
     creationTourVersion: number;
+    emailBindingRequired: boolean;
 };
 
 export type UserSession = {
@@ -171,6 +173,7 @@ function normalizeUser(user: ServerUserProfile): LocalUser {
         welcomeRead: user.welcomeRead,
         onboardingVersion: user.onboardingVersion ?? 0,
         creationTourVersion: user.creationTourVersion ?? 0,
+        emailBindingRequired: Boolean(user.emailBindingRequired),
     };
 }
 
