@@ -310,12 +310,23 @@ public final class AiTaskDtos {
      * @param imageBillingConfiguration ImageBillingConfiguration 图片分辨率价目表，可为null
      * @param isCustomModel Boolean 是否使用自定义调用，独立于渠道格式
      * @param videoGenerationConstraints Map 按视频模式分组的公开限制
+     * @param description String 模型说明，为空时不展示
      */
     public record AiModelOption(String value, String label, String capability, String provider, String apiFormat,
                                 Boolean defaultModel, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditCost, String creditUnit, List<String> capabilities,
                                 VideoBillingConfiguration videoBillingConfiguration, String icon, Long ownerTeamId,
                                 ImageBillingConfiguration imageBillingConfiguration, Boolean isCustomModel,
-                                Map<String, VideoGenerationConstraints> videoGenerationConstraints) {
+                                Map<String, VideoGenerationConstraints> videoGenerationConstraints, String description) {
+        /** 保持旧调用方不返回模型说明。 */
+        public AiModelOption(String value, String label, String capability, String provider, String apiFormat,
+                             Boolean defaultModel, BigDecimal creditCost, String creditUnit, List<String> capabilities,
+                             VideoBillingConfiguration videoBillingConfiguration, String icon, Long ownerTeamId,
+                             ImageBillingConfiguration imageBillingConfiguration, Boolean isCustomModel,
+                             Map<String, VideoGenerationConstraints> videoGenerationConstraints) {
+            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, creditUnit, capabilities,
+                    videoBillingConfiguration, icon, ownerTeamId, imageBillingConfiguration, isCustomModel,
+                    videoGenerationConstraints, null);
+        }
         /**
          * 构造普通模型目录项。
          * @param value String 模型标识

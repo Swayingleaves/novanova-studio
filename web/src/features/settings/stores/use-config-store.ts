@@ -126,6 +126,7 @@ export type AiConfig = {
     videoModelBillingConfigurations: VideoModelBillingConfiguration[];
     modelDisplayNames: Record<string, string>;
     modelIcons: Record<string, string>;
+    modelDescriptions: Record<string, string>;
     quality: string;
     imageResolution: string;
     size: string;
@@ -191,6 +192,7 @@ export const defaultConfig: AiConfig = {
     videoModelBillingConfigurations: [],
     modelDisplayNames: {},
     modelIcons: {},
+    modelDescriptions: {},
     quality: "medium",
     imageResolution: "2K",
     size: "1:1",
@@ -561,6 +563,11 @@ export function configFromModelConfigs(channels: ModelChannel[], modelConfigs: S
                 .filter((item) => item.modelIcon)
                 .map((item) => [`${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`, item.modelIcon!]),
         ),
+        modelDescriptions: Object.fromEntries(
+            modelConfigs
+                .filter((item) => item.description?.trim())
+                .map((item) => [`${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`, item.description!.trim()]),
+        ),
         modelCosts: modelConfigs.map((item) => ({
             model: `${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`,
             taskType: item.modelType,
@@ -627,6 +634,11 @@ function configFromServerModels(modelList: ServerAiModelList | null) {
             models
                 .filter((model) => model.icon)
                 .map((model) => [model.value, model.icon!]),
+        ),
+        modelDescriptions: Object.fromEntries(
+            models
+                .filter((model) => model.description?.trim())
+                .map((model) => [model.value, model.description!.trim()]),
         ),
     });
 }

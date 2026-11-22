@@ -810,7 +810,7 @@ public class AiTaskService {
                                             config.channelId() + CHANNEL_MODEL_SEPARATOR + config.modelName(),
                                             StringUtils.hasText(config.displayName()) ? config.displayName() : config.modelName(), config.modelType(), channel.name(), channel.apiFormat(), config.defaultModel(),
                                             config.creditCost(), config.creditUnit(), config.capabilities(), config.videoBillingConfiguration(), config.modelIcon(), config.ownerTeamId(), config.imageBillingConfiguration(),
-                                            Boolean.TRUE.equals(config.isCustomModel()), VideoGenerationConstraintSupport.constraintsByMode(config.customModelConfig())))
+                                            Boolean.TRUE.equals(config.isCustomModel()), VideoGenerationConstraintSupport.constraintsByMode(config.customModelConfig()), config.description()))
                                     .orElse(null))
                             .filter(java.util.Objects::nonNull)
                             .toList();

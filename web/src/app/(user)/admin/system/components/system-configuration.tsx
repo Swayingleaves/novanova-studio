@@ -818,6 +818,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                         imageBillingConfiguration: normalizedConfig.imageBillingConfiguration,
                         displayName: normalizedConfig.displayName,
                         modelIcon: normalizedConfig.modelIcon,
+                        description: normalizedConfig.description ?? null,
                         isCustomModel: normalizedConfig.isCustomModel,
                         customModelConfig: normalizedConfig.customModelConfig,
                     });
@@ -851,6 +852,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                         imageBillingConfiguration: normalizedConfig.imageBillingConfiguration,
                         displayName: normalizedConfig.displayName,
                         modelIcon: normalizedConfig.modelIcon,
+                        description: normalizedConfig.description ?? null,
                         isCustomModel: normalizedConfig.isCustomModel,
                         customModelConfig: normalizedConfig.customModelConfig,
                     });
@@ -1888,6 +1890,22 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                             <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("appShell.displayIconAutoMatchDetectsItFromModelOr")}</p>
                         </section>
 
+                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                            <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                                {translate("appShell.modelDescription")}
+                                <Info className="size-4 text-[var(--studio-muted)]" />
+                            </div>
+                            <Input.TextArea
+                                maxLength={500}
+                                showCount
+                                autoSize={{ minRows: 2, maxRows: 4 }}
+                                placeholder={translate("appShell.modelDescriptionPlaceholder")}
+                                value={editingModelConfig.description || ""}
+                                onChange={(event) => updateEditingModelConfig({ description: event.target.value || null })}
+                            />
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("appShell.modelDescriptionHelper")}</p>
+                        </section>
+
                         <section className="grid gap-4 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4 md:grid-cols-3">
                             <div>
                                 <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
@@ -2202,6 +2220,16 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                         <Form.Item label={translate("appShell.displayIcon")} extra={translate("appShell.displayIconAutoMatchDetectsItFromModelOr")}>
                             <Select value={editingModelConfig.modelIcon || ""} options={modelIconSelectOptions} className="w-full" onChange={(modelIcon: string) => updateEditingModelConfig({ modelIcon: modelIcon || null })} />
                         </Form.Item>
+                        <Form.Item label={translate("appShell.modelDescription")} extra={translate("appShell.modelDescriptionHelper")}>
+                            <Input.TextArea
+                                maxLength={500}
+                                showCount
+                                autoSize={{ minRows: 2, maxRows: 4 }}
+                                placeholder={translate("appShell.modelDescriptionPlaceholder")}
+                                value={editingModelConfig.description || ""}
+                                onChange={(event) => updateEditingModelConfig({ description: event.target.value || null })}
+                            />
+                        </Form.Item>
                         {editingModelConfig.modelType !== "video" ? (
                             <Form.Item label={translate("appShell.creditsPerRun")}>
                                 <InputNumber<string> min="0" stringMode precision={6} value={String(editingModelConfig.creditCost)} className="w-full" onChange={(value) => updateEditingModelConfig({ creditCost: creditText(value || "0") })} />
@@ -2460,6 +2488,7 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         imageBillingConfiguration: null,
         displayName: null,
         modelIcon: null,
+        description: null,
         isCustomModel: false,
         customModelConfig: {},
     };
@@ -2494,6 +2523,7 @@ function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelC
         first.reasoningEffort === second.reasoningEffort &&
         (first.displayName || null) === (second.displayName || null) &&
         (first.modelIcon || null) === (second.modelIcon || null) &&
+        (first.description?.trim() || null) === (second.description?.trim() || null) &&
         first.isCustomModel === second.isCustomModel &&
         sameValue(first.capabilities, second.capabilities) &&
         sameValue(first.customBodyParameters, second.customBodyParameters) &&

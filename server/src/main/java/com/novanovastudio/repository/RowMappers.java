@@ -178,6 +178,7 @@ public final class RowMappers {
         record.setImageBillingConfiguration(row.get("image_billing_configuration", String.class));
         record.setDisplayName(row.get("display_name", String.class));
         record.setModelIcon(row.get("model_icon", String.class));
+        record.setDescription(row.get("description", String.class));
         record.setIsCustomModel(row.get("is_custom_model", Boolean.class));
         record.setCustomModelConfig(row.get("custom_model_config", String.class));
         record.setCreatedAt(row.get("created_at", OffsetDateTime.class));

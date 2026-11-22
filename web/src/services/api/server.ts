@@ -247,6 +247,7 @@ export type ServerAiModelList = {
         videoGenerationConstraints: Partial<Record<VideoGenerationMode, VideoGenerationConstraints>>;
         imageBillingConfiguration: ImageBillingConfiguration | null;
         icon: string | null;
+        description?: string | null;
     }>;
     imageModels: string[];
     videoModels: string[];
@@ -467,6 +468,7 @@ export type ServerModelConfig = {
     imageBillingConfiguration: ImageBillingConfiguration | null;
     displayName: string | null;
     modelIcon: string | null;
+    description?: string | null;
     isCustomModel: boolean;
     customModelConfig: Record<string, CustomModelGroupConfig>;
 };
@@ -1700,6 +1702,7 @@ export function updateModelConfig(
         | "imageBillingConfiguration"
         | "displayName"
         | "modelIcon"
+        | "description"
         | "isCustomModel"
         | "customModelConfig"
     >,

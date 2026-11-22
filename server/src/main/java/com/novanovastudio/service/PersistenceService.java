@@ -297,6 +297,7 @@ public class PersistenceService {
                     record.setCustomModelConfig(JSON.toJSONString(normalizeCustomModelConfig(request.modelType(), isCustomModel, capabilities, request.customModelConfig(), videoBillingConfiguration)));
                     record.setDisplayName(normalizeDisplayName(request.displayName(), request.modelName()));
                     record.setModelIcon(normalizeModelIcon(request.modelIcon()));
+                    record.setDescription(normalizeModelDescription(request.description()));
                     return repository.createPlatformAiModelConfig(record)
                             .onErrorMap(DuplicateKeyException.class, exception -> {
                                 // 数据库约束仍负责并发保护，只把同渠道同类型同名模型冲突转换为业务提示。
@@ -359,6 +360,7 @@ public class PersistenceService {
                     record.setCustomModelConfig(JSON.toJSONString(normalizeCustomModelConfig(request.modelType(), isCustomModel, capabilities, request.customModelConfig(), videoBillingConfiguration)));
                     record.setDisplayName(normalizeDisplayName(request.displayName(), record.getModelName()));
                     record.setModelIcon(normalizeModelIcon(request.modelIcon()));
+                    record.setDescription(normalizeModelDescription(request.description()));
                     PersistenceDtos.ModelConfig modelConfig = modelConfigDto(record);
                     return repository.updatePlatformAiModelConfig(record)
                             .then(isModelQueueType(modelConfig.modelType())
@@ -431,7 +433,8 @@ public class PersistenceService {
                         record.getImageSizeMappings() == null ? null : JSON.parseObject(record.getImageSizeMappings(),
                                 new TypeReference<Map<String, Map<String, String>>>() {})) : null,
                 parseImageBillingConfiguration(record.getImageBillingConfiguration()),
-                record.getEnabled() == null || Boolean.TRUE.equals(record.getEnabled()));
+                record.getEnabled() == null || Boolean.TRUE.equals(record.getEnabled()),
+                record.getDescription());
     }
 
     /**
@@ -460,6 +463,23 @@ public class PersistenceService {
             return null;
         }
         return modelIcon.trim();
+    }
+
+    /**
+     * 规范化模型说明，空白返回 null，超过 500 字符抛出参数异常。
+     *
+     * @param description String 请求模型说明
+     * @return String 规范化后的模型说明，可为 null
+     */
+    private String normalizeModelDescription(String description) {
+        if (description == null || description.isBlank()) {
+            return null;
+        }
+        String trimmed = description.trim();
+        if (trimmed.length() > 500) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.modelDescriptionMustNotExceed500Characters"));
+        }
+        return trimmed;
     }
 
     /**

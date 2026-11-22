@@ -1109,6 +1109,28 @@ class PersistenceServiceTest {
         Assertions.assertNull(new VideoBillingConfiguration("second", 3, -1, java.util.Map.of()).effectiveMaximumDurationSeconds());
     }
 
+    /** 模型说明应在创建与更新时去空白保留，超过500字应拒绝保存。 */
+    @Test
+    void shouldValidateAndRoundTripModelDescription() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"gpt-image\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+
+        PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "gpt-image", "image", List.of("text-to-image"), 0, java.math.BigDecimal.ONE,
+                false, "high", "generation", 1, new JSONObject(), null, null, null, false, null, false, null, null, Boolean.TRUE,
+                "  适合快速出图  ")).block();
+        Assertions.assertNotNull(created);
+        Assertions.assertEquals("适合快速出图", created.description());
+
+        String tooLong = "a".repeat(501);
+        Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "gpt-image", "image", List.of("text-to-image"), 0, java.math.BigDecimal.ONE,
+                false, "high", "generation", 1, new JSONObject(), null, null, null, false, null, false, null, null, Boolean.TRUE,
+                tooLong)).block());
+    }
+
     /** 模型自定义JSON请求体参数应在创建、更新和查询间完整往返。 */
     @Test
     void shouldRoundTripModelCustomBodyParameters() {

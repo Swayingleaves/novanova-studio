@@ -29,6 +29,7 @@ export type CustomModelTransferPayload = {
     modelType: "image" | "video";
     displayName: string | null;
     modelIcon: string | null;
+    description?: string | null;
     creditCost: string;
     creditUnit: ModelCreditUnit;
     requestConcurrency: number;
@@ -70,6 +71,7 @@ export function buildCustomModelTransferJson(config: ServerModelConfig): string 
         modelType: config.modelType === "image" ? "image" : "video",
         displayName: config.displayName || null,
         modelIcon: config.modelIcon || null,
+        description: config.description?.trim() || null,
         creditCost: amountText(config.creditCost),
         creditUnit: config.creditUnit === "second" ? "second" : "generation",
         requestConcurrency: Math.max(1, Math.floor(config.requestConcurrency || 1)),
@@ -135,6 +137,7 @@ export function parseCustomModelTransfer(text: string, targetModelType: ServerMo
         isCustomModel: true,
         displayName: readNullableText(raw.displayName, 255),
         modelIcon: readModelIcon(raw.modelIcon),
+        description: readNullableText(raw.description, 500),
         creditCost,
         requestConcurrency,
         capabilities,
