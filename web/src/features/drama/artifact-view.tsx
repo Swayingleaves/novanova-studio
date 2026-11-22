@@ -2,8 +2,10 @@
 
 import { App, Button, InputNumber } from "antd";
 import { Check, Download, LoaderCircle, Minus, Play, Square } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "@/features/locale/use-translation";
+import { PromptMentionText } from "@/features/generation/components/prompt-mention-text";
+import type { PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { saveDramaCut, type DramaMedia, type DramaStage, type DramaVersion, type DramaWorkspace } from "@/services/api/drama";
@@ -20,12 +22,12 @@ function text(value: unknown) {
     return typeof value === "string" ? value : value == null ? "" : String(value);
 }
 
-function Field({ label, value, plain = false, className = "" }: { label: string; value: string; plain?: boolean; className?: string }) {
+function Field({ label, value, content, plain = false, className = "" }: { label: string; value: string; content?: ReactNode; plain?: boolean; className?: string }) {
     if (!value) return null;
     return (
         <div className={`${plain ? "" : "rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] px-4 py-3"} ${className}`}>
             <p className="text-xs font-medium text-[var(--studio-faint)]">{label}</p>
-            <p className={`whitespace-pre-wrap text-sm leading-6 ${plain ? "mt-1 text-[var(--studio-text)]" : "mt-1.5 text-[var(--studio-ink)]"}`}>{value}</p>
+            <div className={`whitespace-pre-wrap text-sm leading-6 ${plain ? "mt-1 text-[var(--studio-text)]" : "mt-1.5 text-[var(--studio-ink)]"}`}>{content ?? value}</div>
         </div>
     );
 }
@@ -371,7 +373,22 @@ export function DramaArtifact({
                                 <FramePreview label={translate("drama.lastFrame")} media={mediaByKey[`cut:last:${ref}`]} />
                             </div>
                             <div className="flex flex-col gap-3 px-3 pb-3">
-                                <Field plain label={translate("drama.videoPrompt")} value={text(shot?.videoPrompt)} />
+                                {(() => {
+                                    const promptText = text(shot?.videoPrompt);
+                                    const mentionRefs: PromptImageReference[] = [
+                                        { id: `cut:first:${ref}`, label: "图片1", name: `${ref} ${translate("drama.firstFrame")}`, previewUrl: mediaByKey[`cut:first:${ref}`]?.url || "", kind: "image" },
+                                        { id: `cut:last:${ref}`, label: "图片2", name: `${ref} ${translate("drama.lastFrame")}`, previewUrl: mediaByKey[`cut:last:${ref}`]?.url || "", kind: "image" },
+                                        { id: sheetKey, label: "图片3", name: `${ref} 连续图`, previewUrl: mediaByKey[sheetKey]?.url || "", kind: "image" },
+                                    ];
+                                    return (
+                                        <Field
+                                            plain
+                                            label={translate("drama.videoPrompt")}
+                                            value={promptText}
+                                            content={<PromptMentionText text={promptText} references={mentionRefs} />}
+                                        />
+                                    );
+                                })()}
                             </div>
                             <MediaFrame media={mediaByKey[`shot-video:${ref}`]} kind="video" targetKey={`shot-video:${ref}`} pending={pendingKeys.includes(`shot-video:${ref}`)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
                         </article>

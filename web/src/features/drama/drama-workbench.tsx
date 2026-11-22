@@ -9,7 +9,7 @@ import { ThemePreferenceMenu } from "@/features/theme/components/theme-preferenc
 import { UserCreditMenu } from "@/features/app-shell/components/user-credit-menu";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
-import { DEFAULT_IMAGE_LAST_USED_SETTINGS, DEFAULT_VIDEO_LAST_USED_SETTINGS, loadImageLastUsedSettings, loadVideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
+import { DEFAULT_IMAGE_LAST_USED_SETTINGS, DEFAULT_VIDEO_LAST_USED_SETTINGS, loadDramaLastUsedSettings, loadImageLastUsedSettings, loadVideoLastUsedSettings, saveDramaLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { VIDEO_RESOLUTION_OPTIONS, availableVideoResolutions } from "@/features/generation/lib/video-billing";
 import { sizeFromAspectRatio } from "@/features/generation/components/video-settings-panel";
 import type { VideoResolution } from "@/features/settings/stores/use-config-store";
@@ -50,6 +50,7 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
     const [imageQuality, setImageQuality] = useState(DEFAULT_IMAGE_LAST_USED_SETTINGS.quality);
     const [imageResolution, setImageResolution] = useState(DEFAULT_IMAGE_LAST_USED_SETTINGS.imageResolution);
     const [videoResolution, setVideoResolution] = useState(DEFAULT_VIDEO_LAST_USED_SETTINGS.vquality);
+    const [settingsHydrated, setSettingsHydrated] = useState(false);
     const [pendingKeys, setPendingKeys] = useState<string[]>([]);
     const [stoppingTaskId, setStoppingTaskId] = useState("");
     const [stopping, setStopping] = useState(false);
@@ -97,23 +98,54 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
     const mediaBusy = (workspace?.media || []).some((item) => item.status === "pending" || item.status === "running");
 
     useEffect(() => {
+        if (!settingsHydrated) return;
         if (!imageModel && config.imageModel) setImageModel(config.imageModel);
-    }, [config.imageModel, imageModel]);
+    }, [config.imageModel, imageModel, settingsHydrated]);
 
     useEffect(() => {
+        if (!settingsHydrated) return;
         if (!videoModel && config.videoModel) setVideoModel(config.videoModel);
-    }, [config.videoModel, videoModel]);
+    }, [config.videoModel, settingsHydrated, videoModel]);
 
     useEffect(() => {
-        void loadImageLastUsedSettings().then((settings) => {
-            setImageQuality(settings.quality || "medium");
-            setImageResolution(settings.imageResolution || "2K");
+        let active = true;
+        void Promise.all([loadDramaLastUsedSettings(), loadImageLastUsedSettings(), loadVideoLastUsedSettings()]).then(([drama, image, video]) => {
+            if (!active) return;
+            if (drama.imageModel) setImageModel(drama.imageModel);
+            if (drama.videoModel) setVideoModel(drama.videoModel);
+            setImageQuality(drama.imageQuality || image.quality || "medium");
+            setImageResolution(drama.imageResolution || image.imageResolution || "2K");
+            setVideoSettings(video);
+            setVideoResolution(drama.videoResolution || video.vquality || "720p");
+            setSettingsHydrated(true);
         });
-        void loadVideoLastUsedSettings().then((settings) => {
-            setVideoSettings(settings);
-            setVideoResolution(settings.vquality || "720p");
-        });
+        return () => { active = false; };
     }, []);
+
+    const handleImageModelChange = (value: string) => {
+        setImageModel(value);
+        void saveDramaLastUsedSettings({ imageModel: value });
+    };
+
+    const handleImageQualityChange = (value: string) => {
+        setImageQuality(value);
+        void saveDramaLastUsedSettings({ imageQuality: value });
+    };
+
+    const handleImageResolutionChange = (value: string) => {
+        setImageResolution(value);
+        void saveDramaLastUsedSettings({ imageResolution: value });
+    };
+
+    const handleVideoModelChange = (value: string) => {
+        setVideoModel(value);
+        void saveDramaLastUsedSettings({ videoModel: value });
+    };
+
+    const handleVideoResolutionChange = (value: string) => {
+        setVideoResolution(value);
+        void saveDramaLastUsedSettings({ videoResolution: value });
+    };
 
     useEffect(() => {
         if (!busy && !mediaBusy) return;
@@ -210,9 +242,9 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
     const videoResolutions = useMemo(() => availableVideoResolutions({ ...config, videoModel, videoGenerationMode: videoMode }, videoModel, videoMode), [config, videoMode, videoModel]);
 
     useEffect(() => {
-        if (!videoResolutions.length || videoResolutions.includes(videoResolution as VideoResolution)) return;
+        if (!settingsHydrated || !videoResolutions.length || videoResolutions.includes(videoResolution as VideoResolution)) return;
         setVideoResolution(videoResolutions[0]);
-    }, [videoResolution, videoResolutions]);
+    }, [settingsHydrated, videoResolution, videoResolutions]);
 
     const saveSettings = async (patch: { name?: string; textModel?: string; durationSeconds?: number; aspectRatio?: string }) => {
         if (!project) return;
@@ -688,11 +720,11 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                         {selected?.confirmationStatus === "confirmed" ? <StatusPill tone="success">{translate("drama.confirmed")}</StatusPill> : selected ? <StatusPill tone="neutral">{translate("drama.pending")}</StatusPill> : null}
                         {selected?.freshness === "needs_update" ? <StatusPill tone="warning">{translate("drama.needsUpdate")}</StatusPill> : null}
                         {viewed === "cast" || viewed === "storyboard" || viewed === "shot" || viewed === "preview" ? <span className="rounded-full border border-[var(--studio-line-strong)] bg-[var(--studio-surface)] px-2.5 py-1 text-xs font-medium tabular-nums text-[var(--studio-ink)]">{dramaAspectRatio(project.aspectRatio)}</span> : null}
-                        {viewed === "cast" || viewed === "storyboard" || viewed === "shot" ? <ModelPicker config={config} value={imageModel} onChange={setImageModel} capability="image" className="max-w-56 !border-[var(--studio-line-strong)] !bg-[var(--studio-surface)] !text-[var(--studio-ink)] shadow-none" /> : null}
-                        {viewed === "cast" || viewed === "storyboard" || viewed === "shot" ? <SettingChips label={translate("drama.quality")} value={imageQuality} options={[{ value: "low", label: translate("generation.lowQuality_ebe981") }, { value: "medium", label: translate("generation.standardQuality_3da00d") }, { value: "high", label: translate("generation.highQuality_f31c44") }]} onChange={setImageQuality} /> : null}
-                        {viewed === "cast" || viewed === "storyboard" || viewed === "shot" ? <SettingChips label={translate("drama.resolution")} value={imageResolution} options={["1K", "2K", "4K"].map((value) => ({ value, label: value }))} onChange={setImageResolution} /> : null}
-                        {viewed === "shot" || viewed === "preview" ? <ModelPicker config={config} value={videoModel} onChange={setVideoModel} capability="video" className="max-w-56 !border-[var(--studio-line-strong)] !bg-[var(--studio-surface)] !text-[var(--studio-ink)] shadow-none" /> : null}
-                        {viewed === "shot" || viewed === "preview" ? <SettingChips label={translate("drama.resolution")} value={videoResolution} options={(videoResolutions.length ? videoResolutions : [videoResolution as VideoResolution]).map((value) => ({ value, label: VIDEO_RESOLUTION_OPTIONS.find((item) => item.value === value)?.label || value }))} onChange={setVideoResolution} /> : null}
+                        {viewed === "cast" || viewed === "storyboard" || viewed === "shot" ? <ModelPicker config={config} value={imageModel} onChange={handleImageModelChange} capability="image" className="max-w-56 !border-[var(--studio-line-strong)] !bg-[var(--studio-surface)] !text-[var(--studio-ink)] shadow-none" /> : null}
+                        {viewed === "cast" || viewed === "storyboard" || viewed === "shot" ? <SettingChips label={translate("drama.quality")} value={imageQuality} options={[{ value: "low", label: translate("generation.lowQuality_ebe981") }, { value: "medium", label: translate("generation.standardQuality_3da00d") }, { value: "high", label: translate("generation.highQuality_f31c44") }]} onChange={handleImageQualityChange} /> : null}
+                        {viewed === "cast" || viewed === "storyboard" || viewed === "shot" ? <SettingChips label={translate("drama.resolution")} value={imageResolution} options={["1K", "2K", "4K"].map((value) => ({ value, label: value }))} onChange={handleImageResolutionChange} /> : null}
+                        {viewed === "shot" || viewed === "preview" ? <ModelPicker config={config} value={videoModel} onChange={handleVideoModelChange} capability="video" className="max-w-56 !border-[var(--studio-line-strong)] !bg-[var(--studio-surface)] !text-[var(--studio-ink)] shadow-none" /> : null}
+                        {viewed === "shot" || viewed === "preview" ? <SettingChips label={translate("drama.resolution")} value={videoResolution} options={(videoResolutions.length ? videoResolutions : [videoResolution as VideoResolution]).map((value) => ({ value, label: VIDEO_RESOLUTION_OPTIONS.find((item) => item.value === value)?.label || value }))} onChange={handleVideoResolutionChange} /> : null}
                         {viewed === "cast" || viewed === "storyboard" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(imageTargets(viewed, selected?.content))}>{translate("drama.generateMissingImages")}</Button> : null}
                         {viewed === "shot" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(productionShotRefs.map((ref) => `sheet:${ref}`))}>{translate("drama.generateMissingSheets")}</Button> : null}
                         {viewed === "shot" || viewed === "preview" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(productionShotRefs.map((ref) => `shot-video:${ref}`))}>{translate("drama.generateMissingVideos")}</Button> : null}

@@ -16,6 +16,14 @@ export type VideoLastUsedSettings = {
     videoWatermark: string;
 };
 
+export type DramaLastUsedSettings = {
+    imageModel: string;
+    imageQuality: string;
+    imageResolution: string;
+    videoModel: string;
+    videoResolution: string;
+};
+
 export const DEFAULT_IMAGE_LAST_USED_SETTINGS: ImageLastUsedSettings = {
     quality: "medium",
     imageResolution: "2K",
@@ -38,6 +46,7 @@ const settingsStorage = localforage.createInstance({
 
 let imageSettingsWriteQueue = Promise.resolve();
 let videoSettingsWriteQueue = Promise.resolve();
+let dramaSettingsWriteQueue = Promise.resolve();
 
 export async function loadImageLastUsedSettings(): Promise<ImageLastUsedSettings> {
     const saved = await settingsStorage.getItem<Partial<ImageLastUsedSettings>>(teamStorageKey("image"));
@@ -63,4 +72,17 @@ export function saveVideoLastUsedSettings(settings: Partial<VideoLastUsedSetting
         await settingsStorage.setItem(teamStorageKey("video"), { ...current, ...settings });
     });
     return videoSettingsWriteQueue;
+}
+
+export async function loadDramaLastUsedSettings(): Promise<Partial<DramaLastUsedSettings>> {
+    const saved = await settingsStorage.getItem<Partial<DramaLastUsedSettings>>(teamStorageKey("drama"));
+    return saved ?? {};
+}
+
+export function saveDramaLastUsedSettings(settings: Partial<DramaLastUsedSettings>): Promise<void> {
+    dramaSettingsWriteQueue = dramaSettingsWriteQueue.catch(() => undefined).then(async () => {
+        const current = await loadDramaLastUsedSettings();
+        await settingsStorage.setItem(teamStorageKey("drama"), { ...current, ...settings });
+    });
+    return dramaSettingsWriteQueue;
 }

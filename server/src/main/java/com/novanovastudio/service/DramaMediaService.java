@@ -442,13 +442,9 @@ public class DramaMediaService {
     }
 
     private String role(String key) {
-        if (key.startsWith("cut:first:")) {
-            return "first_frame";
-        }
-        if (key.startsWith("cut:last:")) {
-            return "last_frame";
-        }
-        if (key.startsWith("sheet:")) {
+        // 镜头视频采用 reference-to-video 全能参考模式，Seedance 不允许把 last_frame 与 reference_image 混传，
+        // 首帧、尾帧与 4×3 连续图统一按 reference_image 传递，顺序对应提示词里的 @图片1、@图片2、@图片3。
+        if (key.startsWith("cut:first:") || key.startsWith("cut:last:") || key.startsWith("sheet:")) {
             return "reference_image";
         }
         return null;

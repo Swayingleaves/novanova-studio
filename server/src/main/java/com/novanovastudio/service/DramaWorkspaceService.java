@@ -64,7 +64,7 @@ public class DramaWorkspaceService {
     private final DramaMediaService dramaMediaService;
 
     /** 正在推进的批次，合并并发刷新，避免同一个目标被提交两次。 */
-    private final ConcurrentHashMap<String, Mono<Void>> advancing = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Mono<Boolean>> advancing = new ConcurrentHashMap<>();
 
     /**
      * 创建项目并排队制作方案。
@@ -321,25 +321,25 @@ public class DramaWorkspaceService {
      * @param project 项目
      * @return 完成信号
      */
-    private Mono<Void> advanceChain(User user, DramaRepository.ProjectRow project) {
+    private Mono<Boolean> advanceChain(User user, DramaRepository.ProjectRow project) {
         // 前端每 3 秒刷一次，会有多个 workspace 请求同时在跑；不合并的话同一个目标会被提交两次。
         return advancing.computeIfAbsent(project.id(), key -> advanceAll(user, project)
                 .doFinally(signal -> advancing.remove(key)).cache());
     }
 
-    private Mono<Void> advanceAll(User user, DramaRepository.ProjectRow project) {
+    private Mono<Boolean> advanceAll(User user, DramaRepository.ProjectRow project) {
         return dramaRepository.listChatMedia(project.id(), user.userId(), user.teamId())
                 .concatMap(batch -> advanceBatch(user, project, batch))
-                .then();
+                .any(Boolean::booleanValue);
     }
 
-    private Mono<Void> advanceBatch(User user, DramaRepository.ProjectRow project, DramaRepository.ChatMediaBatch batch) {
+    private Mono<Boolean> advanceBatch(User user, DramaRepository.ProjectRow project, DramaRepository.ChatMediaBatch batch) {
         return advanceOnce(user, project, batch)
                 .flatMap(changed -> changed
                         ? dramaRepository.listChatMedia(project.id(), user.userId(), user.teamId())
                                 .filter(item -> batch.id().equals(item.id()))
-                                .concatMap(item -> advanceBatch(user, project, item)).then()
-                        : Mono.empty());
+                                .concatMap(item -> advanceBatch(user, project, item)).then(Mono.just(true))
+                        : Mono.just(false));
     }
 
     /**
@@ -942,9 +942,12 @@ public class DramaWorkspaceService {
                 .flatMap(project -> dramaRepository.listVersions(project.id(), user.teamId()).collectList()
                         .flatMap(versions -> dramaMediaService.list(user.userId(), user.teamId(), project.id())
                                 .flatMap(media -> advanceChain(user, project)
-                                        .then(notifyFinishedChat(user, project, media))
-                                        .then(active(project).map(active -> new DramaDtos.WorkspaceResponse(detail(project),
-                                        versions.stream().map(this::versionView).toList(), active, media))))));
+                                        .flatMap(advanced -> Boolean.TRUE.equals(advanced)
+                                                ? dramaMediaService.list(user.userId(), user.teamId(), project.id())
+                                                : Mono.just(media))
+                                        .flatMap(latestMedia -> notifyFinishedChat(user, project, latestMedia)
+                                                .then(active(project).map(active -> new DramaDtos.WorkspaceResponse(detail(project),
+                                                versions.stream().map(this::versionView).toList(), active, latestMedia)))))));
     }
 
     private Mono<DramaDtos.ActiveRequest> active(DramaRepository.ProjectRow project) {
