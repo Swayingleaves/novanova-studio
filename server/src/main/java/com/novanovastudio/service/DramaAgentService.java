@@ -232,7 +232,7 @@ public class DramaAgentService {
                 counts.put("characters", sizeOf(content.getJSONArray("characters")));
                 counts.put("locations", sizeOf(content.getJSONArray("locations")));
             }
-            case "storyboard", "shot" -> counts.put("shots", sizeOf(content.getJSONArray("shots")));
+            case "shot" -> counts.put("shots", sizeOf(content.getJSONArray("shots")));
             default -> counts.put("checks", sizeOf(content.getJSONArray("checklist")));
         }
         counts.values().removeIf(Objects::isNull);
@@ -332,18 +332,16 @@ public class DramaAgentService {
         return StringUtils.hasText(target) ? target : currentStage;
     }
 
-    /** 把已有角色、场景、分镜和它们当前的生成状态交给主 Agent，由它决定 targetKey。 */
+    /** 把已有角色、场景、分镜镜头和它们当前的生成状态交给主 Agent，由它决定 targetKey。 */
     private JSONArray mediaStatus(java.util.List<DramaRepository.VersionRow> versions, java.util.List<DramaRepository.MediaRow> media) {
         JSONObject cast = content(versions, "cast");
-        JSONObject storyboard = content(versions, "storyboard");
-        JSONObject production = content(versions, "shot");
-        JSONObject activeShots = DramaMediaTargets.hasShots(production) ? production : storyboard;
+        JSONObject shots = content(versions, "shot");
         JSONArray rows = new JSONArray();
         addCastStatus(rows, cast, "characters", "character:");
         addCastStatus(rows, cast, "locations", "location:");
-        addShotStatus(rows, storyboard, cast, "board:");
-        addShotStatus(rows, activeShots, cast, "sheet:");
-        addShotStatus(rows, activeShots, cast, "shot-video:");
+        addShotStatus(rows, shots, cast, "shot-first:");
+        addShotStatus(rows, shots, cast, "shot-last:");
+        addShotStatus(rows, shots, cast, "shot-video:");
         for (int index = 0; index < rows.size(); index++) {
             JSONObject row = rows.getJSONObject(index);
             String key = row.getString("targetKey");

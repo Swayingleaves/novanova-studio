@@ -144,14 +144,8 @@ export function seedanceReferenceLabel(kind: ReferenceKind, index: number) {
     return `${prefix[kind]}${index + 1}`;
 }
 
-export function buildSeedancePromptText(prompt: string, images: ReferenceImage[], videos: ReferenceVideo[]) {
-    const labels = [
-        ...labelsForKind("image", images.length),
-        ...labelsForKind("video", videos.length),
-    ];
-    const text = prompt.trim();
-    if (!labels.length) return text;
-    return `参考素材编号：${labels.join("、")}。请按这些编号理解提示词中的图片和视频引用。\n\n${text}`;
+export function buildSeedancePromptText(prompt: string, _images: ReferenceImage[], _videos: ReferenceVideo[]) {
+    return prompt.trim();
 }
 
 export function seedanceVideoReferenceError(videos: ReferenceVideo[]) {

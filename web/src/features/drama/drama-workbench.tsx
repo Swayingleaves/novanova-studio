@@ -227,18 +227,10 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
         }
         return map;
     }, [workspace?.media]);
-    const storyboardShotRefs = useMemo(() => refsOf(latestOf(workspace?.versions, "storyboard")?.content.shots), [workspace?.versions]);
-    const storyboardShotDurations = useMemo(() => shotDurationMap(latestOf(workspace?.versions, "storyboard")?.content.shots), [workspace?.versions]);
-    const productionShotSource = viewed === "shot" && selected?.stage === "shot" ? selected : latestOf(workspace?.versions, "shot");
-    const productionShotRefs = useMemo(() => {
-        const refs = refsOf(productionShotSource?.content.shots);
-        return refs.length ? refs : storyboardShotRefs;
-    }, [productionShotSource, storyboardShotRefs]);
-    const mergedShotDurations = useMemo(() => ({
-        ...storyboardShotDurations,
-        ...shotDurationMap(productionShotSource?.content.shots),
-    }), [storyboardShotDurations, productionShotSource]);
-    const videoMode = viewed === "shot" || viewed === "preview" ? "reference-to-video" : storyboardShotRefs.some((ref) => mediaByKey[`board:${ref}`]?.status === "success") ? "image-to-video" : "text-to-video";
+    const shotVersion = viewed === "shot" && selected?.stage === "shot" ? selected : latestOf(workspace?.versions, "shot");
+    const productionShotRefs = useMemo(() => refsOf(shotVersion?.content.shots), [shotVersion]);
+    const mergedShotDurations = useMemo(() => shotDurationMap(shotVersion?.content.shots), [shotVersion]);
+    const videoMode = productionShotRefs.some((ref) => mediaByKey[`shot-last:${ref}`]?.status === "success") ? "first-last-frame-to-video" : "image-to-video";
     const videoResolutions = useMemo(() => availableVideoResolutions({ ...config, videoModel, videoGenerationMode: videoMode }, videoModel, videoMode), [config, videoMode, videoModel]);
 
     useEffect(() => {
@@ -388,7 +380,7 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
 
     const generate = async (targetKey: string) => {
         if (!project || pendingKeys.includes(targetKey)) return false;
-        const stage: DramaStage = targetKey.startsWith("sheet:") || targetKey.startsWith("shot-video:") || targetKey.startsWith("board:") ? "storyboard" : targetKey.startsWith("character:") || targetKey.startsWith("location:") ? "cast" : "shot";
+        const stage: DramaStage = targetKey.startsWith("character:") || targetKey.startsWith("location:") ? "cast" : "shot";
         const version = viewed === stage && selected?.stage === stage ? selected : latestOf(workspace?.versions, stage);
         if (!version) {
             message.warning(translate("drama.noVersion"));
@@ -402,6 +394,7 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
         }
         const ref = targetKey.slice(targetKey.lastIndexOf(":") + 1);
         const ratio = dramaAspectRatio(project.aspectRatio);
+        const shotVideoMode = mediaByKey[`shot-last:${ref}`]?.status === "success" ? "first-last-frame-to-video" : "image-to-video";
         setPendingKeys((keys) => keys.includes(targetKey) ? keys : [...keys, targetKey]);
         try {
             const next = await generateDramaMedia({
@@ -411,8 +404,8 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                 targetKey,
                 model,
                 parameters: video
-                    ? { seconds: shotSeconds(workspace?.versions, ref, videoSettings.videoSeconds), size: sizeFromAspectRatio({ ...config, videoModel: model, size: ratio, videoGenerationMode: "reference-to-video" }, ratio), resolution: videoResolution || "720p", watermark: false }
-                    : { count: 1, quality: imageQuality || "medium", resolution: imageResolution || "2K", size: targetKey.startsWith("sheet:") ? "16:9" : targetKey.startsWith("character:") ? "3:2" : ratio },
+                    ? { seconds: shotSeconds(workspace?.versions, ref, videoSettings.videoSeconds), size: sizeFromAspectRatio({ ...config, videoModel: model, size: ratio, videoGenerationMode: shotVideoMode }, ratio), resolution: videoResolution || "720p", watermark: false }
+                    : { count: 1, quality: imageQuality || "medium", resolution: imageResolution || "2K", size: targetKey.startsWith("character:") ? "3:2" : ratio },
             });
             setWorkspace(next);
             return true;
@@ -460,20 +453,14 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
         try {
             for (const targetKey of targetKeys) {
                 if (batchRef.current !== batch) return;
-                if (targetKey.startsWith("sheet:")) {
-                    const waited = await waitForPreviousFrame(targetKey, latest, batch);
-                    if (waited === false) return;
-                    if (waited) latest = waited;
-                }
                 const current = mediaFrom(latest)[targetKey];
                 const running = current?.status === "pending" || current?.status === "running";
                 if (running) {
                     blocked += 1;
                     continue;
                 }
-                if (current?.status === "success" && !sheetNeedsFrames(targetKey, mediaFrom(latest))) continue;
+                if (current?.status === "success") continue;
                 const created = await generate(targetKey);
-                if (!created && targetKey.startsWith("sheet:")) return;
                 if (created) started += 1;
                 if (batchRef.current !== batch) return;
                 latest = await refresh().catch(() => latest);
@@ -482,32 +469,6 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
         } finally {
             if (batchRef.current === batch) setFilling(false);
         }
-    };
-
-    const waitForPreviousFrame = async (targetKey: string, latest: DramaWorkspace | null, batch: number) => {
-        const ref = targetKey.slice("sheet:".length);
-        const index = productionShotRefs.indexOf(ref);
-        const previous = index > 0 ? productionShotRefs[index - 1] : "";
-        if (!previous) return latest;
-        const frameKey = `cut:last:${previous}`;
-        const sheetKey = `sheet:${previous}`;
-        let current = latest;
-        for (let attempt = 0; attempt < 90; attempt += 1) {
-            if (batchRef.current !== batch) return false;
-            const media = mediaFrom(current);
-            const frame = media[frameKey];
-            if (frame?.status === "success" && frame.storageKey) return current;
-            const sheet = media[sheetKey];
-            if (sheet?.status === "failed" || sheet?.status === "canceled") {
-                message.warning(translate("drama.previousSheetFailed"));
-                return false;
-            }
-            if (attempt === 89) break;
-            await new Promise((resolve) => window.setTimeout(resolve, 2000));
-            current = await refresh().catch(() => current);
-        }
-        message.warning(translate("drama.previousFrameMissing"));
-        return false;
     };
 
     const onDraftKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -534,8 +495,9 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
 
     const taskStatus = busy ? workspace.activeRequest.status : notice?.status || "";
     const taskMessage = busy ? workspace.activeRequest.message : notice?.message || "";
+    const currentStageMeta = dramaStageMeta[project.currentStage] || dramaStageMeta.shot;
     const nextStage: DramaStage | undefined = project.status === "completed" ? undefined : dramaStages[currentIndex + 1];
-    const CurrentStageIcon = dramaStageMeta[project.currentStage].icon;
+    const CurrentStageIcon = currentStageMeta.icon;
     const lastAssistantIndex = messages.reduce((found, item, index) => (item.role === "assistant" ? index : found), -1);
 
     return (
@@ -554,8 +516,8 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                     className="min-w-36 flex-1 rounded-lg bg-transparent px-2 py-1 text-sm font-semibold text-[var(--studio-ink)] outline-none hover:bg-[var(--studio-surface-hover)] focus:bg-[var(--studio-surface)]"
                 />
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]">
-                    <span className="tabular-nums opacity-70">{currentIndex + 1}/{dramaStages.length}</span>
-                    {translate(dramaStageMeta[project.currentStage].label)}
+                    <span className="tabular-nums opacity-70">{Math.max(0, currentIndex) + 1}/{dramaStages.length}</span>
+                    {translate(currentStageMeta.label)}
                 </span>
                 {project.status === "completed" ? <StatusPill tone="success">{translate("drama.completed")}</StatusPill> : null}
                 <ThemePreferenceMenu variant="toolbar" />
@@ -628,7 +590,7 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                                     <span className="text-sm font-semibold tabular-nums text-[var(--studio-ink)]">{translate("drama.stepProgress", { value0: currentIndex + 1, value1: dramaStages.length })}</span>
                                     <span className="inline-flex items-center gap-1 text-sm font-medium text-[var(--studio-ink)]">
                                         <CurrentStageIcon className="size-3.5 text-[var(--studio-muted)]" aria-hidden="true" />
-                                        {translate(dramaStageMeta[project.currentStage].label)}
+                                        {translate(currentStageMeta.label)}
                                     </span>
                                 </div>
                                 <p className="mt-2 text-xs leading-5 text-[var(--studio-text)]">{nextStage ? translate("drama.confirmHintNext", { value0: translate(dramaStageMeta[nextStage].label) }) : translate("drama.confirmHintLast")}</p>
@@ -719,19 +681,20 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                         ) : selected ? <span className="text-xs font-medium text-[var(--studio-text)]">{versionLabel(translate, selected)}</span> : null}
                         {selected?.confirmationStatus === "confirmed" ? <StatusPill tone="success">{translate("drama.confirmed")}</StatusPill> : selected ? <StatusPill tone="neutral">{translate("drama.pending")}</StatusPill> : null}
                         {selected?.freshness === "needs_update" ? <StatusPill tone="warning">{translate("drama.needsUpdate")}</StatusPill> : null}
-                        {viewed === "cast" || viewed === "storyboard" || viewed === "shot" || viewed === "preview" ? <span className="rounded-full border border-[var(--studio-line-strong)] bg-[var(--studio-surface)] px-2.5 py-1 text-xs font-medium tabular-nums text-[var(--studio-ink)]">{dramaAspectRatio(project.aspectRatio)}</span> : null}
-                        {viewed === "cast" || viewed === "storyboard" || viewed === "shot" ? <ModelPicker config={config} value={imageModel} onChange={handleImageModelChange} capability="image" className="max-w-56 !border-[var(--studio-line-strong)] !bg-[var(--studio-surface)] !text-[var(--studio-ink)] shadow-none" /> : null}
-                        {viewed === "cast" || viewed === "storyboard" || viewed === "shot" ? <SettingChips label={translate("drama.quality")} value={imageQuality} options={[{ value: "low", label: translate("generation.lowQuality_ebe981") }, { value: "medium", label: translate("generation.standardQuality_3da00d") }, { value: "high", label: translate("generation.highQuality_f31c44") }]} onChange={handleImageQualityChange} /> : null}
-                        {viewed === "cast" || viewed === "storyboard" || viewed === "shot" ? <SettingChips label={translate("drama.resolution")} value={imageResolution} options={["1K", "2K", "4K"].map((value) => ({ value, label: value }))} onChange={handleImageResolutionChange} /> : null}
+                        {viewed === "cast" || viewed === "shot" || viewed === "preview" ? <span className="rounded-full border border-[var(--studio-line-strong)] bg-[var(--studio-surface)] px-2.5 py-1 text-xs font-medium tabular-nums text-[var(--studio-ink)]">{dramaAspectRatio(project.aspectRatio)}</span> : null}
+                        {viewed === "cast" || viewed === "shot" ? <ModelPicker config={config} value={imageModel} onChange={handleImageModelChange} capability="image" className="max-w-56 !border-[var(--studio-line-strong)] !bg-[var(--studio-surface)] !text-[var(--studio-ink)] shadow-none" /> : null}
+                        {viewed === "cast" || viewed === "shot" ? <SettingChips label={translate("drama.quality")} value={imageQuality} options={[{ value: "low", label: translate("generation.lowQuality_ebe981") }, { value: "medium", label: translate("generation.standardQuality_3da00d") }, { value: "high", label: translate("generation.highQuality_f31c44") }]} onChange={handleImageQualityChange} /> : null}
+                        {viewed === "cast" || viewed === "shot" ? <SettingChips label={translate("drama.resolution")} value={imageResolution} options={["1K", "2K", "4K"].map((value) => ({ value, label: value }))} onChange={handleImageResolutionChange} /> : null}
                         {viewed === "shot" || viewed === "preview" ? <ModelPicker config={config} value={videoModel} onChange={handleVideoModelChange} capability="video" className="max-w-56 !border-[var(--studio-line-strong)] !bg-[var(--studio-surface)] !text-[var(--studio-ink)] shadow-none" /> : null}
                         {viewed === "shot" || viewed === "preview" ? <SettingChips label={translate("drama.resolution")} value={videoResolution} options={(videoResolutions.length ? videoResolutions : [videoResolution as VideoResolution]).map((value) => ({ value, label: VIDEO_RESOLUTION_OPTIONS.find((item) => item.value === value)?.label || value }))} onChange={handleVideoResolutionChange} /> : null}
-                        {viewed === "cast" || viewed === "storyboard" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(imageTargets(viewed, selected?.content))}>{translate("drama.generateMissingImages")}</Button> : null}
-                        {viewed === "shot" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(productionShotRefs.map((ref) => `sheet:${ref}`))}>{translate("drama.generateMissingSheets")}</Button> : null}
+                        {viewed === "cast" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(imageTargets(viewed, selected?.content))}>{translate("drama.generateMissingImages")}</Button> : null}
+                        {viewed === "shot" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(productionShotRefs.map((ref) => `shot-first:${ref}`))}>{translate("drama.generateMissingFirstFrames")}</Button> : null}
+                        {viewed === "shot" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(productionShotRefs.map((ref) => `shot-last:${ref}`))}>{translate("drama.generateMissingLastFrames")}</Button> : null}
                         {viewed === "shot" || viewed === "preview" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(productionShotRefs.map((ref) => `shot-video:${ref}`))}>{translate("drama.generateMissingVideos")}</Button> : null}
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
                         <div className="mx-auto w-full max-w-[1600px]">
-                            <DramaArtifact stage={viewed} version={selected} durationSeconds={project.durationSeconds} durationDisabled={busy} aspectRatio={dramaAspectRatio(project.aspectRatio)} onAspect={(aspectRatio) => void saveSettings({ aspectRatio })} onDuration={(durationSeconds) => void saveSettings({ durationSeconds })} mediaByKey={mediaByKey} pendingKeys={pendingKeys} shotRefs={viewed === "storyboard" ? storyboardShotRefs : productionShotRefs} shotDurations={mergedShotDurations} projectId={project.id} onWorkspace={setWorkspace} onGenerate={(targetKey) => void generate(targetKey)} onStop={(media) => void stopMedia(media)} stoppingTaskId={stoppingTaskId} />
+                            <DramaArtifact stage={viewed} version={selected} durationSeconds={project.durationSeconds} durationDisabled={busy} aspectRatio={dramaAspectRatio(project.aspectRatio)} onAspect={(aspectRatio) => void saveSettings({ aspectRatio })} onDuration={(durationSeconds) => void saveSettings({ durationSeconds })} mediaByKey={mediaByKey} pendingKeys={pendingKeys} shotRefs={productionShotRefs} shotDurations={mergedShotDurations} projectId={project.id} onWorkspace={setWorkspace} onGenerate={(targetKey) => void generate(targetKey)} onStop={(media) => void stopMedia(media)} stoppingTaskId={stoppingTaskId} />
                         </div>
                     </div>
                 </section>
@@ -746,14 +709,6 @@ function mediaFrom(workspace: DramaWorkspace | null) {
         if (!map[item.targetKey]) map[item.targetKey] = item;
     }
     return map;
-}
-
-function sheetNeedsFrames(targetKey: string, media: Record<string, DramaMedia | undefined>) {
-    if (!targetKey.startsWith("sheet:")) return false;
-    const ref = targetKey.slice("sheet:".length);
-    const first = media[`cut:first:${ref}`];
-    const last = media[`cut:last:${ref}`];
-    return first?.status !== "success" || !first.storageKey || last?.status !== "success" || !last.storageKey;
 }
 
 function latestOf(versions: DramaVersion[] | undefined, stage: DramaStage) {
@@ -778,17 +733,14 @@ function shotDurationMap(value: unknown) {
 
 function imageTargets(stage: DramaStage, content: Record<string, unknown> | undefined) {
     if (stage === "cast") return [...refsOf(content?.characters).map((ref) => `character:${ref}`), ...refsOf(content?.locations).map((ref) => `location:${ref}`)];
-    if (stage === "storyboard") return refsOf(content?.shots).map((ref) => `board:${ref}`);
     return [];
 }
 
 function shotSeconds(versions: DramaVersion[] | undefined, ref: string, fallback: string) {
-    for (const stage of ["shot", "storyboard"] as const) {
-        const shots = latestOf(versions, stage)?.content.shots;
-        const shot = Array.isArray(shots) ? shots.find((item) => item && typeof item === "object" && "ref" in item && item.ref === ref) : undefined;
-        const seconds = shot && typeof shot === "object" && "durationSeconds" in shot ? Number(shot.durationSeconds) : Number.NaN;
-        if (Number.isFinite(seconds) && seconds > 0) return Math.round(seconds);
-    }
+    const shots = latestOf(versions, "shot")?.content.shots;
+    const shot = Array.isArray(shots) ? shots.find((item) => item && typeof item === "object" && "ref" in item && item.ref === ref) : undefined;
+    const seconds = shot && typeof shot === "object" && "durationSeconds" in shot ? Number(shot.durationSeconds) : Number.NaN;
+    if (Number.isFinite(seconds) && seconds > 0) return Math.round(seconds);
     const saved = Number(fallback);
     return Number.isFinite(saved) && saved > 0 ? saved : 5;
 }

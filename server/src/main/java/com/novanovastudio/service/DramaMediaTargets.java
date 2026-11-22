@@ -34,30 +34,16 @@ public final class DramaMediaTargets {
     /**
      * 解析一次生成目标。
      *
-     * @param targetKey 目标，形如 character:c1、sheet:sh1
+     * @param targetKey 目标，形如 character:c1、location:l1、shot-first:sh1、shot-last:sh1、shot-video:sh1
      * @param versionContent 请求指定的阶段版本内容
-     * @param storyboard 最新分镜，可为空
+     * @param shots 最新分镜镜头阶段产物，可为空
      * @return 协议信息
      * @throws BusinessException 目标不合法或条目不存在时抛出
      */
-    public static Spec resolve(String targetKey, JSONObject versionContent, JSONObject storyboard) {
-        return resolve(targetKey, versionContent, storyboard, null);
-    }
-
-    /**
-     * 解析一次生成目标，镜头阶段（sheet / shot-video）优先以最新镜头制作产物为准。
-     *
-     * @param targetKey 目标，形如 character:c1、sheet:sh1
-     * @param versionContent 请求指定的阶段版本内容
-     * @param storyboard 最新分镜，可为空
-     * @param production 最新镜头制作，可为空
-     * @return 协议信息
-     * @throws BusinessException 目标不合法或条目不存在时抛出
-     */
-    public static Spec resolve(String targetKey, JSONObject versionContent, JSONObject storyboard, JSONObject production) {
+    public static Spec resolve(String targetKey, JSONObject versionContent, JSONObject shots) {
         String kind = kind(targetKey);
         String ref = ref(targetKey);
-        JSONObject shotSource = hasShots(production) ? production : storyboard;
+        JSONObject shotSource = hasShots(shots) ? shots : versionContent;
         return switch (kind) {
             case "character" -> {
                 item(versionContent, "characters", ref);
@@ -67,17 +53,13 @@ public final class DramaMediaTargets {
                 item(versionContent, "locations", ref);
                 yield new Spec("cast", "image", 0);
             }
-            case "board" -> {
-                item(versionContent, "shots", ref);
-                yield new Spec("storyboard", "image", 0);
-            }
-            case "sheet" -> {
-                JSONObject shot = item(shotSource, "shots", ref);
-                yield new Spec("storyboard", "image", seconds(shot, storyboard, ref));
+            case "shot-first", "shot-last" -> {
+                item(shotSource, "shots", ref);
+                yield new Spec("shot", "image", 0);
             }
             case "shot-video" -> {
                 JSONObject shot = item(shotSource, "shots", ref);
-                yield new Spec("storyboard", "video", seconds(shot, storyboard, ref));
+                yield new Spec("shot", "video", seconds(shot));
             }
             default -> throw invalid("生成目标不正确");
         };
@@ -90,18 +72,18 @@ public final class DramaMediaTargets {
     }
 
     /**
-     * 必须有成功参考图的目标。连续图不是第一个镜头时，必须带上上一镜的尾帧。
+     * 必须有成功参考图的目标。
+     * <p>尾帧和镜头视频都必须先有对应镜头的首帧图；尾帧本身对视频可选。</p>
      *
      * @param targetKey 生成目标
-     * @param storyboard 最新分镜
      * @return 必需的参考图目标，没有时为 {@link List#of()}
      */
-    public static List<String> requiredReferences(String targetKey, JSONObject storyboard) {
-        if (!"sheet".equals(kind(targetKey))) {
-            return List.of();
+    public static List<String> requiredReferences(String targetKey) {
+        String kind = kind(targetKey);
+        if ("shot-last".equals(kind) || "shot-video".equals(kind)) {
+            return List.of("shot-first:" + ref(targetKey));
         }
-        String previous = previousRef(storyboard, ref(targetKey));
-        return StringUtils.hasText(previous) ? List.of("cut:last:" + previous) : List.of();
+        return List.of();
     }
 
     /**
@@ -177,24 +159,9 @@ public final class DramaMediaTargets {
         throw invalid("当前版本里没有这个条目");
     }
 
-    private static int seconds(JSONObject shot, JSONObject fallbackStoryboard, String ref) {
+    private static int seconds(JSONObject shot) {
         Integer value = shot == null ? null : shot.getInteger("durationSeconds");
-        if (value != null && value >= 1) {
-            return value;
-        }
-        JSONArray array = fallbackStoryboard == null ? null : fallbackStoryboard.getJSONArray("shots");
-        if (array != null) {
-            for (int index = 0; index < array.size(); index++) {
-                JSONObject item = array.getJSONObject(index);
-                if (item != null && ref.equals(item.getString("ref"))) {
-                    Integer fallback = item.getInteger("durationSeconds");
-                    if (fallback != null && fallback >= 1) {
-                        return fallback;
-                    }
-                }
-            }
-        }
-        return 5;
+        return value != null && value >= 1 ? value : 5;
     }
 
     private static BusinessException invalid(String message) {

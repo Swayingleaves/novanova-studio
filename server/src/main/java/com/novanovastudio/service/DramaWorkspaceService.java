@@ -97,7 +97,15 @@ public class DramaWorkspaceService {
         int resolvedSize = Math.min(Math.max(pageSize, 1), 50);
         return scope(user -> dramaRepository.listProjects(user.userId(), user.teamId(), resolvedSize, (resolvedPage - 1) * resolvedSize).collectList()
                 .zipWith(dramaRepository.countProjects(user.userId(), user.teamId()))
-                .map(pair -> new DramaDtos.ProjectListResponse(pair.getT1().stream().map(this::summary).toList(), pair.getT2() == null ? 0 : pair.getT2())));
+                .flatMap(pair -> {
+                    List<DramaRepository.ProjectRow> rows = pair.getT1();
+                    long total = pair.getT2() == null ? 0 : pair.getT2();
+                    List<String> projectIds = rows.stream().map(DramaRepository.ProjectRow::id).toList();
+                    return dramaMediaService.listFirstImageCovers(projectIds, user.teamId())
+                            .map(covers -> new DramaDtos.ProjectListResponse(
+                                    rows.stream().map(row -> summary(row, covers.get(row.id()))).toList(),
+                                    total));
+                }));
     }
 
     /**
@@ -248,9 +256,9 @@ public class DramaWorkspaceService {
         return dramaRepository.listVersions(project.id(), teamId).collectList()
                 .flatMap(versions -> dramaRepository.listMedia(project.id(), teamId).collectList().flatMap(media -> {
                     JSONObject cast = contentOf(latest(versions, "cast"));
-                    JSONObject storyboard = contentOf(latest(versions, "storyboard"));
+                    JSONObject shots = contentOf(latest(versions, "shot"));
                     List<String> keys = plannedKeys(requested.stream().map(DramaContracts.MediaItem::targetKey).toList(),
-                            regenerate, cast, storyboard, media);
+                            regenerate, cast, shots, media);
                     if (keys.isEmpty()) {
                         return dramaRepository.clearActive(project.id(), requestId);
                     }
@@ -279,19 +287,18 @@ public class DramaWorkspaceService {
     }
 
     private Mono<String> submitChatMedia(DramaRepository.ProjectRow project, JSONObject payload, DramaContracts.MediaItem item,
-                                         String castVersion, String storyboardVersion) {
+                                         String castVersion, String shotVersion) {
         String targetKey = item.targetKey();
         boolean video = targetKey.startsWith("shot-video:");
-        String versionId = targetKey.startsWith("character:") || targetKey.startsWith("location:") ? castVersion : storyboardVersion;
+        String versionId = targetKey.startsWith("character:") || targetKey.startsWith("location:") ? castVersion : shotVersion;
         if (!StringUtils.hasText(versionId)) {
-            return Mono.error(invalid(video ? "还没有分镜，不能生成视频" : "还没有对应阶段的内容"));
+            return Mono.error(invalid(video ? "还没有分镜镜头，不能生成视频" : "还没有对应阶段的内容"));
         }
         Map<String, Object> parameters = new LinkedHashMap<>();
         if (video) {
             String resolution = payload == null ? "" : payload.getString("videoResolution");
             parameters.put("resolution", StringUtils.hasText(resolution) ? resolution : "720p");
             parameters.put("watermark", false);
-            // 供应商的 size 要的是比例：留空会被兜底成 16:9 再换算成 720x1280，直接被拒。
             parameters.put("size", DramaArtifacts.normalizeAspect(project.aspectRatio()));
         } else {
             String quality = payload == null ? "" : payload.getString("imageQuality");
@@ -299,7 +306,7 @@ public class DramaWorkspaceService {
             parameters.put("count", 1);
             parameters.put("quality", StringUtils.hasText(quality) ? quality : "medium");
             parameters.put("resolution", StringUtils.hasText(resolution) ? resolution : "2K");
-            parameters.put("size", targetKey.startsWith("sheet:") ? "16:9" : targetKey.startsWith("character:") ? "3:2" : project.aspectRatio());
+            parameters.put("size", targetKey.startsWith("character:") ? "3:2" : project.aspectRatio());
         }
         String model = payload == null ? "" : payload.getString(video ? "videoModel" : "imageModel");
         return dramaMediaService.generate(new DramaDtos.GenerateMediaRequest(UUID.randomUUID().toString(), project.id(), versionId, targetKey,
@@ -363,10 +370,9 @@ public class DramaWorkspaceService {
         JSONObject payload = result.getJSONObject("payload");
         return dramaRepository.listVersions(project.id(), user.teamId()).collectList()
                 .flatMap(versions -> dramaMediaService.list(user.userId(), user.teamId(), project.id()).flatMap(media -> {
-                    JSONObject storyboard = contentOf(latest(versions, "storyboard"));
                     JSONObject cast = contentOf(latest(versions, "cast"));
                     String castVersion = latest(versions, "cast") == null ? "" : latest(versions, "cast").id();
-                    String storyboardVersion = latest(versions, "storyboard") == null ? "" : latest(versions, "storyboard").id();
+                    String shotVersion = latest(versions, "shot") == null ? "" : latest(versions, "shot").id();
                     List<DramaMediaCommands.NameTarget> catalog = new ArrayList<>();
                     catalog.addAll(namedTargets(cast, "characters", "character:"));
                     catalog.addAll(namedTargets(cast, "locations", "location:"));
@@ -375,7 +381,7 @@ public class DramaWorkspaceService {
                     boolean dropped = false;
                     for (int index = 0; index < pending.size(); index++) {
                         String key = pending.getString(index);
-                        String state = chainState(key, storyboard, media);
+                        String state = chainState(key, media);
                         if (target == null && "ready".equals(state)) {
                             target = key;
                             continue;
@@ -395,7 +401,7 @@ public class DramaWorkspaceService {
                         return dramaRepository.updateChatMedia(batch.id(), result.toJSONString()).thenReturn(true);
                     }
                     String key = target;
-                    return submitChatMedia(project, payload, itemOf(items, key), castVersion, storyboardVersion)
+                    return submitChatMedia(project, payload, itemOf(items, key), castVersion, shotVersion)
                             .flatMap(submitted -> appendTask(user, project, result, submitted, catalog))
                             .onErrorResume(error -> {
                                 log.warn("短剧对话提交媒体失败: projectId={}, target={}, message={}", project.id(), key, error.getMessage());
@@ -450,29 +456,18 @@ public class DramaWorkspaceService {
      * 判断一个生成目标现在能不能提交。
      *
      * @param key 生成目标
-     * @param storyboard 最新分镜
      * @param media 当前项目的全部媒体
      * @return ready 可以提交，wait 等前置，dead 前置已经废了
      */
-    private String chainState(String key, JSONObject storyboard, List<DramaDtos.MediaView> media) {
+    private String chainState(String key, List<DramaDtos.MediaView> media) {
         if (!chainedTarget(key)) {
             return "ready";
         }
-        String ref = DramaMediaTargets.ref(key);
-        List<String> required;
-        List<String> blockers;
-        if (key.startsWith("sheet:")) {
-            required = DramaMediaTargets.requiredReferences(key, storyboard);
-            String previous = DramaMediaTargets.previousRef(storyboard, ref);
-            blockers = StringUtils.hasText(previous) ? List.of("sheet:" + previous) : List.of();
-        } else {
-            required = List.of("cut:first:" + ref, "cut:last:" + ref);
-            blockers = List.of("sheet:" + ref);
-        }
+        List<String> required = DramaMediaTargets.requiredReferences(key);
         if (required.isEmpty() || ready(media, required)) {
             return "ready";
         }
-        return blocked(media, blockers) ? "dead" : "wait";
+        return blocked(media, required) ? "dead" : "wait";
     }
 
     /**
@@ -572,7 +567,7 @@ public class DramaWorkspaceService {
      * @return 需要串行返回 true
      */
     private static boolean chainedTarget(String key) {
-        return key.startsWith("sheet:") || key.startsWith("shot-video:");
+        return key.startsWith("shot-last:") || key.startsWith("shot-video:");
     }
 
     /**
@@ -606,13 +601,13 @@ public class DramaWorkspaceService {
         });
     }
 
-    private List<String> plannedKeys(List<String> requested, boolean regenerate, JSONObject cast, JSONObject storyboard, List<DramaRepository.MediaRow> media) {
+    private List<String> plannedKeys(List<String> requested, boolean regenerate, JSONObject cast, JSONObject shots, List<DramaRepository.MediaRow> media) {
         java.util.Set<String> allowed = new java.util.LinkedHashSet<>();
         allowed.addAll(prefixed("character:", refs(cast, "characters")));
         allowed.addAll(prefixed("location:", refs(cast, "locations")));
-        allowed.addAll(prefixed("board:", refs(storyboard, "shots")));
-        allowed.addAll(prefixed("sheet:", refs(storyboard, "shots")));
-        allowed.addAll(prefixed("shot-video:", refs(storyboard, "shots")));
+        allowed.addAll(prefixed("shot-first:", refs(shots, "shots")));
+        allowed.addAll(prefixed("shot-last:", refs(shots, "shots")));
+        allowed.addAll(prefixed("shot-video:", refs(shots, "shots")));
         List<String> keys = new ArrayList<>();
         for (String key : requested) {
             if (!allowed.contains(key) || keys.contains(key)) {
@@ -664,14 +659,14 @@ public class DramaWorkspaceService {
             }
         }
         String ref = key.substring(key.lastIndexOf(':') + 1);
-        if (key.startsWith("sheet:")) {
-            return ref + " 的连续图";
+        if (key.startsWith("shot-first:")) {
+            return ref + " 的首帧";
+        }
+        if (key.startsWith("shot-last:")) {
+            return ref + " 的尾帧";
         }
         if (key.startsWith("shot-video:")) {
             return ref + " 的视频";
-        }
-        if (key.startsWith("board:")) {
-            return ref + " 的分镜";
         }
         return ref;
     }
@@ -732,7 +727,7 @@ public class DramaWorkspaceService {
                         return Mono.error(invalid("还不能修改尚未开始的阶段"));
                     }
                     JSONObject content = DramaArtifacts.normalize(stage, raw, contentOf(latest(versions, stage)),
-                            contentOf(latest(versions, "cast")), contentOf(latest(versions, "storyboard")), project.durationSeconds(), project.aspectRatio(), userMessage);
+                            contentOf(latest(versions, "cast")), contentOf(latest(versions, "shot")), project.durationSeconds(), project.aspectRatio(), userMessage);
                     return storeVersion(user, project, versions, stage, requestId, content, true);
                 }));
     }
@@ -997,21 +992,19 @@ public class DramaWorkspaceService {
      * 按生成目标判断这批素材属于哪个阶段。
      *
      * @param keys 生成目标
-     * @return String 阶段；角色和场景归 cast，镜头连续图和视频归 shot，其余归 storyboard
+     * @return String 阶段；角色和场景归 cast，其余归 shot
      */
     private String mediaStage(List<String> keys) {
         if (keys.stream().allMatch(key -> key.startsWith("character:") || key.startsWith("location:"))) {
             return "cast";
         }
-        if (keys.stream().anyMatch(key -> key.startsWith("sheet:") || key.startsWith("shot-video:"))) {
-            return "shot";
-        }
-        return "storyboard";
+        return "shot";
     }
 
-    private DramaDtos.ProjectView summary(DramaRepository.ProjectRow project) {
+    private DramaDtos.ProjectView summary(DramaRepository.ProjectRow project, DramaRepository.ProjectCoverRow cover) {
         return new DramaDtos.ProjectView(project.id(), project.name(), project.currentStage(), project.status(), project.revision(),
-                project.textModel(), project.textCredits(), project.durationSeconds(), DramaArtifacts.normalizeAspect(project.aspectRatio()), text(project.updatedAt()));
+                project.textModel(), project.textCredits(), project.durationSeconds(), DramaArtifacts.normalizeAspect(project.aspectRatio()), text(project.updatedAt()),
+                cover == null ? "" : cover.url(), cover == null ? "" : cover.storageKey());
     }
 
     private DramaDtos.ProjectDetail detail(DramaRepository.ProjectRow project) {

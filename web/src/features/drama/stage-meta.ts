@@ -1,9 +1,9 @@
-import { Clapperboard, FileText, LayoutGrid, Play, ScrollText, Users, type LucideIcon } from "lucide-react";
+import { Clapperboard, FileText, Play, ScrollText, Users, type LucideIcon } from "lucide-react";
 import type { DramaStage } from "@/services/api/drama";
 
 /** 每个阶段的阶段名、图标、对话身份，以及卡片下方可点的建议。 */
 export const dramaStageMeta: Record<DramaStage, {
-    label: "drama.stagePlan" | "drama.stageScript" | "drama.stageCast" | "drama.stageStoryboard" | "drama.stageShot" | "drama.stagePreview";
+    label: "drama.stagePlan" | "drama.stageScript" | "drama.stageCast" | "drama.stageShot" | "drama.stagePreview";
     icon: LucideIcon;
     /** 对话里这个阶段由哪个身份应答。 */
     agentKey: string;
@@ -28,17 +28,11 @@ export const dramaStageMeta: Record<DramaStage, {
         agentKey: "drama.agentCharacterDesigner",
         suggestions: ["drama.suggestCastAppearance", "drama.suggestCastExtra", "drama.suggestCastImage"],
     },
-    storyboard: {
-        label: "drama.stageStoryboard",
-        icon: LayoutGrid,
-        agentKey: "drama.agentStoryboardArtist",
-        suggestions: ["drama.suggestBoardDuration", "drama.suggestBoardTransition", "drama.suggestBoardImage"],
-    },
     shot: {
         label: "drama.stageShot",
         icon: Clapperboard,
         agentKey: "drama.agentCinematographer",
-        suggestions: ["drama.suggestShotRedo", "drama.suggestShotVideo", "drama.suggestShotCamera"],
+        suggestions: ["drama.suggestBoardDuration", "drama.suggestShotVideo", "drama.suggestShotCamera"],
     },
     preview: {
         label: "drama.stagePreview",

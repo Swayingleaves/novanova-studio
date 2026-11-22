@@ -22,13 +22,12 @@ public final class DramaContracts {
      * @param plan 制作方案
      * @param script 剧本
      * @param cast 角色与场景
-     * @param storyboard 分镜
-     * @param shot 镜头制作
+     * @param shot 分镜镜头
      * @param preview 成片说明
      * @param media 要提交的图片或视频，不出图时为空
      */
     public record DirectorResult(String reply, String intent, String targetStage, PlanBody plan, ScriptBody script,
-                                 CastBody cast, StoryboardBody storyboard, ShotBody shot, PreviewBody preview, MediaPlan media) {
+                                 CastBody cast, ShotBody shot, PreviewBody preview, MediaPlan media) {
     }
 
     /**
@@ -43,7 +42,7 @@ public final class DramaContracts {
     /**
      * 一次生成目标的完整提交内容。
      *
-     * @param targetKey 目标，如 character:c1、location:l1、board:sh1、sheet:sh1、shot-video:sh1
+     * @param targetKey 目标，如 character:c1、location:l1、shot-first:sh1、shot-last:sh1、shot-video:sh1
      * @param prompt 交给图片或视频模型的完整提示词
      * @param referenceKeys 参考图顺序，按语义从先到后排列
      */
@@ -87,21 +86,13 @@ public final class DramaContracts {
     public record LocationBody(String ref, String name, String visual) {
     }
 
-    /** @param shots 镜头 */
-    public record StoryboardBody(List<BoardShot> shots) {
-    }
-
-    /** @param ref 镜头短序号sh1 @param order 顺序 @param durationSeconds 时长 @param size 景别 @param camera 运镜 @param picture 画面 @param dialogue 对白 @param characterRef 角色 @param locationRef 场景 */
-    public record BoardShot(String ref, Integer order, Integer durationSeconds, String size, String camera, String picture,
-                            String dialogue, String characterRef, String locationRef) {
-    }
-
-    /** @param shots 镜头制作说明 */
+    /** @param shots 分镜镜头列表 */
     public record ShotBody(List<ShotItem> shots) {
     }
 
-    /** @param ref 镜头短序号 @param durationSeconds 这一镜的时长（整数秒） @param videoPrompt 视频提示词，按秒写这一镜的动作和情节 */
-    public record ShotItem(String ref, Integer durationSeconds, String videoPrompt) {
+    /** @param ref 镜头短序号sh1 @param order 顺序 @param durationSeconds 这一镜的时长（整数秒） @param size 景别 @param camera 运镜 @param picture 画面描述 @param dialogue 对白 @param characterRef 角色短序号 @param locationRef 场景短序号 @param videoPrompt 视频提示词，描述这一镜从首帧到尾帧的动作与情节 */
+    public record ShotItem(String ref, Integer order, Integer durationSeconds, String size, String camera, String picture,
+                           String dialogue, String characterRef, String locationRef, String videoPrompt) {
     }
 
     /** @param summary 制作总结 @param checklist 检查项 */

@@ -4,15 +4,15 @@
 
 # 输入
 
-- targetKey：本次要生成的目标，形如 character:c1、location:l1、board:sh1、sheet:sh1、shot-video:sh1。
+- targetKey：本次要生成的目标，形如 character:c1、location:l1、shot-first:sh1、shot-last:sh1、shot-video:sh1。
 - mediaType：image 或 video。
 - seconds：视频秒数，图片为 0。
-- aspectRatio：项目成片画幅。它只约束成片，不约束连续图画布。
+- aspectRatio：项目成片画幅。
 - style：制作方案里的视觉风格，是最重要的风格依据。
-- shot：本镜头的分镜，含 order、durationSeconds、size、camera、picture、dialogue、characterRef、locationRef。
-- previousShot：上一镜头的 ref、picture、dialogue，以及它的尾帧 key 和是否已就绪。只有连续图目标会带这个字段。
+- shot：本镜头的分镜镜头信息，含 order、durationSeconds、size、camera、picture、dialogue、characterRef、locationRef、videoPrompt。
+- previousShot：上一镜头的 ref、picture、dialogue，以及它的尾帧/首帧 key 和是否已就绪。只有首帧目标会带这个字段。
+- hasLastFrame：布尔值，表示本镜头是否已经生成尾帧图。只有视频目标会带这个字段。
 - cast：角色和场景设定。characters 有 name、appearance，locations 有 name、visual。
-- production：镜头制作，含本镜的 videoPrompt。只有视频目标有意义。
 - availableReferences：当前已经生成成功、可以挂给模型的参考图目标。
 
 # 输出
@@ -27,7 +27,7 @@
 # 通用规则
 
 - 只使用输入里出现的事实。人物姓名、外形、场景视觉、画幅、时长都必须来自输入，不要自己编。
-- 连续图固定写 16:9；角色图固定写 3:2；其他目标用 aspectRatio。除此之外不要写别的比例。
+- 角色图固定写 3:2；其他目标统一用 aspectRatio。除此之外不要写别的比例。
 - style 里如果带画幅、竖屏、横屏、比例，引用时一律删掉，只保留风格、光线、色彩和质感。
 - 不要写景别以外的摄影参数、不要写模型名、不要写负面词清单以外的技术字段。
 - 画面里不要出现文字、字幕、水印、边框、标签、分镜格编号。
@@ -48,27 +48,24 @@
 
 写一张空场景图：没有人物，只有地点本身。用 cast 里该 location 的 visual 描述空间结构、材质、光源和氛围，电影场景质感。画幅用 aspectRatio。referenceKeys 返回空数组，场景图不需要参考图。
 
-# 分镜静帧 board
+# 镜头首帧 shot-first
 
-写一张单幅分镜画面：按 shot.picture 描述这一镜的画面，补充 shot.size 的景别和 shot.camera 的运镜带来的机位感，人物和地点用 cast 锁定。画幅用 aspectRatio。不要画成多格拼图。referenceKeys 按 characterRef、locationRef 的顺序挂已有的 character: 和 location: 目标，没有就返回空数组。
+写一张单幅高清首帧画面，呈现这一镜刚开始瞬间的构图、人物起始姿态、表情与环境。画幅用 aspectRatio，绝对不要画成多格拼图。
 
-# 连续图 sheet
+- 按 shot.picture、shot.size（景别）、shot.camera（机位）描述开场画面，人物外形和地点严格沿用 cast。
+- referenceKeys：优先放入与本镜对应的 character: 和 location:；如果 previousShot 存在且与本镜属于连续场景、且其 lastFrameReady 或 firstFrameReady 为真，可把 previousShot.lastFrameKey（其次 previousShot.firstFrameKey）一起放入参考图以保持画面连贯。
 
-写一张 16:9 的 4 列 3 行动作连续分格图，表现这一个镜头大约 seconds 秒的动作。整张图固定 16:9，是一张完整的 4×3 拼版，共 12 个等大画格，不能只画单格，也不能画成竖幅长图。
+# 镜头尾帧 shot-last
 
-- 阅读顺序：从左到右、从上到下。
-- 第 1 格是首帧，第 12 格是本镜头的尾帧，中间每一格都是上一格动作的继续，动作必须连续推进，不能跳步、不能重复同一姿态。
-- 有 previousShot 且 lastFrameReady 为真时：referenceKeys 第一张必须是 previousShot.lastFrameKey，接着是 board:本镜（若可用），再是 character: 和 location: 目标。提示词里要写明第 1 格原样接上这张尾帧，作为本镜头的开始，人物、场景、姿态不得跳变；分镜静帧只能用来延续第 1 格之后的动作，不能替换第 1 格。
-- 没有上一镜尾帧、但 availableReferences 里有 board:本镜时：referenceKeys 先放 board:本镜，再放 character: 和 location:。第 1 格必须延续这张分镜静帧。参考图只用来延续画面内容，不要沿用成片画幅，也不要改成参考图的比例。
-- 两者都没有时：referenceKeys 只放 character: 和 location:，按 shot.picture 直接写第 1 格的画面，不要提参考图。
-- 用 shot.picture 和 shot.dialogue 写清这一镜演了什么；对白只作为画面内容的依据，不要把台词逐字写进画面要求里。
-- 格子之间留细白边，不要文字。
+写一张单幅高清尾帧画面，呈现这一镜动作结束时的定格状态（姿态变化、表情落点、物体位置与镜头落幅），必须自然承接本镜首帧，不得换人、换衣或切换无关场景。画幅用 aspectRatio，不要画成多格拼图。
+
+- referenceKeys：第一张必须是 shot-first:本镜，后面跟本镜相关的 character: 和 location:。
 
 # 镜头视频 shot-video
 
-写一条 reference-to-video 提示词：在提示词开头明确用 `@图片1` 指代首帧、`@图片2` 指代尾帧、`@图片3` 指代 4×3 动作连续分格图（例如：「以 @图片1 为首帧、以 @图片2 为尾帧，严格按照 @图片3 中 4×3 连续分格从左到右、从上到下的动作顺序演绎本镜头……」），视频必须从 `@图片1` 演到 `@图片2`，动作和情节不得跳格、换人或改场景。
+写一条视频生成提示词，描述这一镜在 seconds 秒内的动作推进、表情变化、运镜轨迹与画面情节，让视频模型自由且自然地演绎完整动态过程。
 
-- referenceKeys 固定为 cut:first:本镜、cut:last:本镜、sheet:本镜，顺序不能变（分别对应 `@图片1`、`@图片2`、`@图片3`）；少一张时不要编造。
-- 这一镜演什么，优先用 production.videoPrompt；没有时用 shot.picture。要把情节写清楚，不要只写气氛和光效。
-- 人物外形沿用 cast，不要另写一套长相。
-- 时长 seconds 秒，画幅用 aspectRatio。
+- 如果 hasLastFrame 为真：本视频采用首尾帧模式（首帧为 shot-first:本镜，尾帧为 shot-last:本镜），提示词需写清画面从开场姿态自然过渡到收尾状态的完整动作，不跳切、不换人。
+- 如果 hasLastFrame 为假：本视频采用图生视频模式（仅以 shot-first:本镜为首帧），提示词围绕首帧展开连贯动作与运镜推进。
+- 这一镜演什么，优先依据 shot.videoPrompt；没有时依据 shot.picture 与 shot.dialogue。要把可见情节写清楚，不要只写气氛和光效。
+- 人物外形沿用 cast，时长 seconds 秒，画幅用 aspectRatio。referenceKeys 返回空数组（首尾帧由服务端自动挂载）。

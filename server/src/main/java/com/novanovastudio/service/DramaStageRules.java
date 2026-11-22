@@ -18,8 +18,8 @@ public final class DramaStageRules {
     /** 文本积分流水使用的稳定业务名称。 */
     public static final String OPERATION = "智能短剧文本生成";
 
-    /** 从制作方案到成片预览的固定顺序。声音步骤暂时不进入流程。 */
-    public static final List<String> ORDER = List.of("plan", "script", "cast", "storyboard", "shot", "preview");
+    /** 从制作方案到成片预览的固定顺序。分镜与镜头已合并为 shot 阶段。 */
+    public static final List<String> ORDER = List.of("plan", "script", "cast", "shot", "preview");
 
     private DramaStageRules() {
     }

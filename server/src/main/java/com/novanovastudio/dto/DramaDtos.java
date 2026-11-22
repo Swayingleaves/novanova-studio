@@ -82,9 +82,10 @@ public final class DramaDtos {
     public record ProjectListResponse(List<ProjectView> projects, long total) {
     }
 
-    /** @param id 项目ID @param name 名称 @param currentStage 当前阶段 @param status 状态 @param revision 修订号 @param textModel 模型 @param textCredits 文本积分 @param durationSeconds 时长 @param updatedAt 更新时间 */
+    /** @param id 项目ID @param name 名称 @param currentStage 当前阶段 @param status 状态 @param revision 修订号 @param textModel 模型 @param textCredits 文本积分 @param durationSeconds 时长 @param aspectRatio 画幅比例 @param updatedAt 更新时间 @param coverUrl 封面图地址 @param coverStorageKey 封面图存储键 */
     public record ProjectView(String id, String name, String currentStage, String status, int revision, String textModel,
-                              BigDecimal textCredits, int durationSeconds, String aspectRatio, String updatedAt) {
+                              BigDecimal textCredits, int durationSeconds, String aspectRatio, String updatedAt,
+                              String coverUrl, String coverStorageKey) {
     }
 
     /** @param project 项目 @param versions 全部版本 @param activeRequest 活动请求 @param media 图片和视频生成记录，新的在前 */

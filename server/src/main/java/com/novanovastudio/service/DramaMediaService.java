@@ -46,9 +46,6 @@ public class DramaMediaService {
 
     private static final Set<String> STATUSES = Set.of("pending", "running", "success", "failed", "canceled");
 
-    /** 正在裁切的项目，合并同一项目的并发裁切请求。 */
-    private final Map<String, Mono<Void>> cropping = new ConcurrentHashMap<>();
-
     /** 当前用户。 */
     private final CurrentUserProvider currentUserProvider;
 
@@ -77,6 +74,25 @@ public class DramaMediaService {
     private final StorageBillingService storageBillingService;
 
     /**
+     * 批量读取项目封面图，并按需签名可预览地址。
+     *
+     * @param projectIds 项目ID列表
+     * @param teamId 团队空间
+     * @return 按项目ID索引的封面记录
+     */
+    public Mono<Map<String, DramaRepository.ProjectCoverRow>> listFirstImageCovers(List<String> projectIds, long teamId) {
+        return dramaRepository.findFirstImageCovers(projectIds, teamId)
+                .flatMap(row -> {
+                    String url = text(row.url());
+                    Mono<String> signed = StringUtils.hasText(url)
+                            ? mediaAccessService.signUrl(url, MediaAccessService.Purpose.PREVIEW)
+                            : Mono.just("");
+                    return signed.map(resolved -> new DramaRepository.ProjectCoverRow(row.projectId(), resolved, text(row.storageKey())));
+                })
+                .collectMap(DramaRepository.ProjectCoverRow::projectId);
+    }
+
+    /**
      * 为角色、场景或镜头创建一个真实的图片或视频任务。
      *
      * @param request 生成请求
@@ -95,34 +111,30 @@ public class DramaMediaService {
                     if (version == null) {
                         return Mono.error(invalid("版本不存在"));
                     }
-                    JSONObject storyboard = contentOf(latest(versions, "storyboard"));
-                    JSONObject production = contentOf(latest(versions, "shot"));
+                    JSONObject shots = contentOf(latest(versions, "shot"));
                     JSONObject cast = contentOf(latest(versions, "cast"));
                     JSONObject plan = contentOf(latest(versions, "plan"));
-                    DramaMediaTargets.Spec spec = DramaMediaTargets.resolve(request.targetKey(), contentOf(version), storyboard, production);
+                    DramaMediaTargets.Spec spec = DramaMediaTargets.resolve(request.targetKey(), contentOf(version), shots);
                     if (!spec.stage().equals(version.stage())) {
                         return Mono.error(invalid("请在对应阶段生成"));
                     }
-                    JSONObject activeShots = DramaMediaTargets.hasShots(production) ? production : storyboard;
                     return dramaRepository.listMedia(project.id(), teamId).collectList()
-                            .flatMap(media -> prepareFrames(userId, teamId, project.id(), request.targetKey(), media))
                             .flatMap(media -> {
                         if (media.stream().anyMatch(item -> request.targetKey().equals(item.targetKey()) && open(item.status()))) {
                             return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "这一项正在生成"));
                         }
-                        return prompt(userId, project, request, spec, storyboard, cast, plan, production, media)
+                        return prompt(userId, project, request, spec, shots, cast, plan, media)
                                 // 提示词 Agent 要跑十几秒，参考图可能在这期间才落库，写完再读一次
                                 .flatMap(item -> dramaRepository.listMedia(project.id(), teamId).collectList().flatMap(fresh -> {
-                            List<AiTaskDtos.AiTaskMediaReference> references = references(request.targetKey(), item.referenceKeys(), spec, fresh, activeShots);
+                            List<AiTaskDtos.AiTaskMediaReference> references = references(request.targetKey(), item.referenceKeys(), spec, fresh);
                             String mode = videoMode(request.targetKey(), spec.mediaType(), references);
                             Map<String, Object> parameters = parameters(request, spec);
                             applyAspect(parameters, request.targetKey(), spec.mediaType(), project.aspectRatio());
                             AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(spec.mediaType(), item.prompt(),
                                     request.model().trim(), parameters, references, null, AiTaskSources.DRAMA, null, null, mode);
-                            return validateFrameSizes(userId, references)
-                                    .then(aiTaskService.createTask(taskRequest, created -> persist(userId, teamId, project.id(), version.id(), request, spec, item, created)))
-                                    .doOnNext(created -> log.info("短剧已提交媒体任务: projectId={}, target={}, mediaType={}, model={}, taskId={}",
-                                            project.id(), request.targetKey(), spec.mediaType(), request.model().trim(), created.id()))
+                            return aiTaskService.createTask(taskRequest, created -> persist(userId, teamId, project.id(), version.id(), request, spec, item, created))
+                                    .doOnNext(created -> log.info("短剧已提交媒体任务: projectId={}, target={}, mediaType={}, model={}, mode={}, taskId={}",
+                                            project.id(), request.targetKey(), spec.mediaType(), request.model().trim(), mode, created.id()))
                                     .onErrorMap(error -> duplicateTarget(error) ? new BusinessException(ErrorCode.BUSINESS_ERROR, "这一项正在生成") : error)
                                     .then();
                         }));
@@ -132,15 +144,15 @@ public class DramaMediaService {
 
     /** 提示词必须来自 Agent：调用方带了就用，没带就让短剧提示词 Agent 现写。 */
     private Mono<DramaContracts.MediaItem> prompt(long userId, DramaRepository.ProjectRow project, DramaDtos.GenerateMediaRequest request,
-                                                  DramaMediaTargets.Spec spec, JSONObject storyboard, JSONObject cast, JSONObject plan,
-                                                  JSONObject production, List<DramaRepository.MediaRow> media) {
+                                                  DramaMediaTargets.Spec spec, JSONObject shots, JSONObject cast, JSONObject plan,
+                                                  List<DramaRepository.MediaRow> media) {
         if (StringUtils.hasText(request.prompt())) {
             List<String> keys = request.referenceKeys() == null ? List.of() : request.referenceKeys().stream()
                     .filter(StringUtils::hasText).map(String::trim).toList();
             return Mono.just(new DramaContracts.MediaItem(request.targetKey(), request.prompt().trim(), keys));
         }
         return dramaMediaPromptService.write(new DramaMediaPromptService.Request(request.targetKey(), spec.mediaType(), spec.seconds(),
-                storyboard, cast, plan, production, availableReferences(media), DramaArtifacts.normalizeAspect(project.aspectRatio()),
+                shots, cast, plan, availableReferences(media), DramaArtifacts.normalizeAspect(project.aspectRatio()),
                 project.textModel(), userId));
     }
 
@@ -154,8 +166,8 @@ public class DramaMediaService {
                     || !StringUtils.hasText(key)) {
                 continue;
             }
-            if (!(key.startsWith("character:") || key.startsWith("location:") || key.startsWith("board:")
-                    || key.startsWith("sheet:") || key.startsWith("cut:first:") || key.startsWith("cut:last:"))) {
+            if (!(key.startsWith("character:") || key.startsWith("location:")
+                    || key.startsWith("shot-first:") || key.startsWith("shot-last:"))) {
                 continue;
             }
             if (!keys.contains(key)) {
@@ -221,7 +233,6 @@ public class DramaMediaService {
     public Mono<List<DramaDtos.MediaView>> list(long userId, long teamId, String projectId) {
         return dramaRepository.listMedia(projectId, teamId).collectList()
                 .flatMap(rows -> refresh(userId, teamId, rows).then(dramaRepository.listMedia(projectId, teamId).collectList()))
-                .flatMap(rows -> cropSheet(userId, teamId, projectId).then(dramaRepository.listMedia(projectId, teamId).collectList()))
                 .flatMap(rows -> Flux.fromIterable(rows).concatMap(row -> view(userId, row)).collectList());
     }
 
@@ -299,63 +310,6 @@ public class DramaMediaService {
         return dramaRepository.updateMedia(row.id(), teamId, status, url, storageKey, mimeType, error);
     }
 
-    private Mono<List<DramaRepository.MediaRow>> prepareFrames(long userId, long teamId, String projectId, String targetKey, List<DramaRepository.MediaRow> media) {
-        if (!targetKey.startsWith("sheet:") && !targetKey.startsWith("shot-video:")) {
-            return Mono.just(media);
-        }
-        return cropSheet(userId, teamId, projectId).then(dramaRepository.listMedia(projectId, teamId).collectList());
-    }
-
-    private Mono<Void> cropSheet(long userId, long teamId, String projectId) {
-        return cropping.computeIfAbsent(projectId, key -> dramaRepository.listMedia(projectId, teamId).collectList()
-                .flatMap(rows -> cutFrames(userId, teamId, projectId, rows))
-                .doFinally(signal -> cropping.remove(projectId))
-                .cache());
-    }
-
-    /** 把成功的连续图裁成首帧和尾帧。并发请求共用同一次裁切，上传完成前不再重复进来。 */
-    private Mono<Void> cutFrames(long userId, long teamId, String projectId, List<DramaRepository.MediaRow> rows) {
-        java.util.LinkedHashMap<String, DramaRepository.MediaRow> newest = new java.util.LinkedHashMap<>();
-        for (DramaRepository.MediaRow row : rows) {
-            if (!row.targetKey().startsWith("sheet:") || !"success".equals(row.status())
-                    || (!StringUtils.hasText(row.storageKey()) && !StringUtils.hasText(row.resultUrl()))) {
-                continue;
-            }
-            newest.putIfAbsent(row.targetKey().substring("sheet:".length()), row);
-        }
-        return Flux.fromIterable(newest.entrySet()).concatMap(entry -> {
-            String ref = entry.getKey();
-            DramaRepository.MediaRow sheet = entry.getValue();
-            boolean hasFirst = rows.stream().anyMatch(row -> ("cut:first:" + ref).equals(row.targetKey()) && sheet.taskId().equals(row.taskId()));
-            boolean hasLast = rows.stream().anyMatch(row -> ("cut:last:" + ref).equals(row.targetKey()) && sheet.taskId().equals(row.taskId()));
-            if (hasFirst && hasLast) {
-                return Mono.empty();
-            }
-            return mediaSupport.resolveReferenceBinary(userId, new AiTaskDtos.AiTaskMediaReference(sheet.id(), sheet.targetKey(), "image/png",
-                            sheet.storageKey(), sheet.resultUrl()), "image/png")
-                    .flatMap(binary -> Mono.fromCallable(() -> DramaArtifacts.cropSheet(binary.data())).subscribeOn(Schedulers.boundedElastic()))
-                    .flatMap(cells -> storeFrame(userId, teamId, projectId, sheet, "cut:first:" + ref, "drama-first-frame.png", cells[0], hasFirst)
-                            .then(storeFrame(userId, teamId, projectId, sheet, "cut:last:" + ref, "drama-last-frame.png", cells[1], hasLast)))
-                    .onErrorResume(error -> {
-                        // 下载或上传抖一下不该把已经生成成功的连续图判死：这里不写 failed，
-                        // 下一次 list 会重新裁一次，链式生成也能自己接上。
-                        log.warn("裁切短剧连续图失败: projectId={}, target={}, message={}", projectId, sheet.targetKey(), error.getMessage());
-                        return Mono.empty();
-                    });
-        }).then();
-    }
-
-    private Mono<Void> storeFrame(long userId, long teamId, String projectId, DramaRepository.MediaRow sheet, String targetKey,
-                                  String fileName, byte[] png, boolean alreadyStored) {
-        if (alreadyStored) {
-            return Mono.empty();
-        }
-        return mediaSupport.storeGeneratedMedia(userId, "image", fileName, new GeneratedBinary(png, "image/png"), null, null, null)
-                .flatMap(stored -> dramaRepository.insertMedia(teamId, userId, new DramaRepository.MediaRow(UUID.randomUUID().toString(), projectId,
-                        text(sheet.versionId()), targetKey, "image", sheet.taskId(), "crop", targetKey, "success",
-                        text(stored.url()), text(stored.storageKey()), "image/png", "", OffsetDateTime.now())).then());
-    }
-
     private Mono<DramaDtos.MediaView> view(long userId, DramaRepository.MediaRow row) {
         String url = text(row.resultUrl());
         return (StringUtils.hasText(url) ? mediaAccessService.signUrl(url, MediaAccessService.Purpose.PREVIEW) : Mono.just(""))
@@ -379,19 +333,33 @@ public class DramaMediaService {
     }
 
     /**
-     * 组装参考图。必需的参考图由服务端决定并排在最前，不能依赖提示词 Agent 有没有写进来；
-     * 它给的其余参考图按顺序补在后面，库里没有就跳过。
+     * 组装参考图。
+     * <p>镜头视频采用首帧（必选）+ 尾帧（可选）；图片目标优先挂必需参考图，再按提示词 Agent 顺序补足角色/场景参考图。</p>
      */
     private List<AiTaskDtos.AiTaskMediaReference> references(String targetKey, List<String> keys, DramaMediaTargets.Spec spec,
-                                                             List<DramaRepository.MediaRow> media, JSONObject storyboard) {
+                                                             List<DramaRepository.MediaRow> media) {
+        if (targetKey.startsWith("shot-video:")) {
+            String ref = DramaMediaTargets.ref(targetKey);
+            DramaRepository.MediaRow first = usableMedia(media, "shot-first:" + ref);
+            if (first == null) {
+                throw invalid("请先生成这个镜头的首帧图");
+            }
+            List<AiTaskDtos.AiTaskMediaReference> videoRefs = new ArrayList<>();
+            videoRefs.add(reference(first, "first_frame"));
+            DramaRepository.MediaRow last = usableMedia(media, "shot-last:" + ref);
+            if (last != null) {
+                videoRefs.add(reference(last, "last_frame"));
+            }
+            return videoRefs;
+        }
         String fixedRole = "image".equals(spec.mediaType()) ? "reference_image" : null;
         List<AiTaskDtos.AiTaskMediaReference> references = new ArrayList<>();
-        for (String key : DramaMediaTargets.requiredReferences(targetKey, storyboard)) {
+        for (String key : DramaMediaTargets.requiredReferences(targetKey)) {
             DramaRepository.MediaRow row = usableMedia(media, key);
             if (row == null) {
-                throw invalid("请先生成上一个镜头的连续图，等它的尾帧准备好后，再生成这一张");
+                throw invalid("请先生成这个镜头的首帧图");
             }
-            references.add(reference(row, fixedRole != null ? fixedRole : role(key)));
+            references.add(reference(row, fixedRole));
         }
         for (String key : keys) {
             if (references.stream().anyMatch(item -> key.equals(item.name()))) {
@@ -399,13 +367,8 @@ public class DramaMediaService {
             }
             DramaRepository.MediaRow row = usableMedia(media, key);
             if (row != null) {
-                references.add(reference(row, fixedRole != null ? fixedRole : role(key)));
+                references.add(reference(row, fixedRole));
             }
-        }
-        if (targetKey.startsWith("shot-video:") && references.size() != 3) {
-            String ref = DramaMediaTargets.ref(targetKey);
-            throw invalid(media.stream().anyMatch(item -> ("sheet:" + ref).equals(item.targetKey()) && "success".equals(item.status()))
-                    ? "连续图的首尾帧还没准备好，请稍后再试" : "请先生成这个镜头的4×3连续图");
         }
         return references;
     }
@@ -422,32 +385,9 @@ public class DramaMediaService {
                 && (StringUtils.hasText(item.storageKey()) || StringUtils.hasText(item.resultUrl()))).findFirst().orElse(null);
     }
 
-    /** 首帧和尾帧只有连续图的 1/4×1/3，高度低于 300px 会被视频渠道的素材处理拒绝，提交前给出可读提示。 */
-    private Mono<Void> validateFrameSizes(long userId, List<AiTaskDtos.AiTaskMediaReference> references) {
-        return Flux.fromIterable(references)
-                .filter(reference -> reference.name() != null
-                        && (reference.name().startsWith("cut:first:") || reference.name().startsWith("cut:last:")))
-                .concatMap(reference -> mediaSupport.resolveReferenceBinary(userId, reference, reference.mimeType())
-                        .flatMap(binary -> Mono.fromCallable(() -> DramaArtifacts.imageSize(binary.data()))
-                                .subscribeOn(Schedulers.boundedElastic()))
-                        .flatMap(size -> size[1] >= 300 && size[0] >= 300 ? Mono.empty()
-                                : Mono.error(invalid("首帧或尾帧只有 " + size[0] + "×" + size[1]
-                                        + "，高度低于 300px，请把连续图分辨率调到 2K 后重新生成"))))
-                .then();
-    }
-
     private AiTaskDtos.AiTaskMediaReference reference(DramaRepository.MediaRow item, String role) {
         String mimeType = item.mimeType() != null && item.mimeType().startsWith("image/") ? item.mimeType() : "image/png";
         return new AiTaskDtos.AiTaskMediaReference(item.id(), item.targetKey(), mimeType, text(item.storageKey()), text(item.resultUrl()), role);
-    }
-
-    private String role(String key) {
-        // 镜头视频采用 reference-to-video 全能参考模式，Seedance 不允许把 last_frame 与 reference_image 混传，
-        // 首帧、尾帧与 4×3 连续图统一按 reference_image 传递，顺序对应提示词里的 @图片1、@图片2、@图片3。
-        if (key.startsWith("cut:first:") || key.startsWith("cut:last:") || key.startsWith("sheet:")) {
-            return "reference_image";
-        }
-        return null;
     }
 
     private String videoMode(String targetKey, String mediaType, List<AiTaskDtos.AiTaskMediaReference> references) {
@@ -455,7 +395,7 @@ public class DramaMediaService {
             return null;
         }
         if (targetKey.startsWith("shot-video:")) {
-            return VideoGenerationMode.REFERENCE_TO_VIDEO;
+            return references.size() >= 2 ? VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO : VideoGenerationMode.IMAGE_TO_VIDEO;
         }
         return references.isEmpty() ? VideoGenerationMode.TEXT_TO_VIDEO : VideoGenerationMode.IMAGE_TO_VIDEO;
     }
@@ -468,12 +408,7 @@ public class DramaMediaService {
         parameters.remove("videoGenerationMode");
         if ("image".equals(spec.mediaType())) {
             parameters.put("count", 1);
-            if (request.targetKey().startsWith("sheet:")) {
-                // 连续图会被等分成 4×3，单格高度低于 300px 时 Seedance 会拒绝，固定用 2K。
-                parameters.put("resolution", "2K");
-            } else {
-                fill(parameters, "resolution", "2K");
-            }
+            fill(parameters, "resolution", "2K");
             fill(parameters, "quality", "medium");
             fill(parameters, "size", request.targetKey().startsWith("character:") ? "3:2" : "16:9");
             return parameters;
@@ -491,10 +426,6 @@ public class DramaMediaService {
             return;
         }
         String ratio = DramaArtifacts.normalizeAspect(aspectRatio);
-        if (targetKey.startsWith("sheet:")) {
-            parameters.put("size", "16:9");
-            return;
-        }
         if ("image".equals(mediaType)) {
             parameters.put("size", ratio);
             return;

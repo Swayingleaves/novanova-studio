@@ -52,7 +52,7 @@ class NanaProviderAdapterTest {
         Assertions.assertEquals(8, payload.getIntValue("duration"));
         Assertions.assertFalse(payload.getBooleanValue("watermark"));
         JSONArray content = payload.getJSONArray("content");
-        Assertions.assertTrue(content.getJSONObject(0).getString("text").startsWith("参考素材编号：图片1、视频1、音频1。"));
+        Assertions.assertEquals("让图片1中的人物动起来", content.getJSONObject(0).getString("text"));
         Assertions.assertEquals("first_frame", content.getJSONObject(1).getString("role"));
         Assertions.assertEquals("reference_video", content.getJSONObject(2).getString("role"));
         Assertions.assertEquals("reference_audio", content.getJSONObject(3).getString("role"));
@@ -73,7 +73,7 @@ class NanaProviderAdapterTest {
 
         JSONObject input = payload.getJSONObject("input");
         Assertions.assertEquals("wan3.0-video", payload.getString("model"));
-        Assertions.assertTrue(input.getString("prompt").startsWith("参考素材编号：图片1、图片2、视频1。"));
+        Assertions.assertEquals("首帧为图片1，尾帧为图片2", input.getString("prompt"));
         JSONArray media = input.getJSONArray("media");
         Assertions.assertEquals("first_frame", media.getJSONObject(0).getString("type"));
         Assertions.assertEquals("last_frame", media.getJSONObject(1).getString("type"));

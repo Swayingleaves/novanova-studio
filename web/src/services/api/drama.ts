@@ -1,6 +1,6 @@
 import { serverGet, serverPost } from "@/services/api/server";
 
-export const dramaStages = ["plan", "script", "cast", "storyboard", "shot", "preview"] as const;
+export const dramaStages = ["plan", "script", "cast", "shot", "preview"] as const;
 
 export type DramaStage = (typeof dramaStages)[number];
 
@@ -15,6 +15,8 @@ export type DramaProjectView = {
     durationSeconds: number;
     aspectRatio?: string;
     updatedAt: string;
+    coverUrl?: string;
+    coverStorageKey?: string;
 };
 
 export type DramaProjectDetail = DramaProjectView & {

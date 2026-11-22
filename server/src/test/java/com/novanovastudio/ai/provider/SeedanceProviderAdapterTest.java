@@ -73,7 +73,7 @@ class SeedanceProviderAdapterTest {
         JSONArray content = payload.getJSONArray("content");
 
         Assertions.assertEquals(3, content.size());
-        Assertions.assertTrue(content.getJSONObject(0).getString("text").startsWith("参考素材编号：图片1、视频1。"));
+        Assertions.assertEquals("让图片1中的人物进入视频1的场景", content.getJSONObject(0).getString("text"));
         Assertions.assertEquals("image_url", content.getJSONObject(1).getString("type"));
         Assertions.assertEquals("reference_image", content.getJSONObject(1).getString("role"));
         Assertions.assertEquals("https://example.com/reference.png",

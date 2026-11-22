@@ -53,7 +53,7 @@ export function stageSummary(translate: ReturnType<typeof useTranslation>, stage
     }
     if (stage === "script") return translate("drama.cardScriptSummary", { scenes: Number(counts?.scenes) || 0 });
     if (stage === "cast") return translate("drama.cardCastSummary", { characters: Number(counts?.characters) || 0, locations: Number(counts?.locations) || 0 });
-    if (stage === "storyboard" || stage === "shot") return translate("drama.cardShotSummary", { shots: Number(counts?.shots) || 0 });
+    if (stage === "shot") return translate("drama.cardShotSummary", { shots: Number(counts?.shots) || 0 });
     return translate("drama.cardPreviewSummary", { checks: Number(counts?.checks) || 0 });
 }
 
@@ -82,14 +82,11 @@ function archiveRows(stage: DramaStage, version: DramaVersion | undefined): Arra
             ...rows(content.locations).map((place) => ({ label: text(place.name), value: text(place.visual) })),
         ];
     }
-    if (stage === "storyboard") {
-        return rows(content.shots).map((shot, index) => ({
-            label: text(shot.order) || `${index + 1}`,
-            value: [text(shot.size), clip(shot.picture)].filter(Boolean).join(" · "),
-        }));
-    }
     if (stage === "shot") {
-        return rows(content.shots).map((shot) => ({ label: text(shot.ref), value: clip(shot.videoPrompt) }));
+        return rows(content.shots).map((shot, index) => ({
+            label: text(shot.ref) || `${index + 1}`,
+            value: [text(shot.size), clip(shot.picture || shot.videoPrompt)].filter(Boolean).join(" · "),
+        }));
     }
     return [
         { label: "drama.summary", value: text(content.summary) },
@@ -109,9 +106,10 @@ export function DramaStageCard({
     const translate = useTranslation();
     const [open, setOpen] = useState(false);
     const stage = (meta.stage || "plan") as DramaStage;
+    const stageMeta = dramaStageMeta[stage];
     const version = useMemo(() => (workspace?.versions || []).find((item) => item.id === meta.versionId), [meta.versionId, workspace?.versions]);
-    if (meta.versionId && !version) return null;
-    const Icon = dramaStageMeta[stage].icon;
+    if (!stageMeta || (meta.versionId && !version)) return null;
+    const Icon = stageMeta.icon;
     const details = open ? archiveRows(stage, version) : [];
     return (
         <section className="mt-2 overflow-hidden rounded-2xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
@@ -121,7 +119,7 @@ export function DramaStageCard({
                 </span>
                 <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-[var(--studio-ink)]">
-                        {translate("drama.cardStageTitle", { stage: translate(dramaStageMeta[stage].label) })}
+                        {translate("drama.cardStageTitle", { stage: translate(stageMeta.label) })}
                         {meta.versionNumber ? <span className="ml-1.5 text-xs font-normal tabular-nums text-[var(--studio-muted)]">{translate("drama.version", { value0: meta.versionNumber })}</span> : null}
                     </p>
                     <p className="mt-0.5 text-xs leading-5 text-[var(--studio-muted)]">{stageSummary(translate, stage, meta.counts, version)}</p>

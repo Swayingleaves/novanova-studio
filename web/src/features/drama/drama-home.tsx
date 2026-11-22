@@ -9,6 +9,7 @@ import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { creditText } from "@/shared/lib/credit-amounts";
 import { createDramaProject, deleteDramaProject, dramaStages, listDramaProjects, updateDramaProject, type DramaProjectView, type DramaStage } from "@/services/api/drama";
+import { useMediaUrl } from "@/shared/hooks/use-media-url";
 import { DramaAspectPicker } from "./aspect-ratio";
 import { dramaStageMeta } from "./stage-meta";
 
@@ -185,51 +186,56 @@ export function DramaHome() {
                                 const stage = (dramaStages as readonly string[]).includes(project.currentStage) ? project.currentStage as DramaStage : "plan";
                                 const done = project.status === "completed";
                                 const index = dramaStages.indexOf(stage);
+                                const hasCover = Boolean(project.coverUrl || project.coverStorageKey);
                                 return (
                                     <article key={project.id} className="relative flex flex-col overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] transition-colors duration-150 hover:border-[var(--studio-primary-line)] motion-reduce:transition-none">
-                                        <Dropdown
-                                            trigger={["click"]}
-                                            menu={{
-                                                items: [
-                                                    { key: "rename", label: translate("drama.rename"), onClick: () => { setRenameTarget(project); setRenameName(project.name); } },
-                                                    { key: "delete", danger: true, label: translate("drama.delete"), onClick: () => remove(project) },
-                                                ],
-                                            }}
-                                        >
-                                            <Button
-                                                type="text"
-                                                className="absolute right-2 top-2 z-10"
-                                                aria-label={`${translate("drama.rename")} / ${translate("drama.delete")}`}
-                                                icon={<MoreHorizontal className="size-4" aria-hidden="true" />}
-                                            />
-                                        </Dropdown>
-                                        <button type="button" className="flex h-full flex-col p-5 pr-12 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--studio-action)]" onClick={() => router.push(`/drama/${project.id}`)}>
-                                            <ol className="flex gap-1" aria-label={translate(dramaStageMeta[stage].label)}>
-                                                {dramaStages.map((item, itemIndex) => {
-                                                    const filled = done || itemIndex <= index;
-                                                    const current = !done && itemIndex === index;
-                                                    return <li key={item} className={`h-1 flex-1 rounded-full ${current ? "bg-[var(--studio-action)]" : filled ? "bg-[color-mix(in_srgb,var(--studio-action)_42%,transparent)]" : "bg-[var(--studio-line)]"}`} />;
-                                                })}
-                                            </ol>
-                                            <h3 className="mt-4 truncate text-base font-semibold text-[var(--studio-ink)]">{project.name}</h3>
-                                            <p className="mt-2 text-xs text-[var(--studio-muted)]">
-                                                {translate(dramaStageMeta[stage].label)}
-                                                {done ? ` · ${translate("drama.completed")}` : ""}
-                                            </p>
-                                            <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--studio-line)] pt-4">
-                                                <span className="rounded-full bg-[var(--studio-surface-soft)] px-2.5 py-1 text-xs font-medium tabular-nums text-[var(--studio-text)]">{project.aspectRatio || "9:16"}</span>
-                                                <span className="rounded-full bg-[var(--studio-surface-soft)] px-2.5 py-1 text-xs font-medium tabular-nums text-[var(--studio-text)]">{translate("drama.seconds", { value0: project.durationSeconds })}</span>
-                                                <span className="rounded-full bg-[var(--studio-surface-soft)] px-2.5 py-1 text-xs font-medium tabular-nums text-[var(--studio-text)]">{translate("drama.credits", { value0: creditText(project.textCredits) })}</span>
-                                            </div>
-                                            <div className="mt-4 flex items-center justify-between gap-3">
-                                                <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-[var(--studio-faint)]">
-                                                    <Clock3 className="size-3.5 shrink-0" aria-hidden="true" />
-                                                    <span className="truncate">{formatUpdatedAt(project.updatedAt, translate.locale)}</span>
-                                                </span>
-                                                <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-[var(--studio-action)]">
-                                                    {translate("drama.continue")}
-                                                    <ArrowRight className="size-3.5" aria-hidden="true" />
-                                                </span>
+                                        <div className="absolute right-2 top-2 z-10">
+                                            <Dropdown
+                                                trigger={["click"]}
+                                                menu={{
+                                                    items: [
+                                                        { key: "rename", label: translate("drama.rename"), onClick: () => { setRenameTarget(project); setRenameName(project.name); } },
+                                                        { key: "delete", danger: true, label: translate("drama.delete"), onClick: () => remove(project) },
+                                                    ],
+                                                }}
+                                            >
+                                                <Button
+                                                    type="text"
+                                                    className={hasCover ? "bg-black/45! text-white! hover:bg-black/65!" : undefined}
+                                                    aria-label={`${translate("drama.rename")} / ${translate("drama.delete")}`}
+                                                    icon={<MoreHorizontal className="size-4" aria-hidden="true" />}
+                                                />
+                                            </Dropdown>
+                                        </div>
+                                        <button type="button" className="flex h-full flex-col text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--studio-action)]" onClick={() => router.push(`/drama/${project.id}`)}>
+                                            {hasCover ? <ProjectCover url={project.coverUrl} storageKey={project.coverStorageKey} alt={project.name} /> : null}
+                                            <div className={`flex flex-1 flex-col p-5 ${hasCover ? "" : "pr-12"}`}>
+                                                <ol className="flex gap-1" aria-label={translate(dramaStageMeta[stage].label)}>
+                                                    {dramaStages.map((item, itemIndex) => {
+                                                        const filled = done || itemIndex <= index;
+                                                        const current = !done && itemIndex === index;
+                                                        return <li key={item} className={`h-1 flex-1 rounded-full ${current ? "bg-[var(--studio-action)]" : filled ? "bg-[color-mix(in_srgb,var(--studio-action)_42%,transparent)]" : "bg-[var(--studio-line)]"}`} />;
+                                                    })}
+                                                </ol>
+                                                <h3 className="mt-4 truncate text-base font-semibold text-[var(--studio-ink)]">{project.name}</h3>
+                                                <p className="mt-2 text-xs text-[var(--studio-muted)]">
+                                                    {translate(dramaStageMeta[stage].label)}
+                                                    {done ? ` · ${translate("drama.completed")}` : ""}
+                                                </p>
+                                                <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--studio-line)] pt-4">
+                                                    <span className="rounded-full bg-[var(--studio-surface-soft)] px-2.5 py-1 text-xs font-medium tabular-nums text-[var(--studio-text)]">{project.aspectRatio || "9:16"}</span>
+                                                    <span className="rounded-full bg-[var(--studio-surface-soft)] px-2.5 py-1 text-xs font-medium tabular-nums text-[var(--studio-text)]">{translate("drama.seconds", { value0: project.durationSeconds })}</span>
+                                                </div>
+                                                <div className="mt-auto flex items-center justify-between gap-3 pt-4">
+                                                    <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-[var(--studio-faint)]">
+                                                        <Clock3 className="size-3.5 shrink-0" aria-hidden="true" />
+                                                        <span className="truncate">{formatUpdatedAt(project.updatedAt, translate.locale)}</span>
+                                                    </span>
+                                                    <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-[var(--studio-action)]">
+                                                        {translate("drama.continue")}
+                                                        <ArrowRight className="size-3.5" aria-hidden="true" />
+                                                    </span>
+                                                </div>
                                             </div>
                                         </button>
                                     </article>
@@ -256,6 +262,27 @@ export function DramaHome() {
                 </label>
             </Modal>
         </main>
+    );
+}
+
+function ProjectCover({ url, storageKey, alt }: { url?: string; storageKey?: string; alt: string }) {
+    const media = useMediaUrl({ storageKey, url, kind: "media" });
+    const [failed, setFailed] = useState(false);
+    const src = media.url || url || "";
+    if (!src || failed || (Boolean(storageKey) && media.failed)) return null;
+    return (
+        <div className="aspect-[16/9] w-full overflow-hidden border-b border-[var(--studio-line)] bg-[var(--studio-media)]">
+            <img
+                src={src}
+                alt={alt}
+                loading="lazy"
+                className="h-full w-full object-cover"
+                onError={() => {
+                    if (storageKey) media.onError();
+                    else setFailed(true);
+                }}
+            />
+        </div>
     );
 }
 

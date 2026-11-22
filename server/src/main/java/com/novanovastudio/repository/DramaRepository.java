@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.security.TeamScope;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Repository;
@@ -603,6 +604,38 @@ public class DramaRepository {
                 .map((row, metadata) -> Boolean.TRUE).one()
                 .defaultIfEmpty(Boolean.FALSE)
                 .contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
+    }
+
+    /** 项目封面图记录。 */
+    public record ProjectCoverRow(String projectId, String url, String storageKey) {
+    }
+
+    /**
+     * 批量读取每个项目最早生成成功的一张图片作为封面。
+     *
+     * @param projectIds 项目ID列表
+     * @param teamId 团队空间
+     * @return 封面记录
+     */
+    public Flux<ProjectCoverRow> findFirstImageCovers(List<String> projectIds, long teamId) {
+        if (projectIds == null || projectIds.isEmpty()) return Flux.empty();
+        return databaseClient.sql("""
+                SELECT DISTINCT ON (project_id) project_id, result_url, storage_key
+                FROM drama_media
+                WHERE team_id = :teamId
+                  AND project_id IN (:projectIds)
+                  AND media_type = 'image'
+                  AND status = 'success'
+                  AND (COALESCE(result_url, '') <> '' OR COALESCE(storage_key, '') <> '')
+                ORDER BY project_id, created_at ASC
+                """)
+                .bind("teamId", teamId)
+                .bind("projectIds", projectIds)
+                .map((row, metadata) -> new ProjectCoverRow(
+                        row.get("project_id", String.class),
+                        row.get("result_url", String.class),
+                        row.get("storage_key", String.class)))
+                .all();
     }
 
     /**

@@ -48,17 +48,16 @@ public class DramaMediaPromptService {
      * @param targetKey 生成目标
      * @param mediaType image 或 video
      * @param seconds 视频秒数，图片为 0
-     * @param storyboard 最新分镜
+     * @param shots 最新分镜镜头阶段产物
      * @param cast 角色与场景
      * @param plan 制作方案
-     * @param production 镜头制作
      * @param availableReferences 已有成功参考图的目标
      * @param aspectRatio 项目画幅
      * @param textModel 文本模型
      * @param userId 当前用户
      */
-    public record Request(String targetKey, String mediaType, int seconds, JSONObject storyboard, JSONObject cast,
-                          JSONObject plan, JSONObject production, List<String> availableReferences, String aspectRatio,
+    public record Request(String targetKey, String mediaType, int seconds, JSONObject shots, JSONObject cast,
+                          JSONObject plan, List<String> availableReferences, String aspectRatio,
                           String textModel, long userId) {
     }
 
@@ -114,22 +113,23 @@ public class DramaMediaPromptService {
         input.put("seconds", request.seconds());
         input.put("aspectRatio", request.aspectRatio());
         input.put("style", text(request.plan(), "style"));
-        JSONObject shot = find(request.storyboard(), "shots", DramaMediaTargets.ref(request.targetKey()));
+        String kind = DramaMediaTargets.kind(request.targetKey());
+        String ref = DramaMediaTargets.ref(request.targetKey());
+        JSONObject shot = find(request.shots(), "shots", ref);
         if (shot != null) {
             input.put("shot", shot);
         }
-        if ("sheet".equals(DramaMediaTargets.kind(request.targetKey()))) {
+        if ("shot-first".equals(kind)) {
             JSONObject previous = previousShot(request);
             if (previous != null) {
                 input.put("previousShot", previous);
             }
         }
+        if ("shot-video".equals(kind)) {
+            input.put("hasLastFrame", request.availableReferences().contains("shot-last:" + ref));
+        }
         if (request.cast() != null) {
             input.put("cast", request.cast());
-        }
-        JSONObject directed = find(request.production(), "shots", DramaMediaTargets.ref(request.targetKey()));
-        if (directed != null) {
-            input.put("production", directed);
         }
         JSONArray references = new JSONArray();
         references.addAll(request.availableReferences());
@@ -138,11 +138,11 @@ public class DramaMediaPromptService {
     }
 
     private JSONObject previousShot(Request request) {
-        String previous = DramaMediaTargets.previousRef(request.storyboard(), DramaMediaTargets.ref(request.targetKey()));
+        String previous = DramaMediaTargets.previousRef(request.shots(), DramaMediaTargets.ref(request.targetKey()));
         if (!StringUtils.hasText(previous)) {
             return null;
         }
-        JSONObject shot = find(request.storyboard(), "shots", previous);
+        JSONObject shot = find(request.shots(), "shots", previous);
         if (shot == null) {
             return null;
         }
@@ -150,8 +150,10 @@ public class DramaMediaPromptService {
         summary.put("ref", previous);
         summary.put("picture", shot.getString("picture"));
         summary.put("dialogue", shot.getString("dialogue"));
-        summary.put("lastFrameKey", "cut:last:" + previous);
-        summary.put("lastFrameReady", request.availableReferences().contains("cut:last:" + previous));
+        summary.put("lastFrameKey", "shot-last:" + previous);
+        summary.put("lastFrameReady", request.availableReferences().contains("shot-last:" + previous));
+        summary.put("firstFrameKey", "shot-first:" + previous);
+        summary.put("firstFrameReady", request.availableReferences().contains("shot-first:" + previous));
         return summary;
     }
 

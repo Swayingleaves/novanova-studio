@@ -25,8 +25,11 @@ class DramaStageRulesTest {
     @Test
     void stageOrderStopsAtPreviewAndListsDownstream() {
         assertEquals("script", DramaStageRules.next("plan"));
+        assertEquals("shot", DramaStageRules.next("cast"));
+        assertEquals("preview", DramaStageRules.next("shot"));
         assertNull(DramaStageRules.next("preview"));
         assertEquals(java.util.List.of("preview"), DramaStageRules.downstream("shot"));
+        assertEquals(java.util.List.of("shot", "preview"), DramaStageRules.downstream("cast"));
         assertTrue(DramaStageRules.canRevise("preview", "script", true));
         assertFalse(DramaStageRules.canRevise("plan", "script", false));
         assertEquals("720x1280", DramaArtifacts.videoSize("1280x720", "9:16"));
@@ -44,8 +47,8 @@ class DramaStageRulesTest {
         JSONObject content = DramaArtifacts.normalize("cast", raw, previous, null, null, 60);
         assertEquals("kept", content.getJSONArray("characters").getJSONObject(0).getString("id"));
 
-        JSONObject broken = JSON.parseObject("{\"storyboard\":{\"shots\":[{\"ref\":\"sh1\",\"picture\":\"近景\",\"characterRef\":\"c9\"}]}}");
+        JSONObject broken = JSON.parseObject("{\"shot\":{\"shots\":[{\"ref\":\"bad\",\"picture\":\"近景\"}]}}");
         JSONObject cast = JSON.parseObject("{\"characters\":[{\"ref\":\"c1\"}],\"locations\":[{\"ref\":\"l1\"}]}");
-        assertThrows(BusinessException.class, () -> DramaArtifacts.normalize("storyboard", broken, null, cast, null, 60));
+        assertThrows(BusinessException.class, () -> DramaArtifacts.normalize("shot", broken, null, cast, null, 60));
     }
 }

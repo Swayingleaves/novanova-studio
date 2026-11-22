@@ -4,8 +4,6 @@ import { App, Button, InputNumber } from "antd";
 import { Check, Download, LoaderCircle, Minus, Play, Square } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "@/features/locale/use-translation";
-import { PromptMentionText } from "@/features/generation/components/prompt-mention-text";
-import type { PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { saveDramaCut, type DramaMedia, type DramaStage, type DramaVersion, type DramaWorkspace } from "@/services/api/drama";
@@ -53,16 +51,6 @@ function ZoomableMedia({ kind, url, storageKey, className }: { kind: "image" | "
             </button>
             <ResultDetailDialog detail={detail} onClose={() => setDetail(null)} />
         </>
-    );
-}
-
-function FramePreview({ label, media }: { label: string; media: DramaMedia | undefined }) {
-    const translate = useTranslation();
-    return (
-        <div>
-            <p className="mb-1 text-xs font-medium text-[var(--studio-faint)]">{label}</p>
-            {media?.status === "success" && media.url ? <ZoomableMedia kind="image" url={media.url} storageKey={media.storageKey} className="aspect-[4/3] w-full rounded-lg object-cover" /> : <div className="grid aspect-[4/3] place-items-center rounded-lg bg-[var(--studio-media)] text-xs text-[var(--studio-muted)]">{translate("drama.noImageYet")}</div>}
-        </div>
     );
 }
 
@@ -135,7 +123,7 @@ function MediaFrame({
                         </button>
                     ) : (
                         <Button size="small" type={ready ? "default" : "primary"} loading={running} disabled={running} onClick={() => onGenerate(targetKey)}>
-                            {targetKey.startsWith("sheet:") ? translate("drama.generateSheet") : kind === "video" ? translate("drama.generateVideo") : translate("drama.generateImage")}
+                            {targetKey.startsWith("shot-first:") ? translate("drama.generateFirstFrame") : targetKey.startsWith("shot-last:") ? translate("drama.generateLastFrame") : kind === "video" ? translate("drama.generateVideo") : translate("drama.generateImage")}
                         </Button>
                     )}
                 </div>
@@ -325,72 +313,45 @@ export function DramaArtifact({
             </div>
         );
     }
-    if (stage === "storyboard") {
-        return (
-            <div className="flex flex-col gap-4">
-                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                    {rows(content.shots).map((shot, index) => {
-                        const targetKey = `board:${text(shot.ref)}`;
-                        return (
-                        <article key={text(shot.id) || targetKey || index} className="overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
-                            <MediaFrame bare media={mediaByKey[targetKey]} kind="image" targetKey={targetKey} pending={pendingKeys.includes(targetKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
-                            <div className="flex flex-col gap-3 p-4">
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <span className="inline-flex size-6 items-center justify-center rounded-full bg-[var(--studio-primary-soft)] text-xs font-semibold tabular-nums text-[var(--studio-ink)]">{text(shot.order) || index + 1}</span>
-                                    {[text(shot.size), text(shot.camera)].filter(Boolean).map((chip, chipIndex) => (
-                                        <span key={`${chip}-${chipIndex}`} className="rounded-full bg-[var(--studio-surface-soft)] px-2 py-0.5 text-xs text-[var(--studio-text)]">{chip}</span>
-                                    ))}
-                                    <span className="ml-auto text-xs tabular-nums text-[var(--studio-muted)]">{translate("drama.seconds", { value0: text(shot.durationSeconds) })}</span>
-                                </div>
-                                <Field plain label={translate("drama.picture")} value={text(shot.picture)} />
-                                <Field plain label={translate("drama.dialogue")} value={text(shot.dialogue)} />
-                            </div>
-                        </article>
-                        );
-                    })}
-                </div>
-            </div>
-        );
-    }
     if (stage === "shot") {
-        const prompts = new Map(rows(content.shots).map((shot) => [text(shot.ref), shot]));
+        const shotsByRef = new Map(rows(content.shots).map((shot) => [text(shot.ref), shot]));
         const stageRefs = refsOf(content.shots);
         return (
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                {(stageRefs.length ? stageRefs : shotRefs).map((ref) => {
-                    const sheetKey = `sheet:${ref}`;
-                    const shot = prompts.get(ref);
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {(stageRefs.length ? stageRefs : shotRefs).map((ref, index) => {
+                    const shot = shotsByRef.get(ref);
                     const duration = Number(shot?.durationSeconds) || shotDurations[ref];
+                    const firstKey = `shot-first:${ref}`;
+                    const lastKey = `shot-last:${ref}`;
+                    const videoKey = `shot-video:${ref}`;
                     return (
-                        <article key={ref} className="overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
-                            <div className="flex items-center justify-between gap-2 px-3 pt-3">
-                                <p className="text-sm font-semibold text-[var(--studio-ink)]">{ref}</p>
-                                {duration ? <span className="text-xs tabular-nums text-[var(--studio-muted)]">{translate("drama.seconds", { value0: duration })}</span> : null}
+                        <article key={text(shot?.id) || ref} className="flex flex-col overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
+                            <div className="flex flex-wrap items-center gap-2 border-b border-[var(--studio-line)] px-4 py-3">
+                                <span className="inline-flex size-6 items-center justify-center rounded-full bg-[var(--studio-primary-soft)] text-xs font-semibold tabular-nums text-[var(--studio-ink)]">{text(shot?.order) || index + 1}</span>
+                                <span className="text-xs font-semibold text-[var(--studio-muted)]">{ref}</span>
+                                {[text(shot?.size), text(shot?.camera)].filter(Boolean).map((chip, chipIndex) => (
+                                    <span key={`${chip}-${chipIndex}`} className="rounded-full bg-[var(--studio-surface-soft)] px-2 py-0.5 text-xs text-[var(--studio-text)]">{chip}</span>
+                                ))}
+                                {duration ? <span className="ml-auto text-xs tabular-nums text-[var(--studio-muted)]">{translate("drama.seconds", { value0: duration })}</span> : null}
                             </div>
-                            <MediaFrame bare media={mediaByKey[sheetKey]} kind="image" targetKey={sheetKey} pending={pendingKeys.includes(sheetKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
-                            <div className="grid grid-cols-2 gap-2 p-3">
-                                <FramePreview label={translate("drama.firstFrame")} media={mediaByKey[`cut:first:${ref}`]} />
-                                <FramePreview label={translate("drama.lastFrame")} media={mediaByKey[`cut:last:${ref}`]} />
+                            <div className="grid grid-cols-2 gap-2.5 p-3">
+                                <div className="flex flex-col gap-1.5">
+                                    <p className="text-xs font-medium text-[var(--studio-faint)]">{translate("drama.firstFrame")}</p>
+                                    <MediaFrame media={mediaByKey[firstKey]} kind="image" targetKey={firstKey} pending={pendingKeys.includes(firstKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                                </div>
+                                <div className="flex flex-col gap-1.5">
+                                    <p className="text-xs font-medium text-[var(--studio-faint)]">{translate("drama.lastFrame")}</p>
+                                    <MediaFrame media={mediaByKey[lastKey]} kind="image" targetKey={lastKey} pending={pendingKeys.includes(lastKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                                </div>
                             </div>
-                            <div className="flex flex-col gap-3 px-3 pb-3">
-                                {(() => {
-                                    const promptText = text(shot?.videoPrompt);
-                                    const mentionRefs: PromptImageReference[] = [
-                                        { id: `cut:first:${ref}`, label: "图片1", name: `${ref} ${translate("drama.firstFrame")}`, previewUrl: mediaByKey[`cut:first:${ref}`]?.url || "", kind: "image" },
-                                        { id: `cut:last:${ref}`, label: "图片2", name: `${ref} ${translate("drama.lastFrame")}`, previewUrl: mediaByKey[`cut:last:${ref}`]?.url || "", kind: "image" },
-                                        { id: sheetKey, label: "图片3", name: `${ref} 连续图`, previewUrl: mediaByKey[sheetKey]?.url || "", kind: "image" },
-                                    ];
-                                    return (
-                                        <Field
-                                            plain
-                                            label={translate("drama.videoPrompt")}
-                                            value={promptText}
-                                            content={<PromptMentionText text={promptText} references={mentionRefs} />}
-                                        />
-                                    );
-                                })()}
+                            <div className="flex flex-1 flex-col gap-3 px-4 pb-3">
+                                <Field plain label={translate("drama.picture")} value={text(shot?.picture)} />
+                                <Field plain label={translate("drama.dialogue")} value={text(shot?.dialogue)} />
+                                <Field plain label={translate("drama.videoPrompt")} value={text(shot?.videoPrompt)} />
                             </div>
-                            <MediaFrame media={mediaByKey[`shot-video:${ref}`]} kind="video" targetKey={`shot-video:${ref}`} pending={pendingKeys.includes(`shot-video:${ref}`)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                            <div className="px-3 pb-3">
+                                <MediaFrame media={mediaByKey[videoKey]} kind="video" targetKey={videoKey} pending={pendingKeys.includes(videoKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                            </div>
                         </article>
                     );
                 })}

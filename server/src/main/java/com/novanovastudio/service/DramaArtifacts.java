@@ -4,14 +4,9 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
-import java.awt.Graphics2D;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import javax.imageio.ImageIO;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.springframework.util.StringUtils;
@@ -79,8 +74,7 @@ public final class DramaArtifacts {
             case "plan" -> plan(source.getJSONObject("plan"), fallbackDuration, aspectRatio);
             case "script" -> script(source.getJSONObject("script"), previous);
             case "cast" -> cast(source.getJSONObject("cast"), previous);
-            case "storyboard" -> storyboard(source.getJSONObject("storyboard"), previous, cast);
-            case "shot" -> shot(source.getJSONObject("shot"), previous, storyboard);
+            case "shot" -> shot(source.getJSONObject("shot"), previous, cast);
             case "preview" -> preview(source.getJSONObject("preview"));
             default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "不支持的短剧阶段");
         };
@@ -138,67 +132,6 @@ public final class DramaArtifacts {
      * @param aspectRatio 项目画幅
      * @return 应提交的 size
      */
-    /**
-     * 把 4×3 连续图等分成 12 格，返回左上首帧和右下尾帧的 PNG。
-     *
-     * @param source 连续图字节
-     * @return 下标 0 为首帧，下标 1 为尾帧
-     * @throws BusinessException 图片无法读取或尺寸不足以分格时抛出
-     */
-    public static byte[][] cropSheet(byte[] source) {
-        BufferedImage image;
-        try {
-            image = ImageIO.read(new ByteArrayInputStream(source));
-        } catch (Exception exception) {
-            throw invalid("连续图无法读取");
-        }
-        if (image == null) {
-            throw invalid("连续图无法读取");
-        }
-        int cellWidth = image.getWidth() / 4;
-        int cellHeight = image.getHeight() / 3;
-        if (cellWidth < 1 || cellHeight < 1) {
-            throw invalid("连续图尺寸不足以分成12格");
-        }
-        return new byte[][]{
-                png(image, 0, 0, cellWidth, cellHeight),
-                png(image, cellWidth * 3, cellHeight * 2, cellWidth, cellHeight)
-        };
-    }
-
-    /**
-     * 读取图片宽高，读不出来时按 0 处理。
-     *
-     * @param source 图片字节
-     * @return 下标 0 为宽，下标 1 为高
-     */
-    public static int[] imageSize(byte[] source) {
-        try {
-            BufferedImage image = ImageIO.read(new ByteArrayInputStream(source));
-            return image == null ? new int[]{0, 0} : new int[]{image.getWidth(), image.getHeight()};
-        } catch (Exception exception) {
-            return new int[]{0, 0};
-        }
-    }
-
-    private static byte[] png(BufferedImage source, int x, int y, int width, int height) {
-        BufferedImage cell = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        Graphics2D graphics = cell.createGraphics();
-        graphics.drawImage(source, 0, 0, width, height, x, y, x + width, y + height, null);
-        graphics.dispose();
-        try {
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            if (!ImageIO.write(cell, "png", output)) {
-                throw invalid("连续图无法裁切");
-            }
-            return output.toByteArray();
-        } catch (BusinessException exception) {
-            throw exception;
-        } catch (Exception exception) {
-            throw invalid("连续图无法裁切");
-        }
-    }
-
     public static String videoSize(String sent, String aspectRatio) {
         String ratio = normalizeAspect(aspectRatio);
         String size = sent == null ? "" : sent.trim();
@@ -317,10 +250,10 @@ public final class DramaArtifacts {
         return stored;
     }
 
-    private static JSONObject storyboard(JSONObject body, JSONObject previous, JSONObject cast) {
+    private static JSONObject shot(JSONObject body, JSONObject previous, JSONObject cast) {
         JSONArray shots = array(body, "shots");
         if (shots.isEmpty()) {
-            throw invalid("分镜至少要有一个镜头");
+            throw invalid("分镜镜头至少要有一个镜头");
         }
         Set<String> characters = refsOf(cast, "characters");
         Set<String> locations = refsOf(cast, "locations");
@@ -331,22 +264,33 @@ public final class DramaArtifacts {
             String ref = ref(shot, "ref", SHOT, refs);
             String characterRef = resolveStoryRef(text(shot, "characterRef"), characters, cast, "characters", "name", CHARACTER);
             String locationRef = resolveStoryRef(text(shot, "locationRef"), locations, cast, "locations", "name", LOCATION);
+            String picture = required(shot, "picture");
+            String videoPrompt = text(shot, "videoPrompt");
             JSONObject item = new JSONObject();
             item.put("id", reuse(previous, "shots", ref));
             item.put("ref", ref);
             item.put("order", index + 1);
-            item.put("durationSeconds", storyboardDuration(shot == null ? null : shot.getInteger("durationSeconds")));
+            item.put("durationSeconds", shotDuration(shot, previous, ref));
             item.put("size", text(shot, "size"));
             item.put("camera", text(shot, "camera"));
-            item.put("picture", required(shot, "picture"));
+            item.put("picture", picture);
             item.put("dialogue", text(shot, "dialogue"));
             item.put("characterRef", characterRef);
             item.put("locationRef", locationRef);
+            item.put("videoPrompt", StringUtils.hasText(videoPrompt) ? videoPrompt : picture);
             stored.add(item);
         }
         JSONObject content = new JSONObject();
         content.put("shots", stored);
         return content;
+    }
+
+    private static int shotDuration(JSONObject shot, JSONObject previous, String ref) {
+        Integer explicit = shot == null ? null : shot.getInteger("durationSeconds");
+        if (explicit != null && explicit >= 1) {
+            return explicit;
+        }
+        return storyboardDuration(durationOfRef(previous, ref));
     }
 
     /**
@@ -396,40 +340,6 @@ public final class DramaArtifacts {
             }
         }
         return byName;
-    }
-
-    private static JSONObject shot(JSONObject body, JSONObject previous, JSONObject storyboard) {
-        JSONArray shots = array(body, "shots");
-        if (shots.isEmpty()) {
-            throw invalid("镜头制作至少要有一个镜头");
-        }
-        JSONArray stored = new JSONArray();
-        Set<String> refs = new HashSet<>();
-        for (int index = 0; index < shots.size(); index++) {
-            JSONObject shot = shots.getJSONObject(index);
-            String ref = ref(shot, "ref", SHOT, refs);
-            JSONObject item = new JSONObject();
-            item.put("id", reuse(previous, "shots", ref));
-            item.put("ref", ref);
-            item.put("durationSeconds", shotDuration(shot, previous, storyboard, ref));
-            item.put("videoPrompt", required(shot, "videoPrompt"));
-            stored.add(item);
-        }
-        JSONObject content = new JSONObject();
-        content.put("shots", stored);
-        return content;
-    }
-
-    private static int shotDuration(JSONObject shot, JSONObject previous, JSONObject storyboard, String ref) {
-        Integer explicit = shot == null ? null : shot.getInteger("durationSeconds");
-        if (explicit != null && explicit >= 1) {
-            return explicit;
-        }
-        Integer inherited = durationOfRef(storyboard, ref);
-        if (inherited == null) {
-            inherited = durationOfRef(previous, ref);
-        }
-        return storyboardDuration(inherited);
     }
 
     private static Integer durationOfRef(JSONObject content, String ref) {

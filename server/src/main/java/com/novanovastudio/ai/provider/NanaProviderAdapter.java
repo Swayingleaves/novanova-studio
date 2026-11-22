@@ -865,23 +865,16 @@ public class NanaProviderAdapter implements AiProviderAdapter {
     }
 
     /**
-     * 为参考素材补充稳定编号。
+     * 透传原始提示词，不再自动拼接参考素材编号前缀。
      *
      * @param prompt String 原始提示词
      * @param imageCount int 参考图片数量
      * @param videoCount int 参考视频数量
      * @param audioCount int 参考音频数量
-     * @return String 带参考素材编号说明的提示词
+     * @return String 原始提示词
      */
     private static String referenceAwarePrompt(String prompt, int imageCount, int videoCount, int audioCount) {
-        String text = prompt == null ? "" : prompt;
-        if (imageCount == 0 && videoCount == 0 && audioCount == 0) return text;
-        if (text.trim().startsWith("参考素材编号：")) return text;
-        List<String> labels = new ArrayList<>();
-        for (int index = 0; index < imageCount; index++) labels.add("图片" + (index + 1));
-        for (int index = 0; index < videoCount; index++) labels.add("视频" + (index + 1));
-        for (int index = 0; index < audioCount; index++) labels.add("音频" + (index + 1));
-        return "参考素材编号：" + String.join("、", labels) + "。请按这些编号理解提示词中的图片、视频和音频引用。\n\n" + text.trim();
+        return prompt == null ? "" : prompt.trim();
     }
 
     /**
