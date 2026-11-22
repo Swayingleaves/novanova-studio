@@ -399,6 +399,9 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const [modelPicker, setModelPicker] = useState<{ capability: ModelCapability; mode: "options" | "default" } | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
     const [collapsedEditingCapabilities, setCollapsedEditingCapabilities] = useState<string[]>([]);
+    const [modelEditorTab, setModelEditorTab] = useState<"basic" | "capabilities" | "advanced">("basic");
+    const [activeEditingVideoMode, setActiveEditingVideoMode] = useState<VideoGenerationMode>("text-to-video");
+    const [activeEditingImageMode, setActiveEditingImageMode] = useState<string>("text-to-image");
     const [modelConfigCopyTarget, setModelConfigCopyTarget] = useState<ServerModelConfig | null>(null);
     const [modelConfigImportTarget, setModelConfigImportTarget] = useState<ServerModelConfig | null>(null);
     const [autoFillConfigMode, setAutoFillConfigMode] = useState<VideoGenerationMode | null>(null);
@@ -631,6 +634,11 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
         setEditingModelConfig(cloneModelConfig(configItem));
         setEditingCustomBodyParameters(JSON.stringify(configItem.customBodyParameters || {}, null, 2));
         setCollapsedEditingCapabilities(defaultCollapsedEditingCapabilities(configItem));
+        setModelEditorTab("basic");
+        const firstVideoMode = VIDEO_GENERATION_CAPABILITY_OPTIONS.find((item) => configItem.capabilities.includes(item.value))?.value || "text-to-video";
+        setActiveEditingVideoMode(firstVideoMode);
+        const firstImageMode = MODEL_CAPABILITY_OPTIONS.image.find((item) => configItem.capabilities.includes(item.value))?.value || "text-to-image";
+        setActiveEditingImageMode(firstImageMode);
         setModelConfigCopyTarget(null);
         setModelConfigImportTarget(null);
     };
@@ -706,6 +714,8 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
         if (!editingModelConfig) return;
         const issue = customVideoConfigurationIssue(editingModelConfig);
         if (issue) {
+            setModelEditorTab("capabilities");
+            setActiveEditingVideoMode(issue.mode);
             setCollapsedEditingCapabilities((current) => current.filter((key) => key !== `video:${issue.mode}`));
             message.error(issue.message);
             requestAnimationFrame(() => {
@@ -723,6 +733,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             customBodyParameters = parsed as Record<string, unknown>;
             imageSizeMappings = editingModelConfig.modelType === "image" ? normalizeImageSizeMappings(editingModelConfig.imageSizeMappings) : null;
         } catch (error) {
+            setModelEditorTab("advanced");
             message.error(error instanceof Error ? error.message : translate("appShell.invalidCustomModelJSON"));
             return;
         }
@@ -1972,177 +1983,256 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                 centered
                 // 从模型选择弹窗里打开配置时叠在弹窗之上。
                 zIndex={modelPicker ? 1200 : undefined}
-                width={editingModelConfig?.modelType === "video" ? 980 : 760}
+                width={editingModelConfig?.modelType === "video" ? 960 : 780}
+                styles={{ body: { maxHeight: "72vh", overflowY: "auto", paddingTop: 8 } }}
                 destroyOnHidden
                 okText={translate("appShell.confirm")}
                 cancelText={translate("appShell.cancel")}
                 onCancel={() => setEditingModelConfig(null)}
                 onOk={saveModelConfigEditor}
             >
-                {editingModelConfig?.modelType === "video" && editingModelIsMedia ? (
-                    <div className="space-y-5">
-                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div>
-                                    <div className="flex items-center gap-1.5 text-sm font-semibold">
-                                        {translate("appShell.customModel")}
-                                        <Info className="size-4 text-[var(--studio-muted)]" />
-                                    </div>
-                                    <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.useRequestAndResponseExamplesForEachModeTo")}</p>
-                                </div>
-                                <div className="flex flex-wrap items-center justify-end gap-2">
-                                    {editingModelConfig.isCustomModel ? (
-                                        <>
-                                            <Button size="small" icon={<Copy className="size-3.5" />} disabled={isSaving} onClick={copyEditingModelConfig}>
-                                                {translate("appShell.copyConfig")}
-                                            </Button>
-                                            <Button size="small" icon={<Upload className="size-3.5" />} disabled={isSaving} onClick={() => setModelConfigImportTarget(editingModelConfig)}>
-                                                {translate("appShell.importConfig")}
-                                            </Button>
-                                        </>
-                                    ) : null}
-                                    <Switch checked={Boolean(editingModelConfig.isCustomModel)} onChange={(checked) => updateEditingModelConfig({ isCustomModel: checked })} />
-                                </div>
-                            </div>
-                        </section>
+                {editingModelConfig ? (() => {
+                    const isVideo = editingModelConfig.modelType === "video" && editingModelIsMedia;
+                    const isImage = editingModelConfig.modelType === "image";
+                    const videoModes = createVideoGenerationCapabilityOptions(translate);
+                    const selectedVideoMode = videoModes.find((item) => item.value === activeEditingVideoMode) || videoModes[0];
+                    const selectedVideoModeIndex = videoModes.findIndex((item) => item.value === selectedVideoMode.value);
+                    const imageModes = createModelCapabilityOptions(translate).image;
+                    const selectedImageMode = imageModes.find((item) => item.value === activeEditingImageMode) || imageModes[0];
+                    const hasVideoConstraintError = isVideo && Boolean(customVideoConfigurationIssue(editingModelConfig));
 
-                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
-                            <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                {translate("appShell.displayName")}
-                                <Info className="size-4 text-[var(--studio-muted)]" />
-                            </div>
-                            <Input
-                                maxLength={255}
-                                placeholder={editingModelConfig.modelName}
-                                value={editingModelConfig.displayName || editingModelConfig.modelName}
-                                onChange={(event) => updateEditingModelConfig({ displayName: event.target.value.trim() || null })}
-                            />
-                            <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("appShell.userFacingNameDefaultsToModelNameAndDoes")}</p>
-                        </section>
-
-                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
-                            <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                {translate("appShell.displayIcon")}
-                                <Info className="size-4 text-[var(--studio-muted)]" />
-                            </div>
-                            <Select value={editingModelConfig.modelIcon || ""} options={modelIconSelectOptions} className="w-full" onChange={(modelIcon: string) => updateEditingModelConfig({ modelIcon: modelIcon || null })} />
-                            <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("appShell.displayIconAutoMatchDetectsItFromModelOr")}</p>
-                        </section>
-
-                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
-                            <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                {translate("appShell.modelDescription")}
-                                <Info className="size-4 text-[var(--studio-muted)]" />
-                            </div>
-                            <Input.TextArea
-                                maxLength={500}
-                                showCount
-                                autoSize={{ minRows: 2, maxRows: 4 }}
-                                placeholder={translate("appShell.modelDescriptionPlaceholder")}
-                                value={editingModelConfig.description || ""}
-                                onChange={(event) => updateEditingModelConfig({ description: event.target.value || null })}
-                            />
-                            <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("appShell.modelDescriptionHelper")}</p>
-                        </section>
-
-                        <section className="grid gap-4 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4 md:grid-cols-3">
-                            <div>
-                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                    {translate("appShell.billingMethod")}
-                                    <Info className="size-4 text-[var(--studio-muted)]" />
-                                </div>
-                                <Select
-                                    value={editingModelConfig.videoBillingConfiguration?.billingUnit || "generation"}
-                                    options={[
-                                        { value: "generation", label: translate("appShell.perRun") },
-                                        { value: "second", label: translate("appShell.perSecond") },
-                                    ]}
-                                    className="w-full"
-                                    onChange={(billingUnit: ServerModelConfig["creditUnit"]) =>
-                                        updateEditingModelConfig({
-                                            creditUnit: billingUnit,
-                                            videoBillingConfiguration: {
-                                                ...(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration()),
-                                                billingUnit,
-                                            },
-                                        })
-                                    }
-                                />
-                            </div>
-                            <div>
-                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                    {translate("appShell.minimumDurationS")} <Info className="size-4 text-[var(--studio-muted)]" />
-                                </div>
-                                <InputNumber
-                                    min={1}
-                                    precision={0}
-                                    suffix={translate("appShell.s")}
-                                    className="w-full!"
-                                    value={editingModelConfig.videoBillingConfiguration?.minimumDurationSeconds || 3}
-                                    onChange={(value) => {
-                                        const current = editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration();
-                                        const nextMin = Math.max(1, Math.floor(Number(value) || 1));
-                                        updateEditingModelConfig({
-                                            videoBillingConfiguration: {
-                                                ...current,
-                                                minimumDurationSeconds: nextMin,
-                                                ...(current.maximumDurationSeconds != null && current.maximumDurationSeconds !== UNLIMITED_VIDEO_DURATION_SECONDS && current.maximumDurationSeconds < nextMin ? { maximumDurationSeconds: nextMin } : {}),
-                                            },
-                                        });
-                                    }}
-                                />
-                            </div>
-                            <div>
-                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                    {translate("appShell.maximumDurationS")} <Info className="size-4 text-[var(--studio-muted)]" />
-                                </div>
-                                <InputNumber
-                                    min={UNLIMITED_VIDEO_DURATION_SECONDS}
-                                    precision={0}
-                                    suffix={translate("appShell.s")}
-                                    placeholder={translate("appShell.maximumDurationPlaceholder")}
-                                    className="w-full!"
-                                    value={editingModelConfig.videoBillingConfiguration?.maximumDurationSeconds ?? null}
-                                    onChange={(value) =>
-                                        updateEditingModelConfig({
-                                            videoBillingConfiguration: {
-                                                ...(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration()),
-                                                maximumDurationSeconds: value === null || value === undefined ? null : Math.floor(Number(value)),
-                                            },
-                                        })
-                                    }
-                                />
-                            </div>
-                        </section>
-
-                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
-                            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                                <div>
-                                    <div className="flex items-center gap-1.5 text-base font-semibold">
-                                        {translate("appShell.capabilitiesAndResolutionPricing")}
-                                        <Info className="size-4 text-[var(--studio-muted)]" />
-                                    </div>
-                                    <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.configureCapabilitiesAndCreditPricesByResolution")}</p>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    {editingModelConfig.isCustomModel ? (
-                                        <Button size="small" icon={<Copy className="size-3.5" />} disabled={isSaving} onClick={() => setModelConfigCopyTarget(editingModelConfig)}>
-                                            {translate("appShell.copyConfigFromModel")}
-                                        </Button>
-                                    ) : null}
-                                    <span className="rounded-md border border-[var(--studio-line)] px-2.5 py-1 text-xs text-[var(--studio-muted)]">
-                                        {translate("appShell.pricing")}
-                                        {editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.creditsS") : translate("appShell.creditsRun")}
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="space-y-4">
-                                <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] p-4">
+                    const basicTabContent = (
+                        <div className="space-y-4">
+                            <section className="space-y-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                <div className="grid gap-4 md:grid-cols-2">
                                     <div>
-                                        <div className="font-medium">{translate("appShell.audioInputSupported")}</div>
-                                        <p className="text-xs text-[var(--studio-muted)]">{translate("appShell.allowAudioReferencesForThisVideoModelUniversalReference")}</p>
+                                        <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
+                                            {translate("appShell.displayName")}
+                                            <Info className="size-3.5 text-[var(--studio-muted)]" />
+                                        </div>
+                                        <Input
+                                            maxLength={255}
+                                            placeholder={editingModelConfig.modelName}
+                                            value={editingModelConfig.displayName || editingModelConfig.modelName}
+                                            onChange={(event) => updateEditingModelConfig({ displayName: event.target.value.trim() || null })}
+                                        />
+                                        <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.userFacingNameDefaultsToModelNameAndDoes")}</p>
                                     </div>
+                                    <div>
+                                        <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
+                                            {translate("appShell.displayIcon")}
+                                            <Info className="size-3.5 text-[var(--studio-muted)]" />
+                                        </div>
+                                        <Select value={editingModelConfig.modelIcon || ""} options={modelIconSelectOptions} className="w-full" onChange={(modelIcon: string) => updateEditingModelConfig({ modelIcon: modelIcon || null })} />
+                                        <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.displayIconAutoMatchDetectsItFromModelOr")}</p>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
+                                        {translate("appShell.modelDescription")}
+                                        <Info className="size-3.5 text-[var(--studio-muted)]" />
+                                    </div>
+                                    <Input.TextArea
+                                        maxLength={500}
+                                        showCount
+                                        autoSize={{ minRows: 2, maxRows: 3 }}
+                                        placeholder={translate("appShell.modelDescriptionPlaceholder")}
+                                        value={editingModelConfig.description || ""}
+                                        onChange={(event) => updateEditingModelConfig({ description: event.target.value || null })}
+                                    />
+                                    <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.modelDescriptionHelper")}</p>
+                                </div>
+                            </section>
+
+                            {isVideo ? (
+                                <section className="grid gap-4 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4 md:grid-cols-4">
+                                    <div>
+                                        <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
+                                            {translate("appShell.billingMethod")}
+                                            <Info className="size-3.5 text-[var(--studio-muted)]" />
+                                        </div>
+                                        <Select
+                                            value={editingModelConfig.videoBillingConfiguration?.billingUnit || "generation"}
+                                            options={[
+                                                { value: "generation", label: translate("appShell.perRun") },
+                                                { value: "second", label: translate("appShell.perSecond") },
+                                            ]}
+                                            className="w-full"
+                                            onChange={(billingUnit: ServerModelConfig["creditUnit"]) =>
+                                                updateEditingModelConfig({
+                                                    creditUnit: billingUnit,
+                                                    videoBillingConfiguration: {
+                                                        ...(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration()),
+                                                        billingUnit,
+                                                    },
+                                                })
+                                            }
+                                        />
+                                    </div>
+                                    <div>
+                                        <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
+                                            {translate("appShell.minimumDurationS")}
+                                            <Info className="size-3.5 text-[var(--studio-muted)]" />
+                                        </div>
+                                        <InputNumber
+                                            min={1}
+                                            precision={0}
+                                            suffix={translate("appShell.s")}
+                                            className="w-full!"
+                                            value={editingModelConfig.videoBillingConfiguration?.minimumDurationSeconds || 3}
+                                            onChange={(value) => {
+                                                const current = editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration();
+                                                const nextMin = Math.max(1, Math.floor(Number(value) || 1));
+                                                updateEditingModelConfig({
+                                                    videoBillingConfiguration: {
+                                                        ...current,
+                                                        minimumDurationSeconds: nextMin,
+                                                        ...(current.maximumDurationSeconds != null && current.maximumDurationSeconds !== UNLIMITED_VIDEO_DURATION_SECONDS && current.maximumDurationSeconds < nextMin ? { maximumDurationSeconds: nextMin } : {}),
+                                                    },
+                                                });
+                                            }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
+                                            {translate("appShell.maximumDurationS")}
+                                            <Info className="size-3.5 text-[var(--studio-muted)]" />
+                                        </div>
+                                        <InputNumber
+                                            min={UNLIMITED_VIDEO_DURATION_SECONDS}
+                                            precision={0}
+                                            suffix={translate("appShell.s")}
+                                            placeholder={translate("appShell.maximumDurationPlaceholder")}
+                                            className="w-full!"
+                                            value={editingModelConfig.videoBillingConfiguration?.maximumDurationSeconds ?? null}
+                                            onChange={(value) =>
+                                                updateEditingModelConfig({
+                                                    videoBillingConfiguration: {
+                                                        ...(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration()),
+                                                        maximumDurationSeconds: value === null || value === undefined ? null : Math.floor(Number(value)),
+                                                    },
+                                                })
+                                            }
+                                        />
+                                    </div>
+                                    <div>
+                                        <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
+                                            {translate("appShell.concurrency")}
+                                            <Info className="size-3.5 text-[var(--studio-muted)]" />
+                                        </div>
+                                        <InputNumber
+                                            min={1}
+                                            precision={0}
+                                            suffix={translate("appShell.tasks")}
+                                            className="w-full!"
+                                            value={editingModelConfig.requestConcurrency}
+                                            onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })}
+                                        />
+                                    </div>
+                                </section>
+                            ) : (
+                                <section className="space-y-4 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div>
+                                            <div className="mb-1.5 text-sm font-semibold">{translate("appShell.creditsPerRun")}</div>
+                                            <InputNumber<string> min="0" stringMode precision={6} value={String(editingModelConfig.creditCost)} className="w-full!" onChange={(value) => updateEditingModelConfig({ creditCost: creditText(value || "0") })} />
+                                        </div>
+                                        {isImage ? (
+                                            <div>
+                                                <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
+                                                    {translate("appShell.concurrency")}
+                                                    <Info className="size-3.5 text-[var(--studio-muted)]" />
+                                                </div>
+                                                <InputNumber
+                                                    min={1}
+                                                    precision={0}
+                                                    suffix={translate("appShell.tasks")}
+                                                    className="w-full!"
+                                                    value={editingModelConfig.requestConcurrency}
+                                                    onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })}
+                                                />
+                                            </div>
+                                        ) : null}
+                                        {supportsThinkingConfiguration(editingModelConfig) ? (
+                                            <div className="grid grid-cols-[auto_minmax(0,1fr)] items-end gap-3">
+                                                <div>
+                                                    <div className="mb-1.5 text-sm font-semibold">{translate("appShell.enableThinking")}</div>
+                                                    <Switch checked={editingModelConfig.thinkingEnabled} onChange={(thinkingEnabled) => updateEditingModelConfig({ thinkingEnabled })} />
+                                                </div>
+                                                <div>
+                                                    <div className="mb-1.5 text-sm font-semibold">{translate("appShell.thinkingIntensity")}</div>
+                                                    <Select
+                                                        className="w-full"
+                                                        value={editingModelConfig.reasoningEffort}
+                                                        disabled={isReasoningEffortDisabled(false, editingModelConfig.thinkingEnabled)}
+                                                        options={reasoningEffortOptions}
+                                                        onChange={(reasoningEffort: "high" | "max") => updateEditingModelConfig({ reasoningEffort })}
+                                                    />
+                                                </div>
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                    {isImage ? (
+                                        <div className="border-t border-[var(--studio-line)] pt-3">
+                                            <div className="text-sm font-semibold">{translate("appShell.imageResolutionPricing")}</div>
+                                            <div className="mt-0.5 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.imageResolutionPricingHint")}</div>
+                                            <div className="mt-2.5 grid grid-cols-3 gap-3">
+                                                {IMAGE_RESOLUTIONS.map((resolution) => (
+                                                    <label key={resolution} className="block">
+                                                        <span className="mb-1 block text-xs text-[var(--studio-muted)]">{resolution}</span>
+                                                        <InputNumber<string>
+                                                            stringMode
+                                                            min="0"
+                                                            precision={6}
+                                                            className="w-full!"
+                                                            placeholder={translate("appShell.inheritModelUnitPrice")}
+                                                            value={formatImageResolutionPrice(editingModelConfig.imageBillingConfiguration?.resolutionPrices?.[resolution])}
+                                                            onChange={(value) => updateImageResolutionPrice(resolution, value === null || String(value).trim() === "" ? "" : creditText(value))}
+                                                        />
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ) : null}
+                                </section>
+                            )}
+                        </div>
+                    );
+
+                    const customModelSwitchBar = editingModelConfig.modelType !== "text" ? (
+                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] px-4 py-3">
+                            <div>
+                                <div className="flex items-center gap-1.5 text-sm font-semibold">
+                                    {translate("appShell.customModel")}
+                                    <Info className="size-3.5 text-[var(--studio-muted)]" />
+                                </div>
+                                <p className="mt-0.5 text-xs text-[var(--studio-muted)]">
+                                    {isVideo ? translate("appShell.useRequestAndResponseExamplesForEachModeTo") : translate("appShell.useRequestAndResponseExamplesForEachCapabilityTo")}
+                                </p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                {editingModelConfig.isCustomModel ? (
+                                    <>
+                                        <Button size="small" icon={<Copy className="size-3.5" />} disabled={isSaving} onClick={copyEditingModelConfig}>
+                                            {translate("appShell.copyConfig")}
+                                        </Button>
+                                        <Button size="small" icon={<Upload className="size-3.5" />} disabled={isSaving} onClick={() => setModelConfigImportTarget(editingModelConfig)}>
+                                            {translate("appShell.importConfig")}
+                                        </Button>
+                                    </>
+                                ) : null}
+                                <Switch checked={Boolean(editingModelConfig.isCustomModel)} onChange={(checked) => updateEditingModelConfig({ isCustomModel: checked })} />
+                            </div>
+                        </div>
+                    ) : null;
+
+                    const capabilitiesTabContent = isVideo ? (
+                        <div className="space-y-3">
+                            {customModelSwitchBar}
+                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] px-4 py-2.5">
+                                <div className="flex items-center gap-3">
                                     <Switch
+                                        size="small"
                                         aria-label={translate("appShell.audioInputSupported")}
                                         checked={editingModelConfig.capabilities.includes("audio-input")}
                                         disabled={isSaving || (!editingModelConfig.capabilities.includes("audio-input") && !editingModelConfig.capabilities.includes("reference-to-video"))}
@@ -2162,294 +2252,222 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                             });
                                         }}
                                     />
+                                    <div>
+                                        <span className="text-sm font-medium">{translate("appShell.audioInputSupported")}</span>
+                                        <span className="ml-2 text-xs text-[var(--studio-muted)]">{translate("appShell.allowAudioReferencesForThisVideoModelUniversalReference")}</span>
+                                    </div>
                                 </div>
-                                {createVideoGenerationCapabilityOptions(translate).map((mode, index) => {
-                                    const prices = editingModelConfig.videoBillingConfiguration?.modePrices?.[mode.value] || {};
-                                    const modeEnabled = editingModelConfig.capabilities.includes(mode.value);
-                                    const modeCollapsed = collapsedEditingCapabilities.includes(`video:${mode.value}`);
-                                    const modeIcon = index === 0 ? <TextCursorInput className="size-5" /> : index === 1 ? <Image className="size-5" /> : <Sparkles className="size-5" />;
-                                    const modeColor = index === 0 ? "border-violet-500/50 bg-violet-500/5" : index === 1 ? "border-blue-500/50 bg-blue-500/5" : "border-emerald-500/50 bg-emerald-500/5";
-                                    const iconColor = index === 0 ? "bg-violet-500/15 text-violet-500" : index === 1 ? "bg-blue-500/15 text-blue-500" : "bg-emerald-500/15 text-emerald-500";
-                                    const description = index === 0 ? translate("appShell.generateVideoFromText") : index === 1 ? translate("appShell.generateVideoFromImage") : translate("appShell.generateVideoFromTextImagesAndMultimodalReferences");
-                                    return (
-                                        <div key={mode.value} className={`rounded-lg border p-4 transition-colors ${modeEnabled ? modeColor : "border-[var(--studio-line)] opacity-70"}`}>
-                                            <div className={modeCollapsed ? "flex items-start justify-between gap-4" : "flex items-start justify-between gap-4 border-b border-[var(--studio-line)] pb-3"}>
-                                                <div className="flex min-w-0 items-center gap-3">
-                                                    <span className={`flex size-10 shrink-0 items-center justify-center rounded-md ${iconColor}`}>{modeIcon}</span>
-                                                    <div>
-                                                        <div className="flex flex-wrap items-center gap-2">
-                                                            <span className="font-semibold">{mode.label}</span>
-                                                            {modeEnabled ? (
-                                                                <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">{translate("appShell.enabled")}</span>
-                                                            ) : (
-                                                                <span className="rounded bg-[var(--studio-panel)] px-2 py-0.5 text-xs text-[var(--studio-muted)]">{translate("appShell.disabled")}</span>
-                                                            )}
-                                                        </div>
-                                                        <p className="mt-1 text-xs text-[var(--studio-muted)]">{description}</p>
-                                                    </div>
-                                                </div>
-                                                <div className="flex shrink-0 items-center gap-2">
-                                                    <Button
-                                                        type="text"
-                                                        size="small"
-                                                        aria-label={`${mode.label}${modeCollapsed ? translate("appShell.expand") : translate("appShell.collapse")}`}
-                                                        aria-expanded={!modeCollapsed}
-                                                        title={translate("appShell.configuration", { value0: modeCollapsed ? translate("appShell.expand") : translate("appShell.collapse"), value1: mode.label })}
-                                                        icon={modeCollapsed ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
-                                                        onClick={() => toggleEditingCapabilityCollapsed(`video:${mode.value}`)}
-                                                    />
-                                                    <Switch
-                                                        checked={modeEnabled}
-                                                        onChange={(checked) =>
-                                                            updateEditingModelConfig({
-                                                                capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, mode.value]) : editingModelConfig.capabilities.filter((value) => value !== mode.value),
-                                                                ...(!checked ? { videoBillingConfiguration: clearVideoModePrices(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value) } : {}),
-                                                            })
-                                                        }
-                                                    />
-                                                </div>
-                                            </div>
-                                            {modeCollapsed ? null : (
-                                                <div className="pt-3">
-                                                    <div className="mb-2 text-xs font-medium text-[var(--studio-muted)]">
-                                                        {translate("appShell.resolutionPricing")}
-                                                        {editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.creditsS") : translate("appShell.creditsRun")}）
-                                                    </div>
-                                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                                                        {VIDEO_RESOLUTION_OPTIONS.filter((resolution) => resolution.value !== "auto").map((resolution) => (
-                                                            <label key={resolution.value} className="flex min-w-0 items-center gap-2 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2.5 py-2">
-                                                                <span
-                                                                    className={`flex size-7 shrink-0 items-center justify-center rounded text-[10px] font-semibold ${resolution.value === "480p" ? "bg-violet-500/15 text-violet-500" : resolution.value === "720p" ? "bg-blue-500/15 text-blue-500" : resolution.value === "1080p" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : resolution.value === "2k" ? "bg-rose-500/15 text-rose-500" : resolution.value === "4k" ? "bg-purple-500/15 text-purple-500" : "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400"}`}
-                                                                >
-                                                                    <Monitor className="size-3.5" />
-                                                                </span>
-                                                                <span className="min-w-0 flex-1">
-                                                                    <span className="block text-xs font-medium">{resolution.label}</span>
-                                                                    <InputNumber<string>
-                                                                        stringMode
-                                                                        min="0"
-                                                                        precision={6}
-                                                                        placeholder={translate("appShell.notConfigured")}
-                                                                        value={prices[resolution.value] === undefined ? undefined : String(prices[resolution.value])}
-                                                                        className="mt-0.5 w-full"
-                                                                        disabled={!modeEnabled}
-                                                                        controls={false}
-                                                                        onChange={(value) =>
-                                                                            updateEditingModelConfig({
-                                                                                videoBillingConfiguration: updateVideoResolutionPrice(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value, resolution.value, value),
-                                                                            })
-                                                                        }
-                                                                    />
-                                                                </span>
-                                                            </label>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {modeCollapsed || !modeEnabled || !editingModelConfig.isCustomModel ? null : (
-                                                <div>
-                                                    <div className="mt-3 flex items-center justify-between gap-3">
-                                                        <span className="text-sm font-semibold">{translate("appShell.videoConstraintSection")}</span>
-                                                        <AutoFillButton onClick={() => setAutoFillConfigMode(mode.value)} />
-                                                    </div>
-                                                    <VideoGenerationConstraintsEditor
-                                                        mode={mode.value}
-                                                        constraints={editingModelConfig.customModelConfig?.[mode.value]?.videoGenerationConstraints}
-                                                        audioEnabled={editingModelConfig.capabilities.includes("audio-input")}
-                                                        billingMinimum={editingModelConfig.videoBillingConfiguration?.minimumDurationSeconds || 1}
-                                                        billingMaximum={resolveBillingMaximumDurationSeconds(editingModelConfig.videoBillingConfiguration)}
-                                                        onChange={(videoGenerationConstraints) =>
-                                                            updateEditingModelConfig({
-                                                                customModelConfig: {
-                                                                    ...editingModelConfig.customModelConfig,
-                                                                    [mode.value]: { ...emptyCustomModelGroup(), ...editingModelConfig.customModelConfig?.[mode.value], videoGenerationConstraints },
-                                                                },
-                                                            })
-                                                        }
-                                                    />
-                                                </div>
-                                            )}
-                                            {modeCollapsed ? null : editingModelConfig.isCustomModel ? (
-                                                <CustomModelGroupEditor
-                                                    label={mode.label}
-                                                    group={editingModelConfig.customModelConfig?.[mode.value]}
-                                                    isVideo
-                                                    onAutoFill={() => setAutoFillConfigMode(mode.value)}
-                                                    onChange={(group) =>
-                                                        updateEditingModelConfig({
-                                                            customModelConfig: { ...(editingModelConfig.customModelConfig || {}), [mode.value]: group },
-                                                        })
-                                                    }
-                                                />
-                                            ) : null}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </section>
-
-                        <div className="grid gap-5 md:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
-                            <section>
-                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                    {translate("appShell.concurrency")}
-                                    <Info className="size-4 text-[var(--studio-muted)]" />
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <InputNumber min={1} precision={0} value={editingModelConfig.requestConcurrency} className="w-52" onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })} />
-                                    <span className="text-sm text-[var(--studio-muted)]">{translate("appShell.tasks")}</span>
-                                </div>
-                            </section>
-                            <section>
-                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">{translate("appShell.capabilities")}</div>
-                                <div className="flex flex-wrap gap-2">
-                                    {createModelCapabilityOptions(translate)
-                                        .video.filter((option) => editingModelConfig.capabilities.includes(option.value))
-                                        .map((option) => (
-                                            <span key={option.value} className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
-                                                <CheckCircle2 className="size-3.5" />
-                                                {option.label}
-                                            </span>
-                                        ))}
-                                    {!editingModelConfig.capabilities.length ? <span className="text-xs text-[var(--studio-muted)]">{translate("appShell.videoGenerationIsDisabled")}</span> : null}
-                                </div>
-                            </section>
-                        </div>
-
-                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
-                            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-                                <div className="flex items-center gap-1.5 text-sm font-semibold">
-                                    {translate("appShell.customJSONOptional")}
-                                    <Info className="size-4 text-[var(--studio-muted)]" />
-                                </div>
-                                <Button size="small" icon={<Braces className="size-3.5" />} onClick={formatEditingCustomBodyParameters}>
-                                    {translate("appShell.format")}
-                                </Button>
-                            </div>
-                            <Input.TextArea value={editingCustomBodyParameters} autoSize={{ minRows: 5, maxRows: 12 }} spellCheck={false} className="font-mono text-xs" onChange={(event) => setEditingCustomBodyParameters(event.target.value)} />
-                            <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("appShell.mergedOnlyIntoJSONPOSTBodiesDuplicateFieldsOverride")}</p>
-                        </section>
-                    </div>
-                ) : editingModelConfig ? (
-                    <Form layout="vertical" requiredMark={false}>
-                        {editingModelConfig.modelType !== "text" ? (
-                            <Form.Item label={translate("appShell.customModel")} extra={translate("appShell.useRequestAndResponseExamplesForEachCapabilityTo")}>
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <Switch checked={Boolean(editingModelConfig.isCustomModel)} onChange={(checked) => updateEditingModelConfig({ isCustomModel: checked })} />
+                                <div className="flex flex-wrap items-center gap-2">
                                     {editingModelConfig.isCustomModel ? (
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <Button size="small" icon={<Copy className="size-3.5" />} disabled={isSaving} onClick={copyEditingModelConfig}>
-                                                {translate("appShell.copyConfig")}
-                                            </Button>
-                                            <Button size="small" icon={<Upload className="size-3.5" />} disabled={isSaving} onClick={() => setModelConfigImportTarget(editingModelConfig)}>
-                                                {translate("appShell.importConfig")}
-                                            </Button>
-                                        </div>
-                                    ) : null}
-                                </div>
-                            </Form.Item>
-                        ) : null}
-                        <Form.Item label={translate("appShell.displayName")} extra={translate("appShell.userFacingNameDefaultsToModelNameAndDoes")}>
-                            <Input
-                                maxLength={255}
-                                placeholder={editingModelConfig.modelName}
-                                value={editingModelConfig.displayName || editingModelConfig.modelName}
-                                onChange={(event) => updateEditingModelConfig({ displayName: event.target.value.trim() || null })}
-                            />
-                        </Form.Item>
-                        <Form.Item label={translate("appShell.displayIcon")} extra={translate("appShell.displayIconAutoMatchDetectsItFromModelOr")}>
-                            <Select value={editingModelConfig.modelIcon || ""} options={modelIconSelectOptions} className="w-full" onChange={(modelIcon: string) => updateEditingModelConfig({ modelIcon: modelIcon || null })} />
-                        </Form.Item>
-                        <Form.Item label={translate("appShell.modelDescription")} extra={translate("appShell.modelDescriptionHelper")}>
-                            <Input.TextArea
-                                maxLength={500}
-                                showCount
-                                autoSize={{ minRows: 2, maxRows: 4 }}
-                                placeholder={translate("appShell.modelDescriptionPlaceholder")}
-                                value={editingModelConfig.description || ""}
-                                onChange={(event) => updateEditingModelConfig({ description: event.target.value || null })}
-                            />
-                        </Form.Item>
-                        {editingModelConfig.modelType !== "video" ? (
-                            <Form.Item label={translate("appShell.creditsPerRun")}>
-                                <InputNumber<string> min="0" stringMode precision={6} value={String(editingModelConfig.creditCost)} className="w-full" onChange={(value) => updateEditingModelConfig({ creditCost: creditText(value || "0") })} />
-                            </Form.Item>
-                        ) : null}
-                        {editingModelConfig.modelType === "image" ? (
-                            <Form.Item label={translate("appShell.concurrency")}>
-                                <InputNumber min={1} precision={0} value={editingModelConfig.requestConcurrency} className="w-full" onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })} />
-                            </Form.Item>
-                        ) : null}
-                        {editingModelConfig.modelType === "image" ? (
-                            <Form.Item
-                                label={translate("appShell.convertImageSizeToPixels")}
-                                htmlFor="convert-image-size-to-pixels"
-                                extra={<span id="convert-image-size-to-pixels-description">{translate("appShell.convertImageSizeToPixelsDescription")}</span>}
-                            >
-                                <Switch
-                                    id="convert-image-size-to-pixels"
-                                    aria-label={translate("appShell.convertImageSizeToPixels")}
-                                    aria-describedby="convert-image-size-to-pixels-description"
-                                    checked={Boolean(editingModelConfig.convertImageSizeToPixels)}
-                                    onChange={(checked) => updateEditingModelConfig({ convertImageSizeToPixels: checked })}
-                                />
-                            </Form.Item>
-                        ) : null}
-                        {editingModelConfig.modelType === "image" && editingModelConfig.convertImageSizeToPixels ? (
-                            <Form.Item>
-                                <ImageSizeMappingsEditor value={editingModelConfig.imageSizeMappings ?? cloneImageSizeMappings()} onChange={(imageSizeMappings) => updateEditingModelConfig({ imageSizeMappings })} />
-                            </Form.Item>
-                        ) : null}
-                        <Form.Item label={translate("appShell.capabilities")}>
-                            {editingModelConfig.modelType === "image" && editingModelConfig.isCustomModel ? (
-                                <div className="space-y-3">
-                                    <div className="flex flex-wrap items-center justify-end gap-2">
                                         <Button size="small" icon={<Copy className="size-3.5" />} disabled={isSaving} onClick={() => setModelConfigCopyTarget(editingModelConfig)}>
                                             {translate("appShell.copyConfigFromModel")}
                                         </Button>
-                                    </div>
-                                    {createModelCapabilityOptions(translate).image.map((option) => (
-                                        <div key={option.value} className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
-                                            <div className="flex items-center justify-between gap-3">
-                                                <Checkbox
-                                                    checked={editingModelConfig.capabilities.includes(option.value)}
-                                                    onChange={(event) =>
+                                    ) : null}
+                                    <span className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2 py-0.5 text-xs text-[var(--studio-muted)]">
+                                        {translate("appShell.pricing")}
+                                        {editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.creditsS") : translate("appShell.creditsRun")}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5" role="tablist">
+                                {videoModes.map((mode) => {
+                                    const active = mode.value === selectedVideoMode.value;
+                                    const enabled = editingModelConfig.capabilities.includes(mode.value);
+                                    const modeHasError =
+                                        editingModelConfig.isCustomModel &&
+                                        enabled &&
+                                        videoConstraintConfigurationIssues(
+                                            mode.value,
+                                            editingModelConfig.customModelConfig?.[mode.value]?.videoGenerationConstraints,
+                                            editingModelConfig.capabilities.includes("audio-input"),
+                                            editingModelConfig.videoBillingConfiguration?.minimumDurationSeconds || 1,
+                                            resolveBillingMaximumDurationSeconds(editingModelConfig.videoBillingConfiguration),
+                                        ).length > 0;
+                                    return (
+                                        <button
+                                            key={mode.value}
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={active}
+                                            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm! font-medium transition-colors ${
+                                                active
+                                                    ? "border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] text-[var(--studio-primary)]!"
+                                                    : "border-[var(--studio-line)] bg-[var(--studio-panel)] text-[var(--studio-muted)]! hover:text-[var(--studio-ink)]!"
+                                            }`}
+                                            onClick={() => setActiveEditingVideoMode(mode.value)}
+                                        >
+                                            <span className={`size-2 rounded-full ${modeHasError ? "bg-rose-500" : enabled ? "bg-emerald-500" : "bg-[var(--studio-line)]"}`} />
+                                            <span>{mode.label}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            {(() => {
+                                const mode = selectedVideoMode;
+                                const prices = editingModelConfig.videoBillingConfiguration?.modePrices?.[mode.value] || {};
+                                const modeEnabled = editingModelConfig.capabilities.includes(mode.value);
+                                const description = selectedVideoModeIndex === 0 ? translate("appShell.generateVideoFromText") : selectedVideoModeIndex === 1 ? translate("appShell.generateVideoFromImage") : translate("appShell.generateVideoFromTextImagesAndMultimodalReferences");
+                                return (
+                                    <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                        <div className="flex items-center justify-between gap-3 border-b border-[var(--studio-line)] pb-3">
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm font-semibold">{mode.label}</span>
+                                                    <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${modeEnabled ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-[var(--studio-panel)] text-[var(--studio-muted)]"}`}>
+                                                        {modeEnabled ? translate("appShell.enabled") : translate("appShell.disabled")}
+                                                    </span>
+                                                </div>
+                                                <p className="mt-0.5 text-xs text-[var(--studio-muted)]">{description}</p>
+                                            </div>
+                                            <Switch
+                                                checked={modeEnabled}
+                                                onChange={(checked) =>
+                                                    updateEditingModelConfig({
+                                                        capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, mode.value]) : editingModelConfig.capabilities.filter((value) => value !== mode.value),
+                                                        ...(!checked ? { videoBillingConfiguration: clearVideoModePrices(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value) } : {}),
+                                                    })
+                                                }
+                                            />
+                                        </div>
+
+                                        <div className="pt-3">
+                                            <div className="mb-2 text-xs font-medium text-[var(--studio-muted)]">
+                                                {translate("appShell.resolutionPricing")}
+                                                {editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.creditsS") : translate("appShell.creditsRun")}）
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                                {VIDEO_RESOLUTION_OPTIONS.filter((resolution) => resolution.value !== "auto").map((resolution) => (
+                                                    <label key={resolution.value} className="block rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2.5 py-1.5">
+                                                        <span className="block text-xs font-medium text-[var(--studio-muted)]">{resolution.label}</span>
+                                                        <InputNumber<string>
+                                                            stringMode
+                                                            min="0"
+                                                            precision={6}
+                                                            size="small"
+                                                            placeholder={translate("appShell.notConfigured")}
+                                                            value={prices[resolution.value] === undefined ? undefined : String(prices[resolution.value])}
+                                                            className="mt-1 w-full!"
+                                                            disabled={!modeEnabled}
+                                                            controls={false}
+                                                            onChange={(value) =>
+                                                                updateEditingModelConfig({
+                                                                    videoBillingConfiguration: updateVideoResolutionPrice(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value, resolution.value, value),
+                                                                })
+                                                            }
+                                                        />
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {modeEnabled && editingModelConfig.isCustomModel ? (
+                                            <div>
+                                                <div className="mt-3 flex items-center justify-between gap-3">
+                                                    <span className="text-sm font-semibold">{translate("appShell.videoConstraintSection")}</span>
+                                                    <AutoFillButton onClick={() => setAutoFillConfigMode(mode.value)} />
+                                                </div>
+                                                <VideoGenerationConstraintsEditor
+                                                    mode={mode.value}
+                                                    constraints={editingModelConfig.customModelConfig?.[mode.value]?.videoGenerationConstraints}
+                                                    audioEnabled={editingModelConfig.capabilities.includes("audio-input")}
+                                                    billingMinimum={editingModelConfig.videoBillingConfiguration?.minimumDurationSeconds || 1}
+                                                    billingMaximum={resolveBillingMaximumDurationSeconds(editingModelConfig.videoBillingConfiguration)}
+                                                    onChange={(videoGenerationConstraints) =>
                                                         updateEditingModelConfig({
-                                                            capabilities: event.target.checked ? uniqueModels([...editingModelConfig.capabilities, option.value]) : editingModelConfig.capabilities.filter((value) => value !== option.value),
+                                                            customModelConfig: {
+                                                                ...editingModelConfig.customModelConfig,
+                                                                [mode.value]: { ...emptyCustomModelGroup(), ...editingModelConfig.customModelConfig?.[mode.value], videoGenerationConstraints },
+                                                            },
                                                         })
                                                     }
-                                                >
-                                                    {option.label}
-                                                </Checkbox>
-                                                <Button
-                                                    type="text"
-                                                    size="small"
-                                                    aria-label={`${option.label}${collapsedEditingCapabilities.includes(`image:${option.value}`) ? translate("appShell.expand") : translate("appShell.collapse")}`}
-                                                    aria-expanded={!collapsedEditingCapabilities.includes(`image:${option.value}`)}
-                                                    title={translate("appShell.configuration", {
-                                                        value0: collapsedEditingCapabilities.includes(`image:${option.value}`) ? translate("appShell.expand") : translate("appShell.collapse"),
-                                                        value1: option.label,
-                                                    })}
-                                                    icon={collapsedEditingCapabilities.includes(`image:${option.value}`) ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
-                                                    onClick={() => toggleEditingCapabilityCollapsed(`image:${option.value}`)}
                                                 />
                                             </div>
-                                            {editingModelConfig.capabilities.includes(option.value) && !collapsedEditingCapabilities.includes(`image:${option.value}`) ? (
-                                                <CustomModelGroupEditor
-                                                    label={option.label}
-                                                    group={editingModelConfig.customModelConfig?.[option.value]}
-                                                    isVideo={false}
-                                                    onChange={(group) =>
-                                                        updateEditingModelConfig({
-                                                            customModelConfig: { ...(editingModelConfig.customModelConfig || {}), [option.value]: group },
-                                                        })
-                                                    }
-                                                />
-                                            ) : null}
-                                        </div>
-                                    ))}
+                                        ) : null}
+
+                                        {editingModelConfig.isCustomModel ? (
+                                            <CustomModelGroupEditor
+                                                label={mode.label}
+                                                group={editingModelConfig.customModelConfig?.[mode.value]}
+                                                isVideo
+                                                onAutoFill={() => setAutoFillConfigMode(mode.value)}
+                                                onChange={(group) =>
+                                                    updateEditingModelConfig({
+                                                        customModelConfig: { ...(editingModelConfig.customModelConfig || {}), [mode.value]: group },
+                                                    })
+                                                }
+                                            />
+                                        ) : null}
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    ) : isImage && editingModelConfig.isCustomModel ? (
+                        <div className="space-y-3">
+                            {customModelSwitchBar}
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex flex-wrap items-center gap-1.5" role="tablist">
+                                    {imageModes.map((option) => {
+                                        const active = option.value === selectedImageMode.value;
+                                        const enabled = editingModelConfig.capabilities.includes(option.value);
+                                        return (
+                                            <button
+                                                key={option.value}
+                                                type="button"
+                                                role="tab"
+                                                aria-selected={active}
+                                                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm! font-medium transition-colors ${
+                                                    active
+                                                        ? "border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] text-[var(--studio-primary)]!"
+                                                        : "border-[var(--studio-line)] bg-[var(--studio-panel)] text-[var(--studio-muted)]! hover:text-[var(--studio-ink)]!"
+                                                }`}
+                                                onClick={() => setActiveEditingImageMode(option.value)}
+                                            >
+                                                <span className={`size-2 rounded-full ${enabled ? "bg-emerald-500" : "bg-[var(--studio-line)]"}`} />
+                                                <span>{option.label}</span>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
-                            ) : (
-                                <div className="flex flex-wrap gap-x-4 gap-y-2">
+                                <Button size="small" icon={<Copy className="size-3.5" />} disabled={isSaving} onClick={() => setModelConfigCopyTarget(editingModelConfig)}>
+                                    {translate("appShell.copyConfigFromModel")}
+                                </Button>
+                            </div>
+                            <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                <div className="flex items-center justify-between gap-3 border-b border-[var(--studio-line)] pb-3">
+                                    <span className="text-sm font-semibold">{selectedImageMode.label}</span>
+                                    <Switch
+                                        checked={editingModelConfig.capabilities.includes(selectedImageMode.value)}
+                                        onChange={(checked) =>
+                                            updateEditingModelConfig({
+                                                capabilities: checked
+                                                    ? uniqueModels([...editingModelConfig.capabilities, selectedImageMode.value])
+                                                    : editingModelConfig.capabilities.filter((value) => value !== selectedImageMode.value),
+                                            })
+                                        }
+                                    />
+                                </div>
+                                {editingModelConfig.capabilities.includes(selectedImageMode.value) ? (
+                                    <CustomModelGroupEditor
+                                        label={selectedImageMode.label}
+                                        group={editingModelConfig.customModelConfig?.[selectedImageMode.value]}
+                                        isVideo={false}
+                                        onChange={(group) =>
+                                            updateEditingModelConfig({
+                                                customModelConfig: { ...(editingModelConfig.customModelConfig || {}), [selectedImageMode.value]: group },
+                                            })
+                                        }
+                                    />
+                                ) : null}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {customModelSwitchBar}
+                            <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                <div className="mb-3 text-sm font-semibold">{translate("appShell.capabilities")}</div>
+                                <div className="flex flex-wrap gap-x-5 gap-y-2.5">
                                     {createModelCapabilityOptions(translate)[editingModelConfig.modelType].map((option) => (
                                         <Checkbox
                                             key={option.value}
@@ -2464,50 +2482,71 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                         </Checkbox>
                                     ))}
                                 </div>
-                            )}
-                        </Form.Item>
-                        {supportsThinkingConfiguration(editingModelConfig) ? (
-                            <>
-                                <Form.Item label={translate("appShell.enableThinking")}>
-                                    <Switch checked={editingModelConfig.thinkingEnabled} onChange={(thinkingEnabled) => updateEditingModelConfig({ thinkingEnabled })} />
-                                </Form.Item>
-                                <Form.Item label={translate("appShell.thinkingIntensity")}>
-                                    <Select
-                                        value={editingModelConfig.reasoningEffort}
-                                        disabled={isReasoningEffortDisabled(false, editingModelConfig.thinkingEnabled)}
-                                        options={reasoningEffortOptions}
-                                        onChange={(reasoningEffort: "high" | "max") => updateEditingModelConfig({ reasoningEffort })}
-                                    />
-                                </Form.Item>
-                            </>
-                        ) : null}
-                        {editingModelConfig.modelType === "image" ? (
-                            <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
-                                <div className="text-sm font-semibold">{translate("appShell.imageResolutionPricing")}</div>
-                                <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.imageResolutionPricingHint")}</div>
-                                <div className="mt-3 grid grid-cols-3 gap-3">
-                                    {IMAGE_RESOLUTIONS.map((resolution) => (
-                                        <label key={resolution} className="block">
-                                            <span className="mb-1 block text-xs text-[var(--studio-muted)]">{resolution}</span>
-                                            <InputNumber<string>
-                                                stringMode
-                                                min="0"
-                                                precision={6}
-                                                className="w-full!"
-                                                placeholder={translate("appShell.inheritModelUnitPrice")}
-                                                value={formatImageResolutionPrice(editingModelConfig.imageBillingConfiguration?.resolutionPrices?.[resolution])}
-                                                onChange={(value) => updateImageResolutionPrice(resolution, value === null || String(value).trim() === "" ? "" : creditText(value))}
-                                            />
-                                        </label>
-                                    ))}
+                            </section>
+                        </div>
+                    );
+
+                    const advancedTabContent = (
+                        <div className="space-y-4">
+                            {isImage ? (
+                                <section className="space-y-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <div className="text-sm font-semibold">{translate("appShell.convertImageSizeToPixels")}</div>
+                                            <p id="convert-image-size-to-pixels-description" className="mt-0.5 text-xs text-[var(--studio-muted)]">
+                                                {translate("appShell.convertImageSizeToPixelsDescription")}
+                                            </p>
+                                        </div>
+                                        <Switch
+                                            id="convert-image-size-to-pixels"
+                                            aria-label={translate("appShell.convertImageSizeToPixels")}
+                                            aria-describedby="convert-image-size-to-pixels-description"
+                                            checked={Boolean(editingModelConfig.convertImageSizeToPixels)}
+                                            onChange={(checked) => updateEditingModelConfig({ convertImageSizeToPixels: checked })}
+                                        />
+                                    </div>
+                                    {editingModelConfig.convertImageSizeToPixels ? (
+                                        <ImageSizeMappingsEditor value={editingModelConfig.imageSizeMappings ?? cloneImageSizeMappings()} onChange={(imageSizeMappings) => updateEditingModelConfig({ imageSizeMappings })} />
+                                    ) : null}
+                                </section>
+                            ) : null}
+                            <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                                    <div className="flex items-center gap-1.5 text-sm font-semibold">
+                                        {translate("appShell.customJSONOptional")}
+                                        <Info className="size-3.5 text-[var(--studio-muted)]" />
+                                    </div>
+                                    <Button size="small" icon={<Braces className="size-3.5" />} onClick={formatEditingCustomBodyParameters}>
+                                        {translate("appShell.format")}
+                                    </Button>
                                 </div>
-                            </div>
-                        ) : null}
-                        <Form.Item label={translate("appShell.customJSON")} extra={translate("appShell.mergedOnlyIntoJSONPOSTBodiesDuplicateFieldsOverride")}>
-                            <Input.TextArea value={editingCustomBodyParameters} autoSize={{ minRows: 5, maxRows: 12 }} spellCheck={false} onChange={(event) => setEditingCustomBodyParameters(event.target.value)} />
-                        </Form.Item>
-                    </Form>
-                ) : null}
+                                <Input.TextArea value={editingCustomBodyParameters} autoSize={{ minRows: 5, maxRows: 12 }} spellCheck={false} className="font-mono text-xs" onChange={(event) => setEditingCustomBodyParameters(event.target.value)} />
+                                <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("appShell.mergedOnlyIntoJSONPOSTBodiesDuplicateFieldsOverride")}</p>
+                            </section>
+                        </div>
+                    );
+
+                    return (
+                        <Tabs
+                            activeKey={modelEditorTab}
+                            onChange={(key) => setModelEditorTab(key as "basic" | "capabilities" | "advanced")}
+                            items={[
+                                { key: "basic", label: translate("appShell.editorTabBasic"), children: basicTabContent },
+                                {
+                                    key: "capabilities",
+                                    label: (
+                                        <span className="inline-flex items-center gap-1.5">
+                                            <span>{translate("appShell.editorTabCapabilities")}</span>
+                                            {hasVideoConstraintError ? <span className="size-2 rounded-full bg-rose-500" /> : null}
+                                        </span>
+                                    ),
+                                    children: capabilitiesTabContent,
+                                },
+                                { key: "advanced", label: translate("appShell.editorTabAdvanced"), children: advancedTabContent },
+                            ]}
+                        />
+                    );
+                })() : null}
             </Modal>
             {modelConfigCopyTarget ? <ModelConfigCopyModal target={modelConfigCopyTarget} configs={draftModelConfigs} config={draftConfig} onCancel={() => setModelConfigCopyTarget(null)} onCopy={copyCustomConfigFromModel} /> : null}
             {modelConfigImportTarget ? <ModelConfigImportModal target={modelConfigImportTarget} onCancel={() => setModelConfigImportTarget(null)} onImport={importEditingModelConfig} /> : null}
