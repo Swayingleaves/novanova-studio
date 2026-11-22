@@ -6,9 +6,9 @@ import { ArrowLeft, ArrowUp, Square } from "lucide-react";
 import Link, { useRouter } from "@/shared/lib/team-navigation";
 import { useTranslation } from "@/features/locale/use-translation";
 import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
+import { UserCreditMenu } from "@/features/app-shell/components/user-credit-menu";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
-import { creditText } from "@/shared/lib/credit-amounts";
 import { DEFAULT_IMAGE_LAST_USED_SETTINGS, DEFAULT_VIDEO_LAST_USED_SETTINGS, loadImageLastUsedSettings, loadVideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { VIDEO_RESOLUTION_OPTIONS, availableVideoResolutions } from "@/features/generation/lib/video-billing";
 import { sizeFromAspectRatio } from "@/features/generation/components/video-settings-panel";
@@ -20,7 +20,6 @@ import { getAgentSessionHistory, getAiTaskInfo, type ServerAgentSessionHistoryMe
 import { confirmDramaStage, discardDramaVersion, dramaStages, generateDramaMedia, getDramaWorkspace, regenerateDramaStage, sendDramaMessage, updateDramaProject, type DramaMedia, type DramaStage, type DramaVersion, type DramaWorkspace } from "@/services/api/drama";
 import { DramaArtifact } from "./artifact-view";
 import { DramaChatMessage } from "./chat/chat-message";
-import { GooThinking } from "./chat/goo-thinking";
 import { parseDramaMeta } from "./chat/stage-card";
 import { dramaStageMeta } from "./stage-meta";
 
@@ -32,7 +31,6 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
     const [workspace, setWorkspace] = useState<DramaWorkspace | null>(null);
     const [messages, setMessages] = useState<ServerAgentSessionHistoryMessage[]>([]);
     const [streaming, setStreaming] = useState<{ id: string; text: string } | null>(null);
-    const [gooMounted, setGooMounted] = useState(false);
     const [loading, setLoading] = useState(true);
     const [missing, setMissing] = useState(false);
     const [follow, setFollow] = useState(true);
@@ -171,26 +169,16 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
     }, [nameFocused, workspace]);
 
     // 贴底要连容器自己的下内边距一起滚出来，scrollIntoView 会把它吃掉，导致正文贴住输入框。
-    useEffect(() => {
+    const scrollToBottom = useCallback(() => {
         const element = listRef.current;
         if (element) element.scrollTop = element.scrollHeight;
-    }, [messages, busy, streaming?.text]);
+    }, []);
 
-    // 等待时挂出三个点；第一段正文到达后先播完收拢动画再卸载。
-    const awaiting = Boolean(busy || sending);
-    const liveText = Boolean(streaming);
     useEffect(() => {
-        if (!awaiting) {
-            setGooMounted(false);
-            return;
-        }
-        if (!liveText) {
-            setGooMounted(true);
-            return;
-        }
-        const timer = window.setTimeout(() => setGooMounted(false), 220);
-        return () => window.clearTimeout(timer);
-    }, [awaiting, liveText]);
+        scrollToBottom();
+    }, [messages, busy, sending, streaming?.text, scrollToBottom]);
+
+    const showLiveBubble = Boolean(busy || sending || streaming);
 
     const project = workspace?.project;
     const viewed = (follow ? project?.currentStage : picked) || "plan";
@@ -209,6 +197,15 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
     }, [workspace?.media]);
     const storyboardShotRefs = useMemo(() => refsOf(latestOf(workspace?.versions, "storyboard")?.content.shots), [workspace?.versions]);
     const storyboardShotDurations = useMemo(() => shotDurationMap(latestOf(workspace?.versions, "storyboard")?.content.shots), [workspace?.versions]);
+    const productionShotSource = viewed === "shot" && selected?.stage === "shot" ? selected : latestOf(workspace?.versions, "shot");
+    const productionShotRefs = useMemo(() => {
+        const refs = refsOf(productionShotSource?.content.shots);
+        return refs.length ? refs : storyboardShotRefs;
+    }, [productionShotSource, storyboardShotRefs]);
+    const mergedShotDurations = useMemo(() => ({
+        ...storyboardShotDurations,
+        ...shotDurationMap(productionShotSource?.content.shots),
+    }), [storyboardShotDurations, productionShotSource]);
     const videoMode = viewed === "shot" || viewed === "preview" ? "reference-to-video" : storyboardShotRefs.some((ref) => mediaByKey[`board:${ref}`]?.status === "success") ? "image-to-video" : "text-to-video";
     const videoResolutions = useMemo(() => availableVideoResolutions({ ...config, videoModel, videoGenerationMode: videoMode }, videoModel, videoMode), [config, videoMode, videoModel]);
 
@@ -457,8 +454,8 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
 
     const waitForPreviousFrame = async (targetKey: string, latest: DramaWorkspace | null, batch: number) => {
         const ref = targetKey.slice("sheet:".length);
-        const index = storyboardShotRefs.indexOf(ref);
-        const previous = index > 0 ? storyboardShotRefs[index - 1] : "";
+        const index = productionShotRefs.indexOf(ref);
+        const previous = index > 0 ? productionShotRefs[index - 1] : "";
         if (!previous) return latest;
         const frameKey = `cut:last:${previous}`;
         const sheetKey = `sheet:${previous}`;
@@ -529,8 +526,8 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                     {translate(dramaStageMeta[project.currentStage].label)}
                 </span>
                 {project.status === "completed" ? <StatusPill tone="success">{translate("drama.completed")}</StatusPill> : null}
-                <span className="text-xs tabular-nums text-[var(--studio-muted)]">{translate("drama.credits", { value0: creditText(project.textCredits) })}</span>
                 <ThemePreferenceMenu variant="toolbar" />
+                <UserCreditMenu />
             </header>
             <div className="flex gap-1 border-b border-[var(--studio-line)] bg-[var(--studio-panel-solid)] px-3 py-2 lg:hidden">
                 {(["chat", "work"] as const).map((item) => (
@@ -552,7 +549,7 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                         <span className="text-sm font-medium text-[var(--studio-ink)]">{translate("drama.agentTitle")}</span>
                     </div>
                     <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-4 pb-7 pt-4">
-                        {messages.length === 0 && !gooMounted && !streaming ? (
+                        {messages.length === 0 && !showLiveBubble ? (
                             <div className="flex h-full min-h-40 items-center justify-center">
                                 <p className="max-w-xs text-center text-sm leading-6 text-[var(--studio-muted)]">{translate("drama.noMessages")}</p>
                             </div>
@@ -576,19 +573,14 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                                         />
                                     );
                                 })}
-                                {gooMounted ? (
-                                    <div className={`flex origin-top gap-2.5 overflow-hidden transition-all duration-200 ease-out ${streaming ? "max-h-0 opacity-0" : "max-h-10 opacity-100"}`}>
-                                        <span className="size-8 shrink-0" aria-hidden="true" />
-                                        <GooThinking leaving={Boolean(streaming)} />
-                                    </div>
-                                ) : null}
-                                {streaming ? (
+                                {showLiveBubble ? (
                                     <DramaChatMessage
-                                        message={{ id: streaming.id, role: "assistant", text: streaming.text, meta: null, createdAt: null }}
+                                        message={{ id: streaming?.id || "live-reply", role: "assistant", text: streaming?.text || "", meta: null, createdAt: null }}
                                         workspace={workspace}
                                         busy={busy}
                                         streaming
-                                        revealing
+                                        thinking={!streaming?.text}
+                                        onHeightChange={scrollToBottom}
                                         onView={viewStage}
                                         onSuggest={setDraft}
                                     />
@@ -702,12 +694,12 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                         {viewed === "shot" || viewed === "preview" ? <ModelPicker config={config} value={videoModel} onChange={setVideoModel} capability="video" className="max-w-56 !border-[var(--studio-line-strong)] !bg-[var(--studio-surface)] !text-[var(--studio-ink)] shadow-none" /> : null}
                         {viewed === "shot" || viewed === "preview" ? <SettingChips label={translate("drama.resolution")} value={videoResolution} options={(videoResolutions.length ? videoResolutions : [videoResolution as VideoResolution]).map((value) => ({ value, label: VIDEO_RESOLUTION_OPTIONS.find((item) => item.value === value)?.label || value }))} onChange={setVideoResolution} /> : null}
                         {viewed === "cast" || viewed === "storyboard" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(imageTargets(viewed, selected?.content))}>{translate("drama.generateMissingImages")}</Button> : null}
-                        {viewed === "shot" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(storyboardShotRefs.map((ref) => `sheet:${ref}`))}>{translate("drama.generateMissingSheets")}</Button> : null}
-                        {viewed === "shot" || viewed === "preview" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(storyboardShotRefs.map((ref) => `shot-video:${ref}`))}>{translate("drama.generateMissingVideos")}</Button> : null}
+                        {viewed === "shot" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(productionShotRefs.map((ref) => `sheet:${ref}`))}>{translate("drama.generateMissingSheets")}</Button> : null}
+                        {viewed === "shot" || viewed === "preview" ? <Button size="small" loading={filling} disabled={pendingKeys.length > 0 || filling} onClick={() => void generateMissing(productionShotRefs.map((ref) => `shot-video:${ref}`))}>{translate("drama.generateMissingVideos")}</Button> : null}
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
                         <div className="mx-auto w-full max-w-[1600px]">
-                            <DramaArtifact stage={viewed} version={selected} durationSeconds={project.durationSeconds} durationDisabled={busy} aspectRatio={dramaAspectRatio(project.aspectRatio)} onAspect={(aspectRatio) => void saveSettings({ aspectRatio })} onDuration={(durationSeconds) => void saveSettings({ durationSeconds })} mediaByKey={mediaByKey} pendingKeys={pendingKeys} shotRefs={storyboardShotRefs} shotDurations={storyboardShotDurations} projectId={project.id} onWorkspace={setWorkspace} onGenerate={(targetKey) => void generate(targetKey)} onStop={(media) => void stopMedia(media)} stoppingTaskId={stoppingTaskId} />
+                            <DramaArtifact stage={viewed} version={selected} durationSeconds={project.durationSeconds} durationDisabled={busy} aspectRatio={dramaAspectRatio(project.aspectRatio)} onAspect={(aspectRatio) => void saveSettings({ aspectRatio })} onDuration={(durationSeconds) => void saveSettings({ durationSeconds })} mediaByKey={mediaByKey} pendingKeys={pendingKeys} shotRefs={viewed === "storyboard" ? storyboardShotRefs : productionShotRefs} shotDurations={mergedShotDurations} projectId={project.id} onWorkspace={setWorkspace} onGenerate={(targetKey) => void generate(targetKey)} onStop={(media) => void stopMedia(media)} stoppingTaskId={stoppingTaskId} />
                         </div>
                     </div>
                 </section>
@@ -759,10 +751,12 @@ function imageTargets(stage: DramaStage, content: Record<string, unknown> | unde
 }
 
 function shotSeconds(versions: DramaVersion[] | undefined, ref: string, fallback: string) {
-    const shots = latestOf(versions, "storyboard")?.content.shots;
-    const shot = Array.isArray(shots) ? shots.find((item) => item && typeof item === "object" && "ref" in item && item.ref === ref) : undefined;
-    const seconds = shot && typeof shot === "object" && "durationSeconds" in shot ? Number(shot.durationSeconds) : Number.NaN;
-    if (Number.isFinite(seconds) && seconds > 0) return Math.round(seconds);
+    for (const stage of ["shot", "storyboard"] as const) {
+        const shots = latestOf(versions, stage)?.content.shots;
+        const shot = Array.isArray(shots) ? shots.find((item) => item && typeof item === "object" && "ref" in item && item.ref === ref) : undefined;
+        const seconds = shot && typeof shot === "object" && "durationSeconds" in shot ? Number(shot.durationSeconds) : Number.NaN;
+        if (Number.isFinite(seconds) && seconds > 0) return Math.round(seconds);
+    }
     const saved = Number(fallback);
     return Number.isFinite(saved) && saved > 0 ? saved : 5;
 }

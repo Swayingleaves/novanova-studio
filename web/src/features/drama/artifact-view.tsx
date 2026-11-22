@@ -352,16 +352,18 @@ export function DramaArtifact({
     }
     if (stage === "shot") {
         const prompts = new Map(rows(content.shots).map((shot) => [text(shot.ref), shot]));
+        const stageRefs = refsOf(content.shots);
         return (
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                {(shotRefs.length ? shotRefs : refsOf(content.shots)).map((ref) => {
+                {(stageRefs.length ? stageRefs : shotRefs).map((ref) => {
                     const sheetKey = `sheet:${ref}`;
                     const shot = prompts.get(ref);
+                    const duration = Number(shot?.durationSeconds) || shotDurations[ref];
                     return (
                         <article key={ref} className="overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
                             <div className="flex items-center justify-between gap-2 px-3 pt-3">
                                 <p className="text-sm font-semibold text-[var(--studio-ink)]">{ref}</p>
-                                {shotDurations[ref] ? <span className="text-xs tabular-nums text-[var(--studio-muted)]">{translate("drama.seconds", { value0: shotDurations[ref] })}</span> : null}
+                                {duration ? <span className="text-xs tabular-nums text-[var(--studio-muted)]">{translate("drama.seconds", { value0: duration })}</span> : null}
                             </div>
                             <MediaFrame bare media={mediaByKey[sheetKey]} kind="image" targetKey={sheetKey} pending={pendingKeys.includes(sheetKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
                             <div className="grid grid-cols-2 gap-2 p-3">

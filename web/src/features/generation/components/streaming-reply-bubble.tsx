@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type Spring = {
     x: number;
@@ -127,15 +128,15 @@ export function StreamingReplyBubble({
         const markdownText = text.replace(/\r\n/g, "\n").replace(/\n/g, "  \n");
         return (
             <div
-                className="inline-block max-w-3xl rounded-[20px] bg-[color-mix(in_srgb,var(--studio-ink)_6%,var(--studio-panel-solid))] px-4 py-2.5 text-sm leading-6 text-[var(--studio-ink)]"
+                className="inline-block max-w-[min(100%,48rem)] rounded-[20px] bg-[color-mix(in_srgb,var(--studio-ink)_6%,var(--studio-panel-solid))] px-4 py-2.5 text-sm leading-6 text-[var(--studio-ink)]"
                 style={surfaceStyle}
             >
                 {text ? (
                     <div
-                        className="prose prose-sm max-w-none text-sm leading-6 text-[var(--studio-ink)] dark:prose-invert [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5"
+                        className="prose prose-sm max-w-none break-words text-sm leading-6 text-[var(--studio-ink)] dark:prose-invert [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5"
                         style={bubbleTextColor ? { color: bubbleTextColor } : undefined}
                     >
-                        <ReactMarkdown>{markdownText}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdownText}</ReactMarkdown>
                     </div>
                 ) : (
                     <span className="streaming-reply-think-shine font-medium">{thinkingLabel}</span>

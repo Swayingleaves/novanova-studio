@@ -1,9 +1,7 @@
 "use client";
 
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { Copy, RotateCcw, Undo2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { StreamingReplyBubble } from "@/features/generation/components/streaming-reply-bubble";
 import { useTranslation } from "@/features/locale/use-translation";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { ServerAgentSessionHistoryMessage } from "@/services/api/server";
@@ -30,8 +28,9 @@ export function DramaChatMessage({
     workspace,
     busy,
     streaming = false,
-    revealing = false,
+    thinking = false,
     showSuggestions = false,
+    onHeightChange,
     onView,
     onRegenerate,
     onUndo,
@@ -41,9 +40,9 @@ export function DramaChatMessage({
     workspace: DramaWorkspace | null;
     busy: boolean;
     streaming?: boolean;
-    /** 思考刚结束时，从胶囊里的那个点扩成整条消息。 */
-    revealing?: boolean;
+    thinking?: boolean;
     showSuggestions?: boolean;
+    onHeightChange?: () => void;
     onView: (stage: DramaStage, versionId?: string) => void;
     onRegenerate?: () => void;
     onUndo?: (versionId: string) => void;
@@ -51,20 +50,6 @@ export function DramaChatMessage({
 }) {
     const translate = useTranslation();
     const copy = useCopyText();
-    const [revealRadius, setRevealRadius] = useState<number | null>(revealing ? 6 : null);
-    useEffect(() => {
-        if (!revealing) {
-            return;
-        }
-        // 等上面那行胶囊塌完（200ms），消息正好顶到胶囊原来的位置，圆圈再从同一个点扩散；
-        // 扩满后去掉裁剪，避免超长回复被裁在圆外。
-        const grow = window.setTimeout(() => setRevealRadius(2400), 180);
-        const clear = window.setTimeout(() => setRevealRadius(null), 980);
-        return () => {
-            window.clearTimeout(grow);
-            window.clearTimeout(clear);
-        };
-    }, [revealing]);
 
     if (message.role === "user") {
         return (
@@ -86,13 +71,7 @@ export function DramaChatMessage({
     const stamp = chatTime(message.createdAt, translate);
 
     return (
-        <article
-            className="flex gap-2.5"
-            style={revealRadius === null ? undefined : {
-                clipPath: `circle(${revealRadius}px at 74px 20px)`,
-                transition: "clip-path 420ms cubic-bezier(0.22, 1, 0.36, 1)",
-            }}
-        >
+        <article className="flex gap-2.5">
             <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full bg-[var(--studio-primary-soft)] text-[var(--studio-action-emphasis)]">
                 <Icon className="size-4" aria-hidden="true" />
             </span>
@@ -101,11 +80,19 @@ export function DramaChatMessage({
                     <span className="text-xs font-medium text-[var(--studio-ink)]">{translate(identity.agentKey)}</span>
                     {streaming || !stamp ? null : <span className="text-xs text-[var(--studio-faint)]">· {stamp}</span>}
                 </header>
-                {message.text ? (
-                    <div className={`mt-1 text-sm leading-6 text-[var(--studio-ink)] ${streaming ? "[&>div>p:last-child]:after:ml-0.5 [&>div>p:last-child]:after:inline-block [&>div>p:last-child]:after:h-3.5 [&>div>p:last-child]:after:w-[3px] [&>div>p:last-child]:after:animate-pulse [&>div>p:last-child]:after:bg-[var(--studio-action)] [&>div>p:last-child]:after:align-middle [&>div>p:last-child]:after:content-['']" : ""}`}>
-                        <div className="prose prose-sm max-w-none break-words">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>
-                        </div>
+                {streaming ? (
+                    <div className="mt-1.5">
+                        <StreamingReplyBubble
+                            animated
+                            text={message.text}
+                            thinking={thinking}
+                            thinkingLabel={translate("chat.thinking")}
+                            onHeightChange={onHeightChange}
+                        />
+                    </div>
+                ) : message.text ? (
+                    <div className="mt-1.5">
+                        <StreamingReplyBubble animated={false} text={message.text} />
                     </div>
                 ) : null}
                 {meta?.kind === "stage" ? <DramaStageCard meta={meta} workspace={workspace} onView={onView} /> : null}
