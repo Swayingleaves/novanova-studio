@@ -17,6 +17,7 @@ import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.AiTaskParameterReader;
 import com.novanovastudio.ai.AiTaskPollingSupport;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.ai.GeneratedBinary;
 import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -57,8 +58,10 @@ public class NanaProviderAdapter implements AiProviderAdapter {
     private static final String IMAGE_GENERATION_PATH = "/images/generations";
     /** OpenAI 兼容图片编辑路径。 */
     private static final String IMAGE_EDIT_PATH = "/images/edits";
-    /** Seedance 视频任务路径。 */
+    /** Seedance 官转视频任务路径。 */
     private static final String SEEDANCE_TASK_PATH = "/api/v3/contents/generations/tasks";
+    /** Seedance-cheap 视频任务路径（走 /v1/videos）。 */
+    private static final String SEEDANCE_CHEAP_PATH = "/videos";
     /** Wan 视频创建任务路径。 */
     private static final String WAN_CREATE_PATH = "/bailian-aitoken/api/v1/services/aigc/video-generation/video-synthesis";
     /** Wan 视频查询任务路径前缀。 */
@@ -206,17 +209,74 @@ public class NanaProviderAdapter implements AiProviderAdapter {
      * @return Mono<JSONObject> 视频结果
      */
     private Mono<JSONObject> executeVideoTask(AiTaskExecutionContext context) {
-        String model = normalizeText(context.model());
+        VideoProtocol protocol = resolveVideoProtocol(context.model());
+        if (protocol == null) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.nanaSupportsSeedanceWanMiniMaxVideoModels")));
+        }
+        return switch (protocol) {
+            case SEEDANCE_OFFICIAL -> executeSeedanceVideoTask(context);
+            case SEEDANCE_CHEAP -> executeSeedanceCheapVideoTask(context);
+            case WAN -> executeWanVideoTask(context);
+            case MINIMAX -> executeMiniMaxVideoTask(context);
+        };
+    }
+
+    /**
+     * 按模型名称路由 NANA-API 视频协议。
+     * <p>
+     * 官转 Seedance 固定以 doubao- 开头；其余 seedance-* 模型走 Seedance-cheap (/v1/videos) 通道。
+     *
+     * @param modelName String 原始模型名称
+     * @return VideoProtocol 命中的协议，未匹配时返回 null
+     */
+    static VideoProtocol resolveVideoProtocol(String modelName) {
+        String model = normalizeText(modelName);
+        if (model.startsWith("doubao-") && model.contains("seedance")) {
+            return VideoProtocol.SEEDANCE_OFFICIAL;
+        }
         if (model.contains("seedance")) {
-            return executeSeedanceVideoTask(context);
+            return VideoProtocol.SEEDANCE_CHEAP;
         }
         if (isWanVideoModel(model)) {
-            return executeWanVideoTask(context);
+            return VideoProtocol.WAN;
         }
         if (model.contains("minimax")) {
-            return executeMiniMaxVideoTask(context);
+            return VideoProtocol.MINIMAX;
         }
-        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.nanaSupportsSeedanceWanMiniMaxVideoModels")));
+        return null;
+    }
+
+    /**
+     * 执行 Seedance-cheap 视频任务（POST /v1/videos、GET /v1/videos/{id}）。
+     *
+     * @param context AiTaskExecutionContext 当前任务上下文
+     * @return Mono<JSONObject> 视频结果
+     */
+    private Mono<JSONObject> executeSeedanceCheapVideoTask(AiTaskExecutionContext context) {
+        List<AiTaskDtos.AiTaskMediaReference> imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
+        List<AiTaskDtos.AiTaskMediaReference> videoReferences = AiTaskParameterReader.safeReferences(context.request().videoReferences());
+        List<AiTaskDtos.AiTaskMediaReference> audioReferences = AiTaskParameterReader.safeReferences(context.request().audioReferences());
+        AiTaskDtos.AiChannelConfig channel = openAiChannel(context);
+        return Mono.zip(resolveReferenceUrls(context, imageReferences), resolveReferenceUrls(context, videoReferences), resolveReferenceUrls(context, audioReferences))
+                .flatMap(urls -> {
+                    Map<String, Object> payload = buildSeedanceCheapPayload(context.model(), context.request().prompt(),
+                            context.request().parameters(), urls.getT1(), urls.getT2(), urls.getT3());
+                    log.info("创建NANA-API Seedance-cheap视频任务: taskId={}, model={}, imageCount={}, videoCount={}, audioCount={}",
+                            context.task().getId(), context.model(), urls.getT1().size(), urls.getT2().size(), urls.getT3().size());
+                    return aiHttpClient.sendJsonRequest(channel, "POST", SEEDANCE_CHEAP_PATH,
+                                    AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
+                            .map(AiJsonUtils::responsePayload)
+                            .flatMap(created -> {
+                                String providerTaskId = AiTaskParameterReader.firstNonEmpty(created.getString("id"), created.getString("task_id"));
+                                if (!StringUtils.hasText(providerTaskId)) {
+                                    return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.nanaVideoRequestReturnedNoTaskID")));
+                                }
+                                return context.updateRunningProgress(10)
+                                        .then(pollVideoTask(context, channel, SEEDANCE_CHEAP_PATH + "/" + providerTaskId,
+                                                NanaProviderAdapter::readSeedanceCheapState, "NANA-API Seedance-cheap视频生成超时，请稍后重试"))
+                                        .flatMap(finished -> storeSeedanceCheapVideoResult(context, channel, providerTaskId, finished));
+                            });
+                });
     }
 
     /**
@@ -397,6 +457,38 @@ public class NanaProviderAdapter implements AiProviderAdapter {
     }
 
     /**
+     * 保存 Seedance-cheap 视频结果；优先使用完成响应里的签名直链，缺失时回退 /v1/videos/{id}/content 拉流。
+     *
+     * @param context AiTaskExecutionContext 当前任务上下文
+     * @param channel AiTaskDtos.AiChannelConfig 带 /v1 前缀的渠道配置
+     * @param providerTaskId String 渠道任务ID
+     * @param finished JSONObject 完成状态响应
+     * @return Mono<JSONObject> 视频结果
+     */
+    private Mono<JSONObject> storeSeedanceCheapVideoResult(AiTaskExecutionContext context, AiTaskDtos.AiChannelConfig channel,
+                                                           String providerTaskId, JSONObject finished) {
+        VideoTaskState state = readSeedanceCheapState(finished);
+        Integer durationMilliseconds = state.durationSeconds() == null ? null : state.durationSeconds() * 1000;
+        if (mediaSupport.isHttpUrl(state.videoUrl())) {
+            log.info("NANA-API Seedance-cheap视频任务完成: taskId={}, providerTaskId={}, duration={}",
+                    context.task().getId(), providerTaskId, state.durationSeconds());
+            return mediaSupport.storeGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, state.videoUrl(),
+                            "video/mp4", null, null, durationMilliseconds)
+                    .map(media -> AiJsonUtils.jsonObject(Map.of("item", media, "providerTaskId", providerTaskId)));
+        }
+        log.info("NANA-API Seedance-cheap视频任务完成，回退内容接口下载: taskId={}, providerTaskId={}",
+                context.task().getId(), providerTaskId);
+        return aiHttpClient.downloadBinary(channel, SEEDANCE_CHEAP_PATH + "/" + providerTaskId + "/content")
+                .flatMap(binary -> {
+                    String mimeType = AiTaskParameterReader.firstNonEmpty(binary.mimeType(), "video/mp4");
+                    GeneratedBinary video = new GeneratedBinary(binary.data(), mimeType);
+                    return mediaSupport.storeGeneratedMedia(context.task().getUserId(), AiTaskTypes.VIDEO,
+                                    "generated-video.mp4", video, null, null, durationMilliseconds)
+                            .map(media -> AiJsonUtils.jsonObject(Map.of("item", media, "providerTaskId", providerTaskId)));
+                });
+    }
+
+    /**
      * 按响应结构读取视频任务状态，兼容三类视频协议。
      *
      * @param response JSONObject 完成状态响应
@@ -408,6 +500,30 @@ public class NanaProviderAdapter implements AiProviderAdapter {
         VideoTaskState wan = readWanState(response);
         if (StringUtils.hasText(wan.videoUrl())) return wan;
         return readMiniMaxState(response);
+    }
+
+    /**
+     * 读取 Seedance-cheap 任务状态。
+     * <p>
+     * 文档约定 status=unknown 表示上游暂未同步，必须继续轮询不能重提，此处统一映射为 queued。
+     *
+     * @param response JSONObject Seedance-cheap 响应
+     * @return VideoTaskState 任务状态
+     */
+    static VideoTaskState readSeedanceCheapState(JSONObject response) {
+        String rawStatus = normalizeText(response.getString("status"));
+        String status = "unknown".equals(rawStatus) ? "queued" : rawStatus;
+        JSONObject content = response.getJSONObject("content");
+        JSONObject error = response.getJSONObject("error");
+        String videoUrl = AiTaskParameterReader.firstNonEmpty(
+                response.getString("url"),
+                content == null ? "" : content.getString("video_url"));
+        String failureMessage = AiTaskParameterReader.firstNonEmpty(
+                error == null ? "" : error.getString("message"),
+                response.getString("message"),
+                response.getString("msg"));
+        Integer seconds = response.getInteger("seconds") != null ? response.getInteger("seconds") : response.getInteger("duration");
+        return new VideoTaskState(status, readProgress(response, 0), videoUrl, failureMessage, seconds);
     }
 
     /**
@@ -464,6 +580,36 @@ public class NanaProviderAdapter implements AiProviderAdapter {
         }
         String message = AiTaskParameterReader.firstNonEmpty(response.getString("msg"), data.getString("message"));
         return new VideoTaskState(normalizeText(data.getString("status")), readProgress(response, 0), videoUrl, message, null);
+    }
+
+    /**
+     * 构建 Seedance-cheap 视频请求体（POST /v1/videos）。
+     * <p>
+     * 使用 seconds、aspect_ratio 以及顶层 images/videos/audios 数组；清晰度由模型固定，默认省略。
+     *
+     * @param model String 模型名称
+     * @param prompt String 视频提示词
+     * @param parameters Map<String, Object> 页面视频参数
+     * @param imageUrls List<String> 参考图片地址
+     * @param videoUrls List<String> 参考视频地址
+     * @param audioUrls List<String> 参考音频地址
+     * @return Map<String, Object> Seedance-cheap 请求体
+     */
+    static Map<String, Object> buildSeedanceCheapPayload(String model, String prompt, Map<String, Object> parameters,
+                                                         List<String> imageUrls, List<String> videoUrls, List<String> audioUrls) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("model", model);
+        String resolvedPrompt = referenceAwarePrompt(prompt, imageUrls.size(), videoUrls.size(), audioUrls.size());
+        if (StringUtils.hasText(resolvedPrompt)) {
+            payload.put("prompt", resolvedPrompt);
+        }
+        payload.put("seconds", normalizeDuration(parameters, 1, 60, 5));
+        String ratio = normalizeAspectRatio(AiTaskParameterReader.parameterText(parameters, "size", "16:9"));
+        payload.put("aspect_ratio", "adaptive".equals(ratio) ? "16:9" : ratio);
+        if (!imageUrls.isEmpty()) payload.put("images", imageUrls);
+        if (!videoUrls.isEmpty()) payload.put("videos", videoUrls);
+        if (!audioUrls.isEmpty()) payload.put("audios", audioUrls);
+        return payload;
     }
 
     /**
@@ -899,6 +1045,20 @@ public class NanaProviderAdapter implements AiProviderAdapter {
      */
     static String normalizeText(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * NANA-API 视频协议路由类型。
+     */
+    enum VideoProtocol {
+        /** Seedance 官转通道（/api/v3/contents/generations/tasks）。 */
+        SEEDANCE_OFFICIAL,
+        /** Seedance-cheap 通道（/v1/videos）。 */
+        SEEDANCE_CHEAP,
+        /** Wan 百炼通道。 */
+        WAN,
+        /** MiniMax 通道。 */
+        MINIMAX
     }
 
     /**

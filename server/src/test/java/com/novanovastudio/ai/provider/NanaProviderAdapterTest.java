@@ -183,6 +183,65 @@ class NanaProviderAdapterTest {
     }
 
     /**
+     * 视频协议路由应区分豆包官转与 Seedance-cheap 通道。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldResolveVideoProtocolForOfficialAndCheapSeedance() {
+        Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.SEEDANCE_OFFICIAL,
+                NanaProviderAdapter.resolveVideoProtocol("doubao-seedance-2-0-mini-260615"));
+        for (String cheapModel : List.of("seedance-2.0-933", "seedance-2.0-fast", "seedance-2.5-480p",
+                "seedance-2.5-720p", "seedance-2.5-flash-480p", "seedance-2.5-flash-720p",
+                "seedance-2.5-tk-480p", "seedance-2.5-tk-720p")) {
+            Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.SEEDANCE_CHEAP,
+                    NanaProviderAdapter.resolveVideoProtocol(cheapModel), cheapModel);
+        }
+        Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.WAN, NanaProviderAdapter.resolveVideoProtocol("wan3.0-video"));
+        Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.MINIMAX, NanaProviderAdapter.resolveVideoProtocol("minimax-h3-ref"));
+        Assertions.assertNull(NanaProviderAdapter.resolveVideoProtocol("unknown-video-model"));
+    }
+
+    /**
+     * Seedance-cheap 请求应使用 seconds、aspect_ratio 与顶层素材数组，不默认传递 resolution。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldBuildSeedanceCheapPayloadWithoutResolution() {
+        JSONObject payload = toJsonObject(NanaProviderAdapter.buildSeedanceCheapPayload(
+                "seedance-2.0-933", "清晨的湖面",
+                Map.of("size", "auto", "resolution", "720p", "seconds", "20"),
+                List.of("https://example.com/a.png"), List.of(), List.of("https://example.com/bgm.mp3")));
+
+        Assertions.assertEquals("seedance-2.0-933", payload.getString("model"));
+        Assertions.assertEquals(20, payload.getIntValue("seconds"));
+        Assertions.assertEquals("16:9", payload.getString("aspect_ratio"));
+        Assertions.assertFalse(payload.containsKey("resolution"));
+        Assertions.assertFalse(payload.containsKey("videos"));
+        Assertions.assertEquals("https://example.com/a.png", payload.getJSONArray("images").getString(0));
+        Assertions.assertEquals("https://example.com/bgm.mp3", payload.getJSONArray("audios").getString(0));
+    }
+
+    /**
+     * Seedance-cheap 响应应把 unknown 视作继续轮询状态，并在 completed 时读取顶层 url。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldReadSeedanceCheapUnknownAndCompletedState() {
+        NanaProviderAdapter.VideoTaskState unknownState = NanaProviderAdapter.readSeedanceCheapState(
+                JSON.parseObject("{\"id\":\"task-1\",\"status\":\"unknown\",\"progress\":0}"));
+        Assertions.assertEquals("queued", unknownState.status());
+
+        NanaProviderAdapter.VideoTaskState completedState = NanaProviderAdapter.readSeedanceCheapState(
+                JSON.parseObject("{\"id\":\"task-1\",\"status\":\"completed\",\"progress\":100,\"url\":\"https://example.com/cheap.mp4\"}"));
+        Assertions.assertEquals("completed", completedState.status());
+        Assertions.assertEquals(100, completedState.progress());
+        Assertions.assertEquals("https://example.com/cheap.mp4", completedState.videoUrl());
+    }
+
+    /**
      * 转换请求体为 JSON 对象。
      *
      * @param payload Map<String, Object> 请求体
