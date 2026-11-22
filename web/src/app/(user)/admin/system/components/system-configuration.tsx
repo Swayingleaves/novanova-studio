@@ -9,7 +9,7 @@ import { currentLanguageTag } from "@/features/locale/translate";
 import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
-import { Alert, App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Select, Switch, Tabs } from "antd";
+import { Alert, App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Tabs } from "antd";
 import { nanoid } from "nanoid";
 import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Copy, Image, Info, Monitor, Pencil, Plus, RefreshCw, Search, Sparkles, TextCursorInput, Trash2, Upload, Video, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -368,7 +368,9 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const [testingObjectStorageId, setTestingObjectStorageId] = useState("");
     const [testedObjectStorageId, setTestedObjectStorageId] = useState("");
     const [objectStorageTestUrl, setObjectStorageTestUrl] = useState("");
-    const [collapsedChannelIds, setCollapsedChannelIds] = useState<string[]>([]);
+    const [editingChannelId, setEditingChannelId] = useState<string | null>(null);
+    const [channelFormatFilter, setChannelFormatFilter] = useState<string>("");
+    const [channelSearch, setChannelSearch] = useState("");
     const [activeModelCapabilityTab, setActiveModelCapabilityTab] = useState<ModelCapability>("image");
     const [modelCapabilitySearch, setModelCapabilitySearch] = useState("");
     const [modelCapabilityChannelFilter, setModelCapabilityChannelFilter] = useState<string>("");
@@ -407,11 +409,11 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const [autoFillConfigMode, setAutoFillConfigMode] = useState<VideoGenerationMode | null>(null);
     const editingModelIsMedia = Boolean(editingModelConfig && (editingModelConfig.modelType === "image" || editingModelConfig.modelType === "video"));
 
-    const resetChannelDraft = useCallback((resetCollapsed = false) => {
+    const resetChannelDraft = useCallback(() => {
         const channels = cloneChannels(useConfigStore.getState().managedChannels);
         setChannelBaseline(channels);
         setDraftChannels(cloneChannels(channels));
-        if (resetCollapsed) setCollapsedChannelIds(channels.map((channel) => channel.id));
+        setEditingChannelId(null);
     }, []);
 
     const resetModelConfigDraft = useCallback(() => {
@@ -443,7 +445,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     }, []);
 
     const resetAllDrafts = useCallback(() => {
-        resetChannelDraft(true);
+        resetChannelDraft();
         resetModelConfigDraft();
         resetObjectStorageDraft();
         resetCommunityDraft();
@@ -539,7 +541,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const addChannel = () => {
         const channel = createModelChannel({ name: translate("appShell.channel", { value0: draftChannels.length + 1 }) });
         setDraftChannels((channels) => [channel, ...channels]);
-        setCollapsedChannelIds((ids) => ids.filter((id) => id !== channel.id));
+        setEditingChannelId(channel.id);
     };
 
     const removeChannel = (id: string) => {
@@ -551,13 +553,9 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             cancelText: translate("appShell.cancel"),
             onOk: () => {
                 setDraftChannels((channels) => channels.filter((channel) => channel.id !== id));
-                setCollapsedChannelIds((ids) => ids.filter((item) => item !== id));
+                setEditingChannelId((current) => (current === id ? null : current));
             },
         });
-    };
-
-    const toggleChannelCollapsed = (id: string) => {
-        setCollapsedChannelIds((ids) => (ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]));
     };
 
     const refreshChannelModels = async (channel: ModelChannel) => {
@@ -1236,96 +1234,252 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                         {
                             key: "channels",
                             label: translate("appShell.myChannels"),
-                            children: (
-                                <Form layout="vertical" requiredMark={false}>
-                                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
-                                        <div className="min-w-0 flex-1">
-                                            <span>{translate("appShell.configureChannelAPIsUsedForGenerationHere")}</span>
+                            children: (() => {
+                                const formatOptions = createApiFormatOptions(translate);
+                                const formatCounts = new Map<ApiCallFormat, number>();
+                                for (const channel of draftChannels) {
+                                    formatCounts.set(channel.apiFormat, (formatCounts.get(channel.apiFormat) || 0) + 1);
+                                }
+                                const activeFormatTabs = formatOptions.filter((option) => formatCounts.has(option.value));
+                                const effectiveFormat = channelFormatFilter && formatCounts.has(channelFormatFilter as ApiCallFormat) ? channelFormatFilter : "";
+                                const keyword = channelSearch.trim().toLowerCase();
+                                const filteredChannels = draftChannels.filter((channel) => {
+                                    if (effectiveFormat && channel.apiFormat !== effectiveFormat) return false;
+                                    if (!keyword) return true;
+                                    return [channel.name, channel.baseUrl, ...channel.models].some((text) => text.toLowerCase().includes(keyword));
+                                });
+                                const editingChannel = editingChannelId ? draftChannels.find((item) => item.id === editingChannelId) || null : null;
+                                return (
+                                    <div>
+                                        <div
+                                            className={`sticky top-2 z-20 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3.5 shadow-sm backdrop-blur-md transition-colors ${
+                                                channelsDirty
+                                                    ? "border-[var(--studio-primary-line)] bg-[var(--studio-panel)]/95"
+                                                    : "border-[var(--studio-line)] bg-[var(--studio-surface-soft)]/95"
+                                            }`}
+                                        >
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex items-center gap-2 text-sm font-semibold">
+                                                    <span>{translate("appShell.myChannels")}</span>
+                                                    {channelsDirty ? (
+                                                        <span className="inline-flex items-center gap-1 rounded-full bg-[var(--studio-primary-soft)] px-2 py-0.5 text-xs font-medium text-[var(--studio-primary)]">
+                                                            <span className="size-1.5 rounded-full bg-[var(--studio-primary)]" />
+                                                            {translate("appShell.unsavedChanges")}
+                                                        </span>
+                                                    ) : null}
+                                                </div>
+                                                <div className="mt-0.5 text-xs text-[var(--studio-muted)]">{translate("appShell.configureChannelAPIsUsedForGenerationHere")}</div>
+                                            </div>
+                                            <div className="flex shrink-0 gap-2">
+                                                <Button type="primary" disabled={!channelsDirty || isSaving} loading={savingTab === "channels"} onClick={() => void saveChannels()}>
+                                                    {translate("appShell.save")}
+                                                </Button>
+                                                <Button icon={<Plus className="size-4" />} disabled={isSaving} onClick={addChannel}>
+                                                    {translate("appShell.addChannel")}
+                                                </Button>
+                                            </div>
                                         </div>
-                                        <div className="flex shrink-0 gap-2">
-                                            <Button type="primary" disabled={!channelsDirty || isSaving} loading={savingTab === "channels"} onClick={() => void saveChannels()}>
-                                                {translate("appShell.save")}
-                                            </Button>
-                                            <Button icon={<Plus className="size-4" />} disabled={isSaving} onClick={addChannel}>
-                                                {translate("appShell.addChannel")}
-                                            </Button>
+
+                                        <div className="mb-4 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
+                                            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" role="tablist" aria-label={translate("appShell.aPIFormat")}>
+                                                <button
+                                                    type="button"
+                                                    role="tab"
+                                                    aria-selected={!effectiveFormat}
+                                                    className={`cursor-pointer rounded-lg border px-2.5 py-1 text-xs! font-medium transition-colors ${
+                                                        !effectiveFormat
+                                                            ? "border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] text-[var(--studio-primary)]!"
+                                                            : "border-transparent bg-[var(--studio-panel)] text-[var(--studio-muted)]! hover:border-[var(--studio-line)] hover:text-[var(--studio-ink)]!"
+                                                    }`}
+                                                    onClick={() => setChannelFormatFilter("")}
+                                                >
+                                                    {translate("appShell.allFormats")} ({draftChannels.length})
+                                                </button>
+                                                {activeFormatTabs.map((option) => {
+                                                    const active = effectiveFormat === option.value;
+                                                    return (
+                                                        <button
+                                                            key={option.value}
+                                                            type="button"
+                                                            role="tab"
+                                                            aria-selected={active}
+                                                            className={`inline-flex cursor-pointer items-center gap-1 rounded-lg border px-2.5 py-1 text-xs! font-medium transition-colors ${
+                                                                active
+                                                                    ? "border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] text-[var(--studio-primary)]!"
+                                                                    : "border-transparent bg-[var(--studio-panel)] text-[var(--studio-muted)]! hover:border-[var(--studio-line)] hover:text-[var(--studio-ink)]!"
+                                                            }`}
+                                                            onClick={() => setChannelFormatFilter(option.value)}
+                                                        >
+                                                            <span>{apiFormatLabelNode(option.value)}</span>
+                                                            <span>({formatCounts.get(option.value)})</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            <Input
+                                                allowClear
+                                                prefix={<Search className="size-3.5 text-[var(--studio-muted)]" />}
+                                                placeholder={translate("appShell.searchChannels")}
+                                                value={channelSearch}
+                                                onChange={(event) => setChannelSearch(event.target.value)}
+                                                className="w-full shrink-0 sm:w-60!"
+                                            />
                                         </div>
-                                    </div>
-                                    <div className="space-y-3">
-                                        {draftChannels.map((channel) => {
-                                            const collapsed = collapsedChannelIds.includes(channel.id);
-                                            return (
-                                                <section key={channel.id} className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
-                                                    <div className={collapsed ? "flex items-center justify-between gap-3" : "mb-3 flex items-center justify-between gap-3"}>
-                                                        <div className="min-w-0">
-                                                            <div className="truncate text-sm font-semibold">{channel.name || translate("appShell.unnamedChannel")}</div>
-                                                            <div className="mt-1 text-xs text-[var(--studio-muted)]">
-                                                                {apiFormatLabelNode(channel.apiFormat)} {translate("appShell.configured")}
-                                                                {channel.models.length} {translate("appShell.models")}
+
+                                        {filteredChannels.length ? (
+                                            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                                {filteredChannels.map((channel) => {
+                                                    const hasKey = Boolean(channel.apiKey?.trim());
+                                                    const canFetch = channel.apiFormat !== "minimax" && channel.apiFormat !== "custom";
+                                                    return (
+                                                        <section
+                                                            key={channel.id}
+                                                            className="flex flex-col justify-between rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel)] p-4 transition-colors hover:border-[var(--studio-primary-line)]/60"
+                                                        >
+                                                            <div>
+                                                                <div className="flex items-start justify-between gap-2">
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <div className="truncate text-sm font-semibold text-[var(--studio-ink)]" title={channel.name || translate("appShell.unnamedChannel")}>
+                                                                            {channel.name || translate("appShell.unnamedChannel")}
+                                                                        </div>
+                                                                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-[var(--studio-muted)]">
+                                                                            {apiFormatLabelNode(channel.apiFormat)}
+                                                                        </div>
+                                                                    </div>
+                                                                    <span
+                                                                        className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs ${
+                                                                            hasKey
+                                                                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                                                                : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                                                        }`}
+                                                                    >
+                                                                        <span className={`size-1.5 rounded-full ${hasKey ? "bg-emerald-500" : "bg-amber-500"}`} />
+                                                                        {hasKey ? translate("appShell.apiKeyConfigured") : translate("appShell.apiKeyMissing")}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="mt-3 space-y-1.5">
+                                                                    <div className="truncate rounded-md bg-[var(--studio-surface-soft)] px-2.5 py-1.5 font-mono text-xs text-[var(--studio-muted)]" title={channel.baseUrl || "-"}>
+                                                                        {channel.baseUrl || "-"}
+                                                                    </div>
+                                                                    <div className="text-xs text-[var(--studio-muted)]">
+                                                                        {translate("appShell.configured")} {channel.models.length} {translate("appShell.models")}
+                                                                    </div>
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                        <div className="flex shrink-0 gap-2">
-                                                            <Button size="small" icon={collapsed ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />} onClick={() => toggleChannelCollapsed(channel.id)}>
-                                                                {collapsed ? translate("appShell.expand") : translate("appShell.collapse")}
-                                                            </Button>
-                                                            <Button
-                                                                size="small"
-                                                                disabled={isSaving || channel.apiFormat === "minimax" || channel.apiFormat === "custom"}
-                                                                loading={loadingChannelId === channel.id}
-                                                                title={
-                                                                    channel.apiFormat === "minimax"
-                                                                        ? translate("appShell.configureMiniMaxH3ManuallyForMiniMax")
-                                                                        : channel.apiFormat === "custom"
-                                                                          ? translate("appShell.configureModelListManuallyForCustomFormats")
-                                                                          : undefined
-                                                                }
-                                                                onClick={() => void refreshChannelModels(channel)}
-                                                            >
-                                                                {translate("appShell.fetchModels")}
-                                                            </Button>
-                                                            <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={isSaving} onClick={() => removeChannel(channel.id)} />
-                                                        </div>
-                                                    </div>
-                                                    {collapsed ? null : (
-                                                        <div className="grid gap-4 md:grid-cols-2">
-                                                            <Form.Item label={translate("appShell.channelName")} className="mb-0">
-                                                                <Input value={channel.name} disabled={isSaving} onChange={(event) => updateDraftChannel(channel.id, { name: event.target.value })} />
-                                                            </Form.Item>
-                                                            <Form.Item label={translate("appShell.aPIFormat")} className="mb-0">
-                                                                <Select value={channel.apiFormat} disabled={isSaving} options={createApiFormatOptions(translate)} onChange={(value: ApiCallFormat) => updateChannelApiFormat(channel, value)} />
-                                                            </Form.Item>
-                                                            <Form.Item label="Base URL" className="mb-0">
-                                                                <Input value={channel.baseUrl} disabled={isSaving} onChange={(event) => updateDraftChannel(channel.id, { baseUrl: event.target.value })} />
-                                                            </Form.Item>
-                                                            <Form.Item label="API Key" className="mb-0">
-                                                                <Input.Password value={channel.apiKey} disabled={isSaving} onChange={(event) => updateDraftChannel(channel.id, { apiKey: event.target.value })} />
-                                                            </Form.Item>
-                                                            <Form.Item label={translate("appShell.models_ea4bf0")} className="mb-0 md:col-span-2">
-                                                                <Select
-                                                                    mode="tags"
-                                                                    showSearch
-                                                                    allowClear
-                                                                    maxTagCount="responsive"
-                                                                    placeholder={
-                                                                        channel.apiFormat === "minimax"
-                                                                            ? translate("appShell.enterMiniMaxH3")
-                                                                            : channel.apiFormat === "custom"
-                                                                              ? translate("appShell.enterModelNameCustomFormatsCannotFetchModels")
-                                                                              : translate("appShell.enterModelNameOrFetchModels")
-                                                                    }
-                                                                    value={channel.models}
-                                                                    disabled={isSaving}
-                                                                    onChange={(models) => updateDraftChannel(channel.id, { models })}
+                                                            <div className="mt-3 flex items-center justify-between gap-2 border-t border-[var(--studio-line)] pt-3">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <Button size="small" icon={<Pencil className="size-3.5" />} disabled={isSaving} onClick={() => setEditingChannelId(channel.id)}>
+                                                                        {translate("appShell.edit")}
+                                                                    </Button>
+                                                                    <Button
+                                                                        size="small"
+                                                                        disabled={isSaving || !canFetch}
+                                                                        loading={loadingChannelId === channel.id}
+                                                                        title={
+                                                                            channel.apiFormat === "minimax"
+                                                                                ? translate("appShell.configureMiniMaxH3ManuallyForMiniMax")
+                                                                                : channel.apiFormat === "custom"
+                                                                                  ? translate("appShell.configureModelListManuallyForCustomFormats")
+                                                                                  : undefined
+                                                                        }
+                                                                        onClick={() => void refreshChannelModels(channel)}
+                                                                    >
+                                                                        {translate("appShell.fetchModels")}
+                                                                    </Button>
+                                                                </div>
+                                                                <Button size="small" danger type="text" icon={<Trash2 className="size-3.5" />} disabled={isSaving} onClick={() => removeChannel(channel.id)} />
+                                                            </div>
+                                                        </section>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <div className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel)] px-4 py-10 text-center text-sm text-[var(--studio-muted)]">
+                                                {translate("appShell.noMatchingChannels")}
+                                            </div>
+                                        )}
+
+                                        <Modal
+                                            title={editingChannel ? `${editingChannel.name || translate("appShell.unnamedChannel")} · ${translate("appShell.channelSettings")}` : translate("appShell.channelSettings")}
+                                            open={Boolean(editingChannel)}
+                                            centered
+                                            width={680}
+                                            destroyOnHidden
+                                            footer={
+                                                <div className="flex items-center justify-between gap-2">
+                                                    {editingChannel ? (
+                                                        <Button
+                                                            disabled={isSaving || editingChannel.apiFormat === "minimax" || editingChannel.apiFormat === "custom"}
+                                                            loading={loadingChannelId === editingChannel.id}
+                                                            icon={<RefreshCw className="size-3.5" />}
+                                                            onClick={() => void refreshChannelModels(editingChannel)}
+                                                        >
+                                                            {translate("appShell.fetchModels")}
+                                                        </Button>
+                                                    ) : <span />}
+                                                    <Button type="primary" onClick={() => setEditingChannelId(null)}>
+                                                        {translate("appShell.confirm")}
+                                                    </Button>
+                                                </div>
+                                            }
+                                            onCancel={() => setEditingChannelId(null)}
+                                        >
+                                            {editingChannel ? (
+                                                <Form layout="vertical" requiredMark={false} className="mt-3">
+                                                    <div className="grid gap-4 md:grid-cols-2">
+                                                        <Form.Item label={translate("appShell.channelName")} className="mb-0">
+                                                            <Input value={editingChannel.name} disabled={isSaving} onChange={(event) => updateDraftChannel(editingChannel.id, { name: event.target.value })} />
+                                                        </Form.Item>
+                                                        <Form.Item label={translate("appShell.aPIFormat")} className="mb-0">
+                                                            <Select value={editingChannel.apiFormat} disabled={isSaving} options={createApiFormatOptions(translate)} onChange={(value: ApiCallFormat) => updateChannelApiFormat(editingChannel, value)} />
+                                                        </Form.Item>
+                                                        <Form.Item label="Base URL" className="mb-0">
+                                                            <Space.Compact className="w-full">
+                                                                <Input value={editingChannel.baseUrl} disabled={isSaving} onChange={(event) => updateDraftChannel(editingChannel.id, { baseUrl: event.target.value })} />
+                                                                <Button
+                                                                    icon={<Copy className="size-3.5" />}
+                                                                    disabled={!editingChannel.baseUrl.trim()}
+                                                                    aria-label="复制 Base URL"
+                                                                    onClick={() => copyText(editingChannel.baseUrl.trim(), "Base URL")}
                                                                 />
-                                                            </Form.Item>
-                                                        </div>
-                                                    )}
-                                                </section>
-                                            );
-                                        })}
+                                                            </Space.Compact>
+                                                        </Form.Item>
+                                                        <Form.Item label="API Key" className="mb-0">
+                                                            <Space.Compact className="w-full">
+                                                                <Input.Password value={editingChannel.apiKey} disabled={isSaving} onChange={(event) => updateDraftChannel(editingChannel.id, { apiKey: event.target.value })} />
+                                                                <Button
+                                                                    icon={<Copy className="size-3.5" />}
+                                                                    disabled={!editingChannel.apiKey.trim()}
+                                                                    aria-label="复制 API Key"
+                                                                    onClick={() => copyText(editingChannel.apiKey.trim(), "API Key")}
+                                                                />
+                                                            </Space.Compact>
+                                                        </Form.Item>
+                                                        <Form.Item label={translate("appShell.models_ea4bf0")} className="mb-0 md:col-span-2">
+                                                            <Select
+                                                                mode="tags"
+                                                                showSearch
+                                                                allowClear
+                                                                maxTagCount="responsive"
+                                                                placeholder={
+                                                                    editingChannel.apiFormat === "minimax"
+                                                                        ? translate("appShell.enterMiniMaxH3")
+                                                                        : editingChannel.apiFormat === "custom"
+                                                                          ? translate("appShell.enterModelNameCustomFormatsCannotFetchModels")
+                                                                          : translate("appShell.enterModelNameOrFetchModels")
+                                                                }
+                                                                value={editingChannel.models}
+                                                                disabled={isSaving}
+                                                                onChange={(models) => updateDraftChannel(editingChannel.id, { models })}
+                                                            />
+                                                        </Form.Item>
+                                                    </div>
+                                                </Form>
+                                            ) : null}
+                                        </Modal>
                                     </div>
-                                </Form>
-                            ),
+                                );
+                            })(),
                         },
                         {
                             key: "models",
