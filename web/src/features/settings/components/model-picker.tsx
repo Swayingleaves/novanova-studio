@@ -130,6 +130,7 @@ export function ModelPicker({
                 <PopoverPrimitive.Portal>
                     <PopoverPrimitive.Content
                         data-canvas-no-zoom
+                        data-model-picker-content
                         align="start"
                         side="bottom"
                         sideOffset={6}
