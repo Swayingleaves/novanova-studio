@@ -581,7 +581,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
         setLoadingChannelId(channel.id);
         try {
             const result = await refreshServerChannelModels(channel);
-            updateDraftChannel(channel.id, { models: result.models });
+            updateDraftChannel(channel.id, { models: result.models, modelGroups: result.modelGroups || {} });
             message.success(translate("appShell.modelsUpdatedSaveYourChanges", { value0: channel.name }));
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("appShell.failedToLoadModels"));
