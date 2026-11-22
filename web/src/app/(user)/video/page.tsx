@@ -13,7 +13,7 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { BookOpen, Cloud, CloudUpload, Download, FolderPlus, Cog, HelpCircle, Link2, LoaderCircle, Palette, Play, RefreshCw, Sparkles, Upload, VideoIcon } from "lucide-react";
+import { AudioLines, BookOpen, Cloud, CloudUpload, Download, FolderPlus, Cog, HelpCircle, Link2, LoaderCircle, Palette, Play, RefreshCw, Sparkles, Upload, VideoIcon } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -38,7 +38,7 @@ import { readVideoDurationRange } from "@/features/generation/lib/video-duration
 import { formatBytes, formatDuration } from "@/features/generation/lib/image-utils";
 import { formatVideoGenerationSettingsSummary } from "@/features/generation/lib/generation-settings-summary";
 import type { ReferenceImage } from "@/features/generation/types/image";
-import type { ReferenceVideo } from "@/features/generation/types/media";
+import type { ReferenceAudio, ReferenceVideo } from "@/features/generation/types/media";
 import { PromptSelectDialog } from "@/features/prompts/components/prompt-select-dialog";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useConfigStore, useEffectiveConfig, type AiConfig, type VideoGenerationMode } from "@/features/settings/stores/use-config-store";
@@ -46,6 +46,7 @@ import { deleteStoredMedia, resolveMediaStorageInfo, resolveMediaUrl, uploadMedi
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
 import { resolveImageUrl, uploadImage } from "@/features/storage/services/image-storage";
+import { isAudioFile, uploadAudioFile } from "@/features/storage/services/audio-storage";
 import { uploadRemoteObjectToStorage } from "@/features/storage/services/object-storage";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
@@ -81,7 +82,7 @@ import { hasPendingVideoConversation } from "@/features/generation/lib/generatio
 import { useGenerationConversations } from "@/features/generation/hooks/use-generation-conversations";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { selectGenerationAttachments } from "@/features/generation/lib/generation-retry";
-import { imageReferenceAttachments, referenceMediaType, referenceMediaUrl, videoReferenceAttachments } from "@/features/generation/lib/reference-attachments";
+import { audioReferenceAttachments, imageReferenceAttachments, referenceMediaType, referenceMediaUrl, videoReferenceAttachments } from "@/features/generation/lib/reference-attachments";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { useCreationMode } from "@/features/generation/hooks/use-creation-mode";
 import type { CreationMode } from "@/features/generation/lib/creation-mode-preference";
@@ -264,6 +265,7 @@ export default function VideoPage() {
     const [skillError, setSkillError] = useState<string | null>(null);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
+    const [audioReferences, setAudioReferences] = useState<ReferenceAudio[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
     const newDraftHydratedRef = useRef(false);
     const { mode: creationMode, changeMode: changeCreationMode } = useCreationMode("video");
@@ -360,6 +362,7 @@ export default function VideoPage() {
             setPrompt(draft.prompt);
             setReferences(draft.references);
             setVideoReferences(draft.videoReferences || []);
+            setAudioReferences(draft.audioReferences || []);
         });
         return () => {
             active = false;
@@ -489,9 +492,10 @@ export default function VideoPage() {
         else updateWorkflowImageSelection({ size: value });
     };
 
-    // 文生视频模式下上传参考素材时，按素材类型自动切换生成模式：仅图片 → 图生视频；含视频 → 全能参考。
+    // 文生视频模式下上传参考素材时，按素材类型自动切换生成模式：仅图片 → 图生视频；含视频或音频 → 全能参考。
     // 返回本次应使用的模式交给调用方继续做上限校验、报价和提交，避免沿用切换前的旧模式把刚选的素材判为"模式不对"。
-    const resolveModeForReferences = (addedImages: number, addedVideos: number): VideoGenerationMode => {
+    const resolveModeForReferences = (addedImages: number, addedVideos: number, addedAudios = 0): VideoGenerationMode => {
+        if (audioReferences.length + addedAudios > 0) return "reference-to-video";
         if (config.videoGenerationMode !== "text-to-video") return config.videoGenerationMode;
         if (videoReferences.length + addedVideos > 0) return "reference-to-video";
         if (references.length + addedImages > 0) return "image-to-video";
@@ -514,8 +518,9 @@ export default function VideoPage() {
             prompt,
             references: sanitizeDraftReferences(references, uploadingReferenceIds),
             videoReferences: sanitizeDraftReferences(videoReferences, uploadingReferenceIds),
+            audioReferences: sanitizeDraftReferences(audioReferences, uploadingReferenceIds),
         });
-    }, [activeId, chatMessages.length, prompt, references, videoReferences, uploadingReferenceIds, userId, homepageDraft, skillHandoff]);
+    }, [activeId, chatMessages.length, prompt, references, videoReferences, audioReferences, uploadingReferenceIds, userId, homepageDraft, skillHandoff]);
     const { completedThinkings, activeThinking, onThoughtDelta, onThoughtComplete, resetThinkings } = useAgentThinking();
     const [toolCalls, setToolCalls] = useState<ToolCallState[]>([]);
     const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null);
@@ -825,6 +830,7 @@ export default function VideoPage() {
         size: config.size,
         imageReferenceCount: references.length,
         videoReferenceCount: videoReferences.length,
+        audioReferenceCount: audioReferences.length,
         requireReferences: false,
     });
     useEffect(() => {
@@ -867,8 +873,8 @@ export default function VideoPage() {
         : videoQuote;
     // 素材要求单独校验，用于「可生成」判定与提示，不阻断价格预览。
     const referenceIssue = readVideoGenerationConstraintIssue({ config: effectiveConfig, model, mode: config.videoGenerationMode,
-        size: config.size, seconds: config.videoSeconds, imageCount: references.length, videoCount: videoReferences.length })
-        || videoGenerationReferenceIssue(config.videoGenerationMode, references.length, videoReferences.length);
+        size: config.size, seconds: config.videoSeconds, imageCount: references.length, videoCount: videoReferences.length, audioCount: audioReferences.length })
+        || videoGenerationReferenceIssue(config.videoGenerationMode, references.length, videoReferences.length, audioReferences.length);
     const creditCost = activeQuote === null ? undefined : activeQuote.available ? (activeQuote.credits ?? null) : null;
     const creditRequirement = selectedSkill?.workflowType
         ? modelCreditRequirement(activeQuote?.available ? (workflowImageConfirmNext ? workflowVideoStageQuote ? [workflowVideoStageQuote] : [] : serverWorkflowQuote?.stages ?? []) : [])
@@ -948,36 +954,41 @@ export default function VideoPage() {
         };
     }, [conversations, refreshConversations]);
 
-    const canAddReferences = (images: number, videos: number, mode: VideoGenerationMode = config.videoGenerationMode) => {
+    const canAddReferences = (images: number, videos: number, mode: VideoGenerationMode = config.videoGenerationMode, audios = 0) => {
         const custom = readVideoModelConfiguration(effectiveConfig, model)?.isCustomModel;
         const issue = custom ? readVideoGenerationConstraintIssue({ config: effectiveConfig, model, mode,
-            imageCount: references.length + images, videoCount: videoReferences.length + videos, addingReferences: true })
+            imageCount: references.length + images, videoCount: videoReferences.length + videos, audioCount: audioReferences.length + audios, addingReferences: true })
             : references.length + images > SEEDANCE_REFERENCE_LIMITS.images ? translate("video.addUpToReferenceImages", { value0: SEEDANCE_REFERENCE_LIMITS.images })
-            : videoReferences.length + videos > SEEDANCE_REFERENCE_LIMITS.videos ? translate("generation.atMostSeedanceReferenceVideos", { value0: SEEDANCE_REFERENCE_LIMITS.videos }) : "";
+            : videoReferences.length + videos > SEEDANCE_REFERENCE_LIMITS.videos ? translate("generation.atMostSeedanceReferenceVideos", { value0: SEEDANCE_REFERENCE_LIMITS.videos })
+            : audioReferences.length + audios > 3 ? "最多支持 3 段参考音频" : "";
         if (issue) message.warning(issue);
         return !issue;
     };
 
-    const addReferences = async (files?: FileList | File[] | null): Promise<{ images: ReferenceImage[]; videos: ReferenceVideo[]; mode: VideoGenerationMode }> => {
+    const addReferences = async (files?: FileList | File[] | null): Promise<{ images: ReferenceImage[]; videos: ReferenceVideo[]; audios: ReferenceAudio[]; mode: VideoGenerationMode }> => {
         let mode: VideoGenerationMode = config.videoGenerationMode;
         try {
             const selectedFiles = Array.from(files || []);
-            const unsupportedFiles = selectedFiles.filter((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/"));
+            const unsupportedFiles = selectedFiles.filter((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/") && !isAudioFile(file));
             if (unsupportedFiles.length) {
                 message.warning(translate("video.unsupportedReferencesIgnored"));
             }
 
             const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes);
             const videoFiles = selectedFiles.filter((file) => file.type.startsWith("video/") && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes);
+            const audioFiles = selectedFiles.filter((file) => isAudioFile(file) && file.size <= 15 * 1024 * 1024);
             // 先按素材类型算出目标模式再校验：文生视频下携带素材必然不通过"图片 0 张"的上限检查。
-            mode = resolveModeForReferences(imageFiles.length, videoFiles.length);
-            if (!canAddReferences(imageFiles.length, videoFiles.length, mode)) return { images: [], videos: [], mode };
+            mode = resolveModeForReferences(imageFiles.length, videoFiles.length, audioFiles.length);
+            if (!canAddReferences(imageFiles.length, videoFiles.length, mode, audioFiles.length)) return { images: [], videos: [], audios: [], mode };
             applyModeForReferences(mode);
             if (selectedFiles.some((file) => file.type.startsWith("image/") && file.size > SEEDANCE_REFERENCE_LIMITS.imageMaxBytes)) {
                 message.warning(translate("video.referenceImagesOver30MBIgnored"));
             }
             if (selectedFiles.some((file) => file.type.startsWith("video/") && file.size > SEEDANCE_REFERENCE_LIMITS.videoMaxBytes)) {
                 message.warning(translate("video.referenceVideosOver50MBIgnored"));
+            }
+            if (selectedFiles.some((file) => isAudioFile(file) && file.size > 15 * 1024 * 1024)) {
+                message.warning("参考音频不能超过 15MB，已忽略超出限制的文件");
             }
 
             const imagePlaceholders = imageFiles.map((file) => ({
@@ -992,16 +1003,24 @@ export default function VideoPage() {
                 type: file.type,
                 url: URL.createObjectURL(file),
             }));
-            const placeholders = [...imagePlaceholders, ...videoPlaceholders];
+            const audioPlaceholders: ReferenceAudio[] = audioFiles.map((file) => ({
+                id: nanoid(),
+                name: file.name,
+                type: /\.wav$/i.test(file.name) || file.type.includes("wav") ? "audio/wav" : "audio/mpeg",
+                url: URL.createObjectURL(file),
+            }));
+            const placeholders = [...imagePlaceholders, ...videoPlaceholders, ...audioPlaceholders];
             if (!placeholders.length) {
-                return { images: [], videos: [], mode };
+                return { images: [], videos: [], audios: [], mode };
             }
             setReferences((current) => [...current, ...imagePlaceholders]);
             setVideoReferences((current) => [...current, ...videoPlaceholders]);
+            setAudioReferences((current) => [...current, ...audioPlaceholders]);
             setUploadingReferenceIds((current) => [...current, ...placeholders.map((placeholder) => placeholder.id)]);
 
             const uploadedImages: ReferenceImage[] = [];
             const uploadedVideos: ReferenceVideo[] = [];
+            const uploadedAudios: ReferenceAudio[] = [];
             await Promise.all([
                 ...imagePlaceholders.map(async (placeholder, index) => {
                     const file = imageFiles[index];
@@ -1051,11 +1070,34 @@ export default function VideoPage() {
                         setUploadingReferenceIds((current) => current.filter((id) => id !== placeholder.id));
                     }
                 }),
+                ...audioPlaceholders.map(async (placeholder, index) => {
+                    const file = audioFiles[index];
+                    try {
+                        const audio = await uploadAudioFile(file);
+                        const uploadedReference: ReferenceAudio = {
+                            ...placeholder,
+                            type: audio.mimeType || placeholder.type,
+                            url: audio.url,
+                            storageKey: audio.storageKey,
+                            bytes: audio.bytes,
+                            durationMs: audio.durationMs,
+                            objectStorage: audio.objectStorage,
+                        };
+                        uploadedAudios.push(uploadedReference);
+                        setAudioReferences((current) => current.map((reference) => (reference.id === placeholder.id ? uploadedReference : reference)));
+                    } catch (error) {
+                        setAudioReferences((current) => current.filter((reference) => reference.id !== placeholder.id));
+                        message.error(error instanceof Error ? error.message : `参考音频 ${placeholder.name} 上传失败`);
+                    } finally {
+                        URL.revokeObjectURL(placeholder.url);
+                        setUploadingReferenceIds((current) => current.filter((id) => id !== placeholder.id));
+                    }
+                }),
             ]);
-            return { images: uploadedImages, videos: uploadedVideos, mode };
+            return { images: uploadedImages, videos: uploadedVideos, audios: uploadedAudios, mode };
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("video.failedToUploadReference_893885"));
-            return { images: [], videos: [], mode };
+            return { images: [], videos: [], audios: [], mode };
         }
     };
 
@@ -1133,7 +1175,7 @@ export default function VideoPage() {
         const quality = config.vquality || "720p";
         const watermark = config.videoWatermark ?? true;
         pendingVideoSizeRef.current = size;
-        const currentAttachments = [...imageReferenceAttachments(references), ...videoReferenceAttachments(videoReferences)];
+        const currentAttachments = [...imageReferenceAttachments(references), ...videoReferenceAttachments(videoReferences), ...audioReferenceAttachments(audioReferences)];
         const previousAttachments = [...imageReferenceAttachments(latestRound?.references || []), ...videoReferenceAttachments(latestRound?.videoReferences || [])];
         const allRefs = selectGenerationAttachments(text, currentAttachments, previousAttachments);
         const selectedVideoQuote = quoteVideoGeneration({
@@ -1145,6 +1187,7 @@ export default function VideoPage() {
             size,
             imageReferenceCount: allRefs.filter((reference) => reference.type.startsWith("image/")).length,
             videoReferenceCount: allRefs.filter((reference) => reference.type.startsWith("video/")).length,
+            audioReferenceCount: allRefs.filter((reference) => reference.type.startsWith("audio/")).length,
         });
         // 无技能时每次提交都是真实视频生成；选择技能后仅在即将创建生成任务的确认阶段校验报价与余额。
         // 技能市场的开场白只负责开始引导，这一轮还不创建视频任务。
@@ -1221,6 +1264,7 @@ export default function VideoPage() {
         setPrompt("");
         setReferences([]);
         setVideoReferences([]);
+        setAudioReferences([]);
         setSelectedStyles([]);
     };
 
@@ -1291,8 +1335,8 @@ export default function VideoPage() {
             chatMessagesRef.current = next;
             return next;
         });
-        // 携带当前参考素材附件：技能引导中用户上传的图片/视频需随确认消息送达，作为最终生成参考
-        const currentAttachments = [...imageReferenceAttachments(references), ...videoReferenceAttachments(videoReferences)];
+        // 携带当前参考素材附件：技能引导中用户上传的图片/视频/音频需随确认消息送达，作为最终生成参考
+        const currentAttachments = [...imageReferenceAttachments(references), ...videoReferenceAttachments(videoReferences), ...audioReferenceAttachments(audioReferences)];
         // 图片确认轮确认生成视频时，携带用户确认的视频参数（比例/清晰度/时长）覆盖页面默认值
         const settingsOverride =
             workflowImageConfirmNext && text === "用这些图片生成视频"
@@ -1456,6 +1500,7 @@ export default function VideoPage() {
         setPrompt(savedDraft?.prompt || "");
         setReferences(savedDraft?.references || []);
         setVideoReferences(savedDraft?.videoReferences || []);
+        setAudioReferences(savedDraft?.audioReferences || []);
         setSelectedStyles([]);
         setSelectedSkill(null);
         setSkillMarketTaskActive(false);
@@ -1495,6 +1540,7 @@ export default function VideoPage() {
         setPrompt("");
         setReferences([]);
         setVideoReferences([]);
+        setAudioReferences([]);
         setSelectedStyles([]);
         setSkillMarketTaskActive(false);
         const skill = skillOptionFromSnapshot(conversation.rounds.at(-1)?.skill, skillOptions);
@@ -1726,6 +1772,24 @@ export default function VideoPage() {
                     onRemove: () => setVideoReferences((current) => current.filter((item) => item.id !== reference.id)),
                 };
             }),
+        ...audioReferences.map((reference, index) => {
+            const uploading = uploadingReferenceIds.includes(reference.id);
+            return {
+                id: reference.id,
+                label: uploading ? translate("video.uploading", { value0: `音频${index + 1}` }) : `音频${index + 1}`,
+                preview: (
+                    <div className="relative grid size-11 place-items-center rounded-xl bg-[var(--studio-surface-hover)] text-[var(--studio-ink)]" title={reference.name}>
+                        <AudioLines className="size-5" aria-hidden="true" />
+                        {uploading ? (
+                            <span className="absolute inset-0 grid place-items-center rounded-xl bg-black/35 text-white">
+                                <LoaderCircle className="size-4 animate-spin" />
+                            </span>
+                        ) : null}
+                    </div>
+                ),
+                onRemove: () => setAudioReferences((current) => current.filter((item) => item.id !== reference.id)),
+            };
+        }),
     ];
     // 「最近上传」按素材类型回填到对应的参考列表，视频回填时带上时长，保持 2-15 秒校验有效。
     const addRecentReference = (asset: RecentReferenceAsset) => {
@@ -2015,7 +2079,7 @@ export default function VideoPage() {
             <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*,video/mp4,video/quicktime"
+                accept="image/*,video/mp4,video/quicktime,audio/mpeg,audio/wav,.mp3,.wav"
                 multiple
                 className="hidden"
                 onChange={(event) => {
@@ -2026,7 +2090,7 @@ export default function VideoPage() {
             <input
                 ref={uploadChoiceInputRef}
                 type="file"
-                accept="image/*,video/mp4,video/quicktime"
+                accept="image/*,video/mp4,video/quicktime,audio/mpeg,audio/wav,.mp3,.wav"
                 multiple
                 className="hidden"
                 onChange={(event) => {

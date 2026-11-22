@@ -238,7 +238,7 @@ const PROMPT_PANEL_HEIGHT = 196;
 const PROMPT_PANEL_GAP = 16;
 const IMAGE_GENERATION_NODE_WIDTH = 480;
 const IMAGE_GENERATION_NODE_HEIGHT = 330;
-const PROMPT_PANEL_INTERACTION_IGNORE_SELECTOR = '[data-canvas-prompt-panel],[data-canvas-settings-popover],[data-slot="select-content"],.react-flow__node,.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown';
+const PROMPT_PANEL_INTERACTION_IGNORE_SELECTOR = '[data-canvas-prompt-panel],[data-canvas-settings-popover],[data-model-picker-content],[data-radix-popper-content-wrapper],[data-slot="select-content"],.react-flow__node,.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown';
 const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
@@ -1110,6 +1110,15 @@ function CanvasWorkspacePage() {
                 return;
             }
             const defaultStoryboardModel = type === "storyboard" ? normalizeModelOptionValue(effectiveConfig.textModel, effectiveConfig.channels) : "";
+            const hasAudioSource = type === "video" && sourceNodes.some(isAudioNode);
+            const defaultVideoModelSupportsAudio = hasAudioSource
+                && Boolean(effectiveConfig.modelCapabilities.find((item) => item.model === effectiveConfig.videoModel)?.capabilities.includes("audio-input"));
+            const defaultAudioVideoModel = hasAudioSource && !defaultVideoModelSupportsAudio
+                ? effectiveConfig.videoModels.find((candidate) => {
+                      const capabilities = effectiveConfig.modelCapabilities.find((item) => item.model === candidate)?.capabilities || [];
+                      return capabilities.includes("audio-input") && capabilities.includes("reference-to-video");
+                  }) || ""
+                : "";
             const settingGraph = settingGraphSkill
                 ? ({
                       id: settingGraphSkill.id,
@@ -1122,6 +1131,8 @@ function CanvasWorkspacePage() {
             const initialNode = {
                 ...createCanvasNode(type, pending.position, {
                     ...(defaultStoryboardModel ? { model: defaultStoryboardModel } : {}),
+                    ...(defaultAudioVideoModel ? { model: defaultAudioVideoModel } : {}),
+                    ...(hasAudioSource ? { videoGenerationMode: "reference-to-video" as const } : {}),
                     ...(settingGraph ? { settingGraph } : {}),
                     ...(settingGraph ? { count: 1 } : {}),
                 }),
@@ -1156,7 +1167,7 @@ function CanvasWorkspacePage() {
                 }
             }
             const nextConnections = [...connectionsRef.current, ...createdConnections];
-            const referenceIssue = readVideoReferenceAdditionIssue(nodesWithNewNode, nextConnections);
+            const referenceIssue = hasAudioSource ? "" : readVideoReferenceAdditionIssue(nodesWithNewNode, nextConnections);
             if (referenceIssue) {
                 message.warning(referenceIssue);
                 return;
@@ -1171,7 +1182,7 @@ function CanvasWorkspacePage() {
             setPendingConnectionCreate(null);
             setConnecting(null);
         },
-        [effectiveConfig.channels, effectiveConfig.textModel, message, readVideoReferenceAdditionIssue, requestFocusNodes, setConnecting],
+        [effectiveConfig.channels, effectiveConfig.modelCapabilities, effectiveConfig.textModel, effectiveConfig.videoModel, effectiveConfig.videoModels, message, readVideoReferenceAdditionIssue, requestFocusNodes, setConnecting],
     );
 
     const cancelPendingConnectionCreate = useCallback(() => {

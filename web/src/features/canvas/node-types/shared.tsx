@@ -82,10 +82,13 @@ type CanvasNodeTitleProps = {
 export function CanvasNodeTitle({ nodeId, title, defaultTitle, onTitleChange }: CanvasNodeTitleProps) {
     const translate = useTranslation();
     const theme = useCanvasTheme();
+    const fontSize = useCanvasUiStore((state) => state.nodeTitleFontSize);
+    const adjustFontSize = useCanvasUiStore((state) => state.adjustNodeTitleFontSize);
     const inputRef = useRef<HTMLInputElement>(null);
     const cancelRef = useRef(false);
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState(title || defaultTitle);
+    const lineHeight = Math.round(fontSize * 1.4);
 
     useEffect(() => {
         if (!editing) setDraft(title || defaultTitle);
@@ -131,7 +134,7 @@ export function CanvasNodeTitle({ nodeId, title, defaultTitle, onTitleChange }: 
 
     return (
         <div
-            className="nodrag nopan nowheel pointer-events-auto absolute left-0 top-0 z-[65] max-w-[calc(100%-1.5rem)]"
+            className="group nodrag nopan nowheel pointer-events-auto absolute left-0 top-0 z-[65] flex max-w-[calc(100%-1.5rem)] items-center gap-1"
             data-canvas-no-zoom
             style={{ transform: "translateY(calc(-100% - 8px))" }}
             onDoubleClick={(event) => {
@@ -141,15 +144,21 @@ export function CanvasNodeTitle({ nodeId, title, defaultTitle, onTitleChange }: 
             }}
             onMouseDown={stopCanvasEvent}
             onPointerDown={stopCanvasEvent}
-            onWheel={stopCanvasEvent}
+            onWheel={(event) => {
+                event.stopPropagation();
+                if (event.ctrlKey || event.metaKey) {
+                    event.preventDefault();
+                    adjustFontSize(event.deltaY < 0 ? 2 : -2);
+                }
+            }}
         >
             {editing ? (
                 <input
                     ref={inputRef}
                     value={draft}
                     aria-label={translate("canvas.nodeName")}
-                    className="nodrag nopan nowheel h-7 w-40 max-w-full rounded-md border px-2 text-xs font-medium outline-none transition-colors focus-visible:ring-2 motion-reduce:transition-none"
-                    style={{ background: theme.node.panel, borderColor: theme.node.activeStroke, color: theme.node.text, outlineColor: theme.node.activeStroke }}
+                    className="nodrag nopan nowheel min-w-32 max-w-full rounded-md border px-2 py-0.5 font-medium outline-none transition-colors focus-visible:ring-2 motion-reduce:transition-none"
+                    style={{ background: theme.node.panel, borderColor: theme.node.activeStroke, color: theme.node.text, outlineColor: theme.node.activeStroke, fontSize, lineHeight: `${lineHeight}px` }}
                     onChange={(event) => setDraft(event.target.value)}
                     onBlur={() => {
                         if (cancelRef.current) {
@@ -164,10 +173,42 @@ export function CanvasNodeTitle({ nodeId, title, defaultTitle, onTitleChange }: 
                     onWheel={stopCanvasEvent}
                 />
             ) : (
-                <span className="block max-w-40 cursor-text truncate px-1 py-1 text-xs font-medium" title={translate("canvas.doubleClickToRenameNode", { value0: title || defaultTitle })} style={{ color: theme.node.text, textShadow: "0 1px 3px rgba(0,0,0,.55)" }}>
+                <span
+                    className="block min-w-0 cursor-text truncate px-1 py-1 font-medium"
+                    title={translate("canvas.doubleClickToRenameNode", { value0: title || defaultTitle })}
+                    style={{ color: theme.node.text, textShadow: "0 1px 3px rgba(0,0,0,.55)", fontSize, lineHeight: `${lineHeight}px` }}
+                >
                     {title || defaultTitle}
                 </span>
             )}
+            <span
+                className="inline-flex shrink-0 items-center gap-0.5 rounded-md border px-0.5 py-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+                style={{ background: theme.node.panel, borderColor: theme.toolbar.border }}
+                onDoubleClick={(event) => event.stopPropagation()}
+            >
+                <button
+                    type="button"
+                    aria-label="缩小节点标题字体"
+                    title={`缩小标题字体 (${fontSize}px)`}
+                    disabled={fontSize <= 10}
+                    className="inline-flex h-5 items-center justify-center rounded px-1 text-[11px]! font-medium opacity-75 transition hover:opacity-100 disabled:opacity-25"
+                    style={{ color: theme.node.text }}
+                    onClick={() => adjustFontSize(-2)}
+                >
+                    A-
+                </button>
+                <button
+                    type="button"
+                    aria-label="放大节点标题字体"
+                    title={`放大标题字体 (${fontSize}px)`}
+                    disabled={fontSize >= 36}
+                    className="inline-flex h-5 items-center justify-center rounded px-1 text-[11px]! font-medium opacity-75 transition hover:opacity-100 disabled:opacity-25"
+                    style={{ color: theme.node.text }}
+                    onClick={() => adjustFontSize(2)}
+                >
+                    A+
+                </button>
+            </span>
         </div>
     );
 }

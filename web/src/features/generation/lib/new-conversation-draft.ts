@@ -1,7 +1,7 @@
 import localforage from "localforage";
 
 import type { ReferenceImage } from "@/features/generation/types/image";
-import type { ReferenceVideo } from "@/features/generation/types/media";
+import type { ReferenceAudio, ReferenceVideo } from "@/features/generation/types/media";
 
 export type NewConversationDraftKind = "image" | "video";
 
@@ -9,6 +9,7 @@ export type NewConversationDraft = {
     prompt: string;
     references: ReferenceImage[];
     videoReferences?: ReferenceVideo[];
+    audioReferences?: ReferenceAudio[];
 };
 
 const draftStorage = localforage.createInstance({
@@ -40,7 +41,7 @@ export function sanitizeDraftReferences<T extends { id: string; url?: string; st
 /** 判断草稿是否包含任意有效内容（提示词或参考素材）。 */
 export function hasNewConversationDraftContent(draft: NewConversationDraft | null | undefined): boolean {
     if (!draft) return false;
-    return Boolean(draft.prompt.trim() || draft.references.length || draft.videoReferences?.length);
+    return Boolean(draft.prompt.trim() || draft.references.length || draft.videoReferences?.length || draft.audioReferences?.length);
 }
 
 /** 同步读取内存中的最新草稿，供页内切换历史记录后点击「新增」时瞬时恢复。 */
@@ -87,7 +88,7 @@ export async function saveNewConversationDraft(
     const normalized: NewConversationDraft = {
         prompt: draft.prompt,
         references: draft.references,
-        ...(kind === "video" ? { videoReferences: draft.videoReferences || [] } : {}),
+        ...(kind === "video" ? { videoReferences: draft.videoReferences || [], audioReferences: draft.audioReferences || [] } : {}),
     };
     memoryDrafts.set(key, normalized);
     try {

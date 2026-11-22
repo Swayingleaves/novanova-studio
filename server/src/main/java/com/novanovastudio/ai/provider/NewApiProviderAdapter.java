@@ -173,11 +173,15 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
     private Mono<JSONObject> executeVideoTask(AiTaskExecutionContext context) {
         List<AiTaskDtos.AiTaskMediaReference> imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
         List<AiTaskDtos.AiTaskMediaReference> videoReferences = AiTaskParameterReader.safeReferences(context.request().videoReferences());
+        List<AiTaskDtos.AiTaskMediaReference> audioReferences = AiTaskParameterReader.safeReferences(context.request().audioReferences());
         if (imageReferences.size() > MAXIMUM_REFERENCE_IMAGE_COUNT || videoReferences.size() > MAXIMUM_REFERENCE_VIDEO_COUNT) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.newAPISupportsUpTo9ImagesAnd3Videos")));
         }
-        return Mono.zip(resolveReferenceUrls(context, imageReferences), resolveReferenceUrls(context, videoReferences))
-                .flatMap(urls -> createVideoTask(context, urls.getT1(), urls.getT2()));
+        if (audioReferences.size() > 3) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.atMost3ReferenceAudioClips")));
+        }
+        return Mono.zip(resolveReferenceUrls(context, imageReferences), resolveReferenceUrls(context, videoReferences), resolveReferenceUrls(context, audioReferences))
+                .flatMap(urls -> createVideoTask(context, urls.getT1(), urls.getT2(), urls.getT3()));
     }
 
     /**
@@ -201,12 +205,12 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
      * @param videoUrls List<String> 参考视频URL
      * @return Mono<JSONObject> 视频结果
      */
-    private Mono<JSONObject> createVideoTask(AiTaskExecutionContext context, List<String> imageUrls, List<String> videoUrls) {
+    private Mono<JSONObject> createVideoTask(AiTaskExecutionContext context, List<String> imageUrls, List<String> videoUrls, List<String> audioUrls) {
         List<String> imageRoles = AiTaskParameterReader.safeReferences(context.request().references()).stream()
                 .map(AiTaskDtos.AiTaskMediaReference::role).toList();
         Map<String, Object> payload = buildVideoRequestPayload(context.model(), context.request().prompt(), context.request().parameters(),
-                imageUrls, videoUrls, context.request().videoGenerationMode(), imageRoles);
-        log.info("创建New API视频任务: taskId={}, model={}, imageCount={}, videoCount={}", context.task().getId(), context.model(), imageUrls.size(), videoUrls.size());
+                imageUrls, videoUrls, audioUrls, context.request().videoGenerationMode(), imageRoles);
+        log.info("创建New API视频任务: taskId={}, model={}, imageCount={}, videoCount={}, audioCount={}", context.task().getId(), context.model(), imageUrls.size(), videoUrls.size(), audioUrls.size());
         return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_GENERATION_PATH, com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .map(AiJsonUtils::responsePayload)
                 .flatMap(created -> {
@@ -346,6 +350,13 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
     static Map<String, Object> buildVideoRequestPayload(String model, String prompt, Map<String, Object> parameters,
                                                         List<String> imageUrls, List<String> videoUrls,
                                                         String videoGenerationMode, List<String> imageRoles) {
+        return buildVideoRequestPayload(model, prompt, parameters, imageUrls, videoUrls, List.of(), videoGenerationMode, imageRoles);
+    }
+
+    static Map<String, Object> buildVideoRequestPayload(String model, String prompt, Map<String, Object> parameters,
+                                                        List<String> imageUrls, List<String> videoUrls, List<String> audioUrls,
+                                                        String videoGenerationMode, List<String> imageRoles) {
+        List<String> safeAudios = audioUrls == null ? List.of() : audioUrls;
         int duration = AiTaskParameterReader.intParameter(parameters, "seconds", 5, 1, 15);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", model);
@@ -364,12 +375,16 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
             payload.put("input_reference", imageUrls.getFirst());
             payload.put("reference_image_roles", imageRoles == null ? List.of() : imageRoles);
         }
+        if (!safeAudios.isEmpty()) {
+            payload.put("audios", safeAudios);
+        }
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("aspect_ratio", normalizeAspectRatio(size));
         Boolean watermark = booleanParameter(parameters, "watermark");
         if (watermark != null) metadata.put("watermark", watermark);
         if (!imageUrls.isEmpty()) metadata.put("reference_images", imageUrls);
         if (!videoUrls.isEmpty()) metadata.put("reference_videos", videoUrls);
+        if (!safeAudios.isEmpty()) metadata.put("reference_audios", safeAudios);
         if (!metadata.isEmpty()) payload.put("metadata", metadata);
         return payload;
     }

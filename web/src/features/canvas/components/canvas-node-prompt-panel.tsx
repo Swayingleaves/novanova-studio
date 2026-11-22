@@ -8,7 +8,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ArrowUp, BookOpenText, ChevronDown, FileText, Image as ImageIcon, Info, LoaderCircle, Plus, Search, Sparkles, Square, AudioLines, Video, X } from "lucide-react";
+import { ArrowUp, BookOpenText, ChevronDown, FileText, Image as ImageIcon, Info, LoaderCircle, Maximize2, Minimize2, Plus, Search, Sparkles, Square, AudioLines, Video, X } from "lucide-react";
 import { App, Button, Modal, Tooltip } from "antd";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
@@ -1577,11 +1577,61 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
     );
 
     const isEmpty = !prompt;
+    const [editorHeight, setEditorHeight] = useState(128);
+    const [fontSize, setFontSize] = useState(() => {
+        if (typeof window === "undefined") return 14;
+        const stored = Number(window.localStorage.getItem("novanova:canvas_prompt_font_size"));
+        return Number.isFinite(stored) && stored >= 12 && stored <= 28 ? stored : 14;
+    });
+    const isExpanded = editorHeight > 200;
+
+    const updateFontSize = useCallback((delta: number) => {
+        setFontSize((current) => {
+            const next = Math.max(12, Math.min(28, current + delta));
+            try {
+                window.localStorage.setItem("novanova:canvas_prompt_font_size", String(next));
+            } catch {
+                // 忽略本地存储异常
+            }
+            return next;
+        });
+    }, []);
+
+    const handleResizeMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const startY = event.clientY;
+        const startHeight = editorHeight;
+        const onMove = (moveEvent: MouseEvent) => {
+            const next = Math.max(80, Math.min(480, Math.round(startHeight + (moveEvent.clientY - startY))));
+            setEditorHeight(next);
+        };
+        const onUp = () => {
+            window.removeEventListener("mousemove", onMove);
+            window.removeEventListener("mouseup", onUp);
+        };
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+    }, [editorHeight]);
+
+    const lineHeight = Math.round(fontSize * 1.5);
 
     return (
-        <div className="relative h-32 w-full">
+        <div
+            className="relative w-full"
+            style={{ height: editorHeight }}
+            onWheel={(event) => {
+                if (!event.ctrlKey && !event.metaKey) return;
+                event.preventDefault();
+                event.stopPropagation();
+                updateFontSize(event.deltaY < 0 ? 2 : -2);
+            }}
+        >
             {isEmpty ? (
-                <div className="pointer-events-none absolute inset-0 z-10 flex items-center px-3 py-2 text-sm leading-5 opacity-45" style={{ color: theme.node.text }}>
+                <div
+                    className="pointer-events-none absolute inset-0 z-10 flex items-center px-3 py-2 pr-24 opacity-45"
+                    style={{ color: theme.node.text, fontSize, lineHeight: `${lineHeight}px` }}
+                >
                     {placeholder}
                 </div>
             ) : null}
@@ -1590,8 +1640,8 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
                 ref={editorRef}
                 contentEditable
                 suppressContentEditableWarning
-                className="prompt-editor thin-scrollbar absolute inset-0 cursor-text resize-none select-text rounded-xl border px-3 py-2 text-sm leading-5 outline-none transition focus:border-[#2f80ff] focus:ring-2 focus:ring-[#2f80ff]/25"
-                style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text, whiteSpace: "pre-wrap", overflowWrap: "break-word", overflowY: "auto" }}
+                className="prompt-editor thin-scrollbar absolute inset-0 cursor-text resize-none select-text rounded-xl border px-3 py-2 pr-24 outline-none transition focus:border-[#2f80ff] focus:ring-2 focus:ring-[#2f80ff]/25"
+                style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text, fontSize, lineHeight: `${lineHeight}px`, whiteSpace: "pre-wrap", overflowWrap: "break-word", overflowY: "auto" }}
                 onInput={handleInput}
                 onBeforeInput={handleBeforeInput}
                 onKeyDown={handleKeyDown}
@@ -1605,6 +1655,61 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
                 onCompositionStart={handleCompositionStart}
                 onCompositionEnd={handleCompositionEnd}
             />
+            <div
+                className="absolute right-2 top-2 z-20 inline-flex items-center gap-0.5 rounded-md p-0.5"
+                style={{ background: theme.node.panel }}
+                onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }}
+            >
+                <Tooltip title={`缩小字体 (${fontSize}px)`}>
+                    <button
+                        type="button"
+                        aria-label="缩小字体"
+                        disabled={fontSize <= 12}
+                        className="inline-flex h-6 px-1.5 items-center justify-center rounded text-[11px]! font-medium opacity-70 transition hover:opacity-100 disabled:opacity-25"
+                        style={{ color: theme.node.muted }}
+                        onClick={() => updateFontSize(-2)}
+                    >
+                        A-
+                    </button>
+                </Tooltip>
+                <Tooltip title={`放大字体 (${fontSize}px)`}>
+                    <button
+                        type="button"
+                        aria-label="放大字体"
+                        disabled={fontSize >= 28}
+                        className="inline-flex h-6 px-1.5 items-center justify-center rounded text-[11px]! font-medium opacity-70 transition hover:opacity-100 disabled:opacity-25"
+                        style={{ color: theme.node.muted }}
+                        onClick={() => updateFontSize(2)}
+                    >
+                        A+
+                    </button>
+                </Tooltip>
+                <Tooltip title={isExpanded ? "缩小输入框" : "放大输入框"}>
+                    <button
+                        type="button"
+                        aria-label={isExpanded ? "缩小输入框" : "放大输入框"}
+                        className="inline-flex size-6 items-center justify-center rounded opacity-70 transition hover:opacity-100"
+                        style={{ color: theme.node.muted }}
+                        onClick={() => setEditorHeight((current) => (current > 200 ? 128 : 320))}
+                    >
+                        {isExpanded ? <Minimize2 className="size-3.5" aria-hidden="true" /> : <Maximize2 className="size-3.5" aria-hidden="true" />}
+                    </button>
+                </Tooltip>
+            </div>
+            <div
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="拖动调整提示词输入框高度"
+                title="拖动调整高度"
+                className="group absolute inset-x-3 bottom-0 z-20 flex h-2.5 cursor-ns-resize items-center justify-center"
+                onMouseDown={handleResizeMouseDown}
+                onPointerDown={(event) => event.stopPropagation()}
+            >
+                <span className="h-0.5 w-8 rounded-full opacity-30 transition group-hover:opacity-80" style={{ background: theme.node.muted }} />
+            </div>
         </div>
     );
 });

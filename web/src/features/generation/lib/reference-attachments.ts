@@ -30,6 +30,10 @@ export function videoReferenceAttachments(references: readonly ReferenceMedia[])
     return references.flatMap((reference) => toAgentAttachment(reference, "video/*", translate("generation.referenceVideo_6ae00d")));
 }
 
+export function audioReferenceAttachments(references: readonly ReferenceMedia[]): AgentAttachment[] {
+    return references.flatMap((reference) => toAgentAttachment(reference, "audio/mpeg", "参考音频"));
+}
+
 function toAgentAttachment(reference: ReferenceMedia, fallbackType: string, fallbackName: string): AgentAttachment[] {
     const url = referenceMediaUrl(reference);
     const storageKey = reference.storageKey?.trim() || "";
