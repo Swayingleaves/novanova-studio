@@ -12,6 +12,7 @@ import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.AiTaskParameterReader;
 import com.novanovastudio.ai.AiTaskPollingSupport;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.ai.VideoAudioSupport;
 import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -337,25 +338,12 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
     static Map<String, Object> buildRequestPayload(
             String model, String prompt, Map<String, Object> parameters,
             List<String> imageUrls, List<String> videoUrls, String videoGenerationMode) {
-        String mode = VideoGenerationMode.defaultIfBlank(videoGenerationMode);
-        if (!VideoGenerationMode.isSupported(mode)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedVideoGenerationMode"));
-        }
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("model", model);
-        payload.put("content", buildContent(prompt, imageUrls, videoUrls, mode, List.of()));
-        payload.put("ratio", normalizeRatio(AiTaskParameterReader.parameterText(parameters, "size", "adaptive")));
-        payload.put("resolution", normalizeResolution(
-                AiTaskParameterReader.parameterText(parameters, "resolution", "720p")));
-        payload.put("duration", parseDuration(AiTaskParameterReader.parameterText(parameters, "seconds", "5")));
-        Boolean watermark = booleanParameter(parameters, "watermark");
-        if (watermark != null) {
-            payload.put("watermark", watermark);
-        }
-        return payload;
+        return buildRequestPayload(model, prompt, parameters, imageUrls, videoUrls, videoGenerationMode, List.of());
     }
 
-    /** 构建带媒体角色的Seedance请求体。 */
+    /**
+     * 构建带媒体角色的Seedance请求体；「生成音频」只给 2.0 / 2.5 等认 generate_audio 的模型写（1.0 不认，方舟强校验会报错），没传按模型默认。
+     */
     private static Map<String, Object> buildRequestPayload(
             String model, String prompt, Map<String, Object> parameters,
             List<String> imageUrls, List<String> videoUrls, String videoGenerationMode,
@@ -372,6 +360,8 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
         payload.put("duration", parseDuration(AiTaskParameterReader.parameterText(parameters, "seconds", "5")));
         Boolean watermark = booleanParameter(parameters, "watermark");
         if (watermark != null) payload.put("watermark", watermark);
+        Boolean audio = VideoAudioSupport.nativeValue(VideoAudioSupport.seedanceOutput(model), parameters);
+        if (audio != null) payload.put("generate_audio", audio);
         return payload;
     }
 

@@ -15,6 +15,7 @@ import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.AiTaskParameterReader;
 import com.novanovastudio.ai.AiTaskPollingSupport;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.ai.VideoAudioSupport;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
@@ -139,7 +140,14 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
         payload.put("duration", parameterInt(context, "seconds", 5));
         payload.put("quality", normalizeQuality(parameterText(context, "resolution", "720p")));
         payload.put("aspect_ratio", normalizeAspectRatio(parameterText(context, "size", "adaptive")));
-        payload.put("generate_audio", true);
+        // 生成音频：Seedance 系列按开关（没传仍是 true，与原来一致）；MiniMax H3 参数表 additionalProperties=false、没有声音字段，不写；
+        // 其它文档外模型保持原来写死的 true。
+        String audioOutput = VideoAudioSupport.output("evolink", context.model());
+        if (VideoAudioSupport.SWITCHABLE.equals(audioOutput)) {
+            payload.put("generate_audio", !Boolean.FALSE.equals(VideoAudioSupport.requested(context.request().parameters())));
+        } else if (VideoAudioSupport.UNKNOWN.equals(audioOutput)) {
+            payload.put("generate_audio", true);
+        }
         payload.put("content_filter", true);
         log.info("创建Evolink视频任务: taskId={}, model={}, audioCount={}", context.task().getId(), context.model(), audioUrls.size());
         return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_GENERATION_PATH, AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
