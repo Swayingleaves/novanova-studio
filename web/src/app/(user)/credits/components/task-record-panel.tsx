@@ -15,8 +15,8 @@ import { formatCreditTime, generationTypeLabel } from "../credit-page-utils";
 import { formatConsumedCredits, formatTaskElapsedTime, TASK_RECORD_PAGE_SIZE, taskRecordStatusLabel, taskRecordStatusTone, taskRecordUserLabel } from "../task-record-utils";
 
 type TaskTypeFilter = "all" | "image" | "video";
-type MediaPreview = { taskId: string; index: number; taskType: "image" | "video"; url: string };
-type TaskRecordView = ServerTaskRecord & Partial<Pick<ServerAdminTaskRecord, "userId" | "username" | "nickname" | "email">>;
+type MediaPreview = { taskId: string; index: number; taskType: "image" | "video"; url: string; source?: "result" | "reference" };
+type TaskRecordView = ServerTaskRecord & Partial<Pick<ServerAdminTaskRecord, "userId" | "username" | "nickname" | "email" | "channelName" | "referenceImageUrls" | "referenceVideoUrls" | "referenceAudioUrls">>;
 
 /**
  * 渲染积分页下方的图片与视频生成任务记录。
@@ -54,7 +54,9 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
     const freshDetail = records.find((record) => record.taskId === detailId) ?? null;
     const detail = freshDetail ?? (detailSnapshot?.taskId === detailId ? detailSnapshot : null);
     const previewUrl = preview
-        ? records.find((record) => record.taskId === preview.taskId)?.resultUrls[preview.index] || preview.url
+        ? preview.source === "reference"
+            ? preview.url
+            : records.find((record) => record.taskId === preview.taskId)?.resultUrls[preview.index] || preview.url
         : undefined;
     useEffect(() => {
         refreshedTaskIds.current.clear();
@@ -119,9 +121,18 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
         {
             title: translate("credits.model"),
             dataIndex: "model",
-            width: 180,
+            width: 200,
             ellipsis: true,
-            render: (model: string) => <span className="block truncate text-[var(--studio-muted)]">{model || "—"}</span>,
+            render: (model: string, record: TaskRecordView) => (
+                <div className="min-w-0">
+                    <span className="block truncate text-[var(--studio-text)]" title={model || undefined}>{model || "—"}</span>
+                    {admin && record.channelName ? (
+                        <span className="mt-0.5 block truncate text-xs text-[var(--studio-muted)]" title={record.channelName}>
+                            {record.channelName}
+                        </span>
+                    ) : null}
+                </div>
+            ),
         },
         {
             title: translate("credits.consumedCredits"),
@@ -238,7 +249,7 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
                 </div>
             ) : null}
 
-            <TaskRecordDetail record={detail} onClose={() => setDetailId(null)} onPreview={setPreview} onExpired={refreshExpiredResult} />
+            <TaskRecordDetail record={detail} admin={admin} onClose={() => setDetailId(null)} onPreview={setPreview} onExpired={refreshExpiredResult} />
             <MediaPreviewDialog preview={preview} url={previewUrl} onClose={() => setPreview(null)} onExpired={refreshExpiredResult} />
         </div>
     );
@@ -306,10 +317,11 @@ function TaskRecordThumbnails({ record, onPreview, onExpired, compact }: { recor
  * @param props 任务记录、关闭回调与媒体预览回调
  * @return 任务详情弹窗
  */
-function TaskRecordDetail({ record, onClose, onPreview, onExpired }: { record: ServerTaskRecord | null; onClose: () => void; onPreview: (preview: MediaPreview) => void; onExpired: (taskId: string) => void }) {
+function TaskRecordDetail({ record, admin = false, onClose, onPreview, onExpired }: { record: TaskRecordView | null; admin?: boolean; onClose: () => void; onPreview: (preview: MediaPreview) => void; onExpired: (taskId: string) => void }) {
     const translate = useTranslation();
     const details = record ? [
         { label: translate("credits.model"), value: record.model || "—" },
+        ...(admin ? [{ label: translate("credits.channel"), value: record.channelName || "—" }] : []),
         { label: translate("credits.taskType"), value: generationTypeLabel(record.taskType) },
         { label: translate("credits.resolution"), value: record.resolution || "—" },
         { label: translate("credits.aspectRatio"), value: record.size || "—" },
@@ -318,6 +330,10 @@ function TaskRecordDetail({ record, onClose, onPreview, onExpired }: { record: S
         { label: translate("credits.taskStatus"), value: taskRecordStatusLabel(record.status) },
         { label: translate("credits.time"), value: formatCreditTime(record.createdAt) },
     ] : [];
+    const referenceImageUrls = record?.referenceImageUrls || [];
+    const referenceVideoUrls = record?.referenceVideoUrls || [];
+    const referenceAudioUrls = record?.referenceAudioUrls || [];
+    const hasReferences = referenceImageUrls.length > 0 || referenceVideoUrls.length > 0 || referenceAudioUrls.length > 0;
 
     return (
         <Modal
@@ -354,6 +370,69 @@ function TaskRecordDetail({ record, onClose, onPreview, onExpired }: { record: S
                             {record.prompt || translate("credits.noPrompt")}
                         </p>
                     </div>
+                    {hasReferences ? (
+                        <div className="space-y-3">
+                            <p className="text-xs text-[var(--studio-muted)]">{translate("credits.referenceMaterials")}</p>
+                            {referenceImageUrls.length ? (
+                                <div>
+                                    <p className="mb-1.5 text-xs text-[var(--studio-muted)]">
+                                        {translate("credits.referenceImages")} ({referenceImageUrls.length})
+                                    </p>
+                                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                                        {referenceImageUrls.map((url, index) => (
+                                            <button
+                                                key={`${url}-${index}`}
+                                                type="button"
+                                                className="overflow-hidden rounded-md border border-[var(--studio-line)] bg-[var(--studio-media)]"
+                                                onClick={() => onPreview({ taskId: record.taskId, index, taskType: "image", url, source: "reference" })}
+                                            >
+                                                <img src={url} alt="" loading="lazy" className="aspect-square w-full object-cover" onError={() => onExpired(record.taskId)} />
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : null}
+                            {referenceVideoUrls.length ? (
+                                <div>
+                                    <p className="mb-1.5 text-xs text-[var(--studio-muted)]">
+                                        {translate("credits.referenceVideos")} ({referenceVideoUrls.length})
+                                    </p>
+                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                        {referenceVideoUrls.map((url, index) => (
+                                            <video
+                                                key={`${url}-${index}`}
+                                                src={url}
+                                                controls
+                                                playsInline
+                                                preload="metadata"
+                                                className="max-h-48 w-full rounded-md border border-[var(--studio-line)] bg-black"
+                                                onError={() => onExpired(record.taskId)}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : null}
+                            {referenceAudioUrls.length ? (
+                                <div>
+                                    <p className="mb-1.5 text-xs text-[var(--studio-muted)]">
+                                        {translate("credits.referenceAudios")} ({referenceAudioUrls.length})
+                                    </p>
+                                    <div className="space-y-2">
+                                        {referenceAudioUrls.map((url, index) => (
+                                            <audio
+                                                key={`${url}-${index}`}
+                                                src={url}
+                                                controls
+                                                preload="metadata"
+                                                className="w-full"
+                                                onError={() => onExpired(record.taskId)}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : null}
                 </div>
             ) : null}
         </Modal>

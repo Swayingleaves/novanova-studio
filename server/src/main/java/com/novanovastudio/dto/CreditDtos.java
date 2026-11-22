@@ -300,6 +300,10 @@ public final class CreditDtos {
      * @param username String 用户名
      * @param nickname String 用户昵称
      * @param email String 用户邮箱
+     * @param channelName String 模型所属渠道名称，无法关联时为 null
+     * @param referenceImageUrls List<String> 引用的图片素材地址
+     * @param referenceVideoUrls List<String> 引用的视频素材地址
+     * @param referenceAudioUrls List<String> 引用的音频素材地址
      */
     public record AdminTaskRecordItem(String taskId,
                                       String taskType,
@@ -319,7 +323,21 @@ public final class CreditDtos {
                                       Long userId,
                                       String username,
                                       String nickname,
-                                      String email) {
+                                      String email,
+                                      String channelName,
+                                      List<String> referenceImageUrls,
+                                      List<String> referenceVideoUrls,
+                                      List<String> referenceAudioUrls) {
+        /** 保持旧调用方不传渠道名称与引用素材。 */
+        public AdminTaskRecordItem(String taskId, String taskType, String model, String status, String prompt,
+                                   String resolution, String size, String seconds, BigDecimal consumedCredits,
+                                   List<String> resultUrls, List<String> storageKeys, List<String> thumbnailUrls,
+                                   String errorMessage, String createdAt, String completedAt,
+                                   Long userId, String username, String nickname, String email) {
+            this(taskId, taskType, model, status, prompt, resolution, size, seconds, consumedCredits,
+                    resultUrls, storageKeys, thumbnailUrls, errorMessage, createdAt, completedAt,
+                    userId, username, nickname, email, null, List.of(), List.of(), List.of());
+        }
     }
 
     /**

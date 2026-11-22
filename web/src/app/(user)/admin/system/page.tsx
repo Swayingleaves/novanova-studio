@@ -167,6 +167,7 @@ export default function AdminSystemPage() {
                 { key: "configuration:community", label: translate("administration.communityConfig"), tab: "configuration", sub: "community" },
                 { key: "configuration:externalLink", label: translate("administration.externalLinkConfig"), tab: "configuration", sub: "externalLink" },
                 ...(!team ? [{ key: "configuration:videoExport", label: translate("administration.videoExportSettings"), tab: "configuration", sub: "videoExport" }] : []),
+                ...(!team ? [{ key: "configuration:clientDownload", label: translate("administration.clientDownloadSettings"), tab: "configuration", sub: "clientDownload" }] : []),
             ],
         },
         ...(!team ? [{ key: "navigationMenus", label: translate("administration.menuManagement"), icon: <PanelLeft className="size-4" />, tab: "navigationMenus" }] : []),

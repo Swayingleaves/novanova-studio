@@ -182,5 +182,10 @@
     "noPrompt": "No prompt recorded",
     "failureReason": "Failure reason",
     "generatingResult": "Generation is in progress. The result will appear here once ready.",
-    "failedWithoutResult": "This task has no result"
+    "failedWithoutResult": "This task has no result",
+    "channel": "Channel",
+    "referenceMaterials": "Reference materials",
+    "referenceImages": "Reference images",
+    "referenceVideos": "Reference videos",
+    "referenceAudios": "Reference audios"
 }

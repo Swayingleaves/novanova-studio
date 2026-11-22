@@ -17,5 +17,16 @@
     "updateFailed": "Update failed, please try again later",
     "offlineTitle": "You're offline",
     "offlineDescription": "The network is unavailable. Please check your connection and try again.",
-    "offlineRetry": "Reload"
+    "offlineRetry": "Reload",
+    "downloadApp": "Download {value0}",
+    "downloadClientTitle": "Download {value0}",
+    "downloadClientSubtitle": "Choose your operating system and chip architecture to download.",
+    "macPlatformHint": "macOS 12 or later",
+    "windowsPlatformHint": "Windows 10 / 11 (64-bit)",
+    "macAppleSilicon": "Apple Silicon (M-series)",
+    "macAppleSiliconDownload": "Download for Apple Silicon",
+    "macIntel": "Intel chip",
+    "macIntelDownload": "Download for Intel",
+    "windowsDownload": "Download for Windows",
+    "notConfigured": "Not configured"
 }

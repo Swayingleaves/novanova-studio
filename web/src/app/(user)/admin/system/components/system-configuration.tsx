@@ -93,9 +93,10 @@ import { createExternalLinkDraft, emptyExternalLinkDraft, externalLinkDraftIssue
 import { saveExternalLinkConfig } from "@/services/api/external-link";
 import { useExternalLinkStore } from "@/features/external-link/stores/use-external-link-store";
 import { getVideoExportSettings, saveVideoExportSettings } from "@/services/api/video-export-settings";
+import { getClientDownloadSettings, saveClientDownloadSettings, type ClientDownloadSettings } from "@/services/api/client-download-settings";
 import { useVideoExportSettingsStore } from "@/features/comic-drama/stores/use-video-export-settings-store";
 
-export type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "firstPurchaseBonus" | "objectStorage" | "timeouts" | "community" | "externalLink" | "videoExport";
+export type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "firstPurchaseBonus" | "objectStorage" | "timeouts" | "community" | "externalLink" | "videoExport" | "clientDownload";
 
 const defaultTimeoutSettings = (): TimeoutSettings => ({
     aiRequestBodyTimeoutSeconds: 60,
@@ -397,6 +398,8 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const [draftTimeoutSettings, setDraftTimeoutSettings] = useState<TimeoutSettings>(defaultTimeoutSettings);
     const [videoExportBaseline, setVideoExportBaseline] = useState<boolean>(true);
     const [draftVideoExportEnabled, setDraftVideoExportEnabled] = useState<boolean>(true);
+    const [clientDownloadBaseline, setClientDownloadBaseline] = useState<ClientDownloadSettings>({ macIntelUrl: null, macAppleSiliconUrl: null, windowsUrl: null });
+    const [draftClientDownload, setDraftClientDownload] = useState<ClientDownloadSettings>({ macIntelUrl: null, macAppleSiliconUrl: null, windowsUrl: null });
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
     const [modelPicker, setModelPicker] = useState<{ capability: ModelCapability; mode: "options" | "default" } | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
@@ -470,8 +473,9 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             useTeamStore.getState().team ? Promise.resolve() : useExternalLinkStore.getState().refresh(),
             useTeamStore.getState().team ? Promise.resolve(defaultTimeoutSettings()) : getTimeoutSettings(),
             useTeamStore.getState().team ? Promise.resolve({ enabled: true }) : getVideoExportSettings(),
+            useTeamStore.getState().team ? Promise.resolve({ macIntelUrl: null, macAppleSiliconUrl: null, windowsUrl: null }) : getClientDownloadSettings(),
         ])
-            .then(([, , creditSettings, invitationRewardSettings, checkInSettings, firstPurchaseBonusSettings, , , timeoutSettings, videoExportSettings]) => {
+            .then(([, , creditSettings, invitationRewardSettings, checkInSettings, firstPurchaseBonusSettings, , , timeoutSettings, videoExportSettings, clientDownloadSettings]) => {
                 if (!active) return;
                 resetAllDrafts();
                 setCreditBaseline(creditSettings.initialCredits);
@@ -488,6 +492,13 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                 setVideoExportBaseline(videoExportEnabled);
                 setDraftVideoExportEnabled(videoExportEnabled);
                 useVideoExportSettingsStore.getState().setEnabled(videoExportEnabled);
+                const normalizedClientDownload: ClientDownloadSettings = {
+                    macIntelUrl: clientDownloadSettings?.macIntelUrl || null,
+                    macAppleSiliconUrl: clientDownloadSettings?.macAppleSiliconUrl || null,
+                    windowsUrl: clientDownloadSettings?.windowsUrl || null,
+                };
+                setClientDownloadBaseline(normalizedClientDownload);
+                setDraftClientDownload(normalizedClientDownload);
                 setDraftsReady(true);
             })
             .catch((error) => {
@@ -523,9 +534,13 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const externalLinkDirty = externalLinkDraftSignature(draftExternalLink) !== externalLinkDraftSignature(externalLinkBaseline);
     const timeoutDirty = timeoutSettingsSignature(draftTimeoutSettings) !== timeoutSettingsSignature(timeoutBaseline);
     const videoExportDirty = draftVideoExportEnabled !== videoExportBaseline;
+    const clientDownloadDirty =
+        (draftClientDownload.macIntelUrl?.trim() || null) !== (clientDownloadBaseline.macIntelUrl?.trim() || null) ||
+        (draftClientDownload.macAppleSiliconUrl?.trim() || null) !== (clientDownloadBaseline.macAppleSiliconUrl?.trim() || null) ||
+        (draftClientDownload.windowsUrl?.trim() || null) !== (clientDownloadBaseline.windowsUrl?.trim() || null);
     const editingModelBaseline = editingModelConfig && draftModelConfigs.find((item) => item.id === editingModelConfig.id);
     const modelEditorDirty = Boolean(editingModelConfig && (!sameValue(editingModelConfig, editingModelBaseline) || editingCustomBodyParameters !== JSON.stringify(editingModelBaseline?.customBodyParameters || {}, null, 2)));
-    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || firstPurchaseBonusDirty || communityDirty || externalLinkDirty || timeoutDirty || videoExportDirty || modelEditorDirty;
+    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || firstPurchaseBonusDirty || communityDirty || externalLinkDirty || timeoutDirty || videoExportDirty || clientDownloadDirty || modelEditorDirty;
     const isSaving = Boolean(savingTab);
     useConfigurationLeaveGuard(draftsReady && hasUnsavedChanges);
 
@@ -1056,6 +1071,29 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             message.success(translate("administration.videoExportSettingsSaved"));
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("administration.videoExportSettingsSaveFailed"));
+        } finally {
+            setSavingTab("");
+        }
+    };
+
+    const saveClientDownloadConfigSettings = async () => {
+        setSavingTab("clientDownload");
+        try {
+            const saved = await saveClientDownloadSettings({
+                macIntelUrl: draftClientDownload.macIntelUrl?.trim() || null,
+                macAppleSiliconUrl: draftClientDownload.macAppleSiliconUrl?.trim() || null,
+                windowsUrl: draftClientDownload.windowsUrl?.trim() || null,
+            });
+            const normalized: ClientDownloadSettings = {
+                macIntelUrl: saved.macIntelUrl || null,
+                macAppleSiliconUrl: saved.macAppleSiliconUrl || null,
+                windowsUrl: saved.windowsUrl || null,
+            };
+            setClientDownloadBaseline(normalized);
+            setDraftClientDownload(normalized);
+            message.success(translate("administration.clientDownloadSettingsSaved"));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("administration.clientDownloadSettingsSaveFailed"));
         } finally {
             setSavingTab("");
         }
@@ -2097,7 +2135,60 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                 </Form>
                             ),
                         },
-                    ].filter((item) => !team || !["credits", "creditProducts", "invitationReward", "checkIn", "firstPurchaseBonus", "community", "externalLink", "timeouts", "videoExport"].includes(item.key))}
+                        {
+                            key: "clientDownload",
+                            label: translate("administration.clientDownloadSettings"),
+                            children: (
+                                <Form layout="vertical" requiredMark={false} className="max-w-2xl">
+                                    <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                        <div className="text-sm font-semibold">{translate("administration.clientDownloadSettings")}</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("administration.clientDownloadSettingsHint")}</div>
+                                        <div className="mt-4 space-y-4">
+                                            <Form.Item label={translate("administration.clientDownloadMacAppleSiliconUrl")} className="mb-0">
+                                                <Input
+                                                    maxLength={1024}
+                                                    allowClear
+                                                    placeholder={translate("administration.clientDownloadUrlPlaceholder")}
+                                                    value={draftClientDownload.macAppleSiliconUrl || ""}
+                                                    disabled={isSaving}
+                                                    onChange={(event) => setDraftClientDownload((current) => ({ ...current, macAppleSiliconUrl: event.target.value || null }))}
+                                                />
+                                            </Form.Item>
+                                            <Form.Item label={translate("administration.clientDownloadMacIntelUrl")} className="mb-0">
+                                                <Input
+                                                    maxLength={1024}
+                                                    allowClear
+                                                    placeholder={translate("administration.clientDownloadUrlPlaceholder")}
+                                                    value={draftClientDownload.macIntelUrl || ""}
+                                                    disabled={isSaving}
+                                                    onChange={(event) => setDraftClientDownload((current) => ({ ...current, macIntelUrl: event.target.value || null }))}
+                                                />
+                                            </Form.Item>
+                                            <Form.Item label={translate("administration.clientDownloadWindowsUrl")} className="mb-0">
+                                                <Input
+                                                    maxLength={1024}
+                                                    allowClear
+                                                    placeholder="https://example.com/downloads/novanova-studio-setup.exe"
+                                                    value={draftClientDownload.windowsUrl || ""}
+                                                    disabled={isSaving}
+                                                    onChange={(event) => setDraftClientDownload((current) => ({ ...current, windowsUrl: event.target.value || null }))}
+                                                />
+                                            </Form.Item>
+                                        </div>
+                                        <Button
+                                            type="primary"
+                                            className="mt-5"
+                                            disabled={!clientDownloadDirty || isSaving}
+                                            loading={savingTab === "clientDownload"}
+                                            onClick={() => void saveClientDownloadConfigSettings()}
+                                        >
+                                            {translate("appShell.save")}
+                                        </Button>
+                                    </div>
+                                </Form>
+                            ),
+                        },
+                    ].filter((item) => !team || !["credits", "creditProducts", "invitationReward", "checkIn", "firstPurchaseBonus", "community", "externalLink", "timeouts", "videoExport", "clientDownload"].includes(item.key))}
                 />
             )}
             {modelPicker && modelPickerGroup ? (

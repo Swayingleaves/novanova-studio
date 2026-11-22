@@ -17,5 +17,16 @@
     "updateFailed": "更新失败，请稍后重试",
     "offlineTitle": "当前离线",
     "offlineDescription": "网络连接不可用，请检查网络后重试。",
-    "offlineRetry": "重新加载"
+    "offlineRetry": "重新加载",
+    "downloadApp": "下载 {value0}",
+    "downloadClientTitle": "下载 {value0} 客户端",
+    "downloadClientSubtitle": "选择您的操作系统与芯片版本进行下载。",
+    "macPlatformHint": "支持 macOS 12 及以上版本",
+    "windowsPlatformHint": "支持 Windows 10 / 11（64 位）",
+    "macAppleSilicon": "M 系列芯片",
+    "macAppleSiliconDownload": "M 系列芯片下载",
+    "macIntel": "Intel 芯片",
+    "macIntelDownload": "Intel 芯片下载",
+    "windowsDownload": "Windows 下载",
+    "notConfigured": "暂未配置"
 }

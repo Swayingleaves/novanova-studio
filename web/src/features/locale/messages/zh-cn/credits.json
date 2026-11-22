@@ -182,5 +182,10 @@
     "noPrompt": "未记录提示词",
     "failureReason": "失败原因",
     "generatingResult": "任务生成中，完成后可在这里查看结果",
-    "failedWithoutResult": "任务未生成结果"
+    "failedWithoutResult": "任务未生成结果",
+    "channel": "渠道",
+    "referenceMaterials": "引用素材",
+    "referenceImages": "参考图片",
+    "referenceVideos": "参考视频",
+    "referenceAudios": "参考音频"
 }

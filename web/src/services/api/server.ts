@@ -628,6 +628,10 @@ export type ServerAdminTaskRecord = ServerTaskRecord & {
     username: string | null;
     nickname: string | null;
     email: string | null;
+    channelName?: string | null;
+    referenceImageUrls?: string[];
+    referenceVideoUrls?: string[];
+    referenceAudioUrls?: string[];
 };
 
 export type ServerAdminTaskRecordList = {

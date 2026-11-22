@@ -1053,7 +1053,13 @@ public class CreditRepository {
     private static String taskRecordQuery(TaskRecordQuery query, boolean includeUsers) {
         StringBuilder sql = new StringBuilder("FROM ai_generation_tasks tasks\n");
         if (includeUsers) {
-            sql.append("LEFT JOIN users users ON users.id = tasks.user_id\n");
+            sql.append("LEFT JOIN users users ON users.id = tasks.user_id\n")
+                    .append("LEFT JOIN platform_ai_model_configs model_configs ON model_configs.model_config_id = tasks.model_config_id\n")
+                    .append("LEFT JOIN platform_ai_channels channels ON channels.channel_id = COALESCE(\n")
+                    .append("    model_configs.channel_id,\n")
+                    .append("    CASE WHEN position('::' in COALESCE(tasks.request_data ->> 'model', '')) > 0\n")
+                    .append("         THEN split_part(tasks.request_data ->> 'model', '::', 1)\n")
+                    .append("         ELSE NULL END)\n");
         }
         sql.append("WHERE tasks.task_type IN ('image', 'video')\n")
                 .append("  AND tasks.data_purged = FALSE\n")
@@ -1173,7 +1179,11 @@ public class CreditRepository {
                        tasks.user_id AS user_id,
                        users.username,
                        users.nickname,
-                       users.email
+                       users.email,
+                       channels.name AS channel_name,
+                       COALESCE(jsonb_path_query_array(tasks.request_data, '$.references[*].url'), '[]'::jsonb)::text AS reference_image_urls,
+                       COALESCE(jsonb_path_query_array(tasks.request_data, '$.videoReferences[*].url'), '[]'::jsonb)::text AS reference_video_urls,
+                       COALESCE(jsonb_path_query_array(tasks.request_data, '$.audioReferences[*].url'), '[]'::jsonb)::text AS reference_audio_urls
                 """ + adminTaskRecordQuery(query) + """
                 ORDER BY tasks.created_at DESC, tasks.id DESC
                 LIMIT :limit OFFSET :offset
@@ -1202,7 +1212,11 @@ public class CreditRepository {
                             row.get("user_id", Long.class),
                             row.get("username", String.class),
                             row.get("nickname", String.class),
-                            row.get("email", String.class));
+                            row.get("email", String.class),
+                            row.get("channel_name", String.class),
+                            parseStringArray(RowMappers.jsonText(row, "reference_image_urls")),
+                            parseStringArray(RowMappers.jsonText(row, "reference_video_urls")),
+                            parseStringArray(RowMappers.jsonText(row, "reference_audio_urls")));
                 })
                 .all();
     }

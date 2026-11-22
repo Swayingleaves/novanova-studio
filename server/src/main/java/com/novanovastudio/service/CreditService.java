@@ -501,7 +501,7 @@ public class CreditService {
                             creditRepository.listAdminTaskRecords(query, page, pageSize).collectList(),
                             creditRepository.countTaskRecords(query))
                     .flatMap(result -> Mono.zip(
-                                    signResultUrls(result.getT2(), CreditDtos.AdminTaskRecordItem::resultUrls),
+                                    signResultUrls(result.getT2(), CreditService::allAdminTaskMediaUrls),
                                     signThumbnailUrls(result.getT2(), CreditDtos.AdminTaskRecordItem::taskType,
                                             CreditDtos.AdminTaskRecordItem::resultUrls, CreditDtos.AdminTaskRecordItem::storageKeys))
                             .map(signed -> {
@@ -514,7 +514,11 @@ public class CreditService {
                                             signedResultUrls(item.resultUrls(), signed.getT1()),
                                             item.storageKeys(),
                                             signed.getT2().get(index),
-                                            item.errorMessage(), item.createdAt(), item.completedAt(), item.userId(), item.username(), item.nickname(), item.email()));
+                                            item.errorMessage(), item.createdAt(), item.completedAt(), item.userId(), item.username(), item.nickname(), item.email(),
+                                            item.channelName(),
+                                            signedResultUrls(item.referenceImageUrls(), signed.getT1()),
+                                            signedResultUrls(item.referenceVideoUrls(), signed.getT1()),
+                                            signedResultUrls(item.referenceAudioUrls(), signed.getT1())));
                                 }
                                 return new CreditDtos.AdminTaskRecordListResponse(items, result.getT3());
                             }));
@@ -623,6 +627,21 @@ public class CreditService {
             return urls == null ? List.of() : urls;
         }
         return urls.stream().map(url -> replacements.getOrDefault(url, url)).toList();
+    }
+
+    /**
+     * 汇总管理员任务记录中的生成结果与参考素材地址，用于一次性批量重新签名。
+     *
+     * @param item AdminTaskRecordItem 管理员任务记录项
+     * @return List<String> 需要签名的媒体地址集合
+     */
+    private static List<String> allAdminTaskMediaUrls(CreditDtos.AdminTaskRecordItem item) {
+        List<String> urls = new ArrayList<>();
+        if (item.resultUrls() != null) urls.addAll(item.resultUrls());
+        if (item.referenceImageUrls() != null) urls.addAll(item.referenceImageUrls());
+        if (item.referenceVideoUrls() != null) urls.addAll(item.referenceVideoUrls());
+        if (item.referenceAudioUrls() != null) urls.addAll(item.referenceAudioUrls());
+        return urls;
     }
 
     /**

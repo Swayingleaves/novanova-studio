@@ -601,5 +601,13 @@
   "videoExportEnabled": "已开启",
   "videoExportDisabled": "已关闭",
   "videoExportSettingsSaved": "导出视频配置已保存",
-  "videoExportSettingsSaveFailed": "保存导出视频配置失败"
+  "videoExportSettingsSaveFailed": "保存导出视频配置失败",
+  "clientDownloadSettings": "客户端下载",
+  "clientDownloadSettingsHint": "配置侧边栏与登录页下载按钮弹出窗口中各平台对应的客户端下载链接（需以 http:// 或 https:// 开头，留空则对应按钮不可点击）。",
+  "clientDownloadMacIntelUrl": "Mac（Intel 芯片）下载链接",
+  "clientDownloadMacAppleSiliconUrl": "Mac（M 系列芯片）下载链接",
+  "clientDownloadWindowsUrl": "Windows 下载链接",
+  "clientDownloadUrlPlaceholder": "https://example.com/downloads/novanova-studio.dmg",
+  "clientDownloadSettingsSaved": "客户端下载配置已保存",
+  "clientDownloadSettingsSaveFailed": "保存客户端下载配置失败"
 }
