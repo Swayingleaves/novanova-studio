@@ -55,6 +55,15 @@ class DramaMediaTargetsTest {
     }
 
     @Test
+    void productionStageOverridesStoryboardShotCountAndDuration() {
+        JSONObject storyboard = JSON.parseObject("{\"shots\":[{\"ref\":\"sh1\",\"durationSeconds\":10},{\"ref\":\"sh2\",\"durationSeconds\":10},{\"ref\":\"sh3\",\"durationSeconds\":10}]}");
+        JSONObject production = JSON.parseObject("{\"shots\":[{\"ref\":\"sh1\",\"durationSeconds\":30},{\"ref\":\"sh2\",\"durationSeconds\":30}]}");
+        assertEquals(30, DramaMediaTargets.resolve("shot-video:sh1", null, storyboard, production).seconds());
+        assertEquals(30, DramaMediaTargets.resolve("sheet:sh2", null, storyboard, production).seconds());
+        assertThrows(BusinessException.class, () -> DramaMediaTargets.resolve("shot-video:sh3", null, storyboard, production));
+    }
+
+    @Test
     void cropSheetKeepsTheOpeningAndClosingCells() throws Exception {
         BufferedImage image = new BufferedImage(8, 6, BufferedImage.TYPE_INT_RGB);
         image.setRGB(0, 0, 0xFF0000);

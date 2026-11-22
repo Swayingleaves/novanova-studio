@@ -403,24 +403,50 @@ public final class DramaArtifacts {
         if (shots.isEmpty()) {
             throw invalid("镜头制作至少要有一个镜头");
         }
-        Set<String> known = refsOf(storyboard, "shots");
         JSONArray stored = new JSONArray();
         Set<String> refs = new HashSet<>();
         for (int index = 0; index < shots.size(); index++) {
             JSONObject shot = shots.getJSONObject(index);
             String ref = ref(shot, "ref", SHOT, refs);
-            if (!known.isEmpty() && !known.contains(ref)) {
-                throw invalid("镜头制作引用了不存在的分镜");
-            }
             JSONObject item = new JSONObject();
             item.put("id", reuse(previous, "shots", ref));
             item.put("ref", ref);
+            item.put("durationSeconds", shotDuration(shot, previous, storyboard, ref));
             item.put("videoPrompt", required(shot, "videoPrompt"));
             stored.add(item);
         }
         JSONObject content = new JSONObject();
         content.put("shots", stored);
         return content;
+    }
+
+    private static int shotDuration(JSONObject shot, JSONObject previous, JSONObject storyboard, String ref) {
+        Integer explicit = shot == null ? null : shot.getInteger("durationSeconds");
+        if (explicit != null && explicit >= 1) {
+            return explicit;
+        }
+        Integer inherited = durationOfRef(storyboard, ref);
+        if (inherited == null) {
+            inherited = durationOfRef(previous, ref);
+        }
+        return storyboardDuration(inherited);
+    }
+
+    private static Integer durationOfRef(JSONObject content, String ref) {
+        JSONArray items = content == null ? null : content.getJSONArray("shots");
+        if (items == null) {
+            return null;
+        }
+        for (int index = 0; index < items.size(); index++) {
+            JSONObject item = items.getJSONObject(index);
+            if (item != null && ref.equals(item.getString("ref"))) {
+                Integer value = item.getInteger("durationSeconds");
+                if (value != null && value >= 1) {
+                    return value;
+                }
+            }
+        }
+        return null;
     }
 
     private static JSONObject preview(JSONObject body) {

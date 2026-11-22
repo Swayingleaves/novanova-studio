@@ -99,10 +99,11 @@ public class DramaMediaService {
                     JSONObject production = contentOf(latest(versions, "shot"));
                     JSONObject cast = contentOf(latest(versions, "cast"));
                     JSONObject plan = contentOf(latest(versions, "plan"));
-                    DramaMediaTargets.Spec spec = DramaMediaTargets.resolve(request.targetKey(), contentOf(version), storyboard);
+                    DramaMediaTargets.Spec spec = DramaMediaTargets.resolve(request.targetKey(), contentOf(version), storyboard, production);
                     if (!spec.stage().equals(version.stage())) {
                         return Mono.error(invalid("请在对应阶段生成"));
                     }
+                    JSONObject activeShots = DramaMediaTargets.hasShots(production) ? production : storyboard;
                     return dramaRepository.listMedia(project.id(), teamId).collectList()
                             .flatMap(media -> prepareFrames(userId, teamId, project.id(), request.targetKey(), media))
                             .flatMap(media -> {
@@ -112,7 +113,7 @@ public class DramaMediaService {
                         return prompt(userId, project, request, spec, storyboard, cast, plan, production, media)
                                 // 提示词 Agent 要跑十几秒，参考图可能在这期间才落库，写完再读一次
                                 .flatMap(item -> dramaRepository.listMedia(project.id(), teamId).collectList().flatMap(fresh -> {
-                            List<AiTaskDtos.AiTaskMediaReference> references = references(request.targetKey(), item.referenceKeys(), spec, fresh, storyboard);
+                            List<AiTaskDtos.AiTaskMediaReference> references = references(request.targetKey(), item.referenceKeys(), spec, fresh, activeShots);
                             String mode = videoMode(request.targetKey(), spec.mediaType(), references);
                             Map<String, Object> parameters = parameters(request, spec);
                             applyAspect(parameters, request.targetKey(), spec.mediaType(), project.aspectRatio());
@@ -148,7 +149,9 @@ public class DramaMediaService {
         List<String> keys = new ArrayList<>();
         for (DramaRepository.MediaRow row : media) {
             String key = row.targetKey();
-            if (!"success".equals(row.status()) || !StringUtils.hasText(row.storageKey()) || !StringUtils.hasText(key)) {
+            if (!"success".equals(row.status())
+                    || (!StringUtils.hasText(row.storageKey()) && !StringUtils.hasText(row.resultUrl()))
+                    || !StringUtils.hasText(key)) {
                 continue;
             }
             if (!(key.startsWith("character:") || key.startsWith("location:") || key.startsWith("board:")
@@ -273,7 +276,7 @@ public class DramaMediaService {
                 })).then();
     }
 
-    /** 任务成功但文件没进对象存储时，卡片改为失败，避免一直停在生成中。 */
+    /** 同步任务结果；转存对象存储失败时 AiMediaSupport 已回退登记原始链接，短剧直接保留原结果链接并标记成功。 */
     private Mono<Void> syncMedia(long userId, long teamId, DramaRepository.MediaRow row, AiTaskDtos.AiGenerationTaskResponse task) {
         String status = status(task.status());
         JSONObject item = firstItem(task.resultData());
@@ -285,16 +288,7 @@ public class DramaMediaService {
             status = "failed";
             error = StringUtils.hasText(error) ? error : "生成结果没有媒体地址";
         }
-        if (!"success".equals(status) || !StringUtils.hasText(storageKey)) {
-            return writeMedia(teamId, row, status, url, storageKey, mimeType, error);
-        }
-        String savedUrl = url;
-        String savedKey = storageKey;
-        String savedMime = mimeType;
-        return locallyStored(userId, storageKey)
-                .flatMap(stored -> Boolean.TRUE.equals(stored)
-                        ? writeMedia(teamId, row, "success", savedUrl, savedKey, savedMime, "")
-                        : writeMedia(teamId, row, "failed", "", "", "", unsavedMessage(row)));
+        return writeMedia(teamId, row, status, url, storageKey, mimeType, "success".equals(status) ? "" : error);
     }
 
     private Mono<Void> writeMedia(long teamId, DramaRepository.MediaRow row, String status, String url, String storageKey, String mimeType, String error) {
@@ -303,39 +297,6 @@ public class DramaMediaService {
             return Mono.empty();
         }
         return dramaRepository.updateMedia(row.id(), teamId, status, url, storageKey, mimeType, error);
-    }
-
-    /** 文件在对象存储里才算保存成功。查不到记录视为没保存；查询本身失败时留给下次同步。 */
-    private Mono<Boolean> locallyStored(long userId, String storageKey) {
-        if (!StringUtils.hasText(storageKey)) {
-            return Mono.just(false);
-        }
-        return persistenceService.getMediaInfoForUser(userId, storageKey)
-                .map(info -> info.objectStorage() != null && StringUtils.hasText(info.objectStorage().key()))
-                .onErrorResume(error -> missingMedia(error) ? Mono.just(false) : Mono.error(error));
-    }
-
-    private Mono<Void> failUnsaved(long teamId, DramaRepository.MediaRow sheet) {
-        return writeMedia(teamId, sheet, "failed", "", "", "", unsavedMessage(sheet));
-    }
-
-    private static String unsavedMessage(DramaRepository.MediaRow row) {
-        if (row.targetKey() != null && row.targetKey().startsWith("sheet:")) {
-            return "连续图已生成，但保存到本地失败，请重新生成";
-        }
-        if ("video".equals(row.mediaType())) {
-            return "视频已生成，但保存到本地失败，请重新生成";
-        }
-        return "图片已生成，但保存到本地失败，请重新生成";
-    }
-
-    private boolean missingMedia(Throwable error) {
-        for (Throwable current = error; current != null; current = current.getCause()) {
-            if (current instanceof BusinessException business && business.getCode() == ErrorCode.RESOURCE_NOT_FOUND) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private Mono<List<DramaRepository.MediaRow>> prepareFrames(long userId, long teamId, String projectId, String targetKey, List<DramaRepository.MediaRow> media) {
@@ -356,7 +317,8 @@ public class DramaMediaService {
     private Mono<Void> cutFrames(long userId, long teamId, String projectId, List<DramaRepository.MediaRow> rows) {
         java.util.LinkedHashMap<String, DramaRepository.MediaRow> newest = new java.util.LinkedHashMap<>();
         for (DramaRepository.MediaRow row : rows) {
-            if (!row.targetKey().startsWith("sheet:") || !"success".equals(row.status()) || !StringUtils.hasText(row.storageKey())) {
+            if (!row.targetKey().startsWith("sheet:") || !"success".equals(row.status())
+                    || (!StringUtils.hasText(row.storageKey()) && !StringUtils.hasText(row.resultUrl()))) {
                 continue;
             }
             newest.putIfAbsent(row.targetKey().substring("sheet:".length()), row);
@@ -369,25 +331,15 @@ public class DramaMediaService {
             if (hasFirst && hasLast) {
                 return Mono.empty();
             }
-            return locallyStored(userId, sheet.storageKey())
-                    .flatMap(stored -> {
-                        if (!Boolean.TRUE.equals(stored)) {
-                            return failUnsaved(teamId, sheet);
-                        }
-                        return mediaSupport.resolveReferenceBinary(userId, new AiTaskDtos.AiTaskMediaReference(sheet.id(), sheet.targetKey(), "image/png",
-                                        sheet.storageKey(), sheet.resultUrl()), "image/png")
-                                .flatMap(binary -> Mono.fromCallable(() -> DramaArtifacts.cropSheet(binary.data())).subscribeOn(Schedulers.boundedElastic()))
-                                .flatMap(cells -> storeFrame(userId, teamId, projectId, sheet, "cut:first:" + ref, "drama-first-frame.png", cells[0], hasFirst)
-                                        .then(storeFrame(userId, teamId, projectId, sheet, "cut:last:" + ref, "drama-last-frame.png", cells[1], hasLast)))
-                                .onErrorResume(error -> {
-                                    // 下载或上传抖一下不该把已经生成成功的连续图判死：这里不写 failed，
-                                    // 下一次 list 会重新裁一次，链式生成也能自己接上。
-                                    log.warn("裁切短剧连续图失败: projectId={}, target={}, message={}", projectId, sheet.targetKey(), error.getMessage());
-                                    return Mono.empty();
-                                });
-                    })
+            return mediaSupport.resolveReferenceBinary(userId, new AiTaskDtos.AiTaskMediaReference(sheet.id(), sheet.targetKey(), "image/png",
+                            sheet.storageKey(), sheet.resultUrl()), "image/png")
+                    .flatMap(binary -> Mono.fromCallable(() -> DramaArtifacts.cropSheet(binary.data())).subscribeOn(Schedulers.boundedElastic()))
+                    .flatMap(cells -> storeFrame(userId, teamId, projectId, sheet, "cut:first:" + ref, "drama-first-frame.png", cells[0], hasFirst)
+                            .then(storeFrame(userId, teamId, projectId, sheet, "cut:last:" + ref, "drama-last-frame.png", cells[1], hasLast)))
                     .onErrorResume(error -> {
-                        log.warn("确认连续图是否已保存失败: projectId={}, target={}, message={}", projectId, sheet.targetKey(), error.getMessage());
+                        // 下载或上传抖一下不该把已经生成成功的连续图判死：这里不写 failed，
+                        // 下一次 list 会重新裁一次，链式生成也能自己接上。
+                        log.warn("裁切短剧连续图失败: projectId={}, target={}, message={}", projectId, sheet.targetKey(), error.getMessage());
                         return Mono.empty();
                     });
         }).then();

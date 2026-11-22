@@ -100,8 +100,8 @@ public final class DramaContracts {
     public record ShotBody(List<ShotItem> shots) {
     }
 
-    /** @param ref 镜头短序号 @param videoPrompt 视频提示词，按秒写这一镜的动作和情节 */
-    public record ShotItem(String ref, String videoPrompt) {
+    /** @param ref 镜头短序号 @param durationSeconds 这一镜的时长（整数秒） @param videoPrompt 视频提示词，按秒写这一镜的动作和情节 */
+    public record ShotItem(String ref, Integer durationSeconds, String videoPrompt) {
     }
 
     /** @param summary 制作总结 @param checklist 检查项 */

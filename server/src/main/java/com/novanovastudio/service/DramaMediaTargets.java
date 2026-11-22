@@ -41,8 +41,23 @@ public final class DramaMediaTargets {
      * @throws BusinessException 目标不合法或条目不存在时抛出
      */
     public static Spec resolve(String targetKey, JSONObject versionContent, JSONObject storyboard) {
+        return resolve(targetKey, versionContent, storyboard, null);
+    }
+
+    /**
+     * 解析一次生成目标，镜头阶段（sheet / shot-video）优先以最新镜头制作产物为准。
+     *
+     * @param targetKey 目标，形如 character:c1、sheet:sh1
+     * @param versionContent 请求指定的阶段版本内容
+     * @param storyboard 最新分镜，可为空
+     * @param production 最新镜头制作，可为空
+     * @return 协议信息
+     * @throws BusinessException 目标不合法或条目不存在时抛出
+     */
+    public static Spec resolve(String targetKey, JSONObject versionContent, JSONObject storyboard, JSONObject production) {
         String kind = kind(targetKey);
         String ref = ref(targetKey);
+        JSONObject shotSource = hasShots(production) ? production : storyboard;
         return switch (kind) {
             case "character" -> {
                 item(versionContent, "characters", ref);
@@ -57,15 +72,21 @@ public final class DramaMediaTargets {
                 yield new Spec("storyboard", "image", 0);
             }
             case "sheet" -> {
-                JSONObject shot = item(storyboard, "shots", ref);
-                yield new Spec("storyboard", "image", seconds(shot));
+                JSONObject shot = item(shotSource, "shots", ref);
+                yield new Spec("storyboard", "image", seconds(shot, storyboard, ref));
             }
             case "shot-video" -> {
-                JSONObject shot = item(storyboard, "shots", ref);
-                yield new Spec("storyboard", "video", seconds(shot));
+                JSONObject shot = item(shotSource, "shots", ref);
+                yield new Spec("storyboard", "video", seconds(shot, storyboard, ref));
             }
             default -> throw invalid("生成目标不正确");
         };
+    }
+
+    /** 判断阶段产物是否包含非空镜头列表。 */
+    public static boolean hasShots(JSONObject content) {
+        JSONArray array = content == null ? null : content.getJSONArray("shots");
+        return array != null && !array.isEmpty();
     }
 
     /**
@@ -156,9 +177,24 @@ public final class DramaMediaTargets {
         throw invalid("当前版本里没有这个条目");
     }
 
-    private static int seconds(JSONObject shot) {
-        Integer value = shot.getInteger("durationSeconds");
-        return value == null || value < 1 ? 5 : value;
+    private static int seconds(JSONObject shot, JSONObject fallbackStoryboard, String ref) {
+        Integer value = shot == null ? null : shot.getInteger("durationSeconds");
+        if (value != null && value >= 1) {
+            return value;
+        }
+        JSONArray array = fallbackStoryboard == null ? null : fallbackStoryboard.getJSONArray("shots");
+        if (array != null) {
+            for (int index = 0; index < array.size(); index++) {
+                JSONObject item = array.getJSONObject(index);
+                if (item != null && ref.equals(item.getString("ref"))) {
+                    Integer fallback = item.getInteger("durationSeconds");
+                    if (fallback != null && fallback >= 1) {
+                        return fallback;
+                    }
+                }
+            }
+        }
+        return 5;
     }
 
     private static BusinessException invalid(String message) {

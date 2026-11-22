@@ -336,12 +336,14 @@ public class DramaAgentService {
     private JSONArray mediaStatus(java.util.List<DramaRepository.VersionRow> versions, java.util.List<DramaRepository.MediaRow> media) {
         JSONObject cast = content(versions, "cast");
         JSONObject storyboard = content(versions, "storyboard");
+        JSONObject production = content(versions, "shot");
+        JSONObject activeShots = DramaMediaTargets.hasShots(production) ? production : storyboard;
         JSONArray rows = new JSONArray();
         addCastStatus(rows, cast, "characters", "character:");
         addCastStatus(rows, cast, "locations", "location:");
         addShotStatus(rows, storyboard, cast, "board:");
-        addShotStatus(rows, storyboard, cast, "sheet:");
-        addShotStatus(rows, storyboard, cast, "shot-video:");
+        addShotStatus(rows, activeShots, cast, "sheet:");
+        addShotStatus(rows, activeShots, cast, "shot-video:");
         for (int index = 0; index < rows.size(); index++) {
             JSONObject row = rows.getJSONObject(index);
             String key = row.getString("targetKey");
