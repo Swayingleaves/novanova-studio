@@ -1137,3 +1137,12 @@ V61 按空间、用户、原配置和对象键精确关联已有媒体及原文�
 | `platform_client_download_settings` | 单行表，`id` 固定为 1；`mac_intel_url`（最长 1024，Mac 英特尔芯片下载链接）、`mac_apple_silicon_url`（最长 1024，Mac M 系列芯片下载链接）、`windows_url`（最长 1024，Windows 下载链接）、`created_at`/`updated_at` |
 
 后台入口为「配置与用户偏好 · 客户端下载」。公开读取走 `GET /api/v1/platform/getClientDownloadSettings`，未登录及全部团队空间均可读取；平台管理员保存走 `POST /api/v1/admin/platform/saveClientDownloadSettings`，仅平台空间的全局管理员可修改。侧边栏与登录页的下载按钮点击后弹出平台选择弹窗，展示 macOS（M 系列芯片 / Intel 芯片）与 Windows 下载入口。
+
+## AI 渠道模型分组映射（V106 / 社区版 V107）
+
+| 表 | 新增字段 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| `platform_ai_channels` | `model_groups` | `JSONB` | 模型名到上游 `/v1/models` 返回 `groups` 分组标识列表的映射，默认 `{}` |
+| `user_ai_channels` | `model_groups` | `JSONB` | 模型名到上游 `/v1/models` 返回 `groups` 分组标识列表的映射，默认 `{}` |
+
+拉取渠道模型列表（`POST /api/v1/config/channel/refreshChannelModels`）时同步解析各模型的 `groups` 数组并随渠道保存。`nana` 官方中转站视频任务优先按模型所属 `groups` 路由协议：`doubao-gz` 走官转 Seedance 通道、`seedance-cheap` 走 `/v1/videos` JSON 通道；未命中专用协议时回退为 OpenAI 兼容视频协议兜底。

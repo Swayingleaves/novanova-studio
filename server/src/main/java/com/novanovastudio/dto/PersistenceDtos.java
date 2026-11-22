@@ -35,7 +35,13 @@ public final class PersistenceDtos {
     public record ChannelMutationRequest(String id, @NotNull(message = "business.channelNameMustNotBeNull") String name,
                                          String baseUrl, String apiKey,
                                          @NotBlank(message = "business.aPIFormatIsRequired") String apiFormat,
-                                         List<String> models, Integer sortOrder) {
+                                         List<String> models, Map<String, List<String>> modelGroups, Integer sortOrder) {
+
+        /** 保持旧调用方不传模型分组映射。 */
+        public ChannelMutationRequest(String id, String name, String baseUrl, String apiKey, String apiFormat,
+                                      List<String> models, Integer sortOrder) {
+            this(id, name, baseUrl, apiKey, apiFormat, models, null, sortOrder);
+        }
     }
 
     /** 渠道模型拉取请求。 */
@@ -45,7 +51,12 @@ public final class PersistenceDtos {
     }
 
     /** 渠道模型拉取响应。 */
-    public record ChannelModelRefreshResponse(List<String> models) {
+    public record ChannelModelRefreshResponse(List<String> models, Map<String, List<String>> modelGroups) {
+
+        /** 保持旧调用方使用空模型分组映射。 */
+        public ChannelModelRefreshResponse(List<String> models) {
+            this(models, Map.of());
+        }
     }
 
     /**

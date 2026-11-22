@@ -188,16 +188,17 @@ public class PersistenceService {
     }
 
     /**
-     * 使用当前请求中的临时渠道配置拉取模型列表。
+     * 使用当前请求中的临时渠道配置拉取模型列表及分组映射。
      * <p>
      * 该操作仅访问第三方渠道，不创建或修改数据库中的渠道。
      *
      * @param request ChannelModelRefreshRequest 渠道连接配置
-     * @return Mono<List<String>> 去重并排序后的模型列表
+     * @return Mono<AiHttpClient.ChannelModelsResult> 去重并排序后的模型列表与分组映射
      */
-    public Mono<List<String>> refreshChannelModels(PersistenceDtos.ChannelModelRefreshRequest request) {
-        return aiHttpClient.fetchChannelModels(request.baseUrl(), request.apiKey(), request.apiFormat())
-                .doOnSuccess(models -> log.info("拉取渠道模型列表成功: apiFormat={}, models={}", request.apiFormat(), models.size()));
+    public Mono<AiHttpClient.ChannelModelsResult> refreshChannelModels(PersistenceDtos.ChannelModelRefreshRequest request) {
+        return aiHttpClient.fetchChannelModelList(request.baseUrl(), request.apiKey(), request.apiFormat())
+                .doOnSuccess(result -> log.info("拉取渠道模型列表成功: apiFormat={}, models={}, groupedModels={}",
+                        request.apiFormat(), result.models().size(), result.modelGroups().size()));
     }
 
     /** 删除全站渠道。 */
@@ -406,6 +407,7 @@ public class PersistenceService {
         record.setBaseUrl(firstNonEmpty(request.baseUrl())); record.setApiKeyEncrypted(encryptedApiKey);
         record.setApiFormat(firstNonEmpty(request.apiFormat(), "openai"));
         record.setModels(JSON.toJSONString(request.models() == null ? List.of() : request.models()));
+        record.setModelGroups(JSON.toJSONString(normalizeModelGroups(request.modelGroups())));
         record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder()); record.setStatus(1);
         return record;
     }
@@ -413,7 +415,78 @@ public class PersistenceService {
     /** 构建渠道响应。 */
     private AiTaskDtos.AiChannelConfig channelDto(PersistenceRecords.UserAiChannelRecord record, String apiKey) {
         return new AiTaskDtos.AiChannelConfig(record.getChannelId(), record.getName(), record.getBaseUrl(), apiKey,
-                record.getApiFormat(), parseStringList(record.getModels()));
+                record.getApiFormat(), parseStringList(record.getModels()), parseModelGroups(record.getModelGroups()));
+    }
+
+    /**
+     * 规范化模型分组映射，过滤空模型名与空分组项。
+     *
+     * @param source Map<String, List<String>> 原始模型分组映射
+     * @return Map<String, List<String>> 规范化后的模型分组映射
+     */
+    private static Map<String, List<String>> normalizeModelGroups(Map<String, List<String>> source) {
+        if (source == null || source.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, List<String>> normalized = new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> entry : source.entrySet()) {
+            if (!StringUtils.hasText(entry.getKey()) || entry.getValue() == null) {
+                continue;
+            }
+            List<String> groups = entry.getValue().stream()
+                    .filter(StringUtils::hasText)
+                    .map(String::trim)
+                    .distinct()
+                    .toList();
+            if (!groups.isEmpty()) {
+                normalized.put(entry.getKey().trim(), groups);
+            }
+        }
+        return normalized;
+    }
+
+    /**
+     * 解析数据库保存的模型分组映射JSON。
+     *
+     * @param json String 模型分组映射JSON文本
+     * @return Map<String, List<String>> 模型分组映射
+     */
+    private static Map<String, List<String>> parseModelGroups(String json) {
+        if (!StringUtils.hasText(json)) {
+            return Map.of();
+        }
+        try {
+            JSONObject object = JSON.parseObject(json);
+            if (object == null || object.isEmpty()) {
+                return Map.of();
+            }
+            Map<String, List<String>> result = new LinkedHashMap<>();
+            for (String key : object.keySet()) {
+                if (!StringUtils.hasText(key)) {
+                    continue;
+                }
+                JSONArray array = object.getJSONArray(key);
+                if (array == null || array.isEmpty()) {
+                    continue;
+                }
+                List<String> groups = new ArrayList<>();
+                for (int index = 0; index < array.size(); index++) {
+                    String value = array.getString(index);
+                    if (StringUtils.hasText(value)) {
+                        String trimmed = value.trim();
+                        if (!groups.contains(trimmed)) {
+                            groups.add(trimmed);
+                        }
+                    }
+                }
+                if (!groups.isEmpty()) {
+                    result.put(key.trim(), groups);
+                }
+            }
+            return result;
+        } catch (Exception exception) {
+            return Map.of();
+        }
     }
 
     /** 构建模型配置响应。 */
@@ -2647,6 +2720,8 @@ public class PersistenceService {
                         record.setApiKeyEncrypted(encrypted);
                         record.setApiFormat(firstNonEmpty(textField(item, "apiFormat"), "openai"));
                         record.setModels(toJsonArrayString(item.getJSONArray("models")));
+                        JSONObject modelGroups = item.getJSONObject("modelGroups");
+                        record.setModelGroups(modelGroups == null ? "{}" : modelGroups.toJSONString());
                         record.setSortOrder(index);
                         record.setStatus(1);
                         return record;

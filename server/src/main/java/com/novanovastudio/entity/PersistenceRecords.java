@@ -164,6 +164,9 @@ public final class PersistenceRecords {
         /** 模型列表JSON */
         private String models;
 
+        /** 模型分组映射JSON */
+        private String modelGroups;
+
         /** 排序值 */
         private Integer sortOrder;
 

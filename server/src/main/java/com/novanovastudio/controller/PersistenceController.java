@@ -218,7 +218,7 @@ public class PersistenceController {
     public Mono<ApiResponse<PersistenceDtos.ChannelModelRefreshResponse>> refreshChannelModels(
             @Valid @RequestBody PersistenceDtos.ChannelModelRefreshRequest request) {
         return persistenceService.refreshChannelModels(request)
-                .map(models -> ApiResponse.ok(new PersistenceDtos.ChannelModelRefreshResponse(models)));
+                .map(result -> ApiResponse.ok(new PersistenceDtos.ChannelModelRefreshResponse(result.models(), result.modelGroups())));
     }
 
     /** 删除当前用户渠道。 */

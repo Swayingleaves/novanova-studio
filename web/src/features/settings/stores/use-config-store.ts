@@ -99,6 +99,7 @@ export type ModelChannel = {
     apiKey: string;
     apiFormat: ApiCallFormat;
     models: string[];
+    modelGroups?: Record<string, string[]>;
 };
 
 export type AiConfig = {
@@ -387,6 +388,18 @@ export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
     return "https://api.openai.com/v1";
 }
 
+function normalizeModelGroups(input?: Record<string, string[]>): Record<string, string[]> {
+    if (!input) return {};
+    const result: Record<string, string[]> = {};
+    for (const [modelName, groups] of Object.entries(input)) {
+        const key = modelName.trim();
+        if (!key || !Array.isArray(groups)) continue;
+        const normalized = uniqueText(groups);
+        if (normalized.length) result[key] = normalized;
+    }
+    return result;
+}
+
 export function createModelChannel(input: Partial<ModelChannel> = {}): ModelChannel {
     const apiFormat = normalizeApiFormat(input.apiFormat);
     return {
@@ -396,6 +409,7 @@ export function createModelChannel(input: Partial<ModelChannel> = {}): ModelChan
         apiKey: input.apiKey ?? "",
         apiFormat,
         models: uniqueText(input.models || []),
+        modelGroups: normalizeModelGroups(input.modelGroups),
     };
 }
 

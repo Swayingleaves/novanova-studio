@@ -253,13 +253,15 @@ class PersistenceServiceTest {
     void shouldRefreshChannelModelsWithoutPersistingChannel() {
         PersistenceDtos.ChannelModelRefreshRequest request = new PersistenceDtos.ChannelModelRefreshRequest(
                 "https://api.example.com/v1", "secret-key", "openai");
-        when(aiHttpClient.fetchChannelModels(request.baseUrl(), request.apiKey(), request.apiFormat()))
-                .thenReturn(Mono.just(List.of("model-a", "model-b")));
+        AiHttpClient.ChannelModelsResult expected = new AiHttpClient.ChannelModelsResult(
+                List.of("model-a", "model-b"), java.util.Map.of("model-a", List.of("seedance-cheap")));
+        when(aiHttpClient.fetchChannelModelList(request.baseUrl(), request.apiKey(), request.apiFormat()))
+                .thenReturn(Mono.just(expected));
 
-        List<String> models = service.refreshChannelModels(request).block();
+        AiHttpClient.ChannelModelsResult result = service.refreshChannelModels(request).block();
 
-        Assertions.assertEquals(List.of("model-a", "model-b"), models);
-        verify(aiHttpClient).fetchChannelModels(request.baseUrl(), request.apiKey(), request.apiFormat());
+        Assertions.assertEquals(expected, result);
+        verify(aiHttpClient).fetchChannelModelList(request.baseUrl(), request.apiKey(), request.apiFormat());
         verifyNoInteractions(repository);
     }
 

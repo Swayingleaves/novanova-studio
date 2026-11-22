@@ -25,7 +25,7 @@ class NanaProviderAdapterTest {
      */
     @Test
     void shouldSupportTextImageAndVideoTasks() {
-        NanaProviderAdapter adapter = new NanaProviderAdapter(null, null, new NovanovaProperties());
+        NanaProviderAdapter adapter = new NanaProviderAdapter(null, null, new NovanovaProperties(), null);
 
         Assertions.assertEquals("nana", adapter.apiFormat());
         Assertions.assertTrue(adapter.supports(AiTaskTypes.TEXT));
@@ -183,12 +183,23 @@ class NanaProviderAdapterTest {
     }
 
     /**
-     * 视频协议路由应区分豆包官转与 Seedance-cheap 通道。
+     * 视频协议路由应优先按模型 groups 分组标识分发，未命中时回退到模型名规则与 OpenAI 兜底。
      *
      * @return void 无返回值
      */
     @Test
     void shouldResolveVideoProtocolForOfficialAndCheapSeedance() {
+        // 优先按 groups 识别，即使模型名没有统一前缀也能准确命中
+        Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.SEEDANCE_CHEAP,
+                NanaProviderAdapter.resolveVideoProtocol("custom-video-model-1", List.of("seedance-cheap")));
+        Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.SEEDANCE_OFFICIAL,
+                NanaProviderAdapter.resolveVideoProtocol("custom-video-model-2", List.of("doubao-gz")));
+        Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.SEEDANCE_CHEAP,
+                NanaProviderAdapter.resolveVideoProtocol("doubao-seedance-2-0-mini-260615", List.of("seedance-cheap")));
+        Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.OPENAI,
+                NanaProviderAdapter.resolveVideoProtocol("sora-2", List.of("default")));
+
+        // 未配置 groups 时沿用模型名规则，其余走 OpenAI 兜底
         Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.SEEDANCE_OFFICIAL,
                 NanaProviderAdapter.resolveVideoProtocol("doubao-seedance-2-0-mini-260615"));
         for (String cheapModel : List.of("seedance-2.0-933", "seedance-2.0-fast", "seedance-2.5-480p",
@@ -199,7 +210,7 @@ class NanaProviderAdapterTest {
         }
         Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.WAN, NanaProviderAdapter.resolveVideoProtocol("wan3.0-video"));
         Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.MINIMAX, NanaProviderAdapter.resolveVideoProtocol("minimax-h3-ref"));
-        Assertions.assertNull(NanaProviderAdapter.resolveVideoProtocol("unknown-video-model"));
+        Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.OPENAI, NanaProviderAdapter.resolveVideoProtocol("unknown-video-model"));
     }
 
     /**

@@ -43,7 +43,8 @@
 - 服务端使用 Logback 输出日志，请求接口必须记录 URL、Header、请求内容和响应内容；重要业务节点使用 `log.info`，异常使用 `log.error`。
 - 业务接口保持 `{ code, data, msg }` 的响应结构。
 - 接口路径名称统一为驼峰命名，比如 `/auth/userInfo`、`/ai/task/createTask`。
-- PostgreSQL schema 使用 Flyway，迁移文件放在 `server/src/main/resources/db/migration/`。
+- PostgreSQL schema 使用 Flyway，存在 `server/src/main/resources/db/migration/` 与 `server/src/main/resources/db/migration-community/` 两套迁移目录（`application.yml` 默认读取 `db/migration-community`）。新增迁移时**两个目录必须同步新增**，且各自独立计算版本号。
+- 计算 Flyway 下一个版本号时必须按**数字大小**排序（例如 PowerShell 用 `Sort-Object { [int]($_.Name -replace '^V(\d+)__.*','$1') }`），严禁按文件名字符串排序——字符串排序会把 `V100`~`V109` 排在 `V99` 之前，导致版本号撞车或漏执行迁移。
 - Flyway 已执行或已发布的版本迁移 SQL 禁止修改；数据库结构、数据或注释变更必须新增更高版本迁移文件，避免校验和不一致导致 `Validate failed`。
 - 数据库表名、库名、字段名统一使用下划线，表和字段必须写注释。
 - 新增或调整数据表时同步更新 `docs-api/backend-database.md`。

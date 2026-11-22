@@ -318,6 +318,7 @@ export type ServerChannel = {
     apiKey: string;
     apiFormat: ApiCallFormat;
     models: string[];
+    modelGroups?: Record<string, string[]>;
 };
 
 /** 渠道列表响应 */
@@ -327,6 +328,7 @@ export type ServerChannelList = {
 
 export type ServerChannelModelList = {
     models: string[];
+    modelGroups?: Record<string, string[]>;
 };
 
 /** 平台 OAuth 渠道配置，配置由管理后台维护，替代 .env 中的固定配置。 */

@@ -140,6 +140,7 @@ public final class RowMappers {
         record.setApiKeyEncrypted(row.get("api_key_encrypted", String.class));
         record.setApiFormat(row.get("api_format", String.class));
         record.setModels(jsonText(row, "models"));
+        record.setModelGroups(jsonText(row, "model_groups"));
         record.setSortOrder(row.get("sort_order", Integer.class));
         record.setStatus(row.get("status", Integer.class));
         record.setCreatedAt(row.get("created_at", OffsetDateTime.class));

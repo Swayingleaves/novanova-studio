@@ -402,7 +402,28 @@ public final class AiTaskDtos {
      * @param apiKey String API Key
      * @param apiFormat String 调用格式
      * @param models List<String> 模型列表
+     * @param modelGroups Map<String, List<String>> 模型分组映射
      */
-    public record AiChannelConfig(String id, String name, String baseUrl, String apiKey, String apiFormat, List<String> models) {
+    public record AiChannelConfig(String id, String name, String baseUrl, String apiKey, String apiFormat,
+                                  List<String> models, Map<String, List<String>> modelGroups) {
+
+        /** 保持旧调用方使用空模型分组映射。 */
+        public AiChannelConfig(String id, String name, String baseUrl, String apiKey, String apiFormat, List<String> models) {
+            this(id, name, baseUrl, apiKey, apiFormat, models, Map.of());
+        }
+
+        /**
+         * 读取指定模型的分组标识列表。
+         *
+         * @param modelName String 模型名称
+         * @return List<String> 分组标识列表，未配置时返回空列表
+         */
+        public List<String> modelGroupsFor(String modelName) {
+            if (modelGroups == null || modelGroups.isEmpty() || modelName == null) {
+                return List.of();
+            }
+            List<String> groups = modelGroups.get(modelName.trim());
+            return groups == null ? List.of() : groups;
+        }
     }
 }

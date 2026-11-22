@@ -91,12 +91,18 @@ public class NanaProviderAdapter implements AiProviderAdapter {
     /** 支持的输出比例。 */
     private static final List<String> SUPPORTED_ASPECT_RATIOS = List.of("21:9", "16:9", "4:3", "1:1", "3:4", "9:16");
 
+    /** 官转豆包 Seedance 模型分组标识。 */
+    private static final String GROUP_DOUBAO_OFFICIAL = "doubao-gz";
+    /** Seedance-cheap 模型分组标识。 */
+    private static final String GROUP_SEEDANCE_CHEAP = "seedance-cheap";
     /** AI HTTP 客户端。 */
     private final AiHttpClient aiHttpClient;
     /** AI 媒体支持。 */
     private final AiMediaSupport mediaSupport;
     /** 服务配置。 */
     private final NovanovaProperties properties;
+    /** OpenAI 兼容渠道适配器，用作未命中专用分组时的视频兜底调用。 */
+    private final OpenAiProviderAdapter openAiProviderAdapter;
 
     /**
      * 获取渠道调用格式。
@@ -203,33 +209,65 @@ public class NanaProviderAdapter implements AiProviderAdapter {
     }
 
     /**
-     * 执行视频任务，按模型系列选择对应协议。
+     * 执行视频任务，优先按模型分组标识选择协议，其余走 OpenAI 兼容协议兜底。
      *
      * @param context AiTaskExecutionContext 当前任务上下文
      * @return Mono<JSONObject> 视频结果
      */
     private Mono<JSONObject> executeVideoTask(AiTaskExecutionContext context) {
-        VideoProtocol protocol = resolveVideoProtocol(context.model());
-        if (protocol == null) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.nanaSupportsSeedanceWanMiniMaxVideoModels")));
-        }
+        List<String> groups = context.channel().modelGroupsFor(context.model());
+        VideoProtocol protocol = resolveVideoProtocol(context.model(), groups);
+        log.info("NANA-API视频协议路由: taskId={}, model={}, groups={}, protocol={}",
+                context.task().getId(), context.model(), groups, protocol);
         return switch (protocol) {
             case SEEDANCE_OFFICIAL -> executeSeedanceVideoTask(context);
             case SEEDANCE_CHEAP -> executeSeedanceCheapVideoTask(context);
             case WAN -> executeWanVideoTask(context);
             case MINIMAX -> executeMiniMaxVideoTask(context);
+            case OPENAI -> executeOpenAiFallbackVideoTask(context);
         };
     }
 
     /**
-     * 按模型名称路由 NANA-API 视频协议。
-     * <p>
-     * 官转 Seedance 固定以 doubao- 开头；其余 seedance-* 模型走 Seedance-cheap (/v1/videos) 通道。
+     * 按模型名称路由 NANA-API 视频协议（无分组信息时使用）。
      *
      * @param modelName String 原始模型名称
-     * @return VideoProtocol 命中的协议，未匹配时返回 null
+     * @return VideoProtocol 命中的协议，未命中专用协议时回退为 OPENAI
      */
     static VideoProtocol resolveVideoProtocol(String modelName) {
+        return resolveVideoProtocol(modelName, List.of());
+    }
+
+    /**
+     * 按模型分组标识与模型名称路由 NANA-API 视频协议。
+     * <p>
+     * 优先按 /v1/models 返回的 groups 识别：doubao-gz 走官转 Seedance，seedance-cheap 走 /v1/videos JSON 通道；
+     * 未配置 groups 时按模型名规则兼容识别；其余模型统一走 OpenAI 兼容视频协议兜底。
+     *
+     * @param modelName String 原始模型名称
+     * @param groups List<String> 模型所属分组标识列表
+     * @return VideoProtocol 命中的协议
+     */
+    static VideoProtocol resolveVideoProtocol(String modelName, List<String> groups) {
+        if (groups != null && !groups.isEmpty()) {
+            for (String rawGroup : groups) {
+                String group = normalizeText(rawGroup);
+                if (GROUP_DOUBAO_OFFICIAL.equals(group)) {
+                    return VideoProtocol.SEEDANCE_OFFICIAL;
+                }
+                if (GROUP_SEEDANCE_CHEAP.equals(group)) {
+                    return VideoProtocol.SEEDANCE_CHEAP;
+                }
+            }
+            String model = normalizeText(modelName);
+            if (isWanVideoModel(model)) {
+                return VideoProtocol.WAN;
+            }
+            if (model.contains("minimax")) {
+                return VideoProtocol.MINIMAX;
+            }
+            return VideoProtocol.OPENAI;
+        }
         String model = normalizeText(modelName);
         if (model.startsWith("doubao-") && model.contains("seedance")) {
             return VideoProtocol.SEEDANCE_OFFICIAL;
@@ -243,7 +281,23 @@ public class NanaProviderAdapter implements AiProviderAdapter {
         if (model.contains("minimax")) {
             return VideoProtocol.MINIMAX;
         }
-        return null;
+        return VideoProtocol.OPENAI;
+    }
+
+    /**
+     * 使用 OpenAI 兼容视频协议执行兜底任务。
+     *
+     * @param context AiTaskExecutionContext 当前任务上下文
+     * @return Mono<JSONObject> 视频结果
+     */
+    private Mono<JSONObject> executeOpenAiFallbackVideoTask(AiTaskExecutionContext context) {
+        AiTaskExecutionContext openAiContext = new AiTaskExecutionContext(
+                context.task(), openAiChannel(context), context.model(), context.thinkingEnabled(),
+                context.reasoningEffort(), context.customBodyParameters(), context.request(),
+                context.cancelChecker(), context.progressReporter(), context.deltaEmitter(),
+                context.isCustomModel(), context.customModelConfig(),
+                context.convertImageSizeToPixels(), context.imageSizeMappings());
+        return openAiProviderAdapter.execute(openAiContext);
     }
 
     /**
@@ -811,7 +865,8 @@ public class NanaProviderAdapter implements AiProviderAdapter {
      * @return AiChannelConfig 渠道配置
      */
     private static AiTaskDtos.AiChannelConfig channelWithBaseUrl(AiTaskDtos.AiChannelConfig channel, String baseUrl) {
-        return new AiTaskDtos.AiChannelConfig(channel.id(), channel.name(), baseUrl, channel.apiKey(), channel.apiFormat(), channel.models());
+        return new AiTaskDtos.AiChannelConfig(channel.id(), channel.name(), baseUrl, channel.apiKey(),
+                channel.apiFormat(), channel.models(), channel.modelGroups());
     }
 
     /**
@@ -1051,7 +1106,9 @@ public class NanaProviderAdapter implements AiProviderAdapter {
         /** Wan 百炼通道。 */
         WAN,
         /** MiniMax 通道。 */
-        MINIMAX
+        MINIMAX,
+        /** OpenAI 兼容视频兜底通道。 */
+        OPENAI
     }
 
     /**

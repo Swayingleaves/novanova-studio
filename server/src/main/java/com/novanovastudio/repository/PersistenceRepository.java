@@ -30,7 +30,8 @@ public class PersistenceRepository {
     public Flux<PersistenceRecords.UserAiChannelRecord> listUserAiChannels(Long userId) {
         // 渠道按用户和排序值读取，只返回正常状态记录。
         return databaseClient.sql("""
-                SELECT id, team_id, user_id, channel_id, name, base_url, api_key_encrypted, api_format, models::text AS models, sort_order, status, created_at, updated_at
+                SELECT id, team_id, user_id, channel_id, name, base_url, api_key_encrypted, api_format, models::text AS models,
+                       model_groups::text AS model_groups, sort_order, status, created_at, updated_at
                 FROM user_ai_channels
                 WHERE user_id = :userId AND status = 1
                 ORDER BY sort_order ASC, id ASC
@@ -64,8 +65,8 @@ public class PersistenceRepository {
     private Mono<Void> insertUserAiChannel(PersistenceRecords.UserAiChannelRecord record) {
         // 渠道模型以JSONB保存，API Key只保存加密结果。
         return databaseClient.sql("""
-                INSERT INTO user_ai_channels(user_id, channel_id, name, base_url, api_key_encrypted, api_format, models, sort_order, status)
-                VALUES (:userId, :channelId, :name, :baseUrl, :apiKeyEncrypted, :apiFormat, CAST(:models AS jsonb), :sortOrder, 1)
+                INSERT INTO user_ai_channels(user_id, channel_id, name, base_url, api_key_encrypted, api_format, models, model_groups, sort_order, status)
+                VALUES (:userId, :channelId, :name, :baseUrl, :apiKeyEncrypted, :apiFormat, CAST(:models AS jsonb), CAST(:modelGroups AS jsonb), :sortOrder, 1)
                 """)
                 .bind("userId", record.getUserId())
                 .bind("channelId", record.getChannelId())
@@ -74,6 +75,7 @@ public class PersistenceRepository {
                 .bind("apiKeyEncrypted", record.getApiKeyEncrypted())
                 .bind("apiFormat", record.getApiFormat())
                 .bind("models", record.getModels())
+                .bind("modelGroups", record.getModelGroups() == null || record.getModelGroups().isBlank() ? "{}" : record.getModelGroups())
                 .bind("sortOrder", record.getSortOrder())
                 .fetch()
                 .rowsUpdated()
@@ -83,7 +85,8 @@ public class PersistenceRepository {
     /** 查询单个用户渠道。 */
     public Mono<PersistenceRecords.UserAiChannelRecord> getUserAiChannel(Long userId, String channelId) {
         return databaseClient.sql("""
-                SELECT id, team_id, user_id, channel_id, name, base_url, api_key_encrypted, api_format, models::text AS models, sort_order, status, created_at, updated_at
+                SELECT id, team_id, user_id, channel_id, name, base_url, api_key_encrypted, api_format, models::text AS models,
+                       model_groups::text AS model_groups, sort_order, status, created_at, updated_at
                 FROM user_ai_channels WHERE user_id = :userId AND channel_id = :channelId AND status = 1
                 """).bind("userId", userId).bind("channelId", channelId)
                 .map((row, metadata) -> RowMappers.userAiChannel(row)).one();
@@ -98,11 +101,13 @@ public class PersistenceRepository {
     public Mono<Long> updateUserAiChannel(PersistenceRecords.UserAiChannelRecord record) {
         return databaseClient.sql("""
                 UPDATE user_ai_channels SET name=:name, base_url=:baseUrl, api_key_encrypted=:apiKeyEncrypted,
-                api_format=:apiFormat, models=CAST(:models AS jsonb), sort_order=:sortOrder, updated_at=CURRENT_TIMESTAMP
+                api_format=:apiFormat, models=CAST(:models AS jsonb), model_groups=CAST(:modelGroups AS jsonb), sort_order=:sortOrder, updated_at=CURRENT_TIMESTAMP
                 WHERE user_id=:userId AND channel_id=:channelId AND status=1
                 """).bind("name", record.getName()).bind("baseUrl", record.getBaseUrl())
                 .bind("apiKeyEncrypted", record.getApiKeyEncrypted()).bind("apiFormat", record.getApiFormat())
-                .bind("models", record.getModels()).bind("sortOrder", record.getSortOrder())
+                .bind("models", record.getModels())
+                .bind("modelGroups", record.getModelGroups() == null || record.getModelGroups().isBlank() ? "{}" : record.getModelGroups())
+                .bind("sortOrder", record.getSortOrder())
                 .bind("userId", record.getUserId()).bind("channelId", record.getChannelId()).fetch().rowsUpdated();
     }
 
@@ -316,7 +321,7 @@ public class PersistenceRepository {
     public Flux<PersistenceRecords.UserAiChannelRecord> listPlatformAiChannels() {
         return databaseClient.sql("""
                 SELECT id, team_id, NULL::BIGINT AS user_id, channel_id, name, base_url, api_key_encrypted, api_format,
-                       models::text AS models, sort_order, status, created_at, updated_at
+                       models::text AS models, model_groups::text AS model_groups, sort_order, status, created_at, updated_at
                 FROM platform_ai_channels
                 WHERE status = 1
                 ORDER BY created_at DESC, id DESC
@@ -332,7 +337,7 @@ public class PersistenceRepository {
     public Mono<PersistenceRecords.UserAiChannelRecord> getPlatformAiChannel(String channelId) {
         return databaseClient.sql("""
                 SELECT id, team_id, NULL::BIGINT AS user_id, channel_id, name, base_url, api_key_encrypted, api_format,
-                       models::text AS models, sort_order, status, created_at, updated_at
+                       models::text AS models, model_groups::text AS model_groups, sort_order, status, created_at, updated_at
                 FROM platform_ai_channels
                 WHERE channel_id = :channelId AND status = 1
                 """).bind("channelId", channelId).map((row, metadata) -> RowMappers.userAiChannel(row)).one();
@@ -346,11 +351,12 @@ public class PersistenceRepository {
      */
     public Mono<Void> createPlatformAiChannel(PersistenceRecords.UserAiChannelRecord record) {
         return databaseClient.sql("""
-                INSERT INTO platform_ai_channels(channel_id, name, base_url, api_key_encrypted, api_format, models, sort_order, status)
-                VALUES (:channelId, :name, :baseUrl, :apiKeyEncrypted, :apiFormat, CAST(:models AS jsonb), :sortOrder, 1)
+                INSERT INTO platform_ai_channels(channel_id, name, base_url, api_key_encrypted, api_format, models, model_groups, sort_order, status)
+                VALUES (:channelId, :name, :baseUrl, :apiKeyEncrypted, :apiFormat, CAST(:models AS jsonb), CAST(:modelGroups AS jsonb), :sortOrder, 1)
                 """).bind("channelId", record.getChannelId()).bind("name", record.getName())
                 .bind("baseUrl", record.getBaseUrl()).bind("apiKeyEncrypted", record.getApiKeyEncrypted())
                 .bind("apiFormat", record.getApiFormat()).bind("models", record.getModels())
+                .bind("modelGroups", record.getModelGroups() == null || record.getModelGroups().isBlank() ? "{}" : record.getModelGroups())
                 .bind("sortOrder", record.getSortOrder()).fetch().rowsUpdated().then();
     }
 
@@ -364,11 +370,13 @@ public class PersistenceRepository {
         return databaseClient.sql("""
                 UPDATE platform_ai_channels
                 SET name = :name, base_url = :baseUrl, api_key_encrypted = :apiKeyEncrypted, api_format = :apiFormat,
-                    models = CAST(:models AS jsonb), sort_order = :sortOrder, updated_at = CURRENT_TIMESTAMP
+                    models = CAST(:models AS jsonb), model_groups = CAST(:modelGroups AS jsonb), sort_order = :sortOrder, updated_at = CURRENT_TIMESTAMP
                 WHERE channel_id = :channelId AND status = 1
                 """).bind("name", record.getName()).bind("baseUrl", record.getBaseUrl())
                 .bind("apiKeyEncrypted", record.getApiKeyEncrypted()).bind("apiFormat", record.getApiFormat())
-                .bind("models", record.getModels()).bind("sortOrder", record.getSortOrder())
+                .bind("models", record.getModels())
+                .bind("modelGroups", record.getModelGroups() == null || record.getModelGroups().isBlank() ? "{}" : record.getModelGroups())
+                .bind("sortOrder", record.getSortOrder())
                 .bind("channelId", record.getChannelId()).fetch().rowsUpdated();
     }
 

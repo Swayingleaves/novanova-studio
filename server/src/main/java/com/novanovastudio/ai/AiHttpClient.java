@@ -21,8 +21,11 @@ import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
@@ -480,14 +483,43 @@ public class AiHttpClient {
      * @param apiFormat String 渠道调用格式
      * @return Mono<List<String>> 去重并排序后的模型名称
      */
+    /**
+     * 渠道模型拉取结果。
+     *
+     * @param models List<String> 去重并排序后的模型名称列表
+     * @param modelGroups Map<String, List<String>> 模型到分组标识列表的映射
+     */
+    public record ChannelModelsResult(List<String> models, Map<String, List<String>> modelGroups) {
+    }
+
+    /**
+     * 拉取第三方渠道模型名称列表。
+     *
+     * @param baseUrl String 渠道基础地址
+     * @param apiKey String 渠道密钥
+     * @param apiFormat String 调用格式
+     * @return Mono<List<String>> 去重并排序后的模型名称
+     */
     public Mono<List<String>> fetchChannelModels(String baseUrl, String apiKey, String apiFormat) {
+        return fetchChannelModelList(baseUrl, apiKey, apiFormat).map(ChannelModelsResult::models);
+    }
+
+    /**
+     * 拉取第三方渠道模型列表及分组元数据。
+     *
+     * @param baseUrl String 渠道基础地址
+     * @param apiKey String 渠道密钥
+     * @param apiFormat String 调用格式
+     * @return Mono<ChannelModelsResult> 模型名称列表与模型分组映射
+     */
+    public Mono<ChannelModelsResult> fetchChannelModelList(String baseUrl, String apiKey, String apiFormat) {
         return Mono.defer(() -> {
             String normalizedFormat = normalizeModelApiFormat(apiFormat);
             if ("minimax".equals(normalizedFormat)) {
-                return Mono.<List<String>>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.miniMaxCannotFetchModelsConfigureMiniMaxH3Manually")));
+                return Mono.<ChannelModelsResult>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.miniMaxCannotFetchModelsConfigureMiniMaxH3Manually")));
             }
             if ("custom".equals(normalizedFormat)) {
-                return Mono.<List<String>>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.customChannelsCannotFetchModelsConfigureThemManually")));
+                return Mono.<ChannelModelsResult>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.customChannelsCannotFetchModelsConfigureThemManually")));
             }
             return callBlocking(() -> {
                 URI uri = buildModelListUri(baseUrl, normalizedFormat);
@@ -520,16 +552,16 @@ public class AiHttpClient {
                     if (response.statusCode() < 200 || response.statusCode() >= 300) {
                         throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.failedToFetchModelsHTTP", response.statusCode(), readModelErrorMessage(safeResponseBody)));
                     }
-                    List<String> models;
+                    ChannelModelsResult result;
                     try {
-                        models = parseChannelModels(responseBody, normalizedFormat);
+                        result = parseChannelModels(responseBody, normalizedFormat);
                     } catch (BusinessException exception) {
                         throw new BusinessException(exception.getCode(), sanitizeModelResponse(exception.getMessage(), apiKey));
                     }
-                    if (models.isEmpty()) {
+                    if (result.models().isEmpty()) {
                         throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.channelReturnedNoAvailableModels"));
                     }
-                    return models;
+                    return result;
                 } catch (BusinessException exception) {
                     throw exception;
                 } catch (InterruptedException exception) {
@@ -784,10 +816,10 @@ public class AiHttpClient {
      *
      * @param responseBody String 第三方响应内容
      * @param apiFormat String 规范化后的调用格式
-     * @return List<String> 去重并排序后的模型名称
+     * @return ChannelModelsResult 去重并排序后的模型名称与模型分组映射
      * @throws BusinessException 响应不是合法JSON或模型字段格式错误时抛出
      */
-    private List<String> parseChannelModels(String responseBody, String apiFormat) {
+    private ChannelModelsResult parseChannelModels(String responseBody, String apiFormat) {
         try {
             JSONObject response = JSON.parseObject(responseBody);
             if (response == null) {
@@ -802,6 +834,7 @@ public class AiHttpClient {
                 throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.invalidChannelModelListFormat"));
             }
             TreeSet<String> models = new TreeSet<>();
+            Map<String, Set<String>> groupMap = new LinkedHashMap<>();
             String modelField = "gemini".equals(apiFormat) ? "name" : "id";
             for (Object value : values) {
                 if (!(value instanceof JSONObject model)) {
@@ -818,10 +851,26 @@ public class AiHttpClient {
                             : modelName.trim();
                     if (StringUtils.hasText(normalizedName)) {
                         models.add(normalizedName);
+                        JSONArray groups = model.getJSONArray("groups");
+                        if (groups != null && !groups.isEmpty()) {
+                            Set<String> targetGroups = groupMap.computeIfAbsent(normalizedName, key -> new LinkedHashSet<>());
+                            for (int index = 0; index < groups.size(); index++) {
+                                String group = groups.getString(index);
+                                if (StringUtils.hasText(group)) {
+                                    targetGroups.add(group.trim());
+                                }
+                            }
+                        }
                     }
                 }
             }
-            return new ArrayList<>(models);
+            Map<String, List<String>> modelGroups = new LinkedHashMap<>();
+            for (Map.Entry<String, Set<String>> entry : groupMap.entrySet()) {
+                if (!entry.getValue().isEmpty()) {
+                    modelGroups.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+                }
+            }
+            return new ChannelModelsResult(new ArrayList<>(models), modelGroups);
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {

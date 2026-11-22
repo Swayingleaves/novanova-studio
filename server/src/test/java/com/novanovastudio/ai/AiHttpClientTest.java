@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 class AiHttpClientTest {
 
     /**
-     * OpenAI兼容格式应由服务端携带Bearer鉴权拉取模型并完成去重排序。
+     * OpenAI兼容格式应由服务端携带Bearer鉴权拉取模型并完成去重排序，同时解析模型分组标识。
      *
      * @throws IOException 本地测试服务创建失败时抛出
      */
@@ -29,16 +29,24 @@ class AiHttpClientTest {
     void shouldFetchOpenAiCompatibleModelsFromServer() throws IOException {
         AtomicReference<String> authorization = new AtomicReference<>();
         AtomicReference<String> path = new AtomicReference<>();
-        HttpServer server = startJsonServer(200, "{\"data\":[{\"id\":\"model-b\"},{\"id\":\"model-a\"},{\"id\":\"model-b\"}]}", exchange -> {
-            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
-            path.set(exchange.getRequestURI().getPath());
-        });
+        HttpServer server = startJsonServer(200,
+                "{\"data\":["
+                        + "{\"id\":\"model-b\",\"groups\":[\"seedance-cheap\"]},"
+                        + "{\"id\":\"model-a\",\"groups\":[\"doubao-gz\"]},"
+                        + "{\"id\":\"model-b\",\"groups\":[\"seedance-cheap\"]}]}",
+                exchange -> {
+                    authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+                    path.set(exchange.getRequestURI().getPath());
+                });
         try {
             AiHttpClient client = new AiHttpClient();
 
-            List<String> models = client.fetchChannelModels(baseUrl(server) + "/v1", "secret-key", "openai").block();
+            AiHttpClient.ChannelModelsResult result = client.fetchChannelModelList(baseUrl(server) + "/v1", "secret-key", "openai").block();
 
-            Assertions.assertEquals(List.of("model-a", "model-b"), models);
+            Assertions.assertNotNull(result);
+            Assertions.assertEquals(List.of("model-a", "model-b"), result.models());
+            Assertions.assertEquals(List.of("doubao-gz"), result.modelGroups().get("model-a"));
+            Assertions.assertEquals(List.of("seedance-cheap"), result.modelGroups().get("model-b"));
             Assertions.assertEquals("Bearer secret-key", authorization.get());
             Assertions.assertEquals("/v1/models", path.get());
         } finally {
