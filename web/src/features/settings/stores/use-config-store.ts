@@ -114,6 +114,8 @@ export type AiConfig = {
     videoSeconds: string;
     vquality: string;
     videoWatermark: string;
+    /** 视频生成音频（"true" / "false"），只有能开关声音的模型才生效。 */
+    videoAudio: string;
     videoGenerationMode: VideoGenerationMode;
     systemPrompt: string;
     models: string[];
@@ -179,6 +181,7 @@ export const defaultConfig: AiConfig = {
     videoSeconds: "5",
     vquality: "720p",
     videoWatermark: "false",
+    videoAudio: "true",
     videoGenerationMode: "text-to-video",
     systemPrompt: "",
     models: [],

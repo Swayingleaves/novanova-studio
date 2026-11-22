@@ -14,6 +14,8 @@ export type VideoLastUsedSettings = {
     size: string;
     videoSeconds: string;
     videoWatermark: string;
+    /** 生成音频（"true" / "false"），只有能开关声音的模型才生效。 */
+    videoAudio: string;
 };
 
 export const DEFAULT_IMAGE_LAST_USED_SETTINGS: ImageLastUsedSettings = {
@@ -29,6 +31,7 @@ export const DEFAULT_VIDEO_LAST_USED_SETTINGS: VideoLastUsedSettings = {
     size: "16:9",
     videoSeconds: "5",
     videoWatermark: "false",
+    videoAudio: "true",
 };
 
 const settingsStorage = localforage.createInstance({

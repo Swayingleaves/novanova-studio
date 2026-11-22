@@ -4,12 +4,14 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { Segmented, Slider } from "antd";
+import { Segmented, Slider, Tooltip } from "antd";
+import { Info } from "lucide-react";
 
 import { ImageSettingsTheme } from "@/features/generation/components/image-settings-panel";
 import { agnesVideoRatioOptions, isAgnesVideoConfig, normalizeAgnesVideoRatio, normalizeAgnesVideoSeconds } from "@/features/generation/lib/agnes-video";
 import { isMiniMaxH3VideoConfig, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio } from "@/features/generation/lib/minimax-h3-video";
 import { isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/features/generation/lib/seedance-video";
+import { readVideoAudioOutput, videoAudioOn } from "@/features/generation/lib/video-audio";
 import { readVideoDurationRange } from "@/features/generation/lib/video-duration";
 import { readCustomVideoConstraints, readVideoGenerationConstraintIssue, readVideoModelConfiguration } from "@/features/generation/lib/video-generation-constraints";
 import { createVideoGenerationModeOptions, VIDEO_RESOLUTION_OPTIONS, availableVideoResolutions } from "@/features/generation/lib/video-billing";
@@ -17,7 +19,7 @@ import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import { resolveModelRequestConfig, type AiConfig, type VideoGenerationMode, type VideoResolution } from "@/features/settings/stores/use-config-store";
 
 /** 视频设置面板支持的配置键。 */
-type VideoConfigKey = "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark";
+type VideoConfigKey = "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark" | "videoAudio";
 
 type VideoSettingsPanelProps = {
     config: AiConfig;
@@ -26,6 +28,8 @@ type VideoSettingsPanelProps = {
     showTitle?: boolean;
     showGenerationMode?: boolean;
     showDuration?: boolean;
+    /** 显示「生成音频」开关（按模型能力禁用做不到的选项）。 */
+    showAudio?: boolean;
     resolutionOptions?: VideoResolution[];
     className?: string;
     showCount?: boolean;
@@ -69,6 +73,7 @@ export function VideoSettingsPanel({
     showTitle = true,
     showGenerationMode = true,
     showDuration = true,
+    showAudio = true,
     resolutionOptions,
     className = "w-[388px] space-y-4 px-1 py-0.5",
     showCount = false,
@@ -104,6 +109,15 @@ export function VideoSettingsPanel({
     const seconds = resolveSeconds(resolved, seedance, agnes, miniMaxH3, displayDurationRange);
     const [durationDraft, setDurationDraft] = useState(seconds);
     const count = normalizeVideoGenerationCount(config.canvasVideoCount);
+    // 生成音频：能开关的模型两个都能选；固定有声的「关闭」置灰、不能出声的「开启」置灰；接口没有开关的两个都置灰，按模型默认
+    const audioOutput = readVideoAudioOutput(config);
+    const audioOn = videoAudioOn(config);
+    const audioNote = audioOutput === "always" ? translate("generation.generateAudioAlways")
+        : audioOutput === "none" ? translate("generation.generateAudioUnsupported")
+        : audioOutput === "unknown" ? translate("generation.generateAudioModelDefault") : "";
+    const updateAudio = (value: "true" | "false") => {
+        if (audioOutput === "switchable" && value !== config.videoAudio) onConfigChange("videoAudio", value);
+    };
 
     useEffect(() => setDurationDraft(seconds), [seconds]);
 
@@ -213,6 +227,20 @@ export function VideoSettingsPanel({
                     </Field>
                 ) : null}
 
+                {showAudio ? (
+                    <Field label={translate("generation.generateAudio")} hint={translate("generation.generateAudioHint")} theme={theme}>
+                        <div className="grid grid-cols-2 gap-2">
+                            <OptionButton active={audioOn === true} disabled={audioOutput === "none" || audioOutput === "unknown"} disabledReason={audioNote} theme={theme} onClick={() => updateAudio("true")}>
+                                {translate("generation.generateAudioOn")}
+                            </OptionButton>
+                            <OptionButton active={audioOn === false} disabled={audioOutput === "always" || audioOutput === "unknown"} disabledReason={audioNote} theme={theme} onClick={() => updateAudio("false")}>
+                                {translate("generation.generateAudioOff")}
+                            </OptionButton>
+                        </div>
+                        {audioNote ? <p className="text-xs" style={{ color: theme.node.muted }}>{audioNote}</p> : null}
+                    </Field>
+                ) : null}
+
                 {showCount ? (
                     <Field label={translate("generation.outputCount")} theme={theme}>
                         <div className="grid grid-cols-3 gap-2">
@@ -228,11 +256,16 @@ export function VideoSettingsPanel({
     );
 }
 
-function Field({ label, theme, children }: { label: string; theme: CanvasTheme; children: ReactNode }) {
+function Field({ label, hint, theme, children }: { label: string; hint?: string; theme: CanvasTheme; children: ReactNode }) {
     return (
         <div className="space-y-2">
-            <div className="text-sm font-semibold" style={{ color: theme.node.muted }}>
+            <div className="flex items-center gap-1 text-sm font-semibold" style={{ color: theme.node.muted }}>
                 {label}
+                {hint ? (
+                    <Tooltip title={hint}>
+                        <Info className="size-3.5 shrink-0 cursor-help" aria-label={hint} />
+                    </Tooltip>
+                ) : null}
             </div>
             {children}
         </div>
