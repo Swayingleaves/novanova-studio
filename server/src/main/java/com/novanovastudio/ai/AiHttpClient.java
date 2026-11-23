@@ -10,6 +10,7 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.AiTaskDtos;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
@@ -18,6 +19,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -26,8 +28,11 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -54,6 +59,15 @@ public class AiHttpClient {
 
     /** 远程媒体单次下载最大字节数 */
     private static final long MAXIMUM_REMOTE_MEDIA_BYTES = 100L * 1024 * 1024;
+
+    /** 结果媒体下载中断后最多试几次（含首次）：上游已经出片扣费，一次网络抖动不该让任务失败 */
+    private static final int RESULT_MEDIA_MAXIMUM_ATTEMPTS = 4;
+
+    /** Content-Range 响应头里本段内容的起始位置 */
+    private static final Pattern CONTENT_RANGE_START = Pattern.compile("^bytes\\s+(\\d+)");
+
+    /** 结果媒体重试前的等待，第 N 次失败后等 N 倍；测试里调成 0 */
+    Duration resultMediaRetryDelay = Duration.ofSeconds(2);
 
     /** 模型列表响应日志最大字符数 */
     private static final int MODEL_RESPONSE_LOG_MAXIMUM_CHARACTERS = 4000;
@@ -645,38 +659,100 @@ public class AiHttpClient {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.maximumRemoteMediaBytesMustBePositive"));
             }
             URI uri = validateRemoteMediaUri(url);
-            HttpRequest request = HttpRequest.newBuilder(uri).timeout(Duration.ofMinutes(10)).GET().build();
-            HttpResponse<InputStream> response = remoteMediaHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                try (InputStream inputStream = response.body()) {
-                    throw AiErrorSupport.providerException(response.statusCode(), "", "download");
-                }
-            }
-            long contentLength = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
-            if (contentLength > maximumBytes) {
-                try (InputStream inputStream = response.body()) {
-                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.sourceVideoExceedsTheSizeLimit"));
-                }
-            }
-            String mimeType = AiTaskParameterReader.firstNonEmpty(response.headers().firstValue("Content-Type").orElse(defaultMimeType), defaultMimeType);
             Files.createDirectories(target.toAbsolutePath().getParent());
-            long bytes = 0L;
-            try (InputStream inputStream = response.body(); OutputStream outputStream = Files.newOutputStream(target)) {
-                byte[] buffer = new byte[8192];
-                int readBytes;
-                while ((readBytes = inputStream.read(buffer)) != -1) {
-                    bytes += readBytes;
-                    if (bytes > maximumBytes) {
-                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.sourceVideoExceedsTheSizeLimit"));
+            int attempt = 0;
+            while (true) {
+                attempt++;
+                long received = Files.exists(target) ? Files.size(target) : 0L;
+                try {
+                    ResultMediaDownload download = openResultMedia(uri, received, Duration.ofMinutes(10), maximumBytes, defaultMimeType);
+                    long bytes = download.startOffset();
+                    try (InputStream inputStream = download.body();
+                         OutputStream outputStream = download.startOffset() == 0
+                                 ? Files.newOutputStream(target, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)
+                                 : Files.newOutputStream(target, StandardOpenOption.CREATE, StandardOpenOption.APPEND, StandardOpenOption.WRITE)) {
+                        byte[] buffer = new byte[8192];
+                        int readBytes;
+                        while ((readBytes = inputStream.read(buffer)) != -1) {
+                            bytes += readBytes;
+                            if (bytes > maximumBytes) {
+                                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.sourceVideoExceedsTheSizeLimit"));
+                            }
+                            outputStream.write(buffer, 0, readBytes);
+                        }
                     }
-                    outputStream.write(buffer, 0, readBytes);
+                    return new RemoteMediaFile(bytes, download.mimeType());
+                } catch (Exception exception) {
+                    if (attempt < RESULT_MEDIA_MAXIMUM_ATTEMPTS && isRetryableResultMediaFailure(exception)) {
+                        log.warn("结果媒体下载中断，第 {} 次续传: url={}, received={}, reason={}", attempt, uri, received, exception.toString());
+                        Thread.sleep(resultMediaRetryDelay.toMillis() * attempt);
+                        continue;
+                    }
+                    Files.deleteIfExists(target);
+                    throw exception;
                 }
-            } catch (Exception exception) {
-                Files.deleteIfExists(target);
-                throw exception;
             }
-            return new RemoteMediaFile(bytes, mimeType);
         });
+    }
+
+    /**
+     * 发起一次结果媒体下载，已收到部分内容时用 Range 从断点续传。
+     *
+     * @param uri URI 已校验的媒体地址
+     * @param offset long 已经收到并落盘的字节数，0 表示从头下载
+     * @param timeout Duration 单次请求超时
+     * @param maximumBytes long 允许下载的最大字节数
+     * @param defaultMimeType String 响应没有 Content-Type 时使用的默认类型
+     * @return ResultMediaDownload 响应流与本次数据的起始位置
+     * @throws IOException 连接失败、读取失败或续传响应不合规时抛出
+     * @throws InterruptedException 线程被中断时抛出
+     */
+    private ResultMediaDownload openResultMedia(URI uri, long offset, Duration timeout, long maximumBytes, String defaultMimeType)
+            throws IOException, InterruptedException {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri).timeout(timeout).GET();
+        if (offset > 0) {
+            builder.header("Range", "bytes=" + offset + "-");
+        }
+        HttpResponse<InputStream> response = remoteMediaHttpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
+        int status = response.statusCode();
+        if (status != 200 && status != 206) {
+            try (InputStream inputStream = response.body()) {
+                throw AiErrorSupport.providerException(status, "", "download");
+            }
+        }
+        long startOffset = 0L;
+        if (status == 206) {
+            // 只有服务端明确从断点开始返回剩余内容才允许追加写，否则文件会错位。
+            Optional<String> contentRange = response.headers().firstValue("Content-Range");
+            Matcher matcher = contentRange.map(CONTENT_RANGE_START::matcher).orElse(null);
+            if (matcher == null || !matcher.find() || Long.parseLong(matcher.group(1)) != offset) {
+                response.body().close();
+                throw new IOException("续传响应与断点不一致: offset=" + offset + ", contentRange=" + contentRange.orElse(""));
+            }
+            startOffset = offset;
+        }
+        long contentLength = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
+        if (contentLength > 0 && startOffset + contentLength > maximumBytes) {
+            response.body().close();
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.sourceVideoExceedsTheSizeLimit"));
+        }
+        String mimeType = AiTaskParameterReader.firstNonEmpty(response.headers().firstValue("Content-Type").orElse(defaultMimeType), defaultMimeType);
+        return new ResultMediaDownload(response.body(), startOffset, mimeType);
+    }
+
+    /**
+     * 判断结果媒体下载失败是否值得续传：连接或读取中断、限流、服务端 5xx 可以重试，
+     * 地址失效、鉴权失败这类再试也没用的直接失败。
+     *
+     * @param exception Exception 本次下载抛出的异常
+     * @return boolean 值得续传时为 true
+     */
+    private static boolean isRetryableResultMediaFailure(Exception exception) {
+        if (exception instanceof AiProviderException providerException) {
+            Integer status = providerException.getDetails() == null ? null : providerException.getDetails().httpStatus();
+            return status == null || status == 429 || status >= 500;
+        }
+        return exception instanceof IOException;
     }
 
     /**
@@ -980,6 +1056,15 @@ public class AiHttpClient {
      *
      * @param bytes Long 文件字节数
      * @param mimeType String MIME类型
+     */
+    private record ResultMediaDownload(InputStream body, long startOffset, String mimeType) {
+    }
+
+    /**
+     * 已下载的结果媒体。
+     *
+     * @param bytes Long 字节数
+     * @param mimeType String 媒体类型
      */
     public record RemoteMediaFile(Long bytes, String mimeType) {
     }
