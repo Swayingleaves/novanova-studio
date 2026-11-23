@@ -28,6 +28,7 @@ export type NodeActions = {
     onSplit: (node: CanvasNode) => void;
     onViewImage: (node: CanvasNode) => void;
     onViewVideo: (node: CanvasNode) => void;
+    onCaptureVideoFrame?: (node: CanvasVideoNode, video: HTMLVideoElement) => Promise<void>;
     onRetry: (node: CanvasNode) => void;
     onOpenStoryboard: (node: CanvasStoryboardNode) => void;
     onOpenDirectorDesk?: (node: CanvasDirectorDeskNode) => void;
