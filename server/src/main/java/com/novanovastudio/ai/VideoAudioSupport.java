@@ -3,8 +3,10 @@ package com.novanovastudio.ai;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.common.SystemMessage;
+import com.novanovastudio.dto.PersistenceDtos;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -39,6 +41,9 @@ public final class VideoAudioSupport {
     /** 判断不了，按模型默认、不能开关。 */
     public static final String UNKNOWN = "unknown";
 
+    /** 自定义模型约束里能填的值（不填为 unknown）。 */
+    public static final Set<String> CONFIGURABLE = Set.of(SWITCHABLE, ALWAYS, NONE);
+
     /** Seedance 1.0（pro / pro fast / lite）：无声模型。 */
     private static final Pattern SEEDANCE_SILENT = Pattern.compile("seedance-?1[-.]0(?!\\d)");
 
@@ -52,13 +57,33 @@ public final class VideoAudioSupport {
     }
 
     /**
-     * 视频模型的声音能力。自定义模型只知道接口名、判断不了，按 unknown（模型默认）处理。
+     * 视频模型的声音能力，只按渠道格式和模型名判断。
      *
      * @param apiFormat String 渠道格式
      * @param model     String 模型名
      * @return String switchable / always / none / unknown
      */
     public static String output(String apiFormat, String model) {
+        return output(apiFormat, model, false, null, null);
+    }
+
+    /**
+     * 视频模型的声音能力。自定义模型只知道接口名，按该模式「生成音频」约束判断，不填为 unknown。
+     *
+     * @param apiFormat    String 渠道格式
+     * @param model        String 模型名
+     * @param customModel  boolean 是否自定义模型
+     * @param customConfig Map 自定义模型各模式配置
+     * @param mode         String 视频生成模式，自定义模型按模式区分
+     * @return String switchable / always / none / unknown
+     */
+    public static String output(String apiFormat, String model, boolean customModel,
+                                Map<String, PersistenceDtos.CustomModelGroupConfig> customConfig, String mode) {
+        if (customModel) {
+            PersistenceDtos.CustomModelGroupConfig group = customConfig == null || mode == null ? null : customConfig.get(mode);
+            String value = group == null || group.videoGenerationConstraints() == null ? null : group.videoGenerationConstraints().audioOutput();
+            return value != null && CONFIGURABLE.contains(value) ? value : UNKNOWN;
+        }
         String name = lower(model);
         return switch (lower(apiFormat)) {
             case "agnes", "minimax", "wenew" -> ALWAYS;

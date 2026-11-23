@@ -42,6 +42,8 @@ export type VideoGenerationConstraints = {
     supportedAspectRatios?: string[];
     maximumVideoCount?: number | null;
     maximumAudioCount?: number | null;
+    /** 生成音频：switchable 可开关（请求模板要写 {{generateAudio}}）、always 固定有声、none 不能出声，不填按模型默认。 */
+    audioOutput?: "switchable" | "always" | "none" | null;
 };
 /** 自定义模型单能力/模式分组配置。 */
 export type CustomModelGroupConfig = {

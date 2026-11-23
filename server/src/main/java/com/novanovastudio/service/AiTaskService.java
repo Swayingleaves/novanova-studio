@@ -1554,9 +1554,8 @@ public class AiTaskService {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.thisModelLacks", videoModeLabel(mode)));
         }
         // 生成音频：固定有声的模型不能关、不能出声的模型不能开，扣费前拦下（声音开关不影响计费）。
-        VideoAudioSupport.validate(resolvedModel.isCustomModel() ? VideoAudioSupport.UNKNOWN
-                : VideoAudioSupport.output(resolvedModel.channel() == null ? null : resolvedModel.channel().apiFormat(), resolvedModel.model()),
-                VideoAudioSupport.requested(request.parameters()));
+        VideoAudioSupport.validate(VideoAudioSupport.output(resolvedModel.channel() == null ? null : resolvedModel.channel().apiFormat(),
+                resolvedModel.model(), resolvedModel.isCustomModel(), resolvedModel.customModelConfig(), mode), VideoAudioSupport.requested(request.parameters()));
         VideoBillingConfiguration configuration = resolvedModel.videoBillingConfiguration();
         if (configuration == null) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoTierPricingIsNotConfigured"));

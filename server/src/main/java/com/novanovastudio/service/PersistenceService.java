@@ -7,6 +7,7 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AudioInputSupport;
+import com.novanovastudio.ai.VideoAudioSupport;
 import com.novanovastudio.ai.VideoGenerationConstraintSupport;
 import com.alibaba.fastjson2.TypeReference;
 import com.novanovastudio.ai.AudioMediaProbe;
@@ -830,9 +831,24 @@ public class PersistenceService {
                 PersistenceDtos.CustomModelGroupConfig group = normalized.get(mode);
                 VideoGenerationConstraintSupport.validateConfiguration(mode,
                         group == null ? null : group.videoGenerationConstraints(), capabilities, billing);
+                // 设为可开关声音却没把 {{generateAudio}} 写进请求，开关就发不出去
+                if (group != null && VideoAudioSupport.SWITCHABLE.equals(group.videoGenerationConstraints().audioOutput())
+                        && !mentionsGenerateAudio(group.requestTemplate()) && !mentionsGenerateAudio(group.aiRequestPrompt())) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoConstraintAudioPlaceholderMissing", mode));
+                }
             }
         }
         return Map.copyOf(normalized);
+    }
+
+    /**
+     * 自定义模型的请求示例或 AI 构造提示词里有没有写生成音频占位符。
+     *
+     * @param text String 请求示例或 AI 构造提示词
+     * @return boolean 写了 {{generateAudio}} 时为 true
+     */
+    private static boolean mentionsGenerateAudio(String text) {
+        return text != null && text.contains("{{" + VideoAudioSupport.PARAMETER + "}}");
     }
 
     /** 规范化模型自定义JSON请求体参数。 */

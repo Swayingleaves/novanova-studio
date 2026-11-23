@@ -14,6 +14,7 @@ import java.util.List;
  * @param supportedAspectRatios List 支持的宽高比，auto 表示自动比例
  * @param maximumVideoCount Integer 全能参考最多输入视频数量
  * @param maximumAudioCount Integer 全能参考最多输入音频数量
+ * @param audioOutput String 生成音频：switchable 可开关（模板要写 {{generateAudio}}）、always 固定有声、none 不能出声，不填按模型默认
  * @author zhenglin.cn.cq@gmail.com
  * @date 2026-10-22 00:00
  */
@@ -24,5 +25,14 @@ public record VideoGenerationConstraints(
         @JSONField(deserializeUsing = StrictIntegerReader.class) Integer maximumImageCount,
         List<String> supportedAspectRatios,
         @JSONField(deserializeUsing = StrictIntegerReader.class) Integer maximumVideoCount,
-        @JSONField(deserializeUsing = StrictIntegerReader.class) Integer maximumAudioCount) {
+        @JSONField(deserializeUsing = StrictIntegerReader.class) Integer maximumAudioCount,
+        String audioOutput) {
+
+    /** 不设生成音频（按模型默认）的限制。 */
+    public VideoGenerationConstraints(Integer minimumDurationSeconds, Integer maximumDurationSeconds, Integer minimumImageCount,
+                                      Integer maximumImageCount, List<String> supportedAspectRatios, Integer maximumVideoCount,
+                                      Integer maximumAudioCount) {
+        this(minimumDurationSeconds, maximumDurationSeconds, minimumImageCount, maximumImageCount, supportedAspectRatios,
+                maximumVideoCount, maximumAudioCount, null);
+    }
 }

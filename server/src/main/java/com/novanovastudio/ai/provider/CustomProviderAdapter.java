@@ -15,6 +15,7 @@ import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.AiTaskParameterReader;
 import com.novanovastudio.ai.AiTaskPollingSupport;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.ai.VideoAudioSupport;
 import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.agent.AgentScopeModelFactory;
 import com.novanovastudio.common.BusinessException;
@@ -363,7 +364,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                                                 String userPrompt, String purpose, List<String> referenceUrls,
                                                 List<String> videoReferenceUrls, List<String> audioReferenceUrls, String taskId) {
         String prompt = "你是AI请求体构造助手。请严格按用户要求构造JSON请求体对象。\n\n"
-                + "用户构造要求：\n" + renderPromptPlaceholders(userPrompt, group) + "\n\n"
+                + "用户构造要求：\n" + renderPromptPlaceholders(userPrompt, group, generateAudioPlaceholder(context)) + "\n\n"
                 + "本次请求信息：\n" + describeRequestParameters(context, group, referenceUrls, videoReferenceUrls, audioReferenceUrls, taskId) + "\n\n"
                 + "【约束规则】：严格仅包含用户构造要求或示例中明确需要的字段，严禁自行扩展未提及的额外字段（如 count、batch 等）。\n"
                 + "【重要】请求模型名称必须原样使用「请求模型名称」给出的值，不得改写、缩写或推测变体。\n"
@@ -406,17 +407,29 @@ public class CustomProviderAdapter implements AiProviderAdapter {
      *
      * @param userPrompt 用户配置的AI构造提示词
      * @param group      PersistenceDtos.CustomModelGroupConfig 当前能力或模式配置
+     * @param generateAudio Boolean 视频任务的生成音频开关，非视频任务为空（不替换 {{generateAudio}}）
      * @return String 替换后的提示词
      */
-    private static String renderPromptPlaceholders(String userPrompt, PersistenceDtos.CustomModelGroupConfig group) {
+    private static String renderPromptPlaceholders(String userPrompt, PersistenceDtos.CustomModelGroupConfig group, Boolean generateAudio) {
         if (!StringUtils.hasText(userPrompt)) {
             return userPrompt;
         }
         String requestModelName = group.requestModelName();
-        if (!StringUtils.hasText(requestModelName)) {
-            return userPrompt;
+        String rendered = StringUtils.hasText(requestModelName) ? userPrompt.replace("{{model}}", escapeJsonString(requestModelName)) : userPrompt;
+        return generateAudio == null ? rendered : rendered.replace("{{generateAudio}}", String.valueOf(generateAudio));
+    }
+
+    /**
+     * 视频任务「生成音频」占位符的值：按本次开关，没传按开启（接口只认布尔时不能给 null）；非视频任务为空。
+     *
+     * @param context AiTaskExecutionContext AI任务执行上下文
+     * @return Boolean 占位符值
+     */
+    private static Boolean generateAudioPlaceholder(AiTaskExecutionContext context) {
+        if (!AiTaskTypes.VIDEO.equals(context.task().getTaskType())) {
+            return null;
         }
-        return userPrompt.replace("{{model}}", escapeJsonString(requestModelName));
+        return !Boolean.FALSE.equals(VideoAudioSupport.requested(context.request().parameters()));
     }
 
     /**
@@ -505,6 +518,11 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         String seconds = AiTaskParameterReader.stringParameter(parameters, "seconds", "");
         if (StringUtils.hasText(seconds)) {
             builder.append("- 时长(秒): ").append(seconds).append('\n');
+        }
+        Boolean generateAudio = AiTaskTypes.VIDEO.equals(context.task().getTaskType()) ? VideoAudioSupport.requested(parameters) : null;
+        if (generateAudio != null) {
+            builder.append("- 生成音频: ").append(generateAudio ? "开启" : "关闭")
+                    .append("（接口有生成声音、音效或背景音乐的开关字段时按此填写，没有时不要编造字段）").append('\n');
         }
         if (AiTaskTypes.IMAGE.equals(context.task().getTaskType())) {
             builder.append("- 数量: ").append(AiTaskParameterReader.intParameter(parameters, "count", 1, 1, 10)).append('\n');
@@ -664,6 +682,10 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         String seconds = AiTaskParameterReader.stringParameter(parameters, "seconds", "");
         if (StringUtils.hasText(seconds)) {
             placeholders.put("seconds", seconds);
+        }
+        Boolean generateAudio = generateAudioPlaceholder(context);
+        if (generateAudio != null) {
+            placeholders.put(VideoAudioSupport.PARAMETER, generateAudio);
         }
         placeholders.put("count", AiTaskParameterReader.intParameter(parameters, "count", 1, 1, 10));
         if (StringUtils.hasText(taskId)) {

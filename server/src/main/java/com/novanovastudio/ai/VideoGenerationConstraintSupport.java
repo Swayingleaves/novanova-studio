@@ -58,7 +58,8 @@ public final class VideoGenerationConstraintSupport {
         }
         if (constraints.minimumDurationSeconds() < 1 || constraints.maximumDurationSeconds() < constraints.minimumDurationSeconds()
                 || constraints.minimumImageCount() < 0 || constraints.maximumImageCount() < constraints.minimumImageCount()
-                || constraints.supportedAspectRatios().stream().anyMatch(ratio -> ratio == null || !ASPECT_RATIOS.contains(ratio))) {
+                || constraints.supportedAspectRatios().stream().anyMatch(ratio -> ratio == null || !ASPECT_RATIOS.contains(ratio))
+                || constraints.audioOutput() != null && !VideoAudioSupport.CONFIGURABLE.contains(constraints.audioOutput())) {
             throw invalid("business.videoConstraintsInvalid", mode);
         }
         int billingMinimum = billing == null || billing.minimumDurationSeconds() == null ? 1 : billing.minimumDurationSeconds();
