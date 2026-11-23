@@ -18,6 +18,7 @@ import com.novanovastudio.ai.AiTaskPollingSupport;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.MultipartPart;
 import com.novanovastudio.ai.VideoAudioSupport;
+import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
@@ -372,8 +373,11 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
         if (size.matches("^\\d+x\\d+$")) payload.put("size", size);
         if (!imageUrls.isEmpty()) {
             payload.put("images", imageUrls);
-            payload.put("image", imageUrls.getFirst());
-            payload.put("input_reference", imageUrls.getFirst());
+            // 全能参考的图都是参考图：首帧字段只给图生视频、首尾帧用，否则渠道会当成「参考图 + 一张不同的首帧」
+            if (!VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode)) {
+                payload.put("image", imageUrls.getFirst());
+                payload.put("input_reference", imageUrls.getFirst());
+            }
             payload.put("reference_image_roles", imageRoles == null ? List.of() : imageRoles);
         }
         if (!safeAudios.isEmpty()) {

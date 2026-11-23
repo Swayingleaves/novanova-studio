@@ -96,6 +96,27 @@ class NewApiProviderAdapterTest {
     }
 
     /**
+     * 验证全能参考模式不把第一张图当成首帧写入请求。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldNotFillFirstFrameFieldsForReferenceToVideo() {
+        Map<String, Object> payload = NewApiProviderAdapter.buildVideoRequestPayload(
+                "bytedance/seedance-2.0/reference-to-video", "两个人站在雨里",
+                Map.of("seconds", "5", "resolution", "720p", "size", "16:9"),
+                List.of("https://example.com/ref-a.png", "https://example.com/ref-b.png"),
+                List.of(), List.of(), "reference-to-video", List.of());
+        JSONObject json = JSON.parseObject(JSON.toJSONString(payload));
+
+        Assertions.assertFalse(json.containsKey("image"), "全能参考不能带首帧字段");
+        Assertions.assertFalse(json.containsKey("input_reference"), "全能参考不能带首帧字段");
+        Assertions.assertEquals(2, json.getJSONArray("images").size());
+        Assertions.assertEquals("reference-to-video", json.getString("video_generation_mode"));
+        Assertions.assertEquals(2, json.getJSONObject("metadata").getJSONArray("reference_images").size());
+    }
+
+    /**
      * 验证完成视频地址必须从metadata.url读取。
      *
      * @return void 无返回值
