@@ -20,7 +20,7 @@ public final class AiTaskParameterReader {
     }
 
     /**
-     * 读取整数参数并限制范围
+     * 读取数字或整数字符串并限制范围
      *
      * @param parameters Map<String, Object> 参数集合
      * @param key String 参数名
@@ -31,7 +31,16 @@ public final class AiTaskParameterReader {
      */
     public static int intParameter(Map<String, Object> parameters, String key, int defaultValue, int min, int max) {
         Object value = parameters == null ? null : parameters.get(key);
-        int parsed = value instanceof Number number ? number.intValue() : defaultValue;
+        int parsed = defaultValue;
+        if (value instanceof Number number) {
+            parsed = number.intValue();
+        } else if (value instanceof String text) {
+            try {
+                parsed = Integer.parseInt(text.trim());
+            } catch (NumberFormatException ignored) {
+                // 非法或超出 int 范围的字符串使用默认值。
+            }
+        }
         return Math.max(min, Math.min(max, parsed));
     }
 

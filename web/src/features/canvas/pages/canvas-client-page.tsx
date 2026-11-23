@@ -33,6 +33,7 @@ import { quoteVideoGeneration } from "@/features/generation/lib/video-billing";
 import { defaultConfig, normalizeModelOptionValue, type AiConfig, useConfigStore, useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { getImageBlob, resolveImageUrl, reuseOrUploadImage, uploadImage, type UploadedImage } from "@/features/storage/services/image-storage";
 import { stopCanvasAudio } from "../services/canvas-audio-playback";
+import { captureCanvasVideoFrame } from "../services/canvas-video-frame";
 import { mergeAudioReferences } from "../utils/audio-references";
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
@@ -3266,6 +3267,40 @@ function CanvasWorkspacePage() {
         [addAsset, message],
     );
 
+    const captureVideoFrame = useCallback(async (node: CanvasVideoNode, video: HTMLVideoElement) => {
+        const signal = mediaUploadScopeRef.current?.controller.signal;
+        if (!signal || signal.aborted) return;
+        const { source, storageKey } = node.content;
+        const findCurrentVideo = () => {
+            const current = nodesRef.current.find((item) => item.id === node.id);
+            return current && isVideoNode(current) && current.content.source === source && current.content.storageKey === storageKey ? current : null;
+        };
+        try {
+            const videoUrl = video.currentSrc;
+            const frame = await captureCanvasVideoFrame(video, async () => {
+                const stored = storageKey ? await getMediaBlob(storageKey) : null;
+                if (stored) return stored;
+                if (!videoUrl) return null;
+                const response = await fetch(videoUrl, { signal });
+                return response.ok ? response.blob() : null;
+            }, signal);
+            if (signal.aborted || !findCurrentVideo()) return;
+            const image = await uploadImage(frame, { compress: false });
+            const current = findCurrentVideo();
+            if (signal.aborted || !current) return;
+            const size = fitNodeSize(image.width, image.height);
+            const anchor = { x: current.frame.position.x + current.frame.width + CONNECTED_NODE_GAP, y: current.frame.position.y };
+            const position = findNonOverlappingCanvasNodePosition(nodesRef.current, anchor, size.width, size.height);
+            const child = updateCanvasNodeFrame({ ...createCanvasNode("image", position, imageAttributes(image)), title: translate("canvas.capturedVideoFrame") }, { position, ...size });
+            setNodes((previous) => [...previous, child]);
+            setConnections((previous) => [...previous, createRightToLeftConnection(current.id, child.id)]);
+            setSelectedNodeIds(new Set([child.id]));
+            setSelectedConnectionId(null);
+        } catch {
+            if (!signal.aborted && findCurrentVideo()) message.error(translate("canvas.captureVideoFrameFailed"));
+        }
+    }, [message, translate]);
+
     const cropImageNode = useCallback(
         async (node: CanvasDomainNode, crop: CanvasImageCropRect) => {
             if (!isImageNode(node) || !node.content.source) return;
@@ -5096,7 +5131,11 @@ function CanvasWorkspacePage() {
             onTrim: (n) => setAudioTrimNodeId(n.id),
             onSplit: (n) => setSplitNodeId(n.id),
             onViewImage: (n) => setPreviewNodeId(n.id),
-            onViewVideo: (n) => setPreviewNodeId(n.id),
+            onViewVideo: (n) => {
+                stopCanvasAudio();
+                setPreviewNodeId(n.id);
+            },
+            onCaptureVideoFrame: captureVideoFrame,
             onRetry: (n) => (isStoryboardNode(n) ? void handleGenerateStoryboard(n) : void handleRetryNode(n)),
             onOpenStoryboard: (node) => setStoryboardWorkspaceNodeId(node.id),
             onOpenDirectorDesk: (node) => setDirectorDeskWorkspaceNodeId(node.id),
@@ -5128,6 +5167,7 @@ function CanvasWorkspacePage() {
         }),
         [
             batchCardStacks,
+            captureVideoFrame,
             collapsingBatchIds,
             confirmDeleteNodes,
             downloadNodeImage,

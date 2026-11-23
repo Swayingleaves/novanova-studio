@@ -17,6 +17,7 @@ import com.novanovastudio.ai.AiTaskParameterReader;
 import com.novanovastudio.ai.AiTaskPollingSupport;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.MultipartPart;
+import com.novanovastudio.ai.VideoAudioSupport;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
@@ -382,6 +383,9 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
         metadata.put("aspect_ratio", normalizeAspectRatio(size));
         Boolean watermark = booleanParameter(parameters, "watermark");
         if (watermark != null) metadata.put("watermark", watermark);
+        // 生成音频：New API 豆包插件把 metadata 原样合进方舟请求体，只有 Seedance 认 generate_audio；海螺 H3 等没有声音开关，不写。
+        Boolean audio = VideoAudioSupport.nativeValue(VideoAudioSupport.output("newapi", model), parameters);
+        if (audio != null) metadata.put("generate_audio", audio);
         if (!imageUrls.isEmpty()) metadata.put("reference_images", imageUrls);
         if (!videoUrls.isEmpty()) metadata.put("reference_videos", videoUrls);
         if (!safeAudios.isEmpty()) metadata.put("reference_audios", safeAudios);

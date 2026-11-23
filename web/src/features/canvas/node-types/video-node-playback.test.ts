@@ -1,17 +1,30 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { activateCanvasAudio, releaseCanvasAudio, stopCanvasAudio } from "../services/canvas-audio-playback";
 
-const videoNodeSource = readFileSync(new URL("./video-node.tsx", import.meta.url), "utf8");
-const actionContextSource = readFileSync(new URL("./node-action-context.ts", import.meta.url), "utf8");
+const nodeSource = readFileSync(new URL("./video-node.tsx", import.meta.url), "utf8");
+const pageSource = readFileSync(new URL("../pages/canvas-client-page.tsx", import.meta.url), "utf8");
 const overlaySource = readFileSync(new URL("../components/canvas-workspace-overlays.tsx", import.meta.url), "utf8");
-const canvasPageSource = readFileSync(new URL("../pages/canvas-client-page.tsx", import.meta.url), "utf8");
 
-test("视频节点播放通过放大弹窗进行", () => {
-    assert.ok(actionContextSource.includes("onViewVideo"), "节点操作上下文缺少视频预览回调");
-    assert.ok(videoNodeSource.includes("actions.onViewVideo(data)"), "视频节点播放按钮未打开预览弹窗");
-    assert.ok(!videoNodeSource.includes("videoRef.current?.play()"), "视频节点仍在画布内直接播放");
-    assert.ok(canvasPageSource.includes("onViewVideo: (n) => setPreviewNodeId(n.id)"), "画布页面未接收视频预览请求");
-    assert.ok(overlaySource.includes("autoPlay controls playsInline"), "视频预览弹窗未自动播放或缺少播放控制");
-    assert.ok(overlaySource.includes("destroyOnHidden"), "关闭视频预览后未销毁播放器");
+test("视频节点可在画布内播放和截帧，仍保留放大预览", () => {
+    assert.ok(nodeSource.includes("video.play()"));
+    assert.ok(nodeSource.includes("await onCapture(video)"));
+    assert.ok(nodeSource.includes("onPreview={() => actions.onViewVideo(data)}"));
+    assert.match(pageSource, /onCaptureVideoFrame: captureVideoFrame/);
+    assert.match(overlaySource, /autoPlay controls playsInline/);
+    assert.match(overlaySource, /destroyOnHidden/);
+});
+
+test("画布同时只播放一个媒体，释放旧节点不影响新节点", () => {
+    const pauses: string[] = [];
+    const first = { pause: () => { pauses.push("first"); } } as HTMLMediaElement;
+    const second = { pause: () => { pauses.push("second"); } } as HTMLMediaElement;
+    activateCanvasAudio(first);
+    activateCanvasAudio(second);
+    assert.deepEqual(pauses, ["first"]);
+    releaseCanvasAudio(first);
+    stopCanvasAudio();
+    stopCanvasAudio();
+    assert.deepEqual(pauses, ["first", "first", "second"]);
 });

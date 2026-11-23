@@ -5,6 +5,7 @@ import { boolConfig } from "@/features/generation/lib/seedance-video";
 import { createAiTask, getAiTaskInfo, waitAiTask, type GenerationStyleSnapshot, type ServerAiTask, type ServerAiTaskMediaReference, type ServerGenerationSource } from "@/services/api/server";
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
 import { readVideoGenerationConstraintIssue } from "@/features/generation/lib/video-generation-constraints";
+import { videoAudioParameter } from "@/features/generation/lib/video-audio";
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/features/generation/types/media";
 
@@ -117,6 +118,8 @@ async function createServerVideoTask(config: AiConfig, prompt: string, reference
             size: config.size,
             resolution: config.vquality,
             watermark: boolConfig(config.videoWatermark, false),
+            // 只有能开关声音的模型才带，其余按模型默认
+            ...videoAudioParameter(config, selectedModel),
         },
         references: references.map((reference, index) => ({ ...toServerImageReference(reference),
             ...(config.videoGenerationMode === "first-last-frame-to-video" ? { role: index === 0 ? "first_frame" : "last_frame" } : {}) })),
