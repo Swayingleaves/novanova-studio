@@ -1,4 +1,4 @@
-import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
+import { modelOptionName, resolveModelRequestConfig, type AiConfig, type VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 import { readVideoModelConfiguration } from "./video-generation-constraints";
 
 /**
@@ -34,23 +34,30 @@ export function videoAudioOutput(apiFormat: string, model: string): VideoAudioOu
     }
 }
 
-/** 当前（或指定）视频模型在当前（或指定）模式下的声音能力；自定义模型只知道接口名，判断不了，按 unknown。 */
-export function readVideoAudioOutput(config: AiConfig, model = config.videoModel || config.model): VideoAudioOutput {
-    if (readVideoModelConfiguration(config, model)?.isCustomModel) return "unknown";
+/** 自定义模型约束里能填的值（不填为 unknown）。 */
+export const CONFIGURABLE_VIDEO_AUDIO_OUTPUTS = ["switchable", "always", "none"] as const;
+
+/** 当前（或指定）视频模型在当前（或指定）模式下的声音能力；自定义模型看该模式的「生成音频」约束，不看模型名。 */
+export function readVideoAudioOutput(config: AiConfig, model = config.videoModel || config.model, mode: VideoGenerationMode = config.videoGenerationMode): VideoAudioOutput {
+    const configuration = readVideoModelConfiguration(config, model);
+    if (configuration?.isCustomModel) {
+        const value = configuration.videoGenerationConstraints?.[mode]?.audioOutput;
+        return value && (CONFIGURABLE_VIDEO_AUDIO_OUTPUTS as readonly string[]).includes(value) ? value : "unknown";
+    }
     const resolved = resolveModelRequestConfig(config, model);
     return videoAudioOutput(resolved.apiFormat, modelOptionName(resolved.model));
 }
 
 /** 实际会不会出声：能开关时按设置（没设按开启），固定有声算开，不能出声算关，按模型默认时为 undefined。 */
-export function videoAudioOn(config: AiConfig, model?: string): boolean | undefined {
-    const output = readVideoAudioOutput(config, model);
+export function videoAudioOn(config: AiConfig, model?: string, mode?: VideoGenerationMode): boolean | undefined {
+    const output = readVideoAudioOutput(config, model, mode);
     if (output === "switchable") return String(config.videoAudio ?? "").trim().toLowerCase() !== "false";
     return output === "always" ? true : output === "none" ? false : undefined;
 }
 
 /** 任务参数里的生成音频：只有能开关的模型才带，其余按模型默认（服务端会拒绝关不掉、开不了的要求）。 */
-export function videoAudioParameter(config: AiConfig, model?: string): { generateAudio?: boolean } {
-    return readVideoAudioOutput(config, model) === "switchable" ? { generateAudio: videoAudioOn(config, model) !== false } : {};
+export function videoAudioParameter(config: AiConfig, model?: string, mode?: VideoGenerationMode): { generateAudio?: boolean } {
+    return readVideoAudioOutput(config, model, mode) === "switchable" ? { generateAudio: videoAudioOn(config, model, mode) !== false } : {};
 }
 
 function seedanceAudioOutput(name: string): VideoAudioOutput {

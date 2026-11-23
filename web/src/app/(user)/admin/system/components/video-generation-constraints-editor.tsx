@@ -1,6 +1,6 @@
 "use client";
 
-import { Checkbox, Form, InputNumber } from "antd";
+import { Checkbox, Form, InputNumber, Select } from "antd";
 import { useTranslation } from "@/features/locale/use-translation";
 import { VIDEO_ASPECT_RATIOS, videoConstraintConfigurationIssues, videoConstraintFieldLabel, type VideoConstraintField } from "@/features/generation/lib/video-generation-constraints";
 import type { VideoGenerationConstraints, VideoGenerationMode } from "@/features/settings/stores/use-config-store";
@@ -44,6 +44,20 @@ export function VideoGenerationConstraintsEditor({ mode, constraints, audioEnabl
                 <div id={`${mode}-supportedAspectRatios`} tabIndex={-1}>
                     <Checkbox.Group aria-label={videoConstraintFieldLabel("supportedAspectRatios")} className="flex flex-wrap gap-2" value={current.supportedAspectRatios} options={VIDEO_ASPECT_RATIOS.map((ratio) => ({ value: ratio, label: ratio === "auto" ? translate("generation.videoConstraintAutomatic") : ratio }))} onChange={(values) => updateConstraints({ supportedAspectRatios: values.map(String) })} />
                 </div>
+            </Form.Item>
+            {/* 生成音频：可开关时请求示例或 AI 构造提示词要写 {{generateAudio}}（保存时服务端校验） */}
+            <Form.Item className="mb-0 mt-3" label={videoConstraintFieldLabel("audioOutput")} htmlFor={`${mode}-audioOutput`} layout="vertical">
+                <Select
+                    id={`${mode}-audioOutput`}
+                    value={current.audioOutput ?? ""}
+                    options={[
+                        { value: "", label: translate("generation.videoConstraintAudioOutputDefault") },
+                        { value: "switchable", label: translate("generation.videoConstraintAudioOutputSwitchable", { value0: "{{generateAudio}}" }) },
+                        { value: "always", label: translate("generation.videoConstraintAudioOutputAlways") },
+                        { value: "none", label: translate("generation.videoConstraintAudioOutputNone") },
+                    ]}
+                    onChange={(value: string) => updateConstraints({ audioOutput: value === "switchable" || value === "always" || value === "none" ? value : null })}
+                />
             </Form.Item>
         </section>
     );
