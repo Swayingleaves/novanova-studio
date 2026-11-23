@@ -189,11 +189,15 @@ class NanaProviderAdapterTest {
      */
     @Test
     void shouldResolveVideoProtocolForOfficialAndCheapSeedance() {
-        // 优先按 groups 识别，即使模型名没有统一前缀也能准确命中
+        // 优先按 groups 识别，即使模型名没有统一前缀也能准确命中（支持子分组如 seedance-cheap-ml）
         Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.SEEDANCE_CHEAP,
                 NanaProviderAdapter.resolveVideoProtocol("custom-video-model-1", List.of("seedance-cheap")));
+        Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.SEEDANCE_CHEAP,
+                NanaProviderAdapter.resolveVideoProtocol("qh-vidu-q4", List.of("seedance-cheap-ml")));
         Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.SEEDANCE_OFFICIAL,
                 NanaProviderAdapter.resolveVideoProtocol("custom-video-model-2", List.of("doubao-gz")));
+        Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.SEEDANCE_OFFICIAL,
+                NanaProviderAdapter.resolveVideoProtocol("custom-video-model-3", List.of("doubao-gz-v2")));
         Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.SEEDANCE_CHEAP,
                 NanaProviderAdapter.resolveVideoProtocol("doubao-seedance-2-0-mini-260615", List.of("seedance-cheap")));
         Assertions.assertEquals(NanaProviderAdapter.VideoProtocol.OPENAI,

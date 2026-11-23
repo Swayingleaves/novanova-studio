@@ -25,6 +25,13 @@ test("resolveModelIcon 为 Qwen 和 Wan 系列模型显示 Qwen 图标", () => {
     assert.equal(resolveModelIcon("want-video-model"), "");
 });
 
+test("resolveModelIcon 为 Kling 和 Vidu 系列模型显示对应图标", () => {
+    assert.equal(resolveModelIcon("nv-kling4.0-flash"), "/icons/kling.svg");
+    assert.equal(resolveModelIcon("kling-v2.1"), "/icons/kling.svg");
+    assert.equal(resolveModelIcon("qh-vidu-q4"), "/icons/vidu.svg");
+    assert.equal(resolveModelIcon("qh-vidu-q4-nopeak"), "/icons/vidu.svg");
+});
+
 test("isMonochromeModelIcon 只标记需要暗色反色的黑白单色图标", () => {
     assert.equal(isMonochromeModelIcon("gpt-image-2"), true);
     assert.equal(isMonochromeModelIcon("grok-video"), true);
@@ -33,6 +40,8 @@ test("isMonochromeModelIcon 只标记需要暗色反色的黑白单色图标", (
     assert.equal(isMonochromeModelIcon("doubao-seedance-1.5-pro"), false);
     assert.equal(isMonochromeModelIcon("MiniMax-H3"), false);
     assert.equal(isMonochromeModelIcon("gemini-2.5-flash"), false);
+    assert.equal(isMonochromeModelIcon("nv-kling4.0"), false);
+    assert.equal(isMonochromeModelIcon("qh-vidu-q4"), false);
 });
 
 test("resolveModelIconByKey 按配置标识解析品牌图标", () => {
@@ -40,6 +49,8 @@ test("resolveModelIconByKey 按配置标识解析品牌图标", () => {
     assert.equal(resolveModelIconByKey("seedance"), "/icons/bytedance.svg");
     assert.equal(resolveModelIconByKey("openai"), "/icons/openai.svg");
     assert.equal(resolveModelIconByKey("qwen"), "/icons/qwen.svg");
+    assert.equal(resolveModelIconByKey("kling"), "/icons/kling.svg");
+    assert.equal(resolveModelIconByKey("vidu"), "/icons/vidu.svg");
 });
 
 test("resolveModelIconByKey 自动匹配与默认图标返回空串", () => {

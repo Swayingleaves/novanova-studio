@@ -252,10 +252,10 @@ public class NanaProviderAdapter implements AiProviderAdapter {
         if (groups != null && !groups.isEmpty()) {
             for (String rawGroup : groups) {
                 String group = normalizeText(rawGroup);
-                if (GROUP_DOUBAO_OFFICIAL.equals(group)) {
+                if (matchesGroup(group, GROUP_DOUBAO_OFFICIAL)) {
                     return VideoProtocol.SEEDANCE_OFFICIAL;
                 }
-                if (GROUP_SEEDANCE_CHEAP.equals(group)) {
+                if (matchesGroup(group, GROUP_SEEDANCE_CHEAP)) {
                     return VideoProtocol.SEEDANCE_CHEAP;
                 }
             }
@@ -282,6 +282,17 @@ public class NanaProviderAdapter implements AiProviderAdapter {
             return VideoProtocol.MINIMAX;
         }
         return VideoProtocol.OPENAI;
+    }
+
+    /**
+     * 判断模型分组是否命中目标协议分组（支持精确匹配或连字符子分组前缀，如 seedance-cheap-ml）。
+     *
+     * @param group String 规范化后的模型分组标识
+     * @param targetGroup String 目标协议分组标识
+     * @return boolean 是否命中
+     */
+    private static boolean matchesGroup(String group, String targetGroup) {
+        return targetGroup.equals(group) || group.startsWith(targetGroup + "-");
     }
 
     /**

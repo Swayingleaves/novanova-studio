@@ -17,6 +17,8 @@ export function resolveModelIcon(model: string, apiFormat?: ApiCallFormat): stri
     if (name.includes("minimax")) return "/icons/minimax.svg";
     if (name.includes("deepseek")) return "/icons/deepseek.svg";
     if (name.includes("glm")) return "/icons/glm.svg";
+    if (name.includes("kling")) return "/icons/kling.svg";
+    if (name.includes("vidu")) return "/icons/vidu.svg";
     return "";
 }
 
@@ -48,6 +50,8 @@ export const createModelIconOptions = (translator: typeof translate = translate)
     { value: "grok", label: "Grok", path: "/icons/grok.svg" },
     { value: "minimax", label: "MiniMax", path: "/icons/minimax.svg" },
     { value: "qwen", label: "Qwen", path: "/icons/qwen.svg" },
+    { value: "kling", label: "Kling", path: "/icons/kling.svg" },
+    { value: "vidu", label: "Vidu", path: "/icons/vidu.svg" },
 ]);
 
 export const MODEL_ICON_OPTIONS = createModelIconOptions();

@@ -1031,7 +1031,7 @@ public class PersistenceService {
         return repository.listPlatformAiChannels()
                 .filter(record -> !SERVER_CHANNEL_ID.equals(record.getChannelId()))
                 .concatMap(record -> decryptSecret(record.getApiKeyEncrypted())
-                        .map(apiKey -> new AiTaskDtos.AiChannelConfig(record.getChannelId(), record.getName(), record.getBaseUrl(), apiKey, record.getApiFormat(), parseStringList(record.getModels()))))
+                        .map(apiKey -> channelDto(record, apiKey)))
                 .collectList();
     }
 
