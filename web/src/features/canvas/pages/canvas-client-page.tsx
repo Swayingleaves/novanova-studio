@@ -444,6 +444,25 @@ function CanvasWorkspacePage() {
     selectedBackgroundLabelRef.current = selectedBackgroundLabel;
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("dots");
+    const [edgeFlowEnabled, setEdgeFlowEnabled] = useState(() => {
+        if (typeof window === "undefined") return false;
+        try {
+            return window.localStorage.getItem("novanova:canvas:edge_flow_enabled") === "1";
+        } catch {
+            return false;
+        }
+    });
+    const toggleEdgeFlow = useCallback(() => {
+        setEdgeFlowEnabled((current) => {
+            const next = !current;
+            try {
+                window.localStorage.setItem("novanova:canvas:edge_flow_enabled", next ? "1" : "0");
+            } catch {
+                // 忽略本地存储异常
+            }
+            return next;
+        });
+    }, []);
     const [showImageInfo, setShowImageInfo] = useState(false);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
@@ -1035,11 +1054,19 @@ function CanvasWorkspacePage() {
         (current: ConnectionHandle, targetNodeId: string) => {
             if (current.nodeId === targetNodeId) return;
 
-            const connection = normalizeCanvasConnection(current.nodeId, targetNodeId, nodesRef.current);
-            if (!connection) {
+            const normalized = normalizeCanvasConnection(current.nodeId, targetNodeId, nodesRef.current);
+            if (!normalized) {
                 message.warning(translate("canvas.configurationNodesCannotConnect"));
                 return;
             }
+            const sourceNode = nodesRef.current.find((node) => node.id === normalized.source.nodeId);
+            const targetNode = nodesRef.current.find((node) => node.id === normalized.target.nodeId);
+            const sourceIsLeftOfTarget = !sourceNode || !targetNode || sourceNode.frame.position.x <= targetNode.frame.position.x;
+            const connection = {
+                ...normalized,
+                source: { ...normalized.source, portId: normalized.source.portId ?? (sourceIsLeftOfTarget ? "right" : "left") },
+                target: { ...normalized.target, portId: normalized.target.portId ?? (sourceIsLeftOfTarget ? "left" : "right") },
+            };
             const errorMessage = readVideoCompositionConnectionError(connection.source.nodeId, connection.target.nodeId, nodesRef.current, connectionsRef.current)
                 || readVideoReferenceAdditionIssue(nodesRef.current, [...connectionsRef.current, { id: "pending", ...connection }]);
             if (errorMessage) {
@@ -5356,12 +5383,21 @@ function CanvasWorkspacePage() {
             if (!startedConnection) return;
             if (connectionState.toNode) return;
             if (!nodesRef.current.some((node) => node.id === startedConnection.nodeId)) return;
-            if (!("clientX" in event) || !("clientY" in event)) return;
+            const point = "clientX" in event && "clientY" in event
+                ? { clientX: event.clientX, clientY: event.clientY }
+                : "changedTouches" in event && event.changedTouches[0]
+                    ? { clientX: event.changedTouches[0].clientX, clientY: event.changedTouches[0].clientY }
+                    : null;
+            if (!point) return;
 
-            const dropTarget = getConnectionDropTarget(event.clientX, event.clientY, startedConnection);
-            if (dropTarget.nodeId || dropTarget.isNearNode) return;
+            const dropTarget = getConnectionDropTarget(point.clientX, point.clientY, startedConnection);
+            if (dropTarget.nodeId) {
+                connectNodes(startedConnection, dropTarget.nodeId);
+                return;
+            }
+            if (dropTarget.isNearNode) return;
 
-            const position = screenToCanvas(event.clientX, event.clientY);
+            const position = screenToCanvas(point.clientX, point.clientY);
             const rect = containerRef.current?.getBoundingClientRect();
             setSelectedNodeIds(new Set());
             setSelectedConnectionId(null);
@@ -5372,12 +5408,12 @@ function CanvasWorkspacePage() {
                 connection: startedConnection,
                 position,
                 menuPosition: {
-                    x: event.clientX - (rect?.left || 0),
-                    y: event.clientY - (rect?.top || 0),
+                    x: point.clientX - (rect?.left || 0),
+                    y: point.clientY - (rect?.top || 0),
                 },
             });
         },
-        [getConnectionDropTarget, screenToCanvas],
+        [connectNodes, getConnectionDropTarget, screenToCanvas],
     );
 
     if (!projectLoaded) return <CanvasLoadingShell />;
@@ -5396,7 +5432,7 @@ function CanvasWorkspacePage() {
             onDragOver={(event) => event.preventDefault()}
             onDrop={handleDrop}
         >
-            <section ref={containerRef} className="relative min-w-0 flex-1 overflow-hidden">
+            <section ref={containerRef} data-canvas-edge-flow={edgeFlowEnabled ? "on" : "off"} className="relative min-w-0 flex-1 overflow-hidden">
                 <CanvasTopBar
                     onShare={canShare ? () => openCanvasShare() : undefined}
                     title={currentDocument?.identity.title || translate("canvas.untitledCanvas")}
@@ -5632,6 +5668,8 @@ function CanvasWorkspacePage() {
                     onOpenMyAssets={() => {
                         setAssetPickerOpen(true);
                     }}
+                    edgeFlowEnabled={edgeFlowEnabled}
+                    onToggleEdgeFlow={toggleEdgeFlow}
                     selectedBackground={
                         selectedNodeIds.size === 1
                             ? (() => {

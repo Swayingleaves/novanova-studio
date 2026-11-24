@@ -4,7 +4,7 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 import type { ReactNode } from "react";
 import { Button, Tooltip } from "antd";
-import { Box, Eraser, FolderOpen, Frame, Hand, Image as ImageIcon, Redo2, Trash2, Type, Undo2, Upload, AudioLines, Video } from "lucide-react";
+import { Box, Eraser, FolderOpen, Frame, Hand, Image as ImageIcon, Redo2, Trash2, Type, Undo2, Upload, AudioLines, Video, Waves } from "lucide-react";
 
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import type { CanvasBackgroundNode } from "../types";
@@ -33,6 +33,8 @@ type CanvasToolbarProps = {
     onClear: () => void;
     onDeselect: () => void;
     onOpenMyAssets: () => void;
+    edgeFlowEnabled: boolean;
+    onToggleEdgeFlow: () => void;
     selectedBackground?: CanvasBackgroundNode | null;
     onBackgroundTitleChange?: (nodeId: string, title: string) => void;
     onBackgroundColorChange?: (nodeId: string, color: string) => void;
@@ -101,6 +103,13 @@ function buildToolbarActions(props: CanvasToolbarProps): ToolbarAction[] {
         { key: "background", label: translate("canvas.background"), icon: <Frame className="size-4" />, onClick: props.onAddBackground },
         { key: "upload", label: translate("canvas.uploadAssets"), icon: <Upload className="size-4" />, onClick: props.onUpload },
         { key: "assets", label: translate("canvas.myAssets"), icon: <FolderOpen className="size-4" />, dividerBefore: true, onClick: props.onOpenMyAssets },
+        {
+            key: "edge-flow",
+            label: props.edgeFlowEnabled ? "关闭连线流动效果" : "开启连线流动效果",
+            icon: <Waves className="size-4" />,
+            active: props.edgeFlowEnabled,
+            onClick: props.onToggleEdgeFlow,
+        },
     ];
 
     if (props.selectedCount) {
