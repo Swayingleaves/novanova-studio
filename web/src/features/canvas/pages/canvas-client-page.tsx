@@ -75,6 +75,7 @@ import {
 import {
     applyCanvasNodeConfig,
     applyGeneratedImageToBatchNodes,
+    arrangeCanvasAgentTaskNodes,
     createCanvasConnection,
     findCanvasConnectionDropTarget,
     findNonOverlappingCanvasNodePosition,
@@ -499,9 +500,11 @@ function CanvasWorkspacePage() {
     useEffect(() => {
         setNavigationPanelState("expanded");
         setPreviewAsset(null);
+        agentTaskCreatedNodeIdsRef.current = [];
     }, [projectId]);
     const { start: startGenerationRequest, finish: finishGenerationRequest, stopByRunningId: stopRegisteredGenerationRequests, listTargetNodeIds: listGenerationTargetNodeIds, isRunning: isGenerationRunning } = useCanvasGenerationRequests();
 
+    const agentTaskCreatedNodeIdsRef = useRef<string[]>([]);
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
@@ -1371,6 +1374,24 @@ function CanvasWorkspacePage() {
         [cancelVideoCompositionTasksForDeletedNodes],
     );
 
+    const finalizeAgentTaskNodesLayout = useCallback(() => {
+        const createdIds = agentTaskCreatedNodeIdsRef.current;
+        if (!createdIds.length) return;
+        agentTaskCreatedNodeIdsRef.current = [];
+        const currentNodes = nodesRef.current;
+        const existingIds = new Set(currentNodes.map((node) => node.id));
+        const aliveCreatedIds = createdIds.filter((id) => existingIds.has(id));
+        if (!aliveCreatedIds.length) return;
+        const arranged = arrangeCanvasAgentTaskNodes(currentNodes, aliveCreatedIds);
+        if (arranged !== currentNodes) {
+            requestFocusNodes(aliveCreatedIds);
+            nodesRef.current = arranged;
+            setNodes(arranged);
+        } else {
+            focusCanvasNodes(aliveCreatedIds);
+        }
+    }, [focusCanvasNodes, requestFocusNodes]);
+
     const applyAgentOps = useCallback(
         async (ops: CanvasAgentOp[] | undefined, signal: AbortSignal) => {
             const safeOps = positionCanvasAgentAddNodeOps(Array.isArray(ops) ? ops.filter((op) => op?.type) : [], getCanvasCenter());
@@ -1379,6 +1400,12 @@ function CanvasWorkspacePage() {
             const stateOps: CanvasAgentOp[] = [];
             safeOps.forEach((operation) => (operation.type === "run_generation" ? generationOps : stateOps).push(operation));
             const next = applyCanvasAgentOps(before, stateOps);
+            const beforeNodeIds = new Set(before.nodes.map((node) => node.id));
+            next.nodes.forEach((node) => {
+                if (!beforeNodeIds.has(node.id) && !agentTaskCreatedNodeIdsRef.current.includes(node.id)) {
+                    agentTaskCreatedNodeIdsRef.current.push(node.id);
+                }
+            });
             for (const operation of generationOps) {
                 if (!operation.nodeId) throw new Error(translate("canvas.generationNodeIDIsRequired"));
                 const target = next.nodes.find((node) => node.id === operation.nodeId);
@@ -3628,6 +3655,7 @@ function CanvasWorkspacePage() {
         onThoughtComplete,
         onTaskComplete: (_messageId, text, action) => {
             resetThinkings();
+            finalizeAgentTaskNodesLayout();
             const sessionId = activeAgentSessionIdRef.current;
             if (!sessionId) return;
             const displayMessageId = activeAgentAssistantMessageIdRef.current || nanoid();
@@ -3668,6 +3696,7 @@ function CanvasWorkspacePage() {
         onCanceled: () => {
             resetThinkings();
             resetTextStream(false);
+            agentTaskCreatedNodeIdsRef.current = [];
             activeAgentAssistantMessageIdRef.current = null;
             setAgentRunning(false);
             setAgentQueued(false);
@@ -3712,6 +3741,7 @@ function CanvasWorkspacePage() {
         },
         onError: (errorMessage) => {
             resetThinkings();
+            agentTaskCreatedNodeIdsRef.current = [];
             const sessionId = activeAgentSessionIdRef.current;
             const messageId = activeAgentAssistantMessageIdRef.current;
             resetTextStream(false);
@@ -3825,6 +3855,7 @@ function CanvasWorkspacePage() {
                 appendAssistantMessage(sessionId, userMessage);
             }
             try {
+                agentTaskCreatedNodeIdsRef.current = [];
                 const submitted = await sendAgentMessage(
                     effectivePrompt,
                     [],
@@ -5746,6 +5777,7 @@ function CanvasWorkspacePage() {
                         }
 
                         try {
+                            agentTaskCreatedNodeIdsRef.current = [];
                             const submitted = await sendAgentMessage(
                                 agentText,
                                 references.map((reference) => ({ title: reference.title, text: reference.text || "" })),

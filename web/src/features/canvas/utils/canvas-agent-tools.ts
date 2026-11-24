@@ -109,9 +109,8 @@ export function resolveCanvasAgentTool(name: string, args: Record<string, unknow
     }
 }
 
-/** 将缺少坐标的新增节点放到当前视口中心，并错开批量节点。 */
+/** 将缺少坐标的新增节点放到当前视口中心，交由避让布局按行列整齐排布。 */
 export function positionCanvasAgentAddNodeOps(ops: CanvasAgentOp[], canvasCenter: CanvasPoint): CanvasAgentOp[] {
-    let fallbackIndex = 0;
     const positionedOperations: CanvasAgentOp[] = [];
     for (const operation of ops) {
         if (operation.type !== "add_node") {
@@ -125,13 +124,11 @@ export function positionCanvasAgentAddNodeOps(ops: CanvasAgentOp[], canvasCenter
             continue;
         }
         const template = getCanvasNodeTemplate(kind);
-        const offset = fallbackIndex * 36;
-        fallbackIndex += 1;
         positionedOperations.push({
             ...operation,
             nodeType: kind,
-            x: typeof operation.x === "number" ? operation.x : canvasCenter.x - template.width / 2 + offset,
-            y: typeof operation.y === "number" ? operation.y : canvasCenter.y - template.height / 2 + offset,
+            x: typeof operation.x === "number" ? operation.x : canvasCenter.x - template.width / 2,
+            y: typeof operation.y === "number" ? operation.y : canvasCenter.y - template.height / 2,
         });
     }
     return positionedOperations;

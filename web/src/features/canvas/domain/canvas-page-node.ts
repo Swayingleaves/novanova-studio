@@ -162,8 +162,10 @@ export function canvasFramesIntersect(first: CanvasNode, second: CanvasNode): bo
         && first.frame.position.y + first.frame.height > second.frame.position.y;
 }
 
+const DEFAULT_NON_OVERLAPPING_ROW_WIDTH = 2040;
+
 /**
- * 在首选位置附近寻找不与现有节点相交的位置。
+ * 在首选位置附近按从左到右、顶对齐、满行换行的顺序寻找不与现有节点相交的位置。
  *
  * @param nodes 画布中已存在的节点
  * @param preferredPosition 首选的节点左上角坐标
@@ -173,26 +175,107 @@ export function canvasFramesIntersect(first: CanvasNode, second: CanvasNode): bo
  * @return CanvasPoint 可安全放置的节点左上角坐标
  */
 export function findNonOverlappingCanvasNodePosition(nodes: CanvasNode[], preferredPosition: CanvasPoint, width: number, height: number, gap = 54): CanvasPoint {
-    const step = Math.max(32, gap);
-    const candidateIntersects = (position: CanvasPoint) => nodes.some((node) =>
-        position.x < node.frame.position.x + node.frame.width + gap
-        && position.x + width + gap > node.frame.position.x
-        && position.y < node.frame.position.y + node.frame.height + gap
-        && position.y + height + gap > node.frame.position.y,
-    );
-    if (!candidateIntersects(preferredPosition)) return preferredPosition;
+    const findBlockingNodes = (position: CanvasPoint) =>
+        nodes.filter((node) =>
+            position.x < node.frame.position.x + node.frame.width + gap
+            && position.x + width + gap > node.frame.position.x
+            && position.y < node.frame.position.y + node.frame.height + gap
+            && position.y + height + gap > node.frame.position.y,
+        );
 
-    for (let radius = 1; radius <= 100; radius += 1) {
-        for (let row = -radius; row <= radius; row += 1) {
-            for (let column = -radius; column <= radius; column += 1) {
-                if (Math.max(Math.abs(column), Math.abs(row)) !== radius) continue;
-                const candidate = { x: preferredPosition.x + column * (width + step), y: preferredPosition.y + row * (height + step) };
-                if (!candidateIntersects(candidate)) return candidate;
-            }
+    const initialBlocking = findBlockingNodes(preferredPosition);
+    if (!initialBlocking.length) return preferredPosition;
+
+    // 命中已有节点时对齐到该行基准左上角，避免不同尺寸节点各自偏移导致行/列错位
+    const originX = Math.min(preferredPosition.x, ...initialBlocking.map((node) => node.frame.position.x));
+    let rowY = Math.min(preferredPosition.y, ...initialBlocking.map((node) => node.frame.position.y));
+    const maxRowWidth = Math.max(DEFAULT_NON_OVERLAPPING_ROW_WIDTH, width + gap);
+
+    for (let row = 0; row < 100; row += 1) {
+        let cursorX = originX;
+        let nextRowY = rowY + height + gap;
+
+        while (cursorX === originX || cursorX + width <= originX + maxRowWidth) {
+            const candidate = { x: cursorX, y: rowY };
+            const blocking = findBlockingNodes(candidate);
+            if (!blocking.length) return candidate;
+
+            const maxRight = Math.max(...blocking.map((node) => node.frame.position.x + node.frame.width + gap));
+            const maxBottom = Math.max(...blocking.map((node) => node.frame.position.y + node.frame.height + gap));
+            nextRowY = Math.max(nextRowY, maxBottom);
+            cursorX = Math.max(cursorX + 1, maxRight);
         }
+
+        rowY = Math.max(rowY + 1, nextRowY);
     }
-    const rightmost = nodes.reduce((right, node) => Math.max(right, node.frame.position.x + node.frame.width), preferredPosition.x + width);
+
+    const rightmost = nodes.reduce((right, node) => Math.max(right, node.frame.position.x + node.frame.width), originX + width);
     return { x: rightmost + gap, y: preferredPosition.y };
+}
+
+/**
+ * 将单次 Agent 任务创建的节点按类型分行排布到同一个不与既有节点重叠的区域内。
+ * <p>
+ * 同类型节点（如图片、视频、文本）排成一行、顶对齐、从左到右按固定间距排列；
+ * 不同类型依次分行，整块区域作为整体避让画布中原有节点。
+ *
+ * @param allNodes 画布当前全部节点
+ * @param createdNodeIds 本次任务创建的节点 ID 列表（按创建顺序）
+ * @param preferredOrigin 首选区域左上角坐标（省略时沿用首个创建节点的位置）
+ * @param gap 节点之间与行之间的最小间距
+ * @return CanvasNode[] 更新位置后的节点列表；无需调整时返回原数组引用
+ */
+export function arrangeCanvasAgentTaskNodes(
+    allNodes: CanvasNode[],
+    createdNodeIds: string[],
+    preferredOrigin?: CanvasPoint,
+    gap = 54,
+): CanvasNode[] {
+    const idSet = new Set(createdNodeIds);
+    const nodeById = new Map(allNodes.map((node) => [node.id, node]));
+    const taskNodes = createdNodeIds.map((id) => nodeById.get(id)).filter((node): node is CanvasNode => Boolean(node));
+    if (taskNodes.length <= 1) return allNodes;
+
+    // 按节点类型分组并保留各类型首次出现的顺序，保证同类型排成一行
+    const groupsByKind = new Map<CanvasNode["kind"], CanvasNode[]>();
+    for (const node of taskNodes) {
+        const list = groupsByKind.get(node.kind);
+        if (list) list.push(node);
+        else groupsByKind.set(node.kind, [node]);
+    }
+
+    const relativePositions = new Map<string, CanvasPoint>();
+    let offsetY = 0;
+    let totalWidth = 0;
+    for (const group of groupsByKind.values()) {
+        let offsetX = 0;
+        let rowHeight = 0;
+        for (const node of group) {
+            relativePositions.set(node.id, { x: offsetX, y: offsetY });
+            offsetX += node.frame.width + gap;
+            rowHeight = Math.max(rowHeight, node.frame.height);
+        }
+        const rowWidth = Math.max(0, offsetX - gap);
+        totalWidth = Math.max(totalWidth, rowWidth);
+        offsetY += rowHeight + gap;
+    }
+    const totalHeight = Math.max(0, offsetY - gap);
+
+    const existingNodes = allNodes.filter((node) => !idSet.has(node.id));
+    const anchor = preferredOrigin ?? taskNodes[0].frame.position;
+    const regionOrigin = findNonOverlappingCanvasNodePosition(existingNodes, anchor, totalWidth, totalHeight, gap);
+
+    let changed = false;
+    const arranged = allNodes.map((node) => {
+        const relative = relativePositions.get(node.id);
+        if (!relative) return node;
+        const nextX = Math.round(regionOrigin.x + relative.x);
+        const nextY = Math.round(regionOrigin.y + relative.y);
+        if (node.frame.position.x === nextX && node.frame.position.y === nextY) return node;
+        changed = true;
+        return { ...node, frame: { ...node.frame, position: { x: nextX, y: nextY } } };
+    });
+    return changed ? arranged : allNodes;
 }
 
 /** 把文字描述字号限制在可调整范围内。 */

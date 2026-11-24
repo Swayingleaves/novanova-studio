@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createBackgroundNode, createImageNode, createStoryboardNode, createTextNode } from "../constants.ts";
+import { createBackgroundNode, createImageNode, createStoryboardNode, createTextNode, createVideoNode } from "../constants.ts";
 import { MINIMUM_CONTENT_NODE_DIMENSION } from "../utils/canvas-node-size.ts";
 import {
     applyCanvasNodeConfig,
@@ -20,14 +20,93 @@ import {
     updateBackgroundBoardFrame,
     createBackgroundLabel,
     findNonOverlappingCanvasNodePosition,
+    arrangeCanvasAgentTaskNodes,
 } from "./canvas-page-node.ts";
 
-test("新节点位置会避开已有节点并保留首选位置附近的布局", () => {
+test("新节点位置会避开已有节点并优先向右顶对齐排布", () => {
     const existing = createImageNode({ id: "image-1", position: { x: 0, y: 0 } });
     const position = findNonOverlappingCanvasNodePosition([existing], { x: 0, y: 0 }, 200, 120);
 
-    assert.ok(position.x !== 0 || position.y !== 0);
-    assert.ok(position.x >= existing.frame.position.x + existing.frame.width + 54 || position.x + 200 <= existing.frame.position.x - 54 || position.y >= existing.frame.position.y + existing.frame.height + 54 || position.y + 120 <= existing.frame.position.y - 54);
+    assert.equal(position.x, existing.frame.position.x + existing.frame.width + 54);
+    assert.equal(position.y, existing.frame.position.y);
+});
+
+test("连续创建多种尺寸节点时按从左到右、顶对齐、满行换行整齐排布", () => {
+    const center = { x: 1000, y: 800 };
+    const factories = [
+        () => createTextNode({ id: "text-1", position: { x: 0, y: 0 } }),
+        () => createTextNode({ id: "text-2", position: { x: 0, y: 0 } }),
+        () => createImageNode({ id: "image-1", position: { x: 0, y: 0 } }),
+        () => createImageNode({ id: "image-2", position: { x: 0, y: 0 } }),
+        () => createVideoNode({ id: "video-1", position: { x: 0, y: 0 } }),
+        () => createVideoNode({ id: "video-2", position: { x: 0, y: 0 } }),
+    ];
+    const placed = [];
+    for (const create of factories) {
+        const draft = create();
+        const preferred = { x: center.x - draft.frame.width / 2, y: center.y - draft.frame.height / 2 };
+        const position = findNonOverlappingCanvasNodePosition(placed, preferred, draft.frame.width, draft.frame.height);
+        placed.push({ ...draft, frame: { ...draft.frame, position } });
+    }
+
+    const row1 = placed.slice(0, 3);
+    const row2 = placed.slice(3, 6);
+    // 第一行顶对齐且严格从左到右排列
+    assert.equal(row1[1].frame.position.y, row1[0].frame.position.y);
+    assert.equal(row1[2].frame.position.y, row1[0].frame.position.y);
+    assert.equal(row1[1].frame.position.x, row1[0].frame.position.x + row1[0].frame.width + 54);
+    assert.equal(row1[2].frame.position.x, row1[1].frame.position.x + row1[1].frame.width + 54);
+    // 第二行换行到第一行最高节点下方、左边缘与第一行对齐且从左到右排列
+    const row1Bottom = Math.max(...row1.map((node) => node.frame.position.y + node.frame.height));
+    assert.equal(row2[0].frame.position.x, row1[0].frame.position.x);
+    assert.equal(row2[0].frame.position.y, row1Bottom + 54);
+    assert.equal(row2[1].frame.position.y, row2[0].frame.position.y);
+    assert.equal(row2[2].frame.position.y, row2[0].frame.position.y);
+    assert.equal(row2[1].frame.position.x, row2[0].frame.position.x + row2[0].frame.width + 54);
+    assert.equal(row2[2].frame.position.x, row2[1].frame.position.x + row2[1].frame.width + 54);
+});
+
+test("单次 Agent 任务按类型分行排布在同一区域内且避让既有任务区域", () => {
+    const existing = createTextNode({ id: "old-text", position: { x: 0, y: 0 } });
+    // 模拟单次任务穿插创建 2 个图片、2 个视频、2 个文本节点
+    const taskNodes = [
+        createImageNode({ id: "img-1", position: { x: 0, y: 0 } }),
+        createVideoNode({ id: "vid-1", position: { x: 0, y: 0 } }),
+        createTextNode({ id: "txt-1", position: { x: 0, y: 0 } }),
+        createImageNode({ id: "img-2", position: { x: 0, y: 0 } }),
+        createVideoNode({ id: "vid-2", position: { x: 0, y: 0 } }),
+        createTextNode({ id: "txt-2", position: { x: 0, y: 0 } }),
+    ];
+    const arranged = arrangeCanvasAgentTaskNodes(
+        [existing, ...taskNodes],
+        taskNodes.map((node) => node.id),
+    );
+    const byId = new Map(arranged.map((node) => [node.id, node]));
+    const oldText = byId.get("old-text")!;
+    const img1 = byId.get("img-1")!;
+    const img2 = byId.get("img-2")!;
+    const vid1 = byId.get("vid-1")!;
+    const vid2 = byId.get("vid-2")!;
+    const txt1 = byId.get("txt-1")!;
+    const txt2 = byId.get("txt-2")!;
+
+    // 原有节点保持不动，新任务整块区域避让原有节点
+    assert.deepEqual(oldText.frame.position, { x: 0, y: 0 });
+    assert.ok(img1.frame.position.x >= oldText.frame.position.x + oldText.frame.width + 54);
+
+    // 图片、视频、文本各占一行，行内顶对齐，不同行左对齐
+    assert.equal(img2.frame.position.y, img1.frame.position.y);
+    assert.equal(img2.frame.position.x, img1.frame.position.x + img1.frame.width + 54);
+
+    assert.equal(vid1.frame.position.x, img1.frame.position.x);
+    assert.equal(vid1.frame.position.y, img1.frame.position.y + img1.frame.height + 54);
+    assert.equal(vid2.frame.position.y, vid1.frame.position.y);
+    assert.equal(vid2.frame.position.x, vid1.frame.position.x + vid1.frame.width + 54);
+
+    assert.equal(txt1.frame.position.x, img1.frame.position.x);
+    assert.equal(txt1.frame.position.y, vid1.frame.position.y + vid1.frame.height + 54);
+    assert.equal(txt2.frame.position.y, txt1.frame.position.y);
+    assert.equal(txt2.frame.position.x, txt1.frame.position.x + txt1.frame.width + 54);
 });
 
 test("背景板默认尺寸并可扩展包裹成员", () => {
