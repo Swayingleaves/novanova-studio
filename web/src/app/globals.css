@@ -1663,10 +1663,13 @@ html[data-theme="purple"] {
         }
     }
 
-    .canvas-edge-flow {
-        animation: none;
+    .canvas-edge-flow-group {
         opacity: 0;
         transition: opacity 140ms ease;
+    }
+
+    .canvas-edge-flow {
+        animation: none;
     }
 
     .canvas-edge-base {
@@ -1677,19 +1680,22 @@ html[data-theme="purple"] {
         stroke-width: 3.25px !important;
     }
 
-    .react-flow__edge:hover .canvas-edge-flow {
-        animation: canvas-edge-flow 3.2s linear infinite;
-        opacity: 0.88;
+    .react-flow__edge:hover .canvas-edge-flow-group,
+    [data-canvas-edge-flow="on"] .canvas-edge-flow-group {
+        opacity: 0.92;
     }
 
+    .react-flow__edge:hover .canvas-edge-flow,
     [data-canvas-edge-flow="on"] .canvas-edge-flow {
         animation: canvas-edge-flow 3.2s linear infinite;
-        opacity: 0.88;
+    }
+
+    [data-canvas-edge-flow="off"] .react-flow__edge:hover .canvas-edge-flow-group {
+        opacity: 0;
     }
 
     [data-canvas-edge-flow="off"] .react-flow__edge:hover .canvas-edge-flow {
         animation: none;
-        opacity: 0;
     }
 }
 
@@ -2190,6 +2196,10 @@ html[data-theme="dark"] .creation-composer-submit-trigger:disabled {
 
     .credit-entry-shine::after {
         animation: none !important;
+        opacity: 0 !important;
+    }
+
+    .canvas-edge-flow-group {
         opacity: 0 !important;
     }
 

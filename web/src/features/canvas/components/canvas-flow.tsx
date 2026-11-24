@@ -67,7 +67,17 @@ const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 5;
 const CANVAS_EDGE_STROKE_WIDTH = 2.5;
 // 使用归一化路径长度，让每条连线始终显示三段光带。
-const CANVAS_EDGE_FLOW_DASH = "0.08 0.2533 0.08 0.2533 0.08 0.2534";
+const CANVAS_EDGE_FLOW_DURATION_SECONDS = 3.2;
+const CANVAS_EDGE_FLOW_PERIOD = 1 / 3;
+const CANVAS_EDGE_DROPLET_MAX_LENGTH = 0.096;
+// 多层同相位叠画形成「尾部细淡、头部圆润加粗」的水滴流动轨迹，沿贝塞尔曲线自然弯曲。
+const CANVAS_EDGE_DROPLET_LAYERS = [
+  { length: 0.096, strokeWidth: 1.4, opacity: 0.24 },
+  { length: 0.072, strokeWidth: 2.2, opacity: 0.44 },
+  { length: 0.048, strokeWidth: 3.1, opacity: 0.66 },
+  { length: 0.026, strokeWidth: 4.1, opacity: 0.86 },
+  { length: 0.008, strokeWidth: 5.0, opacity: 1 },
+] as const;
 const CANVAS_PAN_ON_DRAG = [0, 1, 2];
 const CANVAS_SELECTION_KEY_CODES = ["Control", "Meta"];
 const CANVAS_PRO_OPTIONS = { hideAttribution: true };
@@ -129,18 +139,23 @@ function CanvasConnectionEdge({
         markerStart={markerStart}
         interactionWidth={interactionWidth}
       />
-      <path
-        d={path}
-        pathLength={1}
-        fill="none"
-        stroke={theme.node.activeStroke}
-        strokeWidth={CANVAS_EDGE_STROKE_WIDTH + 0.25}
-        strokeLinecap="round"
-        strokeDasharray={CANVAS_EDGE_FLOW_DASH}
-        className="canvas-edge-flow"
-        pointerEvents="none"
-        aria-hidden="true"
-      />
+      <g className="canvas-edge-flow-group" pointerEvents="none" aria-hidden="true">
+        {CANVAS_EDGE_DROPLET_LAYERS.map((layer) => (
+          <path
+            key={layer.length}
+            d={path}
+            pathLength={1}
+            fill="none"
+            stroke={theme.node.activeStroke}
+            strokeOpacity={layer.opacity}
+            strokeWidth={layer.strokeWidth}
+            strokeLinecap="round"
+            strokeDasharray={`${layer.length} ${(CANVAS_EDGE_FLOW_PERIOD - layer.length).toFixed(4)}`}
+            style={{ animationDelay: `${-((CANVAS_EDGE_DROPLET_MAX_LENGTH - layer.length) * CANVAS_EDGE_FLOW_DURATION_SECONDS).toFixed(4)}s` }}
+            className="canvas-edge-flow"
+          />
+        ))}
+      </g>
     </>
   );
 }
