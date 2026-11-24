@@ -6,18 +6,17 @@ import { useTranslation } from "@/features/locale/use-translation";
 import { useMemo, useState } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import type { MenuProps } from "antd";
-import { Button, Dropdown, Empty, Input, Modal, Tabs, Tag, Tooltip } from "antd";
-import { AudioLines, Box, Boxes, Check, ChevronDown, ChevronsLeft, ChevronRight, Clapperboard, FileText, FolderOpen, Image as ImageIcon, ListFilter, PanelLeftClose, PanelLeftOpen, Search, UserRound, Video, X } from "lucide-react";
+import { Button, Dropdown, Empty, Input, Modal, Tag, Tooltip } from "antd";
+import { AudioLines, Box, Boxes, Check, ChevronDown, ChevronsLeft, ChevronRight, Clapperboard, FileText, Image as ImageIcon, ListFilter, PanelLeftClose, PanelLeftOpen, Search, UserRound, Video, X } from "lucide-react";
 
 import { isBackgroundNode, isImageNode, isVideoNode } from "../domain/canvas-node";
 import type { CanvasBackgroundNode, CanvasNode, CanvasStoryboardAssetKind } from "../types";
-import { createCanvasNavigationNodeCategoryOptions, createCanvasNavigationAssetCategoryOptions, canvasNavigationAssetKindLabel, canvasNavigationAssetTitle, canvasNavigationCategoryLabel, canvasNavigationNodeKindLabel, queryCanvasNavigationAssets, queryCanvasNavigationNodes, type CanvasNavigationAsset, type CanvasNavigationAssetCategory, type CanvasNavigationCategoryOption, type CanvasNavigationNodeCategory, type CanvasNavigationNodeResult, type CanvasNavigationStoryboardAsset } from "./canvas-navigation-query";
+import { createCanvasNavigationNodeCategoryOptions, canvasNavigationCategoryLabel, canvasNavigationNodeKindLabel, queryCanvasNavigationNodes, type CanvasNavigationAsset, type CanvasNavigationCategoryOption, type CanvasNavigationNodeCategory, type CanvasNavigationNodeResult, type CanvasNavigationStoryboardAsset } from "./canvas-navigation-query";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
 export type { CanvasNavigationAsset, CanvasNavigationStoryboardAsset } from "./canvas-navigation-query";
 
 export type CanvasNavigationPanelState = "expanded" | "collapsed";
-export type CanvasNavigationTab = "nodes" | "assets";
 
 type NavigationQueryState<Category extends string> = {
     searchOpen: boolean;
@@ -27,13 +26,9 @@ type NavigationQueryState<Category extends string> = {
 
 type CanvasNavigationPanelProps = {
     state: CanvasNavigationPanelState;
-    activeTab: CanvasNavigationTab;
     nodes: CanvasNode[];
-    assets: CanvasNavigationAsset[];
     selectedNodeIds: Set<string>;
-    onTabChange: (tab: CanvasNavigationTab) => void;
     onLocateNode: (nodeId: string) => void;
-    onPreviewAsset: (asset: CanvasNavigationAsset) => void;
     onCollapse: () => void;
     onExpand: () => void;
     onHide: () => void;
@@ -43,9 +38,7 @@ export function CanvasNavigationPanel(props: CanvasNavigationPanelProps) {
     const translate = useTranslation();
     const theme = useCanvasTheme();
     const [nodeQuery, setNodeQuery] = useState<NavigationQueryState<CanvasNavigationNodeCategory>>({ searchOpen: false, keyword: "", category: "all" });
-    const [assetQuery, setAssetQuery] = useState<NavigationQueryState<CanvasNavigationAssetCategory>>({ searchOpen: false, keyword: "", category: "all" });
     const nodeResults = useMemo(() => queryCanvasNavigationNodes(props.nodes, nodeQuery.keyword, nodeQuery.category), [nodeQuery.category, nodeQuery.keyword, props.nodes, translate.locale]);
-    const assetResults = useMemo(() => queryCanvasNavigationAssets(props.assets, assetQuery.keyword, assetQuery.category), [assetQuery.category, assetQuery.keyword, props.assets, translate.locale]);
 
     if (props.state === "collapsed") {
         return (
@@ -59,8 +52,7 @@ export function CanvasNavigationPanel(props: CanvasNavigationPanelProps) {
                 onPointerDown={(event) => event.stopPropagation()}
                 onWheelCapture={(event) => event.stopPropagation()}
             >
-                <NavigationIconButton label={translate("canvas.viewNode")} active={props.activeTab === "nodes"} onClick={() => openTab(props, "nodes")}><Boxes className="size-4" /></NavigationIconButton>
-                <NavigationIconButton label={translate("canvas.viewCanvasAssets")} active={props.activeTab === "assets"} onClick={() => openTab(props, "assets")}><FolderOpen className="size-4" /></NavigationIconButton>
+                <NavigationIconButton label={translate("canvas.viewNode")} active onClick={props.onExpand}><Boxes className="size-4" /></NavigationIconButton>
                 <div className="h-px" style={{ background: theme.toolbar.border }} />
                 <NavigationIconButton label={translate("canvas.expandNavigation")} onClick={props.onExpand}><PanelLeftOpen className="size-4" /></NavigationIconButton>
                 <NavigationIconButton label={translate("canvas.collapseNavigation")} onClick={props.onHide}><ChevronsLeft className="size-4" /></NavigationIconButton>
@@ -70,7 +62,7 @@ export function CanvasNavigationPanel(props: CanvasNavigationPanelProps) {
 
     return (
         <aside
-                data-canvas-navigation="true"
+            data-canvas-navigation="true"
             data-canvas-no-zoom
             aria-label={translate("canvas.canvasNavigator")}
             className="absolute bottom-4 left-0 top-16 z-[100] flex min-h-0 flex-col overflow-hidden rounded-r-lg border"
@@ -80,69 +72,33 @@ export function CanvasNavigationPanel(props: CanvasNavigationPanelProps) {
             onWheelCapture={(event) => event.stopPropagation()}
         >
             <header className="flex h-11 shrink-0 items-center justify-between border-b px-3" style={{ borderColor: theme.toolbar.border }}>
-                <span className="text-sm font-medium">{translate("canvas.canvasNavigator")}</span>
+                <span className="inline-flex items-center gap-1.5 text-sm font-medium">
+                    {translate("canvas.canvasNavigator")}
+                    <span className="text-xs font-normal opacity-60">{props.nodes.length}</span>
+                </span>
                 <div className="flex items-center gap-1">
                     <NavigationIconButton label={translate("canvas.collapseNavigation_ac0916")} onClick={props.onCollapse}><PanelLeftClose className="size-4" /></NavigationIconButton>
                     <NavigationIconButton label={translate("canvas.collapseNavigation")} onClick={props.onHide}><ChevronsLeft className="size-4" /></NavigationIconButton>
                 </div>
             </header>
-            <Tabs
-                activeKey={props.activeTab}
-                className="flex h-full min-h-0 flex-1 flex-col px-2 [&_.ant-tabs-nav]:pl-2 [&_.ant-tabs-body-holder]:min-h-0 [&_.ant-tabs-body-holder]:min-w-0 [&_.ant-tabs-body-holder]:flex-1 [&_.ant-tabs-body]:h-full [&_.ant-tabs-content]:h-full [&_.ant-tabs-content]:min-h-0"
-                onChange={(tab) => props.onTabChange(tab as CanvasNavigationTab)}
-                items={[
-                    {
-                        key: "nodes",
-                        label: <TabLabel icon={<Boxes className="size-3.5" />} label={translate("canvas.node")} count={props.nodes.length} />,
-                        children: (
-                            <div className="flex h-full min-h-0 flex-col">
-                                <NavigationQueryToolbar
-                                    resourceLabel={translate("canvas.node")}
-                                    placeholder={translate("canvas.searchNodes")}
-                                    query={nodeQuery}
-                                    options={createCanvasNavigationNodeCategoryOptions(translate)}
-                                    onChange={setNodeQuery}
-                                />
-                                <NodeList
-                                    nodes={props.nodes}
-                                    results={nodeResults}
-                                    selectedNodeIds={props.selectedNodeIds}
-                                    onLocateNode={props.onLocateNode}
-                                    onClearQuery={() => setNodeQuery((current) => ({ ...current, keyword: "", category: "all" }))}
-                                />
-                            </div>
-                        ),
-                    },
-                    {
-                        key: "assets",
-                        label: <TabLabel icon={<FolderOpen className="size-3.5" />} label={translate("canvas.canvasAsset")} count={props.assets.length} />,
-                        children: (
-                            <div className="flex h-full min-h-0 flex-col">
-                                <NavigationQueryToolbar
-                                    resourceLabel={translate("canvas.assets")}
-                                    placeholder={translate("canvas.searchAssets")}
-                                    query={assetQuery}
-                                    options={createCanvasNavigationAssetCategoryOptions(translate)}
-                                    onChange={setAssetQuery}
-                                />
-                                <AssetList
-                                    assets={props.assets}
-                                    results={assetResults}
-                                    onPreviewAsset={props.onPreviewAsset}
-                                    onClearQuery={() => setAssetQuery((current) => ({ ...current, keyword: "", category: "all" }))}
-                                />
-                            </div>
-                        ),
-                    },
-                ]}
-            />
+            <div className="flex h-full min-h-0 flex-1 flex-col gap-2">
+                <NavigationQueryToolbar
+                    resourceLabel={translate("canvas.node")}
+                    placeholder={translate("canvas.searchNodes")}
+                    query={nodeQuery}
+                    options={createCanvasNavigationNodeCategoryOptions(translate)}
+                    onChange={setNodeQuery}
+                />
+                <NodeList
+                    nodes={props.nodes}
+                    results={nodeResults}
+                    selectedNodeIds={props.selectedNodeIds}
+                    onLocateNode={props.onLocateNode}
+                    onClearQuery={() => setNodeQuery((current) => ({ ...current, keyword: "", category: "all" }))}
+                />
+            </div>
         </aside>
     );
-}
-
-function openTab(props: CanvasNavigationPanelProps, tab: CanvasNavigationTab) {
-    props.onTabChange(tab);
-    props.onExpand();
 }
 
 function NavigationIconButton({ label, active = false, onClick, children }: { label: string; active?: boolean; onClick: () => void; children: ReactNode }) {
@@ -161,10 +117,6 @@ function NavigationIconButton({ label, active = false, onClick, children }: { la
             </button>
         </Tooltip>
     );
-}
-
-function TabLabel({ icon, label, count }: { icon: ReactNode; label: string; count: number }) {
-    return <span className="inline-flex items-center gap-1.5">{icon}{label}<span className="text-xs opacity-60">{count}</span></span>;
 }
 
 function NavigationQueryToolbar<Category extends string>({ resourceLabel, placeholder, query, options, onChange }: { resourceLabel: string; placeholder: string; query: NavigationQueryState<Category>; options: ReadonlyArray<CanvasNavigationCategoryOption<Category>>; onChange: Dispatch<SetStateAction<NavigationQueryState<Category>>> }) {
@@ -337,40 +289,6 @@ function NodeRow({ node, selected, onLocateNode }: { node: CanvasNode; selected:
         </button>
     );
 }
-function AssetList({ assets, results, onPreviewAsset, onClearQuery }: { assets: CanvasNavigationAsset[]; results: CanvasNavigationAsset[]; onPreviewAsset: (asset: CanvasNavigationAsset) => void; onClearQuery: () => void }) {
-    const translate = useTranslation();
-    const theme = useCanvasTheme();
-    if (!assets.length) return <PanelEmpty description={translate("canvas.noCanvasAssets")} />;
-    if (!results.length) return <NavigationNoResult description={translate("canvas.noMatchingAssets")} onClearQuery={onClearQuery} />;
-    return (
-        <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-            <div className="space-y-1">
-                {results.map((asset) => (
-                    <button
-                        key={asset.id}
-                        type="button"
-                        className="flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors motion-reduce:transition-none"
-                        style={{ color: theme.node.text }}
-                        onMouseEnter={(event) => {
-                            event.currentTarget.style.background = theme.toolbar.itemHover;
-                        }}
-                        onMouseLeave={(event) => {
-                            event.currentTarget.style.background = "transparent";
-                        }}
-                        onClick={() => onPreviewAsset(asset)}
-                    >
-                        <AssetPreview asset={asset} />
-                        <span className="min-w-0 flex-1">
-                            <span className="block truncate text-xs font-medium">{canvasNavigationAssetTitle(asset)}</span>
-                            <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px]" style={{ color: theme.node.muted }}><AssetKindIcon asset={asset} className="size-3" /><span className="truncate">{canvasNavigationAssetKindLabel(asset)}</span></span>
-                        </span>
-                    </button>
-                ))}
-            </div>
-        </div>
-    );
-}
-
 function PanelEmpty({ description }: { description: string }) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={description} className="py-12" />;
 }
@@ -401,20 +319,6 @@ function NodePreview({ node }: { node: CanvasNode }) {
             ) : isBackgroundNode(node) ? <Boxes className="size-4" /> : (
                 <NodeKindIcon kind={node.kind} className="size-4" />
             )}
-        </span>
-    );
-}
-
-function AssetPreview({ asset }: { asset: CanvasNavigationAsset }) {
-    const theme = useCanvasTheme();
-    const cover = asset.source === "library"
-        ? asset.asset.coverUrl || (asset.asset.kind === "image" ? asset.asset.data.dataUrl : "")
-        : asset.asset.image?.source || "";
-    const [failedCover, setFailedCover] = useState<string | null>(null);
-    const showCover = Boolean(cover) && failedCover !== cover;
-    return (
-        <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md" style={{ background: theme.node.fill, color: theme.node.muted }}>
-            {showCover ? <img src={cover} alt="" loading="lazy" className="size-full object-cover" onError={() => setFailedCover(cover)} /> : <AssetKindIcon asset={asset} className="size-4" />}
         </span>
     );
 }

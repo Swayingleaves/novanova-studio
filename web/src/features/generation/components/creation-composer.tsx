@@ -19,8 +19,6 @@ import { useCopyText } from "@/shared/hooks/use-copy-text";
 import { useSpaceBrand } from "@/features/team/use-space-brand";
 import { ReferencePromptInput, type ReferencePromptInputHandle } from "@/features/generation/components/reference-prompt-input";
 
-const MAX_CREATION_PROMPT_LENGTH = 5000;
-
 export function CreationComposer({
     agentLabel,
     value,
@@ -106,10 +104,8 @@ export function CreationComposer({
     }, [chatMode]);
 
     const updatePrompt = (nextValue: string, cursor: number) => {
-        const clampedValue = nextValue.length > MAX_CREATION_PROMPT_LENGTH ? nextValue.slice(0, MAX_CREATION_PROMPT_LENGTH) : nextValue;
-        const clampedCursor = Math.min(cursor, clampedValue.length);
-        onChange(clampedValue);
-        const command = chatMode ? null : getStyleCommandRange(clampedValue, clampedCursor);
+        onChange(nextValue);
+        const command = chatMode ? null : getStyleCommandRange(nextValue, cursor);
         if (!command) {
             setStyleCommand(null);
             closeStyleMenu();
@@ -163,13 +159,13 @@ export function CreationComposer({
         if (additions.length > remaining) {
             message.warning(translate("generation.selectUpToStyles", { value0: MAX_GENERATION_STYLE_SELECTION_COUNT }));
         }
-        const nextValue = `${value.slice(0, start)}${parsed.prompt}${value.slice(end)}`.slice(0, MAX_CREATION_PROMPT_LENGTH);
+        const nextValue = `${value.slice(0, start)}${parsed.prompt}${value.slice(end)}`;
         additions.slice(0, remaining).forEach((style) => onStyleSelect(style));
         onChange(nextValue);
         setStyleCommand(null);
         setStyleQuery("");
         closeStyleMenu();
-        requestAnimationFrame(() => focusInput(Math.min(start + parsed.prompt.length, nextValue.length)));
+        requestAnimationFrame(() => focusInput(start + parsed.prompt.length));
         return true;
     };
 
@@ -263,7 +259,7 @@ export function CreationComposer({
                             {headerExtra}
                         </span>
                         <span className="inline-flex shrink-0 items-center gap-2">
-                            <span>{queued ? translate("generation.queued") : running ? translate("generation.generating") : `${value.length} / ${MAX_CREATION_PROMPT_LENGTH}`}</span>
+                            <span>{queued ? translate("generation.queued") : running ? translate("generation.generating") : `共 ${value.length} 字`}</span>
                             <Tooltip title="弹窗查看提示词">
                                 <button
                                     type="button"
@@ -323,7 +319,6 @@ export function CreationComposer({
                         /> : <Input.TextArea
                             ref={inputRef}
                             value={value}
-                            maxLength={MAX_CREATION_PROMPT_LENGTH}
                             autoSize={compact ? { minRows: 1, maxRows: 6 } : { minRows: 3, maxRows: 6 }}
                             placeholder={placeholder}
                             className="creation-composer-textarea"
@@ -416,7 +411,7 @@ export function CreationComposer({
                     <div className="flex items-center justify-between gap-3 pr-7">
                         <span>提示词</span>
                         <span className="text-xs font-normal text-[var(--studio-muted)]">
-                            {value.length} / {MAX_CREATION_PROMPT_LENGTH}
+                            共 {value.length} 字
                         </span>
                     </div>
                 }
@@ -439,12 +434,11 @@ export function CreationComposer({
             >
                 <textarea
                     value={value}
-                    maxLength={MAX_CREATION_PROMPT_LENGTH}
                     placeholder={placeholder}
                     aria-label="提示词内容"
                     className="thin-scrollbar block h-[65vh] w-full resize-none rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] p-3.5 text-[15px] leading-7 text-[var(--studio-ink)] outline-none transition focus:border-[#2f80ff] focus:ring-2 focus:ring-[#2f80ff]/25"
                     style={{ whiteSpace: "pre-wrap", overflowWrap: "break-word" }}
-                    onChange={(event) => onChange(event.target.value.slice(0, MAX_CREATION_PROMPT_LENGTH))}
+                    onChange={(event) => onChange(event.target.value)}
                 />
             </Modal>
         </div>

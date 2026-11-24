@@ -103,7 +103,7 @@ import type { CanvasImageSplitParams } from "../components/canvas-node-split-dia
 import { readVideoGenerationConstraintIssue, readVideoModelConfiguration } from "@/features/generation/lib/video-generation-constraints";
 import { buildNodeGenerationContext, buildNodeResponseMessages, hasNodeGenerationInputs, hydrateNodeGenerationContext, resolveNodeGenerationPrompt } from "../components/canvas-node-generation";
 import { CanvasNodeHoverToolbar } from "../components/canvas-node-hover-toolbar";
-import { CanvasNavigationPanel, CanvasStoryboardAssetPreviewDialog, type CanvasNavigationAsset, type CanvasNavigationPanelState, type CanvasNavigationTab } from "../components/canvas-navigation-panel";
+import { CanvasNavigationPanel, CanvasStoryboardAssetPreviewDialog, type CanvasNavigationAsset, type CanvasNavigationPanelState } from "../components/canvas-navigation-panel";
 import { CanvasFlow } from "../components/canvas-flow";
 import { StoryboardWorkspace } from "../components/storyboard-workspace";
 import { StoryboardVideoGenerationModal, type StoryboardVideoGenerationSettings } from "../components/storyboard-video-generation-modal";
@@ -449,7 +449,6 @@ function CanvasWorkspacePage() {
     const [canvasAssetPickerOpen, setCanvasAssetPickerOpen] = useState(false);
     const [canvasAssetReplaceNodeId, setCanvasAssetReplaceNodeId] = useState<string | null>(null);
     const [navigationPanelState, setNavigationPanelState] = useState<CanvasNavigationPanelState | "hidden">("expanded");
-    const [navigationPanelTab, setNavigationPanelTab] = useState<CanvasNavigationTab>("nodes");
     const [previewAsset, setPreviewAsset] = useState<CanvasNavigationAsset | null>(null);
     const [projectLoaded, setProjectLoaded] = useState(false);
     /** 进入项目后图片等媒体地址还在后台换取，期间不把未水合的地址写回服务端。 */
@@ -499,7 +498,6 @@ function CanvasWorkspacePage() {
     }, []);
     useEffect(() => {
         setNavigationPanelState("expanded");
-        setNavigationPanelTab("nodes");
         setPreviewAsset(null);
     }, [projectId]);
     const { start: startGenerationRequest, finish: finishGenerationRequest, stopByRunningId: stopRegisteredGenerationRequests, listTargetNodeIds: listGenerationTargetNodeIds, isRunning: isGenerationRunning } = useCanvasGenerationRequests();
@@ -5450,13 +5448,9 @@ function CanvasWorkspacePage() {
                 {navigationPanelState !== "hidden" ? (
                     <CanvasNavigationPanel
                         state={navigationPanelState === "collapsed" ? "collapsed" : "expanded"}
-                        activeTab={navigationPanelTab}
                         nodes={navigationNodes}
-                        assets={navigationAssets}
                         selectedNodeIds={selectedNodeIds}
-                        onTabChange={setNavigationPanelTab}
                         onLocateNode={handleNavigationNodeLocate}
-                        onPreviewAsset={setPreviewAsset}
                         onCollapse={() => setNavigationPanelState("collapsed")}
                         onExpand={openNavigationPanel}
                         onHide={() => setNavigationPanelState("hidden")}
