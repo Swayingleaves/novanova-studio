@@ -3,7 +3,7 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Clapperboard } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Clapperboard, Zap } from "lucide-react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { App } from "antd";
 
@@ -19,7 +19,7 @@ import {
     type AiConfig,
     type ModelCapability,
 } from "@/features/settings/stores/use-config-store";
-import { groupModelOptionsByChannel, resolveActiveChannelId, resolveModelSuccessRateTone, type ModelSuccessRateTone } from "@/features/settings/lib/model-picker-groups";
+import { groupModelOptionsByChannel, resolveActiveChannelId, resolveModelOptionPrice, resolveModelSuccessRateTone, type ModelOptionPriceBadge, type ModelSuccessRateTone } from "@/features/settings/lib/model-picker-groups";
 import type { ModelSuccessRateStats } from "@/services/api/server";
 
 import { MODEL_ICON_MONOCHROME_KEYS, isMonochromeModelIcon, resolveModelIcon, resolveModelIconByKey } from "./model-icon";
@@ -151,7 +151,7 @@ export function ModelPicker({
                         side="bottom"
                         sideOffset={6}
                         collisionPadding={12}
-                        className="z-[1200] w-[520px] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-border/70 bg-popover text-popover-foreground shadow-xl outline-none"
+                        className="z-[1200] w-[560px] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-border/70 bg-popover text-popover-foreground shadow-xl outline-none"
                         onPointerDown={(event) => event.stopPropagation()}
                         onMouseDown={(event) => event.stopPropagation()}
                         onWheel={(event) => event.stopPropagation()}
@@ -194,6 +194,7 @@ export function ModelPicker({
                                     {activeGroup?.models.map((model) => {
                                         const selected = model === current;
                                         const description = config.modelDescriptions?.[model.trim()];
+                                        const price = resolveModelOptionPrice(config, model, capability);
                                         return (
                                             <button
                                                 key={model}
@@ -211,6 +212,7 @@ export function ModelPicker({
                                                 <span className="flex w-full min-w-0 items-center gap-2">
                                                     <ModelIcon config={config} model={model} />
                                                     <span className="min-w-0 flex-1 truncate text-sm! font-medium">{itemLabel(model)}</span>
+                                                    {price ? <ModelPriceBadge price={price} /> : null}
                                                     <ModelSuccessRateIndicator stats={config.modelSuccessRateStats?.[model.trim()]} />
                                                     {selected ? <Check className="size-4 shrink-0 text-[var(--studio-primary)]" /> : null}
                                                 </span>
@@ -248,6 +250,24 @@ function createModelOptions(config: AiConfig, capability: ModelCapability | unde
 
 function isFilledText(value: string | undefined): value is string {
     return Boolean(value?.trim());
+}
+
+/** 模型价格胶囊标签，清晰展示按次/按秒单价或区间价。 */
+function ModelPriceBadge({ price }: { price: ModelOptionPriceBadge }) {
+    return (
+        <span
+            title={price.title}
+            className={cn(
+                "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px]! font-medium leading-none tabular-nums",
+                price.isFree
+                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    : "bg-[var(--studio-surface-raised)] text-[var(--studio-muted)]",
+            )}
+        >
+            {!price.isFree ? <Zap className="size-2.5 shrink-0 fill-current" strokeWidth={2.4} aria-hidden="true" /> : null}
+            <span>{price.label}</span>
+        </span>
+    );
 }
 
 /** 模型最近调用成功率指示灯与百分比展示，无调用记录时不渲染。 */

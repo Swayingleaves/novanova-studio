@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { configFromModelConfigs, createModelChannel, normalizeServerModelConfig } from "@/features/settings/stores/use-config-store";
-import { groupModelOptionsByChannel, resolveActiveChannelId, resolveModelSuccessRateTone } from "@/features/settings/lib/model-picker-groups";
+import { groupModelOptionsByChannel, resolveActiveChannelId, resolveModelOptionPrice, resolveModelSuccessRateTone } from "@/features/settings/lib/model-picker-groups";
 
 test("模型选项按渠道分组并保持渠道和模型原有顺序", () => {
     const channels = [
@@ -81,4 +81,34 @@ test("模型成功率区间正确映射红黄绿三色指示灯并透传配置�
     assert.deepEqual(aiConfig.modelSuccessRateStats, {
         "ch-a::gpt-image": { successRate: 92, succeededCount: 46, totalCount: 50, windowDays: 3 },
     });
+});
+
+test("模型选择器正确解析图片/视频/文本模型单价与分档区间价格", () => {
+    const config = {
+        modelCosts: [
+            { model: "ch-a::img-basic", taskType: "image" as const, credits: "5", unit: "generation" as const },
+            { model: "ch-a::img-tiered", taskType: "image" as const, credits: "5", unit: "generation" as const, resolutionPrices: { "1K": "2", "2K": "5", "4K": "10" } },
+            { model: "ch-a::vid-sec", taskType: "video" as const, credits: "10", unit: "second" as const },
+            { model: "ch-a::text-free", taskType: "text" as const, credits: "0", unit: "generation" as const },
+        ],
+        videoModelBillingConfigurations: [
+            {
+                model: "ch-a::vid-sec",
+                capabilities: ["text-to-video"],
+                videoBillingConfiguration: {
+                    billingUnit: "second" as const,
+                    minimumDurationSeconds: 5,
+                    modePrices: {
+                        "text-to-video": { "720p": "8", "1080p": "12" },
+                    },
+                },
+            },
+        ],
+    };
+
+    assert.equal(resolveModelOptionPrice(config, "ch-a::img-basic", "image")?.label, "5/次");
+    assert.equal(resolveModelOptionPrice(config, "ch-a::img-tiered", "image")?.label, "2~10/次");
+    assert.equal(resolveModelOptionPrice(config, "ch-a::vid-sec", "video")?.label, "8~12/秒");
+    assert.equal(resolveModelOptionPrice(config, "ch-a::text-free", "text")?.label, "免费");
+    assert.equal(resolveModelOptionPrice(config, "ch-a::text-free", "text")?.isFree, true);
 });
