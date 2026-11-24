@@ -188,21 +188,47 @@ public class DramaWorkspaceService {
                             if (project.revision() != request.revision()) {
                                 return Mono.error(conflict());
                             }
-                            return dramaRepository.claimActive(user.userId(), user.teamId(), project.id(), project.revision(),
-                                            request.clientRequestId(), "").flatMap(claimed -> {
-                                        if (!claimed) {
-                                            return Mono.error(busy());
-                                        }
-                                        JSONObject payload = turn("converse", project.id(), project.currentStage(), request.message().trim(), request.viewedStage());
-                                        payload.put("imageModel", request.imageModel() == null ? "" : request.imageModel());
-                                        payload.put("videoModel", request.videoModel() == null ? "" : request.videoModel());
-                                        payload.put("imageQuality", request.imageQuality() == null ? "" : request.imageQuality());
-                                        payload.put("imageResolution", request.imageResolution() == null ? "" : request.imageResolution());
-                                        payload.put("videoResolution", request.videoResolution() == null ? "" : request.videoResolution());
-                                        return sessionService.appendUserMessage(project.sessionId(), UUID.randomUUID().toString(), request.message().trim())
-                                                .then(enqueue(user, project, request.clientRequestId(), payload))
-                                                .then(workspace(user, project.id()));
-                                    });
+                            String trimmedMessage = request.message().trim();
+                            return dramaRepository.listVersions(project.id(), user.teamId()).collectList().flatMap(versions -> {
+                                boolean waitingPlanDuration = "plan".equals(project.currentStage()) && latest(versions, "plan") == null;
+                                Integer parsedDuration = waitingPlanDuration ? DramaDurationQuestions.parseTotalDurationSeconds(trimmedMessage) : null;
+                                if (parsedDuration != null) {
+                                    String opening = StringUtils.hasText(project.storyText())
+                                            ? project.ideaText() + (StringUtils.hasText(project.ideaText()) ? "\n" : "") + project.storyText()
+                                            : project.ideaText();
+                                    String planPrompt = opening + "\n用户指定总时长：" + parsedDuration + " 秒\n用户回复：" + trimmedMessage;
+                                    JSONObject payload = turn("generate", project.id(), "plan", planPrompt, "plan");
+                                    return requireIdle(project)
+                                            .then(dramaRepository.saveProgress(user.userId(), user.teamId(), project.id(), project.revision(),
+                                                    "plan", "active", request.clientRequestId(), parsedDuration, project.name()))
+                                            .flatMap(this::requireUpdated)
+                                            .then(sessionService.appendUserMessage(project.sessionId(), UUID.randomUUID().toString(), trimmedMessage))
+                                            .then(enqueue(user, project, request.clientRequestId(), payload))
+                                            .then(workspace(user, project.id()));
+                                }
+                                boolean waitingShotDuration = "shot".equals(project.currentStage()) && latest(versions, "shot") == null
+                                        && DramaDurationQuestions.isShotDurationAnswer(trimmedMessage);
+                                return dramaRepository.claimActive(user.userId(), user.teamId(), project.id(), project.revision(),
+                                                request.clientRequestId(), "").flatMap(claimed -> {
+                                            if (!claimed) {
+                                                return Mono.error(busy());
+                                            }
+                                            JSONObject payload;
+                                            if (waitingShotDuration) {
+                                                payload = turn("generate", project.id(), "shot", trimmedMessage, "shot");
+                                            } else {
+                                                payload = turn("converse", project.id(), project.currentStage(), trimmedMessage, request.viewedStage());
+                                                payload.put("imageModel", request.imageModel() == null ? "" : request.imageModel());
+                                                payload.put("videoModel", request.videoModel() == null ? "" : request.videoModel());
+                                                payload.put("imageQuality", request.imageQuality() == null ? "" : request.imageQuality());
+                                                payload.put("imageResolution", request.imageResolution() == null ? "" : request.imageResolution());
+                                                payload.put("videoResolution", request.videoResolution() == null ? "" : request.videoResolution());
+                                            }
+                                            return sessionService.appendUserMessage(project.sessionId(), UUID.randomUUID().toString(), trimmedMessage)
+                                                    .then(enqueue(user, project, request.clientRequestId(), payload))
+                                                    .then(workspace(user, project.id()));
+                                        });
+                            });
                         }))));
     }
 
@@ -805,18 +831,18 @@ public class DramaWorkspaceService {
     }
 
     private Mono<DramaDtos.WorkspaceResponse> createNew(User user, String clientRequestId, String idea, String story, String textModel, String aspectRatio) {
-        String requestId = clientRequestId + ":plan";
         String name = defaultName(idea, story);
         OffsetDateTime now = OffsetDateTime.now();
         return sessionService.createSession(user.userId(), DramaStageRules.ENTRY).flatMap(session -> {
             DramaRepository.ProjectRow project = new DramaRepository.ProjectRow(clientRequestId, user.teamId(), user.userId(), name,
-                    idea, story, textModel, session.id(), "plan", "active", 1, requestId, 60, aspectRatio, BigDecimal.ZERO, now, now);
+                    idea, story, textModel, session.id(), "plan", "active", 1, "", 60, aspectRatio, BigDecimal.ZERO, now, now);
             String opening = StringUtils.hasText(story) ? idea + (StringUtils.hasText(idea) ? "\n" : "") + story : idea;
             return dramaRepository.insertProject(project)
                     .then(sessionService.persist(new AgentSession(session.id(), user.userId(), name, DramaStageRules.ENTRY, List.of(), now, now)))
                     .then(sessionService.appendUserMessage(session.id(), UUID.randomUUID().toString(), opening))
-                    .then(enqueue(user, project, requestId, turn("generate", project.id(), "plan", opening, "plan")))
-                    .then(dramaRepository.saveClientResult(clientRequestId, project.id(), done(project.id(), requestId)))
+                    .then(sessionService.appendAssistantMessage(session.id(), UUID.randomUUID().toString(),
+                            DramaDurationQuestions.totalDurationReply(), DramaDurationQuestions.totalDurationMeta()))
+                    .then(dramaRepository.saveClientResult(clientRequestId, project.id(), done(project.id(), "")))
                     .then(workspace(user, project.id()));
         });
     }
@@ -834,6 +860,20 @@ public class DramaWorkspaceService {
                     }
                     Mono<Void> idle = StringUtils.hasText(replacingRequestId) ? Mono.empty() : requireIdle(project);
                     String next = DramaStageRules.next(project.currentStage());
+                    if ("shot".equals(next)) {
+                        return idle.then(transactionalOperator.transactional(dramaRepository.confirmVersion(project.id(), current.id()).flatMap(confirmed -> {
+                            if (!confirmed) {
+                                return Mono.error(conflict());
+                            }
+                            return dramaRepository.saveProgress(user.userId(), user.teamId(), project.id(), project.revision(),
+                                    next, "active", "", project.durationSeconds(), project.name()).flatMap(this::requireUpdated);
+                        }))).then(StringUtils.hasText(replacingRequestId)
+                                        ? Mono.empty()
+                                        : sessionService.appendAssistantMessage(project.sessionId(), UUID.randomUUID().toString(),
+                                                DramaDurationQuestions.shotDurationReply(project.durationSeconds()), DramaDurationQuestions.shotDurationMeta()))
+                                .then(dramaRepository.saveClientResult(request.clientRequestId(), project.id(), done(project.id(), "")))
+                                .then(workspace(user, project.id()));
+                    }
                     String requestId = request.clientRequestId() + ":next";
                     return idle.then(transactionalOperator.transactional(dramaRepository.confirmVersion(project.id(), current.id()).flatMap(confirmed -> {
                         if (!confirmed) {

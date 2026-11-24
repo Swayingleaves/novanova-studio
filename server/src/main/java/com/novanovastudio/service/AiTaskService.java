@@ -1126,6 +1126,19 @@ public class AiTaskService {
     }
 
     /**
+     * 查询指定任务类型与模型已启用的能力列表。
+     *
+     * @param taskType String 任务类型（text/image/video）
+     * @param model String 模型标识
+     * @return Mono<List<String>> 已启用的能力列表，未找到时返回空列表
+     */
+    public Mono<List<String>> resolveModelCapabilities(String taskType, String model) {
+        return resolveModel(taskType, model)
+                .map(resolved -> resolved.capabilities() == null ? List.<String>of() : resolved.capabilities())
+                .onErrorReturn(List.of());
+    }
+
+    /**
      * 校验计费生成任务的来源。
      *
      * @param taskType String 任务类型

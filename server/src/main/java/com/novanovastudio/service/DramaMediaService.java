@@ -127,17 +127,23 @@ public class DramaMediaService {
                         return prompt(userId, project, request, spec, shots, cast, plan, media)
                                 // 提示词 Agent 要跑十几秒，参考图可能在这期间才落库，写完再读一次
                                 .flatMap(item -> dramaRepository.listMedia(project.id(), teamId).collectList().flatMap(fresh -> {
-                            List<AiTaskDtos.AiTaskMediaReference> references = references(request.targetKey(), item.referenceKeys(), spec, fresh);
-                            String mode = videoMode(request.targetKey(), spec.mediaType(), references);
-                            Map<String, Object> parameters = parameters(request, spec);
-                            applyAspect(parameters, request.targetKey(), spec.mediaType(), project.aspectRatio());
-                            AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(spec.mediaType(), item.prompt(),
-                                    request.model().trim(), parameters, references, null, AiTaskSources.DRAMA, null, null, mode);
-                            return aiTaskService.createTask(taskRequest, created -> persist(userId, teamId, project.id(), version.id(), request, spec, item, created))
-                                    .doOnNext(created -> log.info("短剧已提交媒体任务: projectId={}, target={}, mediaType={}, model={}, mode={}, taskId={}",
-                                            project.id(), request.targetKey(), spec.mediaType(), request.model().trim(), mode, created.id()))
-                                    .onErrorMap(error -> duplicateTarget(error) ? new BusinessException(ErrorCode.BUSINESS_ERROR, "这一项正在生成") : error)
-                                    .then();
+                            List<AiTaskDtos.AiTaskMediaReference> rawReferences = references(request.targetKey(), item.referenceKeys(), spec, fresh);
+                            Mono<List<String>> capabilitiesMono = "video".equals(spec.mediaType())
+                                    ? aiTaskService.resolveModelCapabilities("video", request.model().trim())
+                                    : Mono.just(List.of());
+                            return capabilitiesMono.flatMap(capabilities -> {
+                                String mode = resolveVideoMode(request.targetKey(), spec.mediaType(), rawReferences, capabilities);
+                                List<AiTaskDtos.AiTaskMediaReference> references = adjustReferenceRolesForVideoMode(rawReferences, mode);
+                                Map<String, Object> parameters = parameters(request, spec);
+                                applyAspect(parameters, request.targetKey(), spec.mediaType(), project.aspectRatio());
+                                AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(spec.mediaType(), item.prompt(),
+                                        request.model().trim(), parameters, references, null, AiTaskSources.DRAMA, null, null, mode);
+                                return aiTaskService.createTask(taskRequest, created -> persist(userId, teamId, project.id(), version.id(), request, spec, item, created))
+                                        .doOnNext(created -> log.info("短剧已提交媒体任务: projectId={}, target={}, mediaType={}, model={}, mode={}, taskId={}",
+                                                project.id(), request.targetKey(), spec.mediaType(), request.model().trim(), mode, created.id()))
+                                        .onErrorMap(error -> duplicateTarget(error) ? new BusinessException(ErrorCode.BUSINESS_ERROR, "这一项正在生成") : error)
+                                        .then();
+                            });
                         }));
                     });
                 }));
@@ -391,14 +397,66 @@ public class DramaMediaService {
         return new AiTaskDtos.AiTaskMediaReference(item.id(), item.targetKey(), mimeType, text(item.storageKey()), text(item.resultUrl()), role);
     }
 
-    private String videoMode(String targetKey, String mediaType, List<AiTaskDtos.AiTaskMediaReference> references) {
+    /**
+     * 按分镜参考图数量与模型已启用能力决定视频生成模式：
+     * <ul>
+     *     <li>有首尾帧时优先使用首尾帧模式；若模型未开启首尾帧但开启了全能参考，则自动回退到全能参考。</li>
+     *     <li>仅有首帧时优先使用图生视频；若模型未开启图生视频但开启了全能参考，同样回退到全能参考。</li>
+     * </ul>
+     *
+     * @param targetKey String 目标键
+     * @param mediaType String 媒体类型
+     * @param references List<AiTaskMediaReference> 参考图列表
+     * @param modelCapabilities List<String> 模型已启用的能力列表
+     * @return String 视频生成模式；非视频目标返回 null
+     */
+    static String resolveVideoMode(String targetKey, String mediaType,
+                                   List<AiTaskDtos.AiTaskMediaReference> references,
+                                   List<String> modelCapabilities) {
         if (!"video".equals(mediaType)) {
             return null;
         }
+        List<String> capabilities = modelCapabilities == null ? List.of() : modelCapabilities;
+        boolean supportsFirstLast = capabilities.contains(VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO);
+        boolean supportsReference = capabilities.contains(VideoGenerationMode.REFERENCE_TO_VIDEO);
+        boolean supportsImageToVideo = capabilities.contains(VideoGenerationMode.IMAGE_TO_VIDEO);
         if (targetKey.startsWith("shot-video:")) {
-            return references.size() >= 2 ? VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO : VideoGenerationMode.IMAGE_TO_VIDEO;
+            if (references.size() >= 2) {
+                if (supportsFirstLast) {
+                    return VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO;
+                }
+                if (supportsReference) {
+                    return VideoGenerationMode.REFERENCE_TO_VIDEO;
+                }
+                return VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO;
+            }
+            if (supportsImageToVideo) {
+                return VideoGenerationMode.IMAGE_TO_VIDEO;
+            }
+            if (supportsReference) {
+                return VideoGenerationMode.REFERENCE_TO_VIDEO;
+            }
+            return VideoGenerationMode.IMAGE_TO_VIDEO;
         }
         return references.isEmpty() ? VideoGenerationMode.TEXT_TO_VIDEO : VideoGenerationMode.IMAGE_TO_VIDEO;
+    }
+
+    /**
+     * 当视频模式回退为全能参考时，把首尾帧角色统一转为 reference_image，兼容全能参考协议。
+     *
+     * @param references List<AiTaskMediaReference> 原始参考图列表
+     * @param mode String 最终视频生成模式
+     * @return List<AiTaskMediaReference> 适配角色后的参考图列表
+     */
+    static List<AiTaskDtos.AiTaskMediaReference> adjustReferenceRolesForVideoMode(
+            List<AiTaskDtos.AiTaskMediaReference> references, String mode) {
+        if (!VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode) || references == null || references.isEmpty()) {
+            return references;
+        }
+        return references.stream()
+                .map(ref -> new AiTaskDtos.AiTaskMediaReference(
+                        ref.id(), ref.name(), ref.mimeType(), ref.storageKey(), ref.url(), "reference_image"))
+                .toList();
     }
 
     private Map<String, Object> parameters(DramaDtos.GenerateMediaRequest request, DramaMediaTargets.Spec spec) {

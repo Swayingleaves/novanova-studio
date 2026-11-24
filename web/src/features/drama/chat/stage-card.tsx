@@ -8,10 +8,22 @@ import { downloadMedia } from "@/features/storage/services/media-download";
 import type { DramaMedia, DramaStage, DramaVersion, DramaWorkspace } from "@/services/api/drama";
 import { dramaStageMeta } from "../stage-meta";
 
+/** 助手消息中的结构化选项，默认按竖向单选框展示。 */
+export type DramaMessageChoice = {
+    label: string;
+    value?: string;
+    description?: string;
+    customInput?: boolean;
+    placeholder?: string;
+};
+
 /** 助手消息 meta 的结构，字段由服务端按消息种类写入。 */
 export type DramaMessageMeta = {
     kind?: string;
     stage?: DramaStage;
+    questionType?: string;
+    multiple?: boolean;
+    choices?: DramaMessageChoice[];
     versionId?: string;
     versionNumber?: number;
     counts?: Record<string, number | string | undefined>;

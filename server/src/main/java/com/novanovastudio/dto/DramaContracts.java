@@ -25,9 +25,24 @@ public final class DramaContracts {
      * @param shot 分镜镜头
      * @param preview 成片说明
      * @param media 要提交的图片或视频，不出图时为空
+     * @param choices 需要用户选择的选项列表，非提问场景为空
+     * @param multiple 是否允许多选，默认为 false（单选）
      */
     public record DirectorResult(String reply, String intent, String targetStage, PlanBody plan, ScriptBody script,
-                                 CastBody cast, ShotBody shot, PreviewBody preview, MediaPlan media) {
+                                 CastBody cast, ShotBody shot, PreviewBody preview, MediaPlan media,
+                                 List<ChoiceOption> choices, Boolean multiple) {
+    }
+
+    /**
+     * 提供给用户点击选择的单个选项。
+     *
+     * @param label 展示给用户的选项文案
+     * @param value 点击后发送给服务端的文本，留空时默认使用 label
+     * @param description 选项辅助说明，可为空
+     * @param customInput 是否为“自己输入”自定义项
+     * @param placeholder 自定义输入框占位提示
+     */
+    public record ChoiceOption(String label, String value, String description, Boolean customInput, String placeholder) {
     }
 
     /**

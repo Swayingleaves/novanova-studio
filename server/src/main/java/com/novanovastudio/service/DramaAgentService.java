@@ -130,15 +130,19 @@ public class DramaAgentService {
         if ("converse".equals(kind) && "confirm".equals(intent)) {
             settled.set(true);
             String nextStage = DramaStageRules.next(project.currentStage());
+            boolean askShotDuration = "shot".equals(nextStage);
+            String confirmReply = askShotDuration ? DramaDurationQuestions.shotDurationReply(project.durationSeconds()) : reply;
+            String confirmMeta = askShotDuration
+                    ? DramaDurationQuestions.shotDurationMeta()
+                    : simpleMeta("confirm", StringUtils.hasText(nextStage) ? nextStage : project.currentStage());
             return runtime.release(request)
                     .then(workspaceService.confirmFromAgent(request.getUserId(), teamId, project.id(), request.getId()))
-                    .then(complete(request, teamId, assistantId, reply,
-                            simpleMeta("confirm", StringUtils.hasText(nextStage) ? nextStage : project.currentStage())))
+                    .then(complete(request, teamId, assistantId, confirmReply, confirmMeta))
                     .then(finish(request, "success", ""));
         }
         if ("converse".equals(kind) && "answer".equals(intent)) {
             settled.set(true);
-            return complete(request, teamId, assistantId, reply, simpleMeta("answer", viewedStage))
+            return complete(request, teamId, assistantId, reply, answerMeta(viewedStage, raw))
                     .then(dramaRepository.clearActive(project.id(), request.getId()))
                     .then(finish(request, "success", ""));
         }
@@ -189,6 +193,23 @@ public class DramaAgentService {
         if (StringUtils.hasText(stage)) {
             meta.put("stage", stage);
         }
+        return meta.toJSONString();
+    }
+
+    /**
+     * 生成问答消息的附加信息，附带结构化选项（如有）。
+     *
+     * @param stage 所属阶段
+     * @param raw 导演结果
+     * @return String 附加信息JSON
+     */
+    private String answerMeta(String stage, JSONObject raw) {
+        JSONObject meta = new JSONObject();
+        meta.put("kind", "answer");
+        if (StringUtils.hasText(stage)) {
+            meta.put("stage", stage);
+        }
+        DramaDurationQuestions.attachChoices(meta, raw);
         return meta.toJSONString();
     }
 

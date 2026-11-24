@@ -10,9 +10,9 @@ import { UserCreditMenu } from "@/features/app-shell/components/user-credit-menu
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { DEFAULT_IMAGE_LAST_USED_SETTINGS, DEFAULT_VIDEO_LAST_USED_SETTINGS, loadDramaLastUsedSettings, loadImageLastUsedSettings, loadVideoLastUsedSettings, saveDramaLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
-import { VIDEO_RESOLUTION_OPTIONS, availableVideoResolutions } from "@/features/generation/lib/video-billing";
+import { VIDEO_RESOLUTION_OPTIONS, availableVideoResolutions, videoModelSupportsMode } from "@/features/generation/lib/video-billing";
 import { sizeFromAspectRatio } from "@/features/generation/components/video-settings-panel";
-import type { VideoResolution } from "@/features/settings/stores/use-config-store";
+import type { AiConfig, VideoGenerationMode, VideoResolution } from "@/features/settings/stores/use-config-store";
 import { cancelAiTasksWithRefundPolicy } from "@/features/generation/lib/cancel-provider-generation";
 import { dramaAspectRatio } from "./aspect-ratio";
 import { agentSubscribeEvents, cancelAgentChat } from "@/features/canvas/api/agent";
@@ -230,7 +230,8 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
     const shotVersion = viewed === "shot" && selected?.stage === "shot" ? selected : latestOf(workspace?.versions, "shot");
     const productionShotRefs = useMemo(() => refsOf(shotVersion?.content.shots), [shotVersion]);
     const mergedShotDurations = useMemo(() => shotDurationMap(shotVersion?.content.shots), [shotVersion]);
-    const videoMode = productionShotRefs.some((ref) => mediaByKey[`shot-last:${ref}`]?.status === "success") ? "first-last-frame-to-video" : "image-to-video";
+    const hasAnyLastFrame = productionShotRefs.some((ref) => mediaByKey[`shot-last:${ref}`]?.status === "success");
+    const videoMode = resolveDramaShotVideoMode(config, videoModel, hasAnyLastFrame);
     const videoResolutions = useMemo(() => availableVideoResolutions({ ...config, videoModel, videoGenerationMode: videoMode }, videoModel, videoMode), [config, videoMode, videoModel]);
 
     useEffect(() => {
@@ -394,7 +395,7 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
         }
         const ref = targetKey.slice(targetKey.lastIndexOf(":") + 1);
         const ratio = dramaAspectRatio(project.aspectRatio);
-        const shotVideoMode = mediaByKey[`shot-last:${ref}`]?.status === "success" ? "first-last-frame-to-video" : "image-to-video";
+        const shotVideoMode = resolveDramaShotVideoMode(config, model, mediaByKey[`shot-last:${ref}`]?.status === "success");
         setPendingKeys((keys) => keys.includes(targetKey) ? keys : [...keys, targetKey]);
         try {
             const next = await generateDramaMedia({
@@ -564,6 +565,7 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                                             onRegenerate={canRegenerate ? () => void regenerate(index) : undefined}
                                             onUndo={undo}
                                             onSuggest={setDraft}
+                                            onSelectChoice={(text) => void send(text)}
                                         />
                                     );
                                 })}
@@ -783,4 +785,16 @@ function StatusPill({ tone, children }: { tone: "neutral" | "success" | "warning
             ? "border border-[color-mix(in_srgb,var(--studio-warning)_45%,transparent)] bg-[color-mix(in_srgb,var(--studio-warning)_14%,var(--studio-surface))] text-[var(--studio-warning)]"
             : "border border-[var(--studio-line-strong)] bg-[var(--studio-surface)] text-[var(--studio-ink)]";
     return <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${toneClass}`}>{children}</span>;
+}
+
+/** 分镜视频模式：未开启首尾帧（或图生视频）但开启了全能参考时自动回退到全能参考，与服务端保持一致。 */
+function resolveDramaShotVideoMode(config: AiConfig, model: string, hasLastFrame: boolean): VideoGenerationMode {
+    const preferred: VideoGenerationMode = hasLastFrame ? "first-last-frame-to-video" : "image-to-video";
+    if (!model || videoModelSupportsMode(config, model, preferred)) {
+        return preferred;
+    }
+    if (videoModelSupportsMode(config, model, "reference-to-video")) {
+        return "reference-to-video";
+    }
+    return preferred;
 }
