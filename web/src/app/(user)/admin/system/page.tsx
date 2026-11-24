@@ -164,6 +164,7 @@ export default function AdminSystemPage() {
                 { key: "configuration:firstPurchaseBonus", label: translate("appShell.firstPurchaseBonus"), tab: "configuration", sub: "firstPurchaseBonus" },
                 { key: "configuration:objectStorage", label: translate("appShell.objectStorage_2caed1"), tab: "configuration", sub: "objectStorage" },
                 ...(!team ? [{ key: "configuration:timeouts", label: translate("administration.timeoutSettings"), tab: "configuration", sub: "timeouts" }] : []),
+                ...(!team ? [{ key: "configuration:modelStats", label: translate("administration.modelStatsSettings"), tab: "configuration", sub: "modelStats" }] : []),
                 { key: "configuration:community", label: translate("administration.communityConfig"), tab: "configuration", sub: "community" },
                 { key: "configuration:externalLink", label: translate("administration.externalLinkConfig"), tab: "configuration", sub: "externalLink" },
                 ...(!team ? [{ key: "configuration:videoExport", label: translate("administration.videoExportSettings"), tab: "configuration", sub: "videoExport" }] : []),

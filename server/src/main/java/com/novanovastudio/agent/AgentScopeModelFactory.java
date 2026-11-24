@@ -49,6 +49,10 @@ public class AgentScopeModelFactory {
     /** 供应商适配器注册表 */
     private final AiProviderAdapterRegistry adapterRegistry;
 
+    /** 模型调用成功率统计服务。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.novanovastudio.service.ModelSuccessRateService modelSuccessRateService;
+
     /**
      * 读取平台配置的默认文本模型并创建AgentScope模型。
      *
@@ -152,7 +156,21 @@ public class AgentScopeModelFactory {
                 return teamTaskScopeService.requireCurrentActive().then(persistenceService.getPlatformModelConfigs()
                         .filter(models -> models.stream().anyMatch(config -> modelConfigId.equals(config.id())))
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, "模型授权已失效，停止后续调用"))))
-                        .thenMany(Flux.defer(() -> model.stream(messages, tools, options)))
+                        .thenMany(Flux.defer(() -> {
+                            java.util.concurrent.atomic.AtomicBoolean recorded = new java.util.concurrent.atomic.AtomicBoolean(false);
+                            return model.stream(messages, tools, options)
+                                    .doOnComplete(() -> {
+                                        if (recorded.compareAndSet(false, true) && modelSuccessRateService != null) {
+                                            modelSuccessRateService.recordCallResultAsync(modelConfigId, true);
+                                        }
+                                    })
+                                    .doOnError(error -> {
+                                        if (recorded.compareAndSet(false, true) && modelSuccessRateService != null) {
+                                            modelSuccessRateService.recordCallResultAsync(modelConfigId, false);
+                                        }
+                                    })
+                                    .doOnCancel(() -> recorded.set(true));
+                        }))
                         .contextWrite(context -> context.putAll(modelContext));
             }
             /** @return 模型名称 */

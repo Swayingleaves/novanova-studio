@@ -1146,3 +1146,11 @@ V61 按空间、用户、原配置和对象键精确关联已有媒体及原文�
 | `user_ai_channels` | `model_groups` | `JSONB` | 模型名到上游 `/v1/models` 返回 `groups` 分组标识列表的映射，默认 `{}` |
 
 拉取渠道模型列表（`POST /api/v1/config/channel/refreshChannelModels`）时同步解析各模型的 `groups` 数组并随渠道保存。`nana` 官方中转站视频任务优先按模型所属 `groups` 路由协议：`doubao-gz` 走官转 Seedance 通道、`seedance-cheap` 走 `/v1/videos` JSON 通道；未命中专用协议时回退为 OpenAI 兼容视频协议兜底。
+
+## 平台模型调用成功率统计配置（V107 / 社区版 V108）
+
+| 表 | 关键字段及约束 |
+| --- | --- |
+| `platform_model_stats_settings` | 单行表，`id` 固定为 1；`success_rate_window_days`（整型，默认 `3`，范围 `1~365`，控制前端模型选择器展示最近多少天的调用成功率）、`created_at`/`updated_at` |
+
+后台入口为「配置与用户偏好 · 模型成功率设置」。平台管理员读取走 `GET /api/v1/admin/platform/getModelStatsSettings`，保存走 `POST /api/v1/admin/platform/saveModelStatsSettings`（仅平台空间的全局管理员可修改）。各模型的成功/失败调用计数按自然日存储在 Redis Hash（`novanova:ai:model:stats:daily:{yyyy-MM-dd}`，TTL 366 天），服务端按配置天数聚合后随 `GET /api/v1/ai/model/listModels` 和 `GET /api/v1/config/model/listModelConfigs` 返回。

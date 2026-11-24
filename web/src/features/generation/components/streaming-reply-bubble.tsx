@@ -1,5 +1,6 @@
 "use client";
 
+import { LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -32,6 +33,8 @@ type StreamingReplyBubbleProps = {
     thinking?: boolean;
     /** 思考胶囊文案，默认“思考中”。 */
     thinkingLabel?: string;
+    /** 已有正文但后续步骤仍在执行时，在气泡文字末尾显示旋转加载指示器。 */
+    loading?: boolean;
     /** 是否启用实时流式弹簧动效；历史轮次传 false 直接静态渲染。 */
     animated?: boolean;
     /** 气泡高度增长时的回调，便于外层保持滚动贴底。 */
@@ -107,6 +110,7 @@ export function StreamingReplyBubble({
     text,
     thinking = false,
     thinkingLabel = "思考中",
+    loading = false,
     animated = false,
     onHeightChange,
     bubbleBackground,
@@ -150,6 +154,7 @@ export function StreamingReplyBubble({
             text={text}
             thinking={thinking}
             thinkingLabel={thinkingLabel}
+            loading={loading}
             onHeightChange={onHeightChange}
             surfaceStyle={surfaceStyle}
         />
@@ -160,9 +165,10 @@ function AnimatedStreamingReplyBubble({
     text,
     thinking,
     thinkingLabel,
+    loading,
     onHeightChange,
     surfaceStyle,
-}: Required<Pick<StreamingReplyBubbleProps, "text" | "thinking" | "thinkingLabel">> & {
+}: Required<Pick<StreamingReplyBubbleProps, "text" | "thinking" | "thinkingLabel" | "loading">> & {
     onHeightChange?: () => void;
     surfaceStyle?: React.CSSProperties;
 }) {
@@ -170,6 +176,7 @@ function AnimatedStreamingReplyBubble({
     const bubbleRef = useRef<HTMLDivElement>(null);
     const thinkRef = useRef<HTMLSpanElement>(null);
     const textLayerRef = useRef<HTMLDivElement>(null);
+    const loadingRef = useRef<HTMLSpanElement>(null);
     const tokenElMapRef = useRef<Map<number, HTMLSpanElement>>(new Map());
     const onHeightChangeRef = useRef(onHeightChange);
     onHeightChangeRef.current = onHeightChange;
@@ -253,6 +260,12 @@ function AnimatedStreamingReplyBubble({
             if (!el) continue;
             maxRight = Math.max(maxRight, el.offsetLeft + el.offsetWidth);
             maxBottom = Math.max(maxBottom, el.offsetTop + el.offsetHeight);
+        }
+        // 正文尾部附带加载指示器时，将其尺寸一并计入气泡目标宽高，避免贴边截断
+        const loader = loading ? loadingRef.current : null;
+        if (loader && maxRight > 0) {
+            maxRight = Math.max(maxRight, loader.offsetLeft + loader.offsetWidth);
+            maxBottom = Math.max(maxBottom, loader.offsetTop + loader.offsetHeight);
         }
         const pill = getThinkPillSize();
         const targetWidth = maxRight > 0 ? Math.min(maxWidth, Math.max(pill.width, maxRight + PAD_X * 2 + 2)) : maxWidth;
@@ -428,7 +441,7 @@ function AnimatedStreamingReplyBubble({
     useLayoutEffect(() => {
         updateTargetDimensions();
         scheduleLoop();
-    }, [tokens, layoutWidth]);
+    }, [tokens, layoutWidth, loading]);
 
     useEffect(() => () => {
         if (rafIdRef.current !== null) {
@@ -481,6 +494,16 @@ function AnimatedStreamingReplyBubble({
                             </span>
                         );
                     })}
+                    {loading && tokens.length > 0 ? (
+                        <span
+                            ref={loadingRef}
+                            role="status"
+                            aria-label="加载中"
+                            className="ml-1.5 inline-flex align-middle text-[var(--studio-muted)]"
+                        >
+                            <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+                        </span>
+                    ) : null}
                 </div>
             </div>
         </div>

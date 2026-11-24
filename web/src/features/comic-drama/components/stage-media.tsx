@@ -68,7 +68,7 @@ type MediaSettingsState = {
 };
 
 type ImageSettingsKey = "quality" | "imageResolution" | "size" | "count";
-type VideoSettingsKey = "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark";
+type VideoSettingsKey = "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark" | "videoAudio";
 
 /** 生成目标类型的中文名，与后端 comic_drama_media_results.target_type 对齐。 */
 const getTargetTypeLabels = (translate = translateMessage): Record<string, string> => ({

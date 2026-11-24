@@ -46,3 +46,12 @@ export function resolveActiveChannelId(
     const matched = currentModel ? groups.find((group) => group.models.includes(currentModel)) : undefined;
     return matched?.channelId || groups[0].channelId;
 }
+
+export type ModelSuccessRateTone = "green" | "yellow" | "red";
+
+/** 根据 0-100 成功率区间映射绿/黄/红三色指示灯（>=80 绿，50-79 黄，<50 红）。 */
+export function resolveModelSuccessRateTone(successRate: number): ModelSuccessRateTone {
+    if (successRate >= 80) return "green";
+    if (successRate >= 50) return "yellow";
+    return "red";
+}

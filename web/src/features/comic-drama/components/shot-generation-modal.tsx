@@ -23,7 +23,7 @@ import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaAssetVersion, ComicDramaPromptVersion, ComicDramaShot } from "../types";
 import { countShotReferenceImages } from "../lib/shot-reference-images";
 
-type VideoConfigKey = "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark";
+type VideoConfigKey = "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark" | "videoAudio";
 
 type ShotGenerationModalProps = {
     /** 弹窗是否可见 */

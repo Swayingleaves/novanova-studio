@@ -53,7 +53,9 @@ import {
     getCheckInRewardSettings,
     getFirstPurchaseBonusSettings,
     getInvitationRewardSettings,
+    getModelStatsSettings,
     getTimeoutSettings,
+    saveModelStatsSettings,
     updateTimeoutSettings,
     refreshChannelModels as refreshServerChannelModels,
     setDefaultModel,
@@ -96,7 +98,7 @@ import { getVideoExportSettings, saveVideoExportSettings } from "@/services/api/
 import { getClientDownloadSettings, saveClientDownloadSettings, type ClientDownloadSettings } from "@/services/api/client-download-settings";
 import { useVideoExportSettingsStore } from "@/features/comic-drama/stores/use-video-export-settings-store";
 
-export type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "firstPurchaseBonus" | "objectStorage" | "timeouts" | "community" | "externalLink" | "videoExport" | "clientDownload";
+export type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "firstPurchaseBonus" | "objectStorage" | "timeouts" | "modelStats" | "community" | "externalLink" | "videoExport" | "clientDownload";
 
 const defaultTimeoutSettings = (): TimeoutSettings => ({
     aiRequestBodyTimeoutSeconds: 60,
@@ -398,6 +400,8 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const [draftTimeoutSettings, setDraftTimeoutSettings] = useState<TimeoutSettings>(defaultTimeoutSettings);
     const [videoExportBaseline, setVideoExportBaseline] = useState<boolean>(true);
     const [draftVideoExportEnabled, setDraftVideoExportEnabled] = useState<boolean>(true);
+    const [modelStatsBaselineDays, setModelStatsBaselineDays] = useState<number>(3);
+    const [draftModelStatsDays, setDraftModelStatsDays] = useState<number>(3);
     const [clientDownloadBaseline, setClientDownloadBaseline] = useState<ClientDownloadSettings>({ macIntelUrl: null, macAppleSiliconUrl: null, windowsUrl: null });
     const [draftClientDownload, setDraftClientDownload] = useState<ClientDownloadSettings>({ macIntelUrl: null, macAppleSiliconUrl: null, windowsUrl: null });
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
@@ -474,8 +478,9 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             useTeamStore.getState().team ? Promise.resolve(defaultTimeoutSettings()) : getTimeoutSettings(),
             useTeamStore.getState().team ? Promise.resolve({ enabled: true }) : getVideoExportSettings(),
             useTeamStore.getState().team ? Promise.resolve({ macIntelUrl: null, macAppleSiliconUrl: null, windowsUrl: null }) : getClientDownloadSettings(),
+            useTeamStore.getState().team ? Promise.resolve({ successRateWindowDays: 3 }) : getModelStatsSettings(),
         ])
-            .then(([, , creditSettings, invitationRewardSettings, checkInSettings, firstPurchaseBonusSettings, , , timeoutSettings, videoExportSettings, clientDownloadSettings]) => {
+            .then(([, , creditSettings, invitationRewardSettings, checkInSettings, firstPurchaseBonusSettings, , , timeoutSettings, videoExportSettings, clientDownloadSettings, modelStatsSettings]) => {
                 if (!active) return;
                 resetAllDrafts();
                 setCreditBaseline(creditSettings.initialCredits);
@@ -499,6 +504,11 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                 };
                 setClientDownloadBaseline(normalizedClientDownload);
                 setDraftClientDownload(normalizedClientDownload);
+                const windowDays = modelStatsSettings?.successRateWindowDays && modelStatsSettings.successRateWindowDays >= 1
+                    ? modelStatsSettings.successRateWindowDays
+                    : 3;
+                setModelStatsBaselineDays(windowDays);
+                setDraftModelStatsDays(windowDays);
                 setDraftsReady(true);
             })
             .catch((error) => {
@@ -533,6 +543,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
     const communityDirty = communityDraftSignature(draftCommunityConfigs) !== communityDraftSignature(communityBaseline);
     const externalLinkDirty = externalLinkDraftSignature(draftExternalLink) !== externalLinkDraftSignature(externalLinkBaseline);
     const timeoutDirty = timeoutSettingsSignature(draftTimeoutSettings) !== timeoutSettingsSignature(timeoutBaseline);
+    const modelStatsDirty = draftModelStatsDays !== modelStatsBaselineDays;
     const videoExportDirty = draftVideoExportEnabled !== videoExportBaseline;
     const clientDownloadDirty =
         (draftClientDownload.macIntelUrl?.trim() || null) !== (clientDownloadBaseline.macIntelUrl?.trim() || null) ||
@@ -540,7 +551,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
         (draftClientDownload.windowsUrl?.trim() || null) !== (clientDownloadBaseline.windowsUrl?.trim() || null);
     const editingModelBaseline = editingModelConfig && draftModelConfigs.find((item) => item.id === editingModelConfig.id);
     const modelEditorDirty = Boolean(editingModelConfig && (!sameValue(editingModelConfig, editingModelBaseline) || editingCustomBodyParameters !== JSON.stringify(editingModelBaseline?.customBodyParameters || {}, null, 2)));
-    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || firstPurchaseBonusDirty || communityDirty || externalLinkDirty || timeoutDirty || videoExportDirty || clientDownloadDirty || modelEditorDirty;
+    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || firstPurchaseBonusDirty || communityDirty || externalLinkDirty || timeoutDirty || modelStatsDirty || videoExportDirty || clientDownloadDirty || modelEditorDirty;
     const isSaving = Boolean(savingTab);
     useConfigurationLeaveGuard(draftsReady && hasUnsavedChanges);
 
@@ -1071,6 +1082,22 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             message.success(translate("administration.videoExportSettingsSaved"));
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("administration.videoExportSettingsSaveFailed"));
+        } finally {
+            setSavingTab("");
+        }
+    };
+
+    const saveModelStatsConfigSettings = async () => {
+        setSavingTab("modelStats");
+        try {
+            const saved = await saveModelStatsSettings(draftModelStatsDays);
+            const days = saved.successRateWindowDays;
+            setModelStatsBaselineDays(days);
+            setDraftModelStatsDays(days);
+            await refreshModelConfiguration();
+            message.success(translate("administration.modelStatsSettingsSaved"));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("administration.modelStatsSettingsSaveFailed"));
         } finally {
             setSavingTab("");
         }
@@ -2071,6 +2098,45 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                             ),
                         },
                         {
+                            key: "modelStats",
+                            label: translate("administration.modelStatsSettings"),
+                            children: (
+                                <Form layout="vertical" requiredMark={false} className="max-w-xl">
+                                    <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                        <div className="text-sm font-semibold">{translate("administration.modelStatsSettings")}</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("administration.modelStatsSettingsHint")}</div>
+                                        <div className="mt-5">
+                                            <Form.Item
+                                                label={<span className="block">{translate("administration.modelSuccessRateWindowDays")}</span>}
+                                                extra={translate("administration.modelSuccessRateWindowDaysHint")}
+                                                className="mb-0"
+                                            >
+                                                <InputNumber
+                                                    min={1}
+                                                    max={365}
+                                                    precision={0}
+                                                    suffix={translate("administration.modelStatsDaysUnit")}
+                                                    value={draftModelStatsDays}
+                                                    disabled={isSaving}
+                                                    className="w-full!"
+                                                    onChange={(value) => setDraftModelStatsDays((current) => (typeof value === "number" ? value : current))}
+                                                />
+                                            </Form.Item>
+                                        </div>
+                                        <Button
+                                            type="primary"
+                                            className="mt-5"
+                                            disabled={!modelStatsDirty || isSaving}
+                                            loading={savingTab === "modelStats"}
+                                            onClick={() => void saveModelStatsConfigSettings()}
+                                        >
+                                            {translate("appShell.save")}
+                                        </Button>
+                                    </div>
+                                </Form>
+                            ),
+                        },
+                        {
                             key: "community",
                             label: translate("administration.communityConfig"),
                             children: (
@@ -2188,7 +2254,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                                 </Form>
                             ),
                         },
-                    ].filter((item) => !team || !["credits", "creditProducts", "invitationReward", "checkIn", "firstPurchaseBonus", "community", "externalLink", "timeouts", "videoExport", "clientDownload"].includes(item.key))}
+                    ].filter((item) => !team || !["credits", "creditProducts", "invitationReward", "checkIn", "firstPurchaseBonus", "community", "externalLink", "timeouts", "modelStats", "videoExport", "clientDownload"].includes(item.key))}
                 />
             )}
             {modelPicker && modelPickerGroup ? (

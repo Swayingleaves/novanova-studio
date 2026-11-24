@@ -13,7 +13,7 @@ import { Clapperboard } from "lucide-react";
 
 import { modelCreditBalance } from "@/features/team/credit-balance";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
-import { VideoSettingsPanel } from "@/features/generation/components/video-settings-panel";
+import { VideoSettingsPanel, type VideoConfigKey } from "@/features/generation/components/video-settings-panel";
 import { videoGenerationModeLabel, videoModelSupportsMode } from "@/features/generation/lib/video-billing";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { isAgnesVideoConfig } from "@/features/generation/lib/agnes-video";
@@ -100,7 +100,8 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
     const toggleShot = (shotId: string, checked: boolean) => {
         setSelectedShotIds((current) => (checked ? [...new Set([...current, shotId])] : current.filter((id) => id !== shotId)));
     };
-    const handleVideoSettingsChange = useCallback((key: keyof StoryboardVideoGenerationSettings, value: string) => {
+    const handleVideoSettingsChange = useCallback((key: VideoConfigKey, value: string) => {
+        if (key === "videoAudio") return;
         setVideoSettings((current) => (current[key] === value ? current : { ...current, [key]: value }));
     }, []);
     const confirmGenerate = () => {

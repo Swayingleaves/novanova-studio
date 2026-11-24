@@ -9,7 +9,7 @@ import { nanoid } from "nanoid";
 import { useMemo } from "react";
 import { create } from "zustand";
 
-import { listChannels, listModelConfigs, listObjectStorages, listServerAiModels, type ServerAiModelList, type ServerModelConfig } from "@/services/api/server";
+import { listChannels, listModelConfigs, listObjectStorages, listServerAiModels, type ModelSuccessRateStats, type ServerAiModelList, type ServerModelConfig } from "@/services/api/server";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import type { ObjectStorageConfig } from "@/shared/types/object-storage";
 
@@ -132,6 +132,7 @@ export type AiConfig = {
     modelDisplayNames: Record<string, string>;
     modelIcons: Record<string, string>;
     modelDescriptions: Record<string, string>;
+    modelSuccessRateStats?: Record<string, ModelSuccessRateStats>;
     quality: string;
     imageResolution: string;
     size: string;
@@ -161,6 +162,7 @@ type ConfigStore = {
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     refreshChannels: () => Promise<void>;
     refreshModelConfiguration: () => Promise<void>;
+    refreshModelSuccessRates: () => Promise<void>;
     refreshObjectStorages: () => Promise<void>;
 };
 
@@ -199,6 +201,7 @@ export const defaultConfig: AiConfig = {
     modelDisplayNames: {},
     modelIcons: {},
     modelDescriptions: {},
+    modelSuccessRateStats: {},
     quality: "medium",
     imageResolution: "2K",
     size: "1:1",
@@ -217,6 +220,11 @@ const defaultObjectStorage: ObjectStorageConfig = createObjectStorageConfig({
 const MAX_HYDRATE_CONFIG_RETRY_ATTEMPTS = 5;
 const HYDRATE_CONFIG_RETRY_DELAY_MS = 2000;
 let hydrateConfigRetryAttempts = 0;
+
+/** 展开模型选择器时静默刷新成功率的最小间隔，与服务端 30 秒缓存窗口对齐。 */
+const MODEL_STATS_REFRESH_THROTTLE_MS = 30_000;
+let lastModelStatsRefreshAt = 0;
+let pendingModelStatsRefresh: Promise<void> | null = null;
 
 export const useConfigStore = create<ConfigStore>()((set, get) => ({
     hydrated: false,
@@ -346,6 +354,7 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
     },
     refreshModelConfiguration: () =>
         refreshModelConfigurationSnapshot(listChannels, listModelConfigs, (channels, modelConfigurations) => {
+            lastModelStatsRefreshAt = Date.now();
             set((state) => {
                 const normalizedChannels = normalizeChannels(channels);
                 return {
@@ -355,6 +364,47 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
                 };
             });
         }).then(async () => { if (useTeamStore.getState().team) set({ config: configFromServerModels(await listServerAiModels()) }); }),
+    refreshModelSuccessRates: async () => {
+        const user = useUserStore.getState().user;
+        if (!user || !get().hydrated) return;
+        const now = Date.now();
+        if (pendingModelStatsRefresh) return pendingModelStatsRefresh;
+        if (now - lastModelStatsRefreshAt < MODEL_STATS_REFRESH_THROTTLE_MS) return;
+        lastModelStatsRefreshAt = now;
+        // 仅刷新模型成功率映射，避免覆盖用户当前已选模型与生成参数。
+        const task = (async () => {
+            try {
+                if (!canManageCurrentSpace() || useTeamStore.getState().team) {
+                    const modelList = await listServerAiModels();
+                    const statsMap = Object.fromEntries(
+                        (modelList.models || [])
+                            .filter((model) => model.successRateStats && model.successRateStats.totalCount > 0)
+                            .map((model) => [model.value, model.successRateStats!]),
+                    );
+                    set((state) => ({ config: { ...state.config, modelSuccessRateStats: statsMap } }));
+                    return;
+                }
+                const modelResult = await listModelConfigs();
+                const modelConfigs = (modelResult.modelConfigs || []).map(normalizeServerModelConfig);
+                const statsMap = Object.fromEntries(
+                    modelConfigs
+                        .filter((item) => item.successRateStats && item.successRateStats.totalCount > 0)
+                        .map((item) => [`${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`, item.successRateStats!]),
+                );
+                set((state) => ({ config: { ...state.config, modelSuccessRateStats: statsMap } }));
+            } catch {
+                // 静默刷新失败不打断用户选择模型
+            }
+        })();
+        pendingModelStatsRefresh = task;
+        try {
+            await task;
+        } finally {
+            if (pendingModelStatsRefresh === task) {
+                pendingModelStatsRefresh = null;
+            }
+        }
+    },
     refreshObjectStorages: async () => {
         const data = await listObjectStorages();
         const objectStorages = normalizeObjectStorages(data.objectStorages);
@@ -587,6 +637,11 @@ export function configFromModelConfigs(channels: ModelChannel[], modelConfigs: S
                 .filter((item) => item.description?.trim())
                 .map((item) => [`${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`, item.description!.trim()]),
         ),
+        modelSuccessRateStats: Object.fromEntries(
+            modelConfigs
+                .filter((item) => item.successRateStats && item.successRateStats.totalCount > 0)
+                .map((item) => [`${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`, item.successRateStats!]),
+        ),
         modelCosts: modelConfigs.map((item) => ({
             model: `${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`,
             taskType: item.modelType,
@@ -658,6 +713,11 @@ function configFromServerModels(modelList: ServerAiModelList | null) {
             models
                 .filter((model) => model.description?.trim())
                 .map((model) => [model.value, model.description!.trim()]),
+        ),
+        modelSuccessRateStats: Object.fromEntries(
+            models
+                .filter((model) => model.successRateStats && model.successRateStats.totalCount > 0)
+                .map((model) => [model.value, model.successRateStats!]),
         ),
     });
 }

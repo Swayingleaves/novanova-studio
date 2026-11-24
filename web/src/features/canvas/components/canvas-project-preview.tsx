@@ -3,8 +3,9 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
+import { loadImageListThumbnail } from "@/features/generation/lib/image-list-thumbnail";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
@@ -40,6 +41,7 @@ export const CanvasProjectPreview = memo(function CanvasProjectPreview({ documen
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
     const theme = canvasThemes[resolvedTheme];
     const layout = useMemo(() => buildCanvasProjectPreviewLayout(document.scene), [document.scene, translate.locale]);
+    const imageSources = usePreviewImageSources(document.scene.nodes);
 
     if (!document.scene.nodes.length) {
         return (
@@ -74,7 +76,7 @@ export const CanvasProjectPreview = memo(function CanvasProjectPreview({ documen
             </g>
             <g>
                 {layout.nodes.map((node) => (
-                    <PreviewNodeShape key={node.id} node={node} theme={theme} />
+                    <PreviewNodeShape key={node.id} node={node} theme={theme} imageHref={imageSources[node.id]} />
                 ))}
             </g>
             {layout.hiddenNodeCount > 0 ? (
@@ -130,7 +132,7 @@ function PreviewDots({ color }: { color: string }) {
     );
 }
 
-function PreviewNodeShape({ node, theme }: { node: PreviewNode; theme: CanvasTheme }) {
+function PreviewNodeShape({ node, theme, imageHref }: { node: PreviewNode; theme: CanvasTheme; imageHref?: string }) {
     const translate = useTranslation();
     const label = nodeLabel(node);
 
@@ -158,12 +160,13 @@ function PreviewNodeShape({ node, theme }: { node: PreviewNode; theme: CanvasThe
     }
 
     if ((isImageNode(node) || isVideoNode(node)) && node.content.source) {
+        const href = isImageNode(node) ? previewImageHref(node, imageHref) : "";
         return (
             <g>
                 <rect x={node.previewX} y={node.previewY} width={node.previewWidth} height={node.previewHeight} rx="6" fill={isVideoNode(node) ? "#111827" : theme.node.panel} stroke={theme.node.stroke} />
-                {isImageNode(node) ? (
+                {href ? (
                     <image
-                        href={node.content.source}
+                        href={href}
                         x={node.previewX + 1}
                         y={node.previewY + 1}
                         width={Math.max(1, node.previewWidth - 2)}
@@ -208,6 +211,66 @@ function PreviewNodeShape({ node, theme }: { node: PreviewNode; theme: CanvasThe
             ) : null}
         </g>
     );
+}
+
+/** 有存储键的图片不直接用文档里的临时地址，地址过期后预览会裂开；按存储键换缩略图。空字符串表示换取失败，再退回已保存地址。 */
+function usePreviewImageSources(nodes: CanvasNode[]) {
+    const targets = useMemo(
+        () =>
+            nodes.flatMap((node) => {
+                if (!isImageNode(node) || !node.content.source) return [];
+                const storageKey = node.content.storageKey?.trim();
+                return storageKey ? [{ id: node.id, storageKey }] : [];
+            }),
+        [nodes],
+    );
+    const targetKey = targets.map((item) => `${item.id}\u0000${item.storageKey}`).join("\u0001");
+    const targetsRef = useRef(targets);
+    targetsRef.current = targets;
+    const [sources, setSources] = useState<Record<string, string>>({});
+
+    useEffect(() => {
+        const current = targetsRef.current;
+        if (!current.length) return;
+        let active = true;
+        const objectUrls: string[] = [];
+        void Promise.all(
+            current.map(async (target) => {
+                const blob = await loadImageListThumbnail(target.storageKey);
+                if (!blob || !active) return;
+                const url = URL.createObjectURL(blob);
+                if (!active) {
+                    URL.revokeObjectURL(url);
+                    return;
+                }
+                objectUrls.push(url);
+                return [target.id, url] as const;
+            }),
+        ).then((entries) => {
+            if (!active) return;
+            const next: Record<string, string> = {};
+            current.forEach((target) => {
+                next[target.id] = "";
+            });
+            entries.forEach((entry) => {
+                if (entry) next[entry[0]] = entry[1];
+            });
+            setSources(next);
+        });
+        return () => {
+            active = false;
+            objectUrls.forEach((url) => URL.revokeObjectURL(url));
+        };
+    }, [targetKey]);
+
+    return sources;
+}
+
+function previewImageHref(node: CanvasNode, imageHref?: string) {
+    if (!isImageNode(node)) return "";
+    if (!node.content.storageKey) return node.content.source;
+    if (imageHref === undefined) return "";
+    return imageHref || node.content.source;
 }
 
 function measureBounds(nodes: CanvasNode[]) {

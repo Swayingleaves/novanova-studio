@@ -82,7 +82,7 @@ import {
 import { hasPendingVideoConversation } from "@/features/generation/lib/generation-conversation-recovery";
 import { useGenerationConversations } from "@/features/generation/hooks/use-generation-conversations";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
-import { selectGenerationAttachments } from "@/features/generation/lib/generation-retry";
+import { selectVideoGenerationAttachments } from "@/features/generation/lib/generation-retry";
 import { audioReferenceAttachments, imageReferenceAttachments, referenceMediaType, referenceMediaUrl, videoReferenceAttachments } from "@/features/generation/lib/reference-attachments";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { useCreationMode } from "@/features/generation/hooks/use-creation-mode";
@@ -394,6 +394,7 @@ export default function VideoPage() {
         setActiveId(null);
         setChatMessages([]);
         chatMessagesRef.current = [];
+        setLastConversationAttachments([]);
         setToolCalls([]);
         toolCallsRef.current = [];
         resetThinkings();
@@ -402,6 +403,7 @@ export default function VideoPage() {
         clearDurationContinue();
         clearModelConfigContinue();
         resetSession();
+        setLastConversationAttachments([]);
         setReferences([]);
         setVideoReferences([]);
         setSelectedSkill(skillHandoff.skill);
@@ -515,6 +517,8 @@ export default function VideoPage() {
 
     // Agent chat state
     const [chatMessages, setChatMessages] = useState<ChatMessageItem[]>([]);
+    // 记录当前对话最近一次随消息发出的参考素材，避免失败轮次尚未落库时无法在同对话直接重试或改词重发。
+    const [lastConversationAttachments, setLastConversationAttachments] = useState<AgentAttachment[]>([]);
 
     useEffect(() => {
         if (!newDraftHydratedRef.current) return;
@@ -879,10 +883,26 @@ export default function VideoPage() {
             ? (serverWorkflowQuote ?? { available: false as const, reason: translate("video.fetchingWorkflowQuote") })
             : (workflowImageConfirmQuote ?? (workflowImageConfirmNext ? { available: false as const, reason: translate("video.fetchingWorkflowQuote") } : null))
         : videoQuote;
+    // 计算当前对话可复用的参考素材：优先使用本轮输入框素材；未选时在带图/参考模式下自动继承本对话最近一次参考素材。
+    const currentAttachments = [...imageReferenceAttachments(references), ...videoReferenceAttachments(videoReferences), ...audioReferenceAttachments(audioReferences)];
+    const previousConversationAttachments = (() => {
+        if (lastConversationAttachments.length) return lastConversationAttachments;
+        const rounds = activeConversation?.rounds || [];
+        for (let index = rounds.length - 1; index >= 0; index--) {
+            const round = rounds[index];
+            const roundAttachments = [...imageReferenceAttachments(round.references || []), ...videoReferenceAttachments(round.videoReferences || [])];
+            if (roundAttachments.length) return roundAttachments;
+        }
+        return [] as AgentAttachment[];
+    })();
+    const effectiveAttachments = selectVideoGenerationAttachments(config.videoGenerationMode, currentAttachments, previousConversationAttachments);
+    const effectiveImageCount = effectiveAttachments.filter((reference) => reference.type.startsWith("image/")).length;
+    const effectiveVideoCount = effectiveAttachments.filter((reference) => reference.type.startsWith("video/")).length;
+    const effectiveAudioCount = effectiveAttachments.filter((reference) => reference.type.startsWith("audio/")).length;
     // 素材要求单独校验，用于「可生成」判定与提示，不阻断价格预览。
     const referenceIssue = readVideoGenerationConstraintIssue({ config: effectiveConfig, model, mode: config.videoGenerationMode,
-        size: config.size, seconds: config.videoSeconds, imageCount: references.length, videoCount: videoReferences.length, audioCount: audioReferences.length })
-        || videoGenerationReferenceIssue(config.videoGenerationMode, references.length, videoReferences.length, audioReferences.length);
+        size: config.size, seconds: config.videoSeconds, imageCount: effectiveImageCount, videoCount: effectiveVideoCount, audioCount: effectiveAudioCount })
+        || videoGenerationReferenceIssue(config.videoGenerationMode, effectiveImageCount, effectiveVideoCount, effectiveAudioCount);
     const creditCost = activeQuote === null ? undefined : activeQuote.available ? (activeQuote.credits ?? null) : null;
     const creditRequirement = selectedSkill?.workflowType
         ? modelCreditRequirement(activeQuote?.available ? (workflowImageConfirmNext ? workflowVideoStageQuote ? [workflowVideoStageQuote] : [] : serverWorkflowQuote?.stages ?? []) : [])
@@ -1183,9 +1203,10 @@ export default function VideoPage() {
         const quality = config.vquality || "720p";
         const watermark = config.videoWatermark ?? true;
         pendingVideoSizeRef.current = size;
-        const currentAttachments = [...imageReferenceAttachments(references), ...videoReferenceAttachments(videoReferences), ...audioReferenceAttachments(audioReferences)];
-        const previousAttachments = [...imageReferenceAttachments(latestRound?.references || []), ...videoReferenceAttachments(latestRound?.videoReferences || [])];
-        const allRefs = selectGenerationAttachments(text, currentAttachments, previousAttachments);
+        const allRefs = selectVideoGenerationAttachments(config.videoGenerationMode, currentAttachments, previousConversationAttachments);
+        if (allRefs.length) {
+            setLastConversationAttachments(allRefs);
+        }
         const selectedVideoQuote = quoteVideoGeneration({
             config: effectiveConfig,
             model: videoModel,
@@ -1522,6 +1543,7 @@ export default function VideoPage() {
         clearModelConfigContinue();
         setChatMessages([]);
         chatMessagesRef.current = [];
+        setLastConversationAttachments([]);
         resetThinkings();
         setToolCalls([]);
         toolCallsRef.current = [];
@@ -1542,6 +1564,7 @@ export default function VideoPage() {
         clearModelConfigContinue();
         setChatMessages([]);
         chatMessagesRef.current = [];
+        setLastConversationAttachments([]);
         setToolCalls([]);
         toolCallsRef.current = [];
         resetThinkings();
@@ -1577,6 +1600,7 @@ export default function VideoPage() {
             activeIdRef.current = null;
             setVideoDraftSettingsModified(false);
             setPrompt("");
+            setLastConversationAttachments([]);
             setReferences([]);
             setVideoReferences([]);
             setSelectedStyles([]);

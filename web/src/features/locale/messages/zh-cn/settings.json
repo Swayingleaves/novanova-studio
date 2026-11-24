@@ -23,5 +23,6 @@
     "nativeFirstAndLastFrames": "首尾帧",
     "defaultObjectStorage": "默认对象存储",
     "objectStorage": "对象存储 {value0}",
-    "unnamedObjectStorage": "未命名对象存储"
+    "unnamedObjectStorage": "未命名对象存储",
+    "modelSuccessRateTooltip": "近 {days} 天成功率：{rate}%（成功 {succeeded} / 总计 {total} 次）"
 }

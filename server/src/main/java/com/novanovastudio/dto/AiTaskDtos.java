@@ -311,12 +311,24 @@ public final class AiTaskDtos {
      * @param isCustomModel Boolean 是否使用自定义调用，独立于渠道格式
      * @param videoGenerationConstraints Map 按视频模式分组的公开限制
      * @param description String 模型说明，为空时不展示
+     * @param successRateStats ModelSuccessRateStats 最近统计窗口内的模型调用成功率，无调用记录时为null
      */
     public record AiModelOption(String value, String label, String capability, String provider, String apiFormat,
                                 Boolean defaultModel, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditCost, String creditUnit, List<String> capabilities,
                                 VideoBillingConfiguration videoBillingConfiguration, String icon, Long ownerTeamId,
                                 ImageBillingConfiguration imageBillingConfiguration, Boolean isCustomModel,
-                                Map<String, VideoGenerationConstraints> videoGenerationConstraints, String description) {
+                                Map<String, VideoGenerationConstraints> videoGenerationConstraints, String description,
+                                ModelStatsDtos.ModelSuccessRateStats successRateStats) {
+        /** 保持旧调用方不返回调用成功率统计。 */
+        public AiModelOption(String value, String label, String capability, String provider, String apiFormat,
+                             Boolean defaultModel, BigDecimal creditCost, String creditUnit, List<String> capabilities,
+                             VideoBillingConfiguration videoBillingConfiguration, String icon, Long ownerTeamId,
+                             ImageBillingConfiguration imageBillingConfiguration, Boolean isCustomModel,
+                             Map<String, VideoGenerationConstraints> videoGenerationConstraints, String description) {
+            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, creditUnit, capabilities,
+                    videoBillingConfiguration, icon, ownerTeamId, imageBillingConfiguration, isCustomModel,
+                    videoGenerationConstraints, description, null);
+        }
         /** 保持旧调用方不返回模型说明。 */
         public AiModelOption(String value, String label, String capability, String provider, String apiFormat,
                              Boolean defaultModel, BigDecimal creditCost, String creditUnit, List<String> capabilities,
@@ -325,7 +337,7 @@ public final class AiTaskDtos {
                              Map<String, VideoGenerationConstraints> videoGenerationConstraints) {
             this(value, label, capability, provider, apiFormat, defaultModel, creditCost, creditUnit, capabilities,
                     videoBillingConfiguration, icon, ownerTeamId, imageBillingConfiguration, isCustomModel,
-                    videoGenerationConstraints, null);
+                    videoGenerationConstraints, null, null);
         }
         /**
          * 构造普通模型目录项。

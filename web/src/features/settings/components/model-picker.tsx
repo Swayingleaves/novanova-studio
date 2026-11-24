@@ -15,14 +15,28 @@ import {
     resolveModelRequestConfig,
     selectableModelsByCapability,
     sortModelOptions,
+    useConfigStore,
     type AiConfig,
     type ModelCapability,
 } from "@/features/settings/stores/use-config-store";
-import { groupModelOptionsByChannel, resolveActiveChannelId } from "@/features/settings/lib/model-picker-groups";
+import { groupModelOptionsByChannel, resolveActiveChannelId, resolveModelSuccessRateTone, type ModelSuccessRateTone } from "@/features/settings/lib/model-picker-groups";
+import type { ModelSuccessRateStats } from "@/services/api/server";
 
 import { MODEL_ICON_MONOCHROME_KEYS, isMonochromeModelIcon, resolveModelIcon, resolveModelIconByKey } from "./model-icon";
 
 const MODEL_PICKER_OPEN_EVENT = "model-picker-open";
+
+const SUCCESS_RATE_DOT_CLASS: Record<ModelSuccessRateTone, string> = {
+    green: "bg-emerald-500",
+    yellow: "bg-amber-500",
+    red: "bg-rose-500",
+};
+
+const SUCCESS_RATE_TEXT_CLASS: Record<ModelSuccessRateTone, string> = {
+    green: "text-emerald-600 dark:text-emerald-400",
+    yellow: "text-amber-600 dark:text-amber-400",
+    red: "text-rose-600 dark:text-rose-400",
+};
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -95,6 +109,7 @@ export function ModelPicker({
         if (nextOpen) {
             setHoveredChannelId(null);
             window.dispatchEvent(new CustomEvent(MODEL_PICKER_OPEN_EVENT, { detail: pickerId }));
+            void useConfigStore.getState().refreshModelSuccessRates();
         }
         setOpen(nextOpen);
     };
@@ -123,6 +138,7 @@ export function ModelPicker({
                 >
                     <ModelIcon config={config} model={current} />
                     <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? triggerLabel(current) : placeholder}</span>
+                    {current ? <ModelSuccessRateIndicator stats={config.modelSuccessRateStats?.[current.trim()]} compact /> : null}
                     <ChevronDown className="pointer-events-none size-4 shrink-0 text-muted-foreground" />
                 </button>
             </PopoverPrimitive.Trigger>
@@ -195,6 +211,7 @@ export function ModelPicker({
                                                 <span className="flex w-full min-w-0 items-center gap-2">
                                                     <ModelIcon config={config} model={model} />
                                                     <span className="min-w-0 flex-1 truncate text-sm! font-medium">{itemLabel(model)}</span>
+                                                    <ModelSuccessRateIndicator stats={config.modelSuccessRateStats?.[model.trim()]} />
                                                     {selected ? <Check className="size-4 shrink-0 text-[var(--studio-primary)]" /> : null}
                                                 </span>
                                                 {description ? (
@@ -231,6 +248,33 @@ function createModelOptions(config: AiConfig, capability: ModelCapability | unde
 
 function isFilledText(value: string | undefined): value is string {
     return Boolean(value?.trim());
+}
+
+/** 模型最近调用成功率指示灯与百分比展示，无调用记录时不渲染。 */
+function ModelSuccessRateIndicator({ stats, compact = false }: { stats?: ModelSuccessRateStats; compact?: boolean }) {
+    const translate = useTranslation();
+    if (!stats || stats.totalCount <= 0) return null;
+    const rate = Math.max(0, Math.min(100, Math.round(stats.successRate)));
+    const tone = resolveModelSuccessRateTone(rate);
+    const tooltip = translate("settings.modelSuccessRateTooltip", {
+        days: stats.windowDays,
+        rate,
+        succeeded: stats.succeededCount,
+        total: stats.totalCount,
+    });
+    return (
+        <span
+            title={tooltip}
+            aria-label={tooltip}
+            className={cn(
+                "inline-flex shrink-0 items-center gap-1 text-xs! font-medium tabular-nums",
+                SUCCESS_RATE_TEXT_CLASS[tone],
+            )}
+        >
+            <span className={cn("size-2 shrink-0 rounded-full", SUCCESS_RATE_DOT_CLASS[tone])} aria-hidden="true" />
+            {compact ? <span className="hidden sm:inline">{rate}%</span> : <span>{rate}%</span>}
+        </span>
+    );
 }
 
 /** 模型图标：优先使用管理端配置的图标，其次按模型名和接口格式自动匹配。 */

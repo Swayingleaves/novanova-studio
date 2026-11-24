@@ -137,6 +137,10 @@ public class PersistenceService {
     /** 私有存储桶读地址签发。 */
     private final MediaAccessService mediaAccessService;
 
+    /** 模型调用成功率统计服务。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ModelSuccessRateService modelSuccessRateService;
+
     /** 当前用户提供器 */
     private final CurrentUserProvider currentUserProvider;
 
@@ -233,12 +237,19 @@ public class PersistenceService {
                     : teamRepository.listPreferences(scope.teamId())
                         .filter(item -> "model".equals(item.getString("resourceType")) && item.getBooleanValue("isDefault"))
                         .map(item -> item.getString("resourceId")).collectList();
-            return defaultModelIds.flatMap(defaults -> repository.listPlatformAiModelConfigs()
-                    .filter(record -> scope.teamId() == 0 || java.util.Objects.equals(record.getTeamId(), scope.teamId()))
-                    .map(record -> {
-                        if (scope.teamId() > 0) record.setDefaultModel(defaults.contains(record.getModelConfigId()));
-                        return modelConfigDto(record);
-                    }).collectList());
+            Mono<Map<String, com.novanovastudio.dto.ModelStatsDtos.ModelSuccessRateStats>> statsMono = modelSuccessRateService == null
+                    ? Mono.just(Map.of())
+                    : modelSuccessRateService.getSuccessRateStatsMap();
+            return Mono.zip(defaultModelIds, statsMono).flatMap(tuple -> {
+                List<String> defaults = tuple.getT1();
+                Map<String, com.novanovastudio.dto.ModelStatsDtos.ModelSuccessRateStats> statsByModelConfigId = tuple.getT2();
+                return repository.listPlatformAiModelConfigs()
+                        .filter(record -> scope.teamId() == 0 || java.util.Objects.equals(record.getTeamId(), scope.teamId()))
+                        .map(record -> {
+                            if (scope.teamId() > 0) record.setDefaultModel(defaults.contains(record.getModelConfigId()));
+                            return modelConfigDto(record, statsByModelConfigId.get(record.getModelConfigId()));
+                        }).collectList();
+            });
         });
     }
 
@@ -492,6 +503,19 @@ public class PersistenceService {
 
     /** 构建模型配置响应。 */
     private PersistenceDtos.ModelConfig modelConfigDto(PersistenceRecords.UserAiModelConfigRecord record) {
+        return modelConfigDto(record, null);
+    }
+
+    /**
+     * 组装携带调用成功率统计的模型配置响应。
+     *
+     * @param record UserAiModelConfigRecord 模型配置持久化记录
+     * @param successRateStats ModelSuccessRateStats 最近窗口成功率统计，无调用记录时为null
+     * @return PersistenceDtos.ModelConfig 模型配置响应
+     */
+    private PersistenceDtos.ModelConfig modelConfigDto(
+            PersistenceRecords.UserAiModelConfigRecord record,
+            com.novanovastudio.dto.ModelStatsDtos.ModelSuccessRateStats successRateStats) {
         return new PersistenceDtos.ModelConfig(record.getModelConfigId(), record.getChannelId(), record.getModelName(), record.getModelType(),
                 parseStringList(record.getCapabilities()), Boolean.TRUE.equals(record.getDefaultModel()), record.getSortOrder(), record.getCreditCost(),
                 thinkingEnabled(record.getThinkingEnabled()), reasoningEffort(record.getReasoningEffort()),
@@ -508,7 +532,8 @@ public class PersistenceService {
                                 new TypeReference<Map<String, Map<String, String>>>() {})) : null,
                 parseImageBillingConfiguration(record.getImageBillingConfiguration()),
                 record.getEnabled() == null || Boolean.TRUE.equals(record.getEnabled()),
-                record.getDescription());
+                record.getDescription(),
+                successRateStats);
     }
 
     /**

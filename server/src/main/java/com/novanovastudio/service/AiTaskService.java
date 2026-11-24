@@ -182,6 +182,10 @@ public class AiTaskService {
     @Autowired
     private VideoWorkflowRegistry videoWorkflowRegistry;
 
+    /** 模型调用成功率统计服务。 */
+    @Autowired(required = false)
+    private ModelSuccessRateService modelSuccessRateService;
+
     /**
      * 计算视频技能工作流报价。
      *
@@ -795,10 +799,14 @@ public class AiTaskService {
      */
     public Mono<AiTaskDtos.AiModelListResponse> listModels() {
         // 模型目录仅向已登录用户开放，并且严禁返回渠道地址或密钥。
+        Mono<Map<String, com.novanovastudio.dto.ModelStatsDtos.ModelSuccessRateStats>> statsMono = modelSuccessRateService == null
+                ? Mono.just(Map.of())
+                : modelSuccessRateService.getSuccessRateStatsMap();
         return currentUserProvider.currentUserId().then(Mono.defer(() -> Mono.zip(
-                        persistenceService.getPlatformAiChannels(), persistenceService.getPlatformModelConfigs())))
+                        persistenceService.getPlatformAiChannels(), persistenceService.getPlatformModelConfigs(), statsMono)))
                 .map(tuple -> {
                     List<AiTaskDtos.AiChannelConfig> channels = tuple.getT1();
+                    Map<String, com.novanovastudio.dto.ModelStatsDtos.ModelSuccessRateStats> statsByModelConfigId = tuple.getT3();
                     List<AiTaskDtos.AiModelOption> models = tuple.getT2().stream()
                             .map(config -> channels.stream()
                                     .filter(channel -> config.channelId().equals(channel.id())
@@ -811,7 +819,8 @@ public class AiTaskService {
                                             config.channelId() + CHANNEL_MODEL_SEPARATOR + config.modelName(),
                                             StringUtils.hasText(config.displayName()) ? config.displayName() : config.modelName(), config.modelType(), channel.name(), channel.apiFormat(), config.defaultModel(),
                                             config.creditCost(), config.creditUnit(), config.capabilities(), config.videoBillingConfiguration(), config.modelIcon(), config.ownerTeamId(), config.imageBillingConfiguration(),
-                                            Boolean.TRUE.equals(config.isCustomModel()), VideoGenerationConstraintSupport.constraintsByMode(config.customModelConfig()), config.description()))
+                                            Boolean.TRUE.equals(config.isCustomModel()), VideoGenerationConstraintSupport.constraintsByMode(config.customModelConfig()), config.description(),
+                                            statsByModelConfigId.get(config.id())))
                                     .orElse(null))
                             .filter(java.util.Objects::nonNull)
                             .toList();
@@ -970,8 +979,12 @@ public class AiTaskService {
                                 if (!Boolean.TRUE.equals(updated)) {
                                     return Mono.empty();
                                 }
+                                // 仅统计进入成功或失败终态的模型调用，用户主动取消不计入失败率。
+                                Mono<Void> recordStats = (modelSuccessRateService != null && (STATUS_SUCCESS.equals(status) || STATUS_FAILED.equals(status)))
+                                        ? modelSuccessRateService.recordCallResult(task.getModelConfigId(), STATUS_SUCCESS.equals(status))
+                                        : Mono.empty();
                                 Mono<Void> orphan = STATUS_SUCCESS.equals(status) ? discardOrphanDramaMedia(task, resultData) : Mono.empty();
-                                return orphan.then(getTaskResponse(taskId, task.getUserId())
+                                return recordStats.then(orphan).then(getTaskResponse(taskId, task.getUserId())
                                         .flatMap(response -> eventPublisher.publish(task.getUserId(), new AiTaskDtos.AiTaskEvent(EVENT_TASK, response))));
                             });
                 })

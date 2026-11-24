@@ -115,6 +115,7 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                                                 text={dialogueText}
                                                                 thinking={isThinkingState}
                                                                 thinkingLabel={translate("chat.thinking")}
+                                                                loading={Boolean(dialogueText)}
                                                                 onHeightChange={handleBubbleHeightChange}
                                                             />
                                                         ) : dialogueText ? (

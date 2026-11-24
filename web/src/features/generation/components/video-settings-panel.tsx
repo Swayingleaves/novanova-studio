@@ -19,7 +19,7 @@ import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import { resolveModelRequestConfig, type AiConfig, type VideoGenerationMode, type VideoResolution } from "@/features/settings/stores/use-config-store";
 
 /** 视频设置面板支持的配置键。 */
-type VideoConfigKey = "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark" | "videoAudio";
+export type VideoConfigKey = "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark" | "videoAudio";
 
 type VideoSettingsPanelProps = {
     config: AiConfig;

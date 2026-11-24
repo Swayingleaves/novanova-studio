@@ -230,6 +230,19 @@ export type GenerationStyleOptionListResponse = {
     styles: GenerationStyleOption[];
 };
 
+/** 单个模型在最近统计窗口内的调用成功率快照。 */
+export type ModelSuccessRateStats = {
+    successRate: number;
+    succeededCount: number;
+    totalCount: number;
+    windowDays: number;
+};
+
+/** 平台模型成功率统计配置。 */
+export type ModelStatsSettings = {
+    successRateWindowDays: number;
+};
+
 export type ServerAiModelList = {
     models: Array<{
         value: string;
@@ -248,6 +261,7 @@ export type ServerAiModelList = {
         imageBillingConfiguration: ImageBillingConfiguration | null;
         icon: string | null;
         description?: string | null;
+        successRateStats?: ModelSuccessRateStats | null;
     }>;
     imageModels: string[];
     videoModels: string[];
@@ -473,6 +487,7 @@ export type ServerModelConfig = {
     description?: string | null;
     isCustomModel: boolean;
     customModelConfig: Record<string, CustomModelGroupConfig>;
+    successRateStats?: ModelSuccessRateStats | null;
 };
 
 export type CreditSettings = {
@@ -1738,6 +1753,14 @@ export function getTimeoutSettings() {
 
 export function updateTimeoutSettings(settings: TimeoutSettings) {
     return serverPost<TimeoutSettings>("/config/timeout/updateTimeoutSettings", settings);
+}
+
+export function getModelStatsSettings() {
+    return serverGet<ModelStatsSettings>("/admin/platform/getModelStatsSettings");
+}
+
+export function saveModelStatsSettings(successRateWindowDays: number) {
+    return serverPost<ModelStatsSettings>("/admin/platform/saveModelStatsSettings", { successRateWindowDays });
 }
 
 export function getFirstPurchaseBonusSettings() {

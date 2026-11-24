@@ -23,5 +23,6 @@
     "nativeFirstAndLastFrames": "Native first and last frames",
     "defaultObjectStorage": "Default object storage",
     "objectStorage": "Object storage {value0}",
-    "unnamedObjectStorage": "Unnamed object storage"
+    "unnamedObjectStorage": "Unnamed object storage",
+    "modelSuccessRateTooltip": "Last {days}d success rate: {rate}% ({succeeded}/{total})"
 }

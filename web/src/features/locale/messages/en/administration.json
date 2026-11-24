@@ -609,5 +609,12 @@
   "clientDownloadWindowsUrl": "Windows download URL",
   "clientDownloadUrlPlaceholder": "https://example.com/downloads/novanova-studio.dmg",
   "clientDownloadSettingsSaved": "Client download settings saved",
-  "clientDownloadSettingsSaveFailed": "Failed to save client download settings"
+  "clientDownloadSettingsSaveFailed": "Failed to save client download settings",
+  "modelStatsSettings": "Model success rate",
+  "modelStatsSettingsHint": "Configure the rolling day window used to calculate model call success rates shown in the model picker across all models (image, video, text, and agents). Defaults to the last 3 days.",
+  "modelSuccessRateWindowDays": "Success rate window (days)",
+  "modelSuccessRateWindowDaysHint": "Range 1 to 365 days, default 3 days. Applies site-wide after saving.",
+  "modelStatsDaysUnit": "days",
+  "modelStatsSettingsSaved": "Model success rate settings saved",
+  "modelStatsSettingsSaveFailed": "Failed to save model success rate settings"
 }

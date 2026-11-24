@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { configFromModelConfigs, createModelChannel, normalizeServerModelConfig } from "@/features/settings/stores/use-config-store";
-import { groupModelOptionsByChannel, resolveActiveChannelId } from "@/features/settings/lib/model-picker-groups";
+import { groupModelOptionsByChannel, resolveActiveChannelId, resolveModelSuccessRateTone } from "@/features/settings/lib/model-picker-groups";
 
 test("模型选项按渠道分组并保持渠道和模型原有顺序", () => {
     const channels = [
@@ -47,4 +47,38 @@ test("模型配置转换时保留模型说明字段并过滤空白说明", () =>
 
     const aiConfig = configFromModelConfigs(channels, configs);
     assert.deepEqual(aiConfig.modelDescriptions, { "ch-a::gpt-image": "适合精细海报生成" });
+});
+
+test("模型成功率区间正确映射红黄绿三色指示灯并透传配置统计", () => {
+    assert.equal(resolveModelSuccessRateTone(100), "green");
+    assert.equal(resolveModelSuccessRateTone(80), "green");
+    assert.equal(resolveModelSuccessRateTone(79), "yellow");
+    assert.equal(resolveModelSuccessRateTone(50), "yellow");
+    assert.equal(resolveModelSuccessRateTone(49), "red");
+    assert.equal(resolveModelSuccessRateTone(0), "red");
+
+    const channels = [createModelChannel({ id: "ch-a", name: "NANA-API", apiFormat: "nana", models: ["gpt-image", "flux-pro"] })];
+    const configs = [
+        normalizeServerModelConfig({
+            id: "m1", channelId: "ch-a", modelName: "gpt-image", modelType: "image", capabilities: ["text-to-image"],
+            defaultModel: true, enabled: true, sortOrder: 0, creditCost: "1", creditUnit: "generation",
+            thinkingEnabled: false, reasoningEffort: "high", requestConcurrency: 1, convertImageSizeToPixels: false,
+            imageSizeMappings: null, customBodyParameters: {}, videoBillingConfiguration: null, imageBillingConfiguration: null,
+            displayName: "GPT 图像", modelIcon: null, description: null, isCustomModel: false, customModelConfig: {},
+            successRateStats: { successRate: 92, succeededCount: 46, totalCount: 50, windowDays: 3 },
+        }),
+        normalizeServerModelConfig({
+            id: "m2", channelId: "ch-a", modelName: "flux-pro", modelType: "image", capabilities: ["text-to-image"],
+            defaultModel: false, enabled: true, sortOrder: 1, creditCost: "1", creditUnit: "generation",
+            thinkingEnabled: false, reasoningEffort: "high", requestConcurrency: 1, convertImageSizeToPixels: false,
+            imageSizeMappings: null, customBodyParameters: {}, videoBillingConfiguration: null, imageBillingConfiguration: null,
+            displayName: null, modelIcon: null, description: null, isCustomModel: false, customModelConfig: {},
+            successRateStats: { successRate: 0, succeededCount: 0, totalCount: 0, windowDays: 3 },
+        }),
+    ];
+
+    const aiConfig = configFromModelConfigs(channels, configs);
+    assert.deepEqual(aiConfig.modelSuccessRateStats, {
+        "ch-a::gpt-image": { successRate: 92, succeededCount: 46, totalCount: 50, windowDays: 3 },
+    });
 });
