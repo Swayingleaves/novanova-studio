@@ -8,6 +8,7 @@ import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.ai.GeneratedBinary;
 import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.common.SystemMessage;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.DramaContracts;
@@ -294,7 +295,7 @@ public class DramaMediaService {
         String url = text(item, "url");
         String storageKey = text(item, "storageKey");
         String mimeType = text(item, "mimeType");
-        String error = task.errorMessage() == null ? "" : task.errorMessage();
+        String error = SystemMessage.sanitizeUserMessage(task.errorMessage());
         if ("success".equals(status) && !StringUtils.hasText(url)) {
             status = "failed";
             error = StringUtils.hasText(error) ? error : "生成结果没有媒体地址";
@@ -315,7 +316,7 @@ public class DramaMediaService {
         return (StringUtils.hasText(url) ? mediaAccessService.signUrl(url, MediaAccessService.Purpose.PREVIEW) : Mono.just(""))
                 .zipWith(mediaProgress(userId, row))
                 .map(pair -> new DramaDtos.MediaView(row.id(), row.versionId(), row.targetKey(), row.mediaType(), row.taskId(), row.model(),
-                        row.status(), pair.getT2(), pair.getT1(), text(row.storageKey()), text(row.mimeType()), text(row.errorMessage()),
+                        row.status(), pair.getT2(), pair.getT1(), text(row.storageKey()), text(row.mimeType()), SystemMessage.sanitizeUserMessage(text(row.errorMessage())),
                         row.createdAt() == null ? "" : row.createdAt().toString()));
     }
 

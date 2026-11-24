@@ -6,6 +6,7 @@ import com.novanovastudio.agent.AgentSessionService;
 import com.novanovastudio.agent.CreationAgentRequestDispatcher;
 import com.novanovastudio.agent.dto.AgentSession;
 import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.common.SystemMessage;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.DramaContracts;
 import com.novanovastudio.dto.DramaDtos;
@@ -951,7 +952,7 @@ public class DramaWorkspaceService {
         }
         return requestRepository.findById(project.activeRequestId())
                 .map(request -> new DramaDtos.ActiveRequest(request.getId(), request.getStatus(),
-                        request.getErrorMessage() == null ? "" : request.getErrorMessage()))
+                        SystemMessage.sanitizeUserMessage(request.getErrorMessage())))
                 .defaultIfEmpty(new DramaDtos.ActiveRequest(project.activeRequestId(), "", ""));
     }
 

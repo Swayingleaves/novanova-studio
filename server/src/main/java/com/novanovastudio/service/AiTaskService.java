@@ -1110,7 +1110,7 @@ public class AiTaskService {
         // 结果JSON里的本系统媒体地址按预览用途现签，空结果保持原样。
         return mediaAccessService.signJson(resultData, MediaAccessService.Purpose.PREVIEW)
                 .defaultIfEmpty(resultData)
-                .map(signed -> new AiTaskDtos.AiGenerationTaskResponse(task.getId(), task.getTaskType(), task.getModel(), task.getProvider(), task.getStatus(), task.getProgress(), requestData, signed, empty(task.getErrorMessage()), SystemMessage.stored(task.getErrorMessageKey(), task.getErrorMessageArguments()), formatTime(task.getStartedAt()), formatTime(task.getCompletedAt()), formatTime(task.getCreatedAt()), formatTime(task.getUpdatedAt()), Boolean.TRUE.equals(task.getProviderRequestSent())));
+                .map(signed -> new AiTaskDtos.AiGenerationTaskResponse(task.getId(), task.getTaskType(), task.getModel(), task.getProvider(), task.getStatus(), task.getProgress(), requestData, signed, SystemMessage.sanitizeUserMessage(empty(task.getErrorMessage())), SystemMessage.stored(task.getErrorMessageKey(), task.getErrorMessageArguments()), formatTime(task.getStartedAt()), formatTime(task.getCompletedAt()), formatTime(task.getCreatedAt()), formatTime(task.getUpdatedAt()), Boolean.TRUE.equals(task.getProviderRequestSent())));
     }
 
     /**
