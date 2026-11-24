@@ -183,6 +183,14 @@ public class CustomProviderAdapter implements AiProviderAdapter {
     private Mono<String> submitAndResolveResult(AiTaskExecutionContext context, PersistenceDtos.CustomModelGroupConfig group,
                                              String mode, String taskKind, List<String> referenceUrls, List<String> videoReferenceUrls,
                                              List<String> audioReferenceUrls) {
+        boolean imageTask = AiTaskTypes.IMAGE.equals(taskKind);
+        boolean asyncEnabled = !imageTask || Boolean.TRUE.equals(group.asyncQuery());
+        String existingProviderTaskId = context.existingProviderTaskId();
+        if (asyncEnabled && StringUtils.hasText(group.queryPath()) && StringUtils.hasText(existingProviderTaskId)) {
+            log.info("自定义模型恢复轮询上游任务: taskId={}, taskKind={}, mode={}, providerTaskId={}",
+                    context.task().getId(), taskKind, mode, existingProviderTaskId);
+            return pollQuery(context, group, existingProviderTaskId, taskKind);
+        }
         if (!StringUtils.hasText(group.requestPath())) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.customModelRequestPathIsMissing")));
         }
@@ -209,17 +217,16 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                         return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.customModelRequestFailed", errorMessage)));
                     }
                     String extracted = extractByPath(response, group.resultPath());
-                    boolean imageTask = AiTaskTypes.IMAGE.equals(taskKind);
                     // 提交响应直接给出媒体地址时无需轮询
                     if (isHttpUrl(extracted)) {
                         return Mono.just(extracted);
                     }
                     // 视频沿用"配置查询路径即异步"的隐式判定；图片只看能力级异步开关
-                    boolean asyncEnabled = !imageTask || Boolean.TRUE.equals(group.asyncQuery());
                     if (asyncEnabled && StringUtils.hasText(group.queryPath()) && StringUtils.hasText(extracted)) {
                         log.info("自定义模型提交响应返回任务ID，开始轮询: taskId={}, taskKind={}, mode={}, providerTaskId={}",
                                 context.task().getId(), taskKind, mode, extracted);
-                        return pollQuery(context, group, extracted, taskKind);
+                        return context.recordProviderTaskId(extracted)
+                                .then(pollQuery(context, group, extracted, taskKind));
                     }
                     // 图片同步结果路径可指向纯Base64或data URL，无需交给文本模型提取HTTP地址。
                     if (imageTask && StringUtils.hasText(extracted)) {
@@ -273,8 +280,9 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         // 查询请求体只构造一次：AI构造模式避免每轮重复调用LLM，模板模式渲染结果幂等。
         Mono<JSONObject> bodyMono = resolveQueryBody(context, group, taskId).cache();
         AtomicReference<JSONObject> lastResponse = new AtomicReference<>();
-        // 进度只增不减，渠道偶尔回退时不让前端百分比跳动。
-        AtomicInteger lastProgress = new AtomicInteger(20);
+        // 进度只增不减，渠道偶尔回退或重启恢复时不让前端百分比倒退。
+        int initialProgress = context.task().getProgress() == null ? 20 : Math.max(20, Math.min(95, context.task().getProgress()));
+        AtomicInteger lastProgress = new AtomicInteger(initialProgress);
         Mono<String> polling = Flux.range(0, MAX_POLLING_ATTEMPTS)
                 .concatMap(attempt -> Mono.delay(interval)
                         .then(context.isCancelRequested())

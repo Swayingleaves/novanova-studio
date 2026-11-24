@@ -309,6 +309,7 @@ public final class RowMappers {
         task.setStatus(row.get("status", String.class));
         task.setProgress(row.get("progress", Integer.class));
         task.setProviderRequestSent(Boolean.TRUE.equals(row.get("provider_request_sent", Boolean.class)));
+        task.setProviderTaskId(row.get("provider_task_id", String.class));
         task.setRequestData(jsonText(row, "request_data"));
         task.setResultData(jsonText(row, "result_data"));
         task.setErrorMessage(row.get("error_message", String.class));

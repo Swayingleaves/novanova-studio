@@ -122,6 +122,12 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
             return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.miniMaxSupportsVideoTasksOnly")));
         }
         validateModel(context.model());
+        String existingProviderTaskId = context.existingProviderTaskId();
+        if (StringUtils.hasText(existingProviderTaskId)) {
+            log.info("MiniMax视频任务恢复轮询: taskId={}, providerTaskId={}", context.task().getId(), existingProviderTaskId);
+            return pollMiniMaxVideoTask(context, existingProviderTaskId)
+                    .flatMap(finished -> storeMiniMaxVideo(context, existingProviderTaskId, finished));
+        }
         List<AiTaskDtos.AiTaskMediaReference> imageReferences =
                 AiTaskParameterReader.safeReferences(context.request().references());
         List<AiTaskDtos.AiTaskMediaReference> videoReferences =
@@ -172,7 +178,8 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
                         return Mono.error(new BusinessException(
                                 ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.miniMaxH3ReturnedNoTaskID")));
                     }
-                    return context.updateRunningProgress(20)
+                    return context.recordProviderTaskId(providerTaskId)
+                            .then(context.updateRunningProgress(20))
                             .then(pollMiniMaxVideoTask(context, providerTaskId))
                             .flatMap(finished -> storeMiniMaxVideo(context, providerTaskId, finished));
                 });

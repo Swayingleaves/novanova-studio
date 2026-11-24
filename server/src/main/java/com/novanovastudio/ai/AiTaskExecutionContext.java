@@ -29,6 +29,7 @@ import reactor.core.publisher.Mono;
  * @param customModelConfig Map<String, PersistenceDtos.CustomModelGroupConfig> 自定义模型按能力或模式分组的请求/响应模板配置
  * @param convertImageSizeToPixels boolean 是否将图片size比例转换为像素尺寸
  * @param imageSizeMappings Map<String, Map<String, String>> 模型独立的图片尺寸映射，null使用系统默认表
+ * @param providerTaskIdRecorder Function<String, Mono<Void>> 供应商异步任务ID记录器，用于服务重启后恢复轮询
  */
 public record AiTaskExecutionContext(AiGenerationTask task,
                                      AiTaskDtos.AiChannelConfig channel,
@@ -43,7 +44,19 @@ public record AiTaskExecutionContext(AiGenerationTask task,
                                      boolean isCustomModel,
                                      Map<String, PersistenceDtos.CustomModelGroupConfig> customModelConfig,
                                      boolean convertImageSizeToPixels,
-                                     Map<String, Map<String, String>> imageSizeMappings) {
+                                     Map<String, Map<String, String>> imageSizeMappings,
+                                     Function<String, Mono<Void>> providerTaskIdRecorder) {
+
+    /** 保持未传入供应商任务ID记录器的旧调用方兼容。 */
+    public AiTaskExecutionContext(AiGenerationTask task, AiTaskDtos.AiChannelConfig channel, String model,
+                                  boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters,
+                                  AiTaskDtos.CreateAiTaskRequest request, Supplier<Mono<Boolean>> cancelChecker,
+                                  IntFunction<Mono<Void>> progressReporter, Function<String, Mono<Void>> deltaEmitter,
+                                  boolean isCustomModel, Map<String, PersistenceDtos.CustomModelGroupConfig> customModelConfig,
+                                  boolean convertImageSizeToPixels, Map<String, Map<String, String>> imageSizeMappings) {
+        this(task, channel, model, thinkingEnabled, reasoningEffort, customBodyParameters, request, cancelChecker,
+                progressReporter, deltaEmitter, isCustomModel, customModelConfig, convertImageSizeToPixels, imageSizeMappings, null);
+    }
 
     /** 保持旧调用方使用空自定义请求体参数。 */
     public AiTaskExecutionContext(AiGenerationTask task, AiTaskDtos.AiChannelConfig channel, String model,
@@ -51,7 +64,36 @@ public record AiTaskExecutionContext(AiGenerationTask task,
                                   Supplier<Mono<Boolean>> cancelChecker, IntFunction<Mono<Void>> progressReporter,
                                   Function<String, Mono<Void>> deltaEmitter) {
         this(task, channel, model, thinkingEnabled, reasoningEffort, new JSONObject(), request, cancelChecker, progressReporter, deltaEmitter,
-                false, null, false, null);
+                false, null, false, null, null);
+    }
+
+    /**
+     * 读取已落库的供应商异步任务ID；非空表示本次属于重启后的恢复轮询。
+     *
+     * @return String 已有的供应商异步任务ID，未记录时返回空字符串
+     */
+    public String existingProviderTaskId() {
+        if (task == null || task.getProviderTaskId() == null) {
+            return "";
+        }
+        return task.getProviderTaskId().trim();
+    }
+
+    /**
+     * 持久化供应商返回的异步任务ID，便于服务重启后跳过重复提交并继续轮询。
+     *
+     * @param providerTaskId String 供应商异步任务ID
+     * @return Mono<Void> 持久化结果
+     */
+    public Mono<Void> recordProviderTaskId(String providerTaskId) {
+        if (providerTaskIdRecorder == null || providerTaskId == null || providerTaskId.isBlank()) {
+            return Mono.empty();
+        }
+        String trimmed = providerTaskId.trim();
+        if (task != null) {
+            task.setProviderTaskId(trimmed);
+        }
+        return providerTaskIdRecorder.apply(trimmed);
     }
 
     /**

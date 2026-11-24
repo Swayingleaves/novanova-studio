@@ -99,6 +99,12 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
         if (!AiTaskTypes.VIDEO.equals(context.task().getTaskType())) {
             return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.evolinkSupportsImageAndVideoTasksOnly")));
         }
+        String existingProviderTaskId = context.existingProviderTaskId();
+        if (StringUtils.hasText(existingProviderTaskId)) {
+            log.info("Evolink视频任务恢复轮询: taskId={}, providerTaskId={}", context.task().getId(), existingProviderTaskId);
+            return pollTask(context, existingProviderTaskId)
+                    .flatMap(finished -> storeResult(context, existingProviderTaskId, finished));
+        }
         List<AiTaskDtos.AiTaskMediaReference> imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
         List<AiTaskDtos.AiTaskMediaReference> videoReferences = AiTaskParameterReader.safeReferences(context.request().videoReferences());
         if (imageReferences.size() > 9 || videoReferences.size() > 3) {
@@ -157,7 +163,8 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
                     if (!StringUtils.hasText(providerTaskId)) {
                         return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.evolinkReturnedNoTaskID")));
                     }
-                    return context.updateRunningProgress(10)
+                    return context.recordProviderTaskId(providerTaskId)
+                            .then(context.updateRunningProgress(10))
                             .then(pollTask(context, providerTaskId))
                             .flatMap(finished -> storeResult(context, providerTaskId, finished));
                 });
@@ -215,6 +222,12 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
      * @return Mono<JSONObject> 已保存的图片媒体结果
      */
     private Mono<JSONObject> executeImageTask(AiTaskExecutionContext context) {
+        String existingProviderTaskId = context.existingProviderTaskId();
+        if (StringUtils.hasText(existingProviderTaskId)) {
+            log.info("Evolink图片任务恢复轮询: taskId={}, providerTaskId={}", context.task().getId(), existingProviderTaskId);
+            return pollTask(context, existingProviderTaskId)
+                    .flatMap(finished -> storeImageResult(context, existingProviderTaskId, finished));
+        }
         List<AiTaskDtos.AiTaskMediaReference> imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
         // Gemini/Nano Banana 单次最多14张参考图，其余模型16张。
         int maximumImages = usesGeminiImageSemantics(context.model()) ? 14 : 16;
@@ -296,7 +309,8 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
                     if (!StringUtils.hasText(providerTaskId)) {
                         return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.evolinkReturnedNoTaskID")));
                     }
-                    return context.updateRunningProgress(10)
+                    return context.recordProviderTaskId(providerTaskId)
+                            .then(context.updateRunningProgress(10))
                             .then(pollTask(context, providerTaskId))
                             .flatMap(finished -> storeImageResult(context, providerTaskId, finished));
                 });

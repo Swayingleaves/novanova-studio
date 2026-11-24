@@ -46,6 +46,10 @@ import com.novanovastudio.storage.MediaAccessService;
 import com.novanovastudio.task.AiTaskEventPublisher;
 import com.novanovastudio.task.AiTaskQueue;
 import com.novanovastudio.task.ModelTaskExecutionDispatcher;
+import com.novanovastudio.task.ModelTaskQueue;
+import com.novanovastudio.task.RedisTaskLock;
+import jakarta.annotation.PreDestroy;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
@@ -67,6 +71,7 @@ import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import org.springframework.util.StringUtils;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -186,6 +191,17 @@ public class AiTaskService {
     @Autowired(required = false)
     private ModelSuccessRateService modelSuccessRateService;
 
+    /** Redis 任务分布式锁，用于识别服务重启后失联的运行中任务。 */
+    @Autowired(required = false)
+    private RedisTaskLock taskLock;
+
+    /** 模型并发队列，用于恢复失联任务前清理残留名额。 */
+    @Autowired(required = false)
+    private ModelTaskQueue modelTaskQueue;
+
+    /** 定期巡检失联运行中任务的订阅。 */
+    private Disposable staleTaskSweepDisposable;
+
     /**
      * 计算视频技能工作流报价。
      *
@@ -278,8 +294,11 @@ public class AiTaskService {
                         for (String mode : stage.videoGenerationModes()) {
                             if (model.capabilities() == null || !model.capabilities().contains(mode)) continue;
                             try {
+                                int videoRefCount = (int) stage.referenceRoles().stream()
+                                        .filter(role -> role != null && role.endsWith("_video")).count();
+                                int imageRefCount = stage.referenceRoles().size() - videoRefCount;
                                 VideoGenerationConstraintSupport.validateInput(mode, model.customModelConfig() == null ? null : model.customModelConfig().get(mode), model.capabilities(),
-                                        model.videoBillingConfiguration(), request.size(), videoSeconds(stage.parameters()), stage.referenceRoles().size(), 0, 0);
+                                        model.videoBillingConfiguration(), request.size(), videoSeconds(stage.parameters()), imageRefCount, videoRefCount, 0);
                                 return;
                             } catch (BusinessException exception) {
                                 if (firstError == null) firstError = exception;
@@ -302,9 +321,15 @@ public class AiTaskService {
             VideoWorkflowDefinition.VideoWorkflowQuotePlan quotePlan, String stage) {
         if (!StringUtils.hasText(stage)) return quotePlan.stages();
         if (!"image".equals(stage) && !"video".equals(stage)) return List.of();
-        return quotePlan.stages().stream()
+        List<VideoWorkflowDefinition.VideoWorkflowQuoteStage> matched = quotePlan.stages().stream()
                 .filter(item -> "image".equals(stage) == "image".equals(item.modelType()))
                 .toList();
+        // 单阶段纯视频工作流（如白模运镜）没有图片阶段，请求 image 阶段时回退返回其全部阶段，避免误报不受支持
+        if (matched.isEmpty() && "image".equals(stage)
+                && quotePlan.stages().stream().noneMatch(item -> "image".equals(item.modelType()))) {
+            return quotePlan.stages();
+        }
+        return matched;
     }
 
     /** 单阶段报价尝试结果：定价失败时保留错误信息。 */
@@ -329,9 +354,14 @@ public class AiTaskService {
             if (TYPE_VIDEO.equals(taskType) && modes.isEmpty()) {
                 throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoModelLacksRequiredWorkflowCapabilities"));
             }
-            List<AiTaskDtos.AiTaskMediaReference> references = stage.referenceRoles().stream()
+            List<AiTaskDtos.AiTaskMediaReference> imageReferences = stage.referenceRoles().stream()
+                    .filter(role -> role != null && !role.endsWith("_video"))
                     .map(role -> new AiTaskDtos.AiTaskMediaReference(role, role, "image/png", role,
                             "https://placeholder.invalid/" + role, role)).toList();
+            List<AiTaskDtos.AiTaskMediaReference> videoReferences = stage.referenceRoles().stream()
+                    .filter(role -> role != null && role.endsWith("_video"))
+                    .map(role -> new AiTaskDtos.AiTaskMediaReference(role, role, "video/mp4", role,
+                            "https://placeholder.invalid/" + role + ".mp4", role)).toList();
             Map<String, Object> parameters = new java.util.LinkedHashMap<>(stage.parameters());
             if (TYPE_VIDEO.equals(taskType) && request.size() != null) parameters.put("size", request.size());
             List<String> candidateModes = modes.isEmpty() ? List.of("") : modes;
@@ -339,7 +369,7 @@ public class AiTaskService {
             for (String candidateMode : candidateModes) {
                 String mode = candidateMode.isEmpty() ? null : candidateMode;
                 AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(taskType, "工作流阶段报价",
-                        selectedModel, parameters, references, List.of(), AiTaskSources.VIDEO_PAGE, null, null, mode);
+                        selectedModel, parameters, imageReferences, videoReferences, AiTaskSources.VIDEO_PAGE, null, null, mode);
                 try {
                     BigDecimal credits = CreditAmounts.multiply(calculateTaskCredits(taskRequest, model), stage.taskCount());
                     return new AiTaskDtos.VideoWorkflowStageQuote(stage.role(), stage.displayName(), taskType, selectedModel,
@@ -360,17 +390,12 @@ public class AiTaskService {
     }
 
     /**
-     * 服务启动时恢复未完成任务
+     * 服务启动时恢复未完成任务，并开启定期巡检以接管重启后锁过期的失联运行中任务。
      */
     @EventListener(ApplicationReadyEvent.class)
     public void recoverUnfinishedTasks() {
-        // 队列化后pending任务不能标记失败，启动时恢复可继续执行的任务并重新入队。
-        OffsetDateTime runningRecoverBefore = OffsetDateTime.now().minusSeconds(properties.getAi().getTask().getRunningRecoverSeconds());
         taskQueue.ensureConsumerGroup()
-                .then(repository.recoverTimeoutRunningTasks(runningRecoverBefore))
-                .thenMany(repository.listRecoverableTasks(runningRecoverBefore))
-                // 按创建时间顺序恢复，避免同一模型的等待任务在并发订阅时乱序。
-                .concatMap(this::dispatchRecoveredTask)
+                .then(recoverUnfinishedTasksOnce(true))
                 .contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true))
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe(
@@ -378,6 +403,82 @@ public class AiTaskService {
                         },
                         exception -> log.error("启动时恢复AI任务失败", exception)
                 );
+        if (staleTaskSweepDisposable == null || staleTaskSweepDisposable.isDisposed()) {
+            staleTaskSweepDisposable = Flux.interval(Duration.ofSeconds(30))
+                    .concatMap(ignored -> recoverUnfinishedTasksOnce(false)
+                            .contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true))
+                            .onErrorResume(exception -> {
+                                log.error("定时巡检恢复AI任务失败", exception);
+                                return Mono.empty();
+                            }))
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .subscribe();
+        }
+    }
+
+    /**
+     * 停止失联任务定时巡检。
+     */
+    @PreDestroy
+    public void stopRecoverySweeper() {
+        if (staleTaskSweepDisposable != null) {
+            staleTaskSweepDisposable.dispose();
+        }
+    }
+
+    /**
+     * 执行一轮未完成任务恢复。
+     *
+     * @param includePending boolean 是否同时派发 pending 任务（启动时为 true，定时巡检为 false）
+     * @return Mono<Void> 恢复完成信号
+     */
+    Mono<Void> recoverUnfinishedTasksOnce(boolean includePending) {
+        return repository.listUnfinishedTasks()
+                // 按创建时间顺序恢复，避免同一模型的等待任务在并发订阅时乱序。
+                .concatMap(task -> {
+                    if (STATUS_PENDING.equals(task.getStatus())) {
+                        return includePending ? dispatchRecoveredTask(task) : Mono.empty();
+                    }
+                    if (STATUS_RUNNING.equals(task.getStatus())) {
+                        return recoverRunningTask(task);
+                    }
+                    return Mono.empty();
+                })
+                .then();
+    }
+
+    /**
+     * 结合 Redis 分布式锁恢复失联的运行中任务：
+     * 已有上游异步任务ID时直接恢复轮询；未发往供应商时重置重跑；已发往供应商且无上游ID时标记失败。
+     *
+     * @param task AiGenerationTask 运行中任务
+     * @return Mono<Void> 恢复结果
+     */
+    private Mono<Void> recoverRunningTask(AiGenerationTask task) {
+        Mono<Boolean> lockedMono = taskLock == null ? Mono.just(false) : taskLock.isLocked(task.getId());
+        return lockedMono.flatMap(locked -> {
+            if (Boolean.TRUE.equals(locked)) {
+                return Mono.empty();
+            }
+            Mono<Void> releaseStaleSlot = (modelTaskQueue != null && isModelQueueTask(task.getTaskType()) && StringUtils.hasText(task.getModelConfigId()))
+                    ? modelTaskQueue.releaseActiveTask(task.getModelConfigId(), task.getId())
+                    : Mono.empty();
+            if (StringUtils.hasText(task.getProviderTaskId())) {
+                log.info("恢复轮询上游AI任务: taskId={}, taskType={}, providerTaskId={}, progress={}",
+                        task.getId(), task.getTaskType(), task.getProviderTaskId(), task.getProgress());
+                return releaseStaleSlot.then(dispatchRecoveredTask(task));
+            }
+            if (!Boolean.TRUE.equals(task.getProviderRequestSent())) {
+                log.info("重置未发往供应商的失联AI任务并重新入队: taskId={}, taskType={}", task.getId(), task.getTaskType());
+                return releaseStaleSlot
+                        .then(repository.resetRunningTaskToPending(task.getId()))
+                        .flatMap(reset -> Boolean.TRUE.equals(reset) ? dispatchRecoveredTask(task) : Mono.empty());
+            }
+            log.warn("失联AI任务已发往供应商但缺少上游任务ID，标记为失败: taskId={}, taskType={}, progress={}",
+                    task.getId(), task.getTaskType(), task.getProgress());
+            return releaseStaleSlot.then(failRecoveredTask(task,
+                    new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "服务重启导致任务中断，请重新生成")));
+        });
     }
 
     /**
@@ -883,8 +984,9 @@ public class AiTaskService {
                                                     request.audioReferences() == null ? 0 : request.audioReferences().size());
                                             return resolveTaskModel(task, request)
                                                     .flatMap(resolvedModel -> {
-                                                        // 任务排队期间模型配置可能被管理员修改，执行前重新校验模式和音频能力，避免绕过最新配置。
-                                                        Mono<Void> executionPreflight = TYPE_VIDEO.equals(task.getTaskType())
+                                                        // 已有上游异步任务ID时属于重启恢复轮询，跳过参考素材重新校验；新任务仍完整校验最新配置。
+                                                        boolean resumingProviderTask = StringUtils.hasText(task.getProviderTaskId());
+                                                        Mono<Void> executionPreflight = TYPE_VIDEO.equals(task.getTaskType()) && !resumingProviderTask
                                                                 ? Mono.fromRunnable(() -> validateVideoTask(request, resolvedModel))
                                                                         .then(validateVideoReferences(task.getUserId(), request, resolvedModel))
                                                                 : Mono.empty();
@@ -907,7 +1009,8 @@ public class AiTaskService {
                                                                 resolvedModel.isCustomModel(),
                                                                 resolvedModel.customModelConfig(),
                                                                 resolvedModel.convertImageSizeToPixels(),
-                                                                resolvedModel.imageSizeMappings()
+                                                                resolvedModel.imageSizeMappings(),
+                                                                providerTaskId -> repository.saveProviderTaskId(taskId, providerTaskId)
                                                         );
                                                         return teamTaskScopeService.requireActive(task.getUserId()).then(Mono.defer(() -> adapter.execute(context))
                                                                 .contextWrite(teamContext -> {

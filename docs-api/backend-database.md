@@ -376,6 +376,7 @@ flowchart TB
 | --- | --- | --- |
 | `model_config_id` | `VARCHAR(64)` | 创建任务使用的全站模型配置业务 ID，用于任务恢复时进入正确的模型队列。 |
 | `provider_request_sent` | `BOOLEAN` | 图片或视频生成请求是否已经发往供应商。发出后用户取消不退积分，默认 `false`。企业版 V86 / 社区版 V87。 |
+| `provider_task_id` | `VARCHAR(255)` | 供应商返回的异步任务 ID，用于后端重启后恢复轮询上游结果，默认空字符串。企业版 V112 / 社区版 V113。 |
 | `error_message_key` | `VARCHAR(180)` | 与语言无关的系统消息键，空值表示无系统提示。 |
 | `error_message_arguments` | `JSONB` | 消息插值参数数组；原始诊断保留在 `error_message` 中。 |
 

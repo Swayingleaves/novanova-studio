@@ -63,7 +63,7 @@ public class AiTaskRepository {
     public Mono<AiGenerationTask> getTask(Long userId, String taskId) {
         // 前端查询任务时限定用户ID，避免跨用户读取。
         return databaseClient.sql("""
-                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, provider_request_sent, request_data::text AS request_data, result_data::text AS result_data,
+                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, provider_request_sent, provider_task_id, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE user_id = :userId AND id = :taskId AND NOT data_purged
@@ -83,7 +83,7 @@ public class AiTaskRepository {
     public Mono<AiGenerationTask> getTaskById(String taskId) {
         // 异步执行线程按任务ID读取任务，不依赖请求上下文。
         return databaseClient.sql("""
-                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, provider_request_sent, request_data::text AS request_data, result_data::text AS result_data,
+                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, provider_request_sent, provider_task_id, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE id = :taskId AND NOT data_purged
@@ -103,7 +103,7 @@ public class AiTaskRepository {
     public Flux<AiGenerationTask> listTasks(Long userId, List<String> statuses) {
         // 基础查询限定用户ID。
         String sql = """
-                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, provider_request_sent, request_data::text AS request_data, result_data::text AS result_data,
+                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, provider_request_sent, provider_task_id, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE user_id = :userId AND NOT data_purged
@@ -223,17 +223,74 @@ public class AiTaskRepository {
     public Flux<AiGenerationTask> listRecoverableTasks(OffsetDateTime runningRecoverBefore) {
         // 恢复时需要保留模型配置ID，才能返回对应的模型并发队列。
         return databaseClient.sql("""
-                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, provider_request_sent, request_data::text AS request_data, result_data::text AS result_data,
+                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, provider_request_sent, provider_task_id, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
-                WHERE status = 'pending'
-                   OR (status = 'running' AND updated_at < :runningRecoverBefore)
+                WHERE NOT data_purged AND (status = 'pending'
+                   OR (status = 'running' AND updated_at < :runningRecoverBefore))
                 ORDER BY created_at ASC, id ASC
                 LIMIT 500
                 """)
                 .bind("runningRecoverBefore", runningRecoverBefore)
                 .map((row, metadata) -> RowMappers.aiTask(row))
                 .all();
+    }
+
+    /**
+     * 查询所有未终态任务（pending / running），用于结合分布式锁恢复失联任务。
+     *
+     * @return Flux<AiGenerationTask> 未终态任务流
+     */
+    public Flux<AiGenerationTask> listUnfinishedTasks() {
+        return databaseClient.sql("""
+                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, provider_request_sent, provider_task_id, request_data::text AS request_data, result_data::text AS result_data,
+                       error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
+                FROM ai_generation_tasks
+                WHERE NOT data_purged AND status IN ('pending', 'running')
+                ORDER BY created_at ASC, id ASC
+                LIMIT 500
+                """)
+                .map((row, metadata) -> RowMappers.aiTask(row))
+                .all();
+    }
+
+    /**
+     * 持久化供应商返回的异步任务ID，供服务重启后恢复轮询。
+     *
+     * @param taskId String 站内任务ID
+     * @param providerTaskId String 供应商异步任务ID
+     * @return Mono<Void> 更新结果
+     */
+    public Mono<Void> saveProviderTaskId(String taskId, String providerTaskId) {
+        return databaseClient.sql("""
+                UPDATE ai_generation_tasks
+                SET provider_task_id = :providerTaskId, updated_at = CURRENT_TIMESTAMP
+                WHERE id = :taskId AND NOT data_purged AND status IN ('pending', 'running')
+                """)
+                .bind("taskId", taskId)
+                .bind("providerTaskId", providerTaskId)
+                .fetch()
+                .rowsUpdated()
+                .then();
+    }
+
+    /**
+     * 将单个未发往供应商的失联运行中任务重置为等待状态。
+     *
+     * @param taskId String 任务ID
+     * @return Mono<Boolean> 是否重置成功
+     */
+    public Mono<Boolean> resetRunningTaskToPending(String taskId) {
+        return databaseClient.sql("""
+                UPDATE ai_generation_tasks
+                SET status = 'pending', progress = 0, error_message = '', error_message_key = '', error_message_arguments = '[]'::jsonb, started_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :taskId AND NOT data_purged AND status = 'running' AND NOT provider_request_sent
+                """)
+                .bind("taskId", taskId)
+                .fetch()
+                .rowsUpdated()
+                .map(rows -> rows > 0);
     }
 
     /**
@@ -248,7 +305,7 @@ public class AiTaskRepository {
                 UPDATE ai_generation_tasks
                 SET status = 'pending', progress = 0, error_message = '', error_message_key = '', error_message_arguments = '[]'::jsonb, started_at = NULL,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE status = 'running' AND updated_at < :runningRecoverBefore
+                WHERE status = 'running' AND updated_at < :runningRecoverBefore AND NOT provider_request_sent
                 """)
                 .bind("runningRecoverBefore", runningRecoverBefore)
                 .fetch()
@@ -263,10 +320,12 @@ public class AiTaskRepository {
      * @return Mono<Boolean> 是否切换成功
      */
     public Mono<Boolean> markTaskRunningIfExecutable(String taskId) {
-        // 只有pending或running任务允许进入执行，终态任务不会被重复拉起。
+        // 只有pending或running任务允许进入执行，终态任务不会被重复拉起；恢复轮询时保留已有进度。
         return databaseClient.sql("""
                 UPDATE ai_generation_tasks
-                SET status = 'running', progress = 5, error_message = '', error_message_key = '', error_message_arguments = '[]'::jsonb,
+                SET status = 'running',
+                    progress = CASE WHEN status = 'running' AND COALESCE(progress, 0) > 5 THEN progress ELSE 5 END,
+                    error_message = '', error_message_key = '', error_message_arguments = '[]'::jsonb,
                     started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :taskId AND NOT data_purged AND status IN ('pending', 'running')

@@ -39,6 +39,9 @@ public class AiGenerationTask {
     /** 图片或视频生成请求是否已经发往供应商 */
     private Boolean providerRequestSent;
 
+    /** 供应商返回的异步任务ID，用于服务重启后恢复轮询 */
+    private String providerTaskId;
+
     /** 请求数据JSON */
     private String requestData;
 

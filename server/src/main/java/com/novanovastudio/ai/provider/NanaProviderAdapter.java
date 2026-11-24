@@ -356,6 +356,13 @@ public class NanaProviderAdapter implements AiProviderAdapter {
         List<AiTaskDtos.AiTaskMediaReference> audioReferences = AiTaskParameterReader.safeReferences(context.request().audioReferences());
         validateReferenceCounts(imageReferences.size(), videoReferences.size(), audioReferences.size());
         AiTaskDtos.AiChannelConfig channel = originChannel(context);
+        String existingProviderTaskId = context.existingProviderTaskId();
+        if (StringUtils.hasText(existingProviderTaskId)) {
+            log.info("NANA-API Seedance视频任务恢复轮询: taskId={}, providerTaskId={}", context.task().getId(), existingProviderTaskId);
+            return pollVideoTask(context, channel, SEEDANCE_TASK_PATH + "/" + existingProviderTaskId,
+                    NanaProviderAdapter::readSeedanceState, "NANA-API Seedance视频生成超时，请稍后重试")
+                    .flatMap(finished -> storeVideoResult(context, existingProviderTaskId, finished));
+        }
         return Mono.zip(resolveReferenceUrls(context, imageReferences), resolveReferenceUrls(context, videoReferences), resolveReferenceUrls(context, audioReferences))
                 .flatMap(urls -> {
                     Map<String, Object> payload = buildSeedancePayload(context.model(), context.request().prompt(), context.request().parameters(),
@@ -371,7 +378,8 @@ public class NanaProviderAdapter implements AiProviderAdapter {
                                 if (!StringUtils.hasText(providerTaskId)) {
                                     return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.nanaVideoRequestReturnedNoTaskID")));
                                 }
-                                return context.updateRunningProgress(10)
+                                return context.recordProviderTaskId(providerTaskId)
+                                        .then(context.updateRunningProgress(10))
                                         .then(pollVideoTask(context, channel, SEEDANCE_TASK_PATH + "/" + providerTaskId,
                                                 NanaProviderAdapter::readSeedanceState, "NANA-API Seedance视频生成超时，请稍后重试"))
                                         .flatMap(finished -> storeVideoResult(context, providerTaskId, finished));
@@ -390,6 +398,13 @@ public class NanaProviderAdapter implements AiProviderAdapter {
         List<AiTaskDtos.AiTaskMediaReference> videoReferences = AiTaskParameterReader.safeReferences(context.request().videoReferences());
         List<AiTaskDtos.AiTaskMediaReference> audioReferences = AiTaskParameterReader.safeReferences(context.request().audioReferences());
         AiTaskDtos.AiChannelConfig channel = originChannel(context);
+        String existingProviderTaskId = context.existingProviderTaskId();
+        if (StringUtils.hasText(existingProviderTaskId)) {
+            log.info("NANA-API Wan视频任务恢复轮询: taskId={}, providerTaskId={}", context.task().getId(), existingProviderTaskId);
+            return pollVideoTask(context, channel, WAN_QUERY_PATH + existingProviderTaskId,
+                    NanaProviderAdapter::readWanState, "NANA-API Wan视频生成超时，请稍后重试")
+                    .flatMap(finished -> storeVideoResult(context, existingProviderTaskId, finished));
+        }
         return Mono.zip(resolveReferenceUrls(context, imageReferences), resolveReferenceUrls(context, videoReferences), resolveReferenceUrls(context, audioReferences))
                 .flatMap(urls -> {
                     Map<String, Object> payload = buildWanPayload(context.model(), context.request().prompt(), context.request().parameters(),
@@ -406,7 +421,8 @@ public class NanaProviderAdapter implements AiProviderAdapter {
                                 if (!StringUtils.hasText(providerTaskId)) {
                                     return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.nanaVideoRequestReturnedNoTaskID")));
                                 }
-                                return context.updateRunningProgress(10)
+                                return context.recordProviderTaskId(providerTaskId)
+                                        .then(context.updateRunningProgress(10))
                                         .then(pollVideoTask(context, channel, WAN_QUERY_PATH + providerTaskId,
                                                 NanaProviderAdapter::readWanState, "NANA-API Wan视频生成超时，请稍后重试"))
                                         .flatMap(finished -> storeVideoResult(context, providerTaskId, finished));
@@ -428,6 +444,13 @@ public class NanaProviderAdapter implements AiProviderAdapter {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.nanaMiniMaxVideoDoesNotSupportVideoReferences")));
         }
         AiTaskDtos.AiChannelConfig channel = originChannel(context);
+        String existingProviderTaskId = context.existingProviderTaskId();
+        if (StringUtils.hasText(existingProviderTaskId)) {
+            log.info("NANA-API MiniMax视频任务恢复轮询: taskId={}, providerTaskId={}", context.task().getId(), existingProviderTaskId);
+            return pollVideoTask(context, channel, MINIMAX_QUERY_PATH + existingProviderTaskId,
+                    NanaProviderAdapter::readMiniMaxState, "NANA-API MiniMax视频生成超时，请稍后重试")
+                    .flatMap(finished -> storeVideoResult(context, existingProviderTaskId, finished));
+        }
         return Mono.zip(resolveReferenceUrls(context, imageReferences), resolveReferenceUrls(context, audioReferences))
                 .flatMap(urls -> {
                     Map<String, Object> payload = buildMiniMaxPayload(context.model(), context.request().prompt(), context.request().parameters(),
@@ -442,7 +465,8 @@ public class NanaProviderAdapter implements AiProviderAdapter {
                                 if (!StringUtils.hasText(providerTaskId)) {
                                     return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.nanaVideoRequestReturnedNoTaskID")));
                                 }
-                                return context.updateRunningProgress(10)
+                                return context.recordProviderTaskId(providerTaskId)
+                                        .then(context.updateRunningProgress(10))
                                         .then(pollVideoTask(context, channel, MINIMAX_QUERY_PATH + providerTaskId,
                                                 NanaProviderAdapter::readMiniMaxState, "NANA-API MiniMax视频生成超时，请稍后重试"))
                                         .flatMap(finished -> storeVideoResult(context, providerTaskId, finished));

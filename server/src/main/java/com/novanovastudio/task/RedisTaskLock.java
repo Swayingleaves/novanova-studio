@@ -98,6 +98,16 @@ public class RedisTaskLock {
     }
 
     /**
+     * 判断任务锁当前是否仍被持有。
+     *
+     * @param taskId String 任务ID
+     * @return Mono<Boolean> true 表示锁仍存在
+     */
+    public Mono<Boolean> isLocked(String taskId) {
+        return redisTemplate.hasKey(lockKey(taskId)).defaultIfEmpty(false);
+    }
+
+    /**
      * 释放任务锁。
      *
      * @param taskId String 任务ID

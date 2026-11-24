@@ -111,6 +111,12 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
         if (!supports(context.task().getTaskType())) {
             return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.seedanceSupportsVideoTasksOnly")));
         }
+        String existingProviderTaskId = context.existingProviderTaskId();
+        if (StringUtils.hasText(existingProviderTaskId)) {
+            log.info("Seedance视频任务恢复轮询: taskId={}, providerTaskId={}", context.task().getId(), existingProviderTaskId);
+            return pollSeedanceVideoTask(context, existingProviderTaskId)
+                    .flatMap(finished -> storeSeedanceVideo(context, existingProviderTaskId, finished));
+        }
         List<AiTaskDtos.AiTaskMediaReference> imageReferences =
                 AiTaskParameterReader.safeReferences(context.request().references());
         List<AiTaskDtos.AiTaskMediaReference> videoReferences =
@@ -166,7 +172,8 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
                         return Mono.error(new BusinessException(
                                 ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.seedanceReturnedNoTaskID")));
                     }
-                    return context.updateRunningProgress(20)
+                    return context.recordProviderTaskId(providerTaskId)
+                            .then(context.updateRunningProgress(20))
                             .then(pollSeedanceVideoTask(context, providerTaskId))
                             .flatMap(finished -> storeSeedanceVideo(context, providerTaskId, finished));
                 });

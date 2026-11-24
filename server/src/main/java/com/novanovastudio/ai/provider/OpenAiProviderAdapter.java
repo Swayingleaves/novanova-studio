@@ -141,6 +141,11 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
      * @return Mono<JSONObject> 视频结果
      */
     private Mono<JSONObject> executeVideoTask(AiTaskExecutionContext context) {
+        String existingProviderTaskId = context.existingProviderTaskId();
+        if (StringUtils.hasText(existingProviderTaskId)) {
+            log.info("OpenAI视频任务恢复轮询: taskId={}, providerTaskId={}", context.task().getId(), existingProviderTaskId);
+            return finishVideoTask(context, existingProviderTaskId);
+        }
         // OpenAI兼容视频接口只支持提示词和图片参考。
         if (!AiTaskParameterReader.safeReferences(context.request().videoReferences()).isEmpty()) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.openAICompatibleVideoDoesNotSupportVideoReferences")));
@@ -174,21 +179,26 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
                     if (!StringUtils.hasText(providerTaskId)) {
                         return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.videoAPIReturnedNoTaskID")));
                     }
-                    return context.updateRunningProgress(20)
-                            .then(pollVideoTask(context, providerTaskId))
-                            .flatMap(finished -> {
-                                String resultUrl = AiTaskParameterReader.firstNonEmpty(finished.getString("url"), finished.getString("output_url"), finished.getString("video_url"), finished.getString("content_url"));
-                                if (mediaSupport.isHttpUrl(resultUrl)) {
-                                    return mediaSupport.storeGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, resultUrl, AiTaskParameterReader.firstNonEmpty(finished.getString("mime_type"), finished.getString("mimeType"), "video/mp4"), null, null, null)
-                                            .map(media -> AiJsonUtils.jsonObject(Map.of("item", media, "providerTaskId", providerTaskId)));
-                                }
-                                return aiHttpClient.downloadBinary(context.channel(), "/videos/" + providerTaskId + "/content").flatMap(binary -> {
-                                        String mimeType = AiTaskParameterReader.firstNonEmpty(finished.getString("mime_type"), finished.getString("mimeType"), binary.mimeType(), "video/mp4");
-                                        GeneratedBinary video = new GeneratedBinary(binary.data(), mimeType);
-                                        return mediaSupport.storeGeneratedMedia(context.task().getUserId(), AiTaskTypes.VIDEO, "generated-video.mp4", video, null, null, null)
-                                                .map(media -> AiJsonUtils.jsonObject(Map.of("item", media, "providerTaskId", providerTaskId)));
-                                    });
-                            });
+                    return context.recordProviderTaskId(providerTaskId)
+                            .then(context.updateRunningProgress(20))
+                            .then(finishVideoTask(context, providerTaskId));
+                });
+    }
+
+    private Mono<JSONObject> finishVideoTask(AiTaskExecutionContext context, String providerTaskId) {
+        return pollVideoTask(context, providerTaskId)
+                .flatMap(finished -> {
+                    String resultUrl = AiTaskParameterReader.firstNonEmpty(finished.getString("url"), finished.getString("output_url"), finished.getString("video_url"), finished.getString("content_url"));
+                    if (mediaSupport.isHttpUrl(resultUrl)) {
+                        return mediaSupport.storeGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, resultUrl, AiTaskParameterReader.firstNonEmpty(finished.getString("mime_type"), finished.getString("mimeType"), "video/mp4"), null, null, null)
+                                .map(media -> AiJsonUtils.jsonObject(Map.of("item", media, "providerTaskId", providerTaskId)));
+                    }
+                    return aiHttpClient.downloadBinary(context.channel(), "/videos/" + providerTaskId + "/content").flatMap(binary -> {
+                        String mimeType = AiTaskParameterReader.firstNonEmpty(finished.getString("mime_type"), finished.getString("mimeType"), binary.mimeType(), "video/mp4");
+                        GeneratedBinary video = new GeneratedBinary(binary.data(), mimeType);
+                        return mediaSupport.storeGeneratedMedia(context.task().getUserId(), AiTaskTypes.VIDEO, "generated-video.mp4", video, null, null, null)
+                                .map(media -> AiJsonUtils.jsonObject(Map.of("item", media, "providerTaskId", providerTaskId)));
+                    });
                 });
     }
 

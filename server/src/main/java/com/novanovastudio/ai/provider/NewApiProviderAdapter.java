@@ -173,6 +173,12 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
      * @return Mono<JSONObject> 视频结果
      */
     private Mono<JSONObject> executeVideoTask(AiTaskExecutionContext context) {
+        String existingProviderTaskId = context.existingProviderTaskId();
+        if (StringUtils.hasText(existingProviderTaskId)) {
+            log.info("New API视频任务恢复轮询: taskId={}, providerTaskId={}", context.task().getId(), existingProviderTaskId);
+            return pollVideoTask(context, existingProviderTaskId)
+                    .flatMap(finished -> storeVideoResult(context, existingProviderTaskId, finished));
+        }
         List<AiTaskDtos.AiTaskMediaReference> imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
         List<AiTaskDtos.AiTaskMediaReference> videoReferences = AiTaskParameterReader.safeReferences(context.request().videoReferences());
         List<AiTaskDtos.AiTaskMediaReference> audioReferences = AiTaskParameterReader.safeReferences(context.request().audioReferences());
@@ -220,7 +226,8 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
                     if (!StringUtils.hasText(providerTaskId)) {
                         return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.newAPIVideoRequestReturnedNoTaskID")));
                     }
-                    return context.updateRunningProgress(10)
+                    return context.recordProviderTaskId(providerTaskId)
+                            .then(context.updateRunningProgress(10))
                             .then(pollVideoTask(context, providerTaskId))
                             .flatMap(finished -> storeVideoResult(context, providerTaskId, finished));
                 });

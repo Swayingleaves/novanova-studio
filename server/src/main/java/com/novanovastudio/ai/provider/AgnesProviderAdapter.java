@@ -240,6 +240,11 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
      * @return Mono<JSONObject> 视频结果
      */
     private Mono<JSONObject> executeVideoTask(AiTaskExecutionContext context) {
+        String existingVideoId = context.existingProviderTaskId();
+        if (StringUtils.hasText(existingVideoId)) {
+            log.info("Agnes视频任务恢复轮询: taskId={}, videoId={}", context.task().getId(), existingVideoId);
+            return finishAgnesVideoTask(context, existingVideoId, existingVideoId);
+        }
         var imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
         var videoReferences = AiTaskParameterReader.safeReferences(context.request().videoReferences());
         var audioReferences = AiTaskParameterReader.safeReferences(context.request().audioReferences());
@@ -293,26 +298,31 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                     if (!StringUtils.hasText(videoId)) {
                         return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.agnesAPIReturnedNoVideoId")));
                     }
-                    return context.updateRunningProgress(20)
-                            .then(pollAgnesVideoTask(context, videoId))
-                            .flatMap(finished -> {
-                                log.info("Agnes 视频任务完成: taskId={}, videoId={}, result={}", context.task().getId(), videoId, finished);
-                                // Agnes 不同场景返回格式不同：有的顶层 url，有的放 remixed_from_video_id
-                                String resultUrl = AiTaskParameterReader.firstNonEmpty(
-                                        finished.getString("url"),
-                                        finished.getString("remixed_from_video_id")
-                                );
-                                if (!StringUtils.hasText(resultUrl)) {
-                                    return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.agnesTaskSucceededWithoutVideoURL")));
-                                }
-                                // 由服务端将 AI 渠道返回的地址转存对象存储并保留原始链接，避免浏览器读取内网结果地址。
-                                return mediaSupport.storeGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, resultUrl,
-                                                "video/mp4", null, null, null)
-                                        .map(media -> AiJsonUtils.jsonObject(Map.of(
-                                                "item", media,
-                                                "providerTaskId", providerTaskId
-                                        )));
-                            });
+                    return context.recordProviderTaskId(videoId)
+                            .then(context.updateRunningProgress(20))
+                            .then(finishAgnesVideoTask(context, videoId, providerTaskId));
+                });
+    }
+
+    private Mono<JSONObject> finishAgnesVideoTask(AiTaskExecutionContext context, String videoId, String providerTaskId) {
+        return pollAgnesVideoTask(context, videoId)
+                .flatMap(finished -> {
+                    log.info("Agnes 视频任务完成: taskId={}, videoId={}, result={}", context.task().getId(), videoId, finished);
+                    // Agnes 不同场景返回格式不同：有的顶层 url，有的放 remixed_from_video_id
+                    String resultUrl = AiTaskParameterReader.firstNonEmpty(
+                            finished.getString("url"),
+                            finished.getString("remixed_from_video_id")
+                    );
+                    if (!StringUtils.hasText(resultUrl)) {
+                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.agnesTaskSucceededWithoutVideoURL")));
+                    }
+                    // 由服务端将 AI 渠道返回的地址转存对象存储并保留原始链接，避免浏览器读取内网结果地址。
+                    return mediaSupport.storeGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, resultUrl,
+                                    "video/mp4", null, null, null)
+                            .map(media -> AiJsonUtils.jsonObject(Map.of(
+                                    "item", media,
+                                    "providerTaskId", providerTaskId
+                            )));
                 });
     }
 
