@@ -72,6 +72,7 @@ import { getHomepageTargetPath } from "@/features/homepage/api/homepage-showcase
 import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { ANNOUNCEMENT_TARGET_PAGE_OPTIONS, announcementTargetCapability } from "@/features/notification/lib/announcement-action";
+import { AnnouncementPopupPreviewModal } from "@/features/notification/components/announcement-popup-modal";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { modelOptionLabel, useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { adminCreditFilterKey, adminCreditUserLabel } from "./admin-credit-utils";
@@ -1182,6 +1183,7 @@ function NotificationManagement() {
     const [editActionLabel, setEditActionLabel] = useState("");
     const [uploadingEditImage, setUploadingEditImage] = useState(false);
     const [assetPickerTarget, setAssetPickerTarget] = useState<"create" | "edit" | null>(null);
+    const [previewNotification, setPreviewNotification] = useState<SystemNotification | null>(null);
     const createImageInputRef = useRef<HTMLInputElement>(null);
     const editImageInputRef = useRef<HTMLInputElement>(null);
 
@@ -1412,9 +1414,12 @@ function NotificationManagement() {
         },
         {
             title: translate("administration.actions"),
-            width: 180,
+            width: 220,
             render: (_, record) => (
                 <span className="inline-flex gap-1">
+                    <Button size="small" onClick={() => setPreviewNotification(record)}>
+                        预览
+                    </Button>
                     <Button size="small" onClick={() => handleEdit(record)}>
                         {translate("administration.edit")}</Button>
                     {record.status === 0 ? (
@@ -1609,6 +1614,15 @@ function NotificationManagement() {
                 defaultTab="image"
                 onInsert={(payload) => void handleInsertAssetImage(payload)}
                 onClose={() => setAssetPickerTarget(null)}
+            />
+
+            <AnnouncementPopupPreviewModal
+                notification={previewNotification}
+                onClose={() => setPreviewNotification(null)}
+                onTryAction={(item) => {
+                    const modelText = item.targetModel ? `，并预选模型「${modelOptionLabel(effectiveConfig, item.targetModel)}」` : "";
+                    message.info(`预览模式：点击后将跳转到 ${item.targetPath}${modelText}`);
+                }}
             />
         </div>
     );

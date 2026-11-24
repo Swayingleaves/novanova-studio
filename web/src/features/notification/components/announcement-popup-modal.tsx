@@ -18,7 +18,107 @@ import {
 } from "@/features/notification/lib/announcement-popup-policy";
 import { useCachedNotificationImage } from "@/features/notification/lib/notification-image-cache";
 import { useNotificationStore } from "@/features/notification/stores/use-notification-store";
+import type { SystemNotification } from "@/services/api/server";
 import { usePathname, useRouter } from "@/shared/lib/team-navigation";
+
+export type AnnouncementPopupPreviewModalProps = {
+    notification: SystemNotification | null;
+    onClose: () => void;
+    onTryAction?: (notification: SystemNotification) => void;
+};
+
+/**
+ * 后台消息管理专用：以与用户端完全一致的居中弹窗样式预览单条公告效果。
+ */
+export function AnnouncementPopupPreviewModal({ notification, onClose, onTryAction }: AnnouncementPopupPreviewModalProps) {
+    const translate = useTranslation();
+    const cachedImageUrl = useCachedNotificationImage(notification?.imageUrl);
+    if (!notification) return null;
+
+    const hasTitle = Boolean(notification.title?.trim());
+    const hasContent = Boolean(notification.content?.trim());
+    const hasImage = Boolean(notification.imageUrl?.trim());
+    const targetPath = notification.targetPath?.trim() || "";
+    const actionLabel = notification.actionLabel?.trim() || "去试一试";
+    const isImageOnly = hasImage && !hasTitle && !hasContent;
+
+    const handleTry = () => {
+        if (!targetPath) return;
+        onTryAction?.(notification);
+    };
+
+    return (
+        <Modal
+            open
+            centered
+            width={isImageOnly ? 520 : 580}
+            destroyOnHidden
+            mask={{ closable: true }}
+            title={hasTitle ? notification.title : isImageOnly ? null : translate("notification.announcementDetails")}
+            onCancel={onClose}
+            footer={
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Button onClick={onClose}>今日不再提示</Button>
+                    <div className="flex items-center gap-2">
+                        <Button type={targetPath ? "default" : "primary"} onClick={onClose}>
+                            不再提示
+                        </Button>
+                        {targetPath ? (
+                            <Button
+                                type="primary"
+                                icon={<ArrowRight className="size-3.5" />}
+                                iconPlacement="end"
+                                onClick={handleTry}
+                            >
+                                {actionLabel}
+                            </Button>
+                        ) : null}
+                    </div>
+                </div>
+            }
+            styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}
+        >
+            <div className="space-y-4">
+                {hasImage ? (
+                    targetPath ? (
+                        <button
+                            type="button"
+                            onClick={handleTry}
+                            title={`点击${actionLabel}`}
+                            className="group relative flex w-full cursor-pointer justify-center overflow-hidden rounded-lg bg-[var(--studio-surface-soft)] transition hover:opacity-95"
+                        >
+                            <img
+                                src={cachedImageUrl || notification.imageUrl!}
+                                alt={notification.title || "系统公告图片"}
+                                className="max-h-[52vh] w-auto object-contain"
+                            />
+                        </button>
+                    ) : (
+                        <div className="flex justify-center overflow-hidden rounded-lg bg-[var(--studio-surface-soft)]">
+                            <Image
+                                src={cachedImageUrl || notification.imageUrl!}
+                                alt={notification.title || "系统公告图片"}
+                                className="max-h-[52vh] w-auto object-contain"
+                            />
+                        </div>
+                    )
+                ) : null}
+                {hasContent ? (
+                    <div className="whitespace-pre-wrap text-sm leading-7 text-[var(--studio-text)]">
+                        {notification.content}
+                    </div>
+                ) : null}
+                {!isImageOnly ? (
+                    <div className="border-t border-[var(--studio-line)] pt-2.5 text-xs text-[var(--studio-faint)]">
+                        {notification.publishedAt
+                            ? translate("notification.published", { value0: new Date(notification.publishedAt).toLocaleString(currentLanguageTag()) })
+                            : translate("notification.created", { value0: new Date(notification.createdAt).toLocaleString(currentLanguageTag()) })}
+                    </div>
+                ) : null}
+            </div>
+        </Modal>
+    );
+}
 
 /**
  * 全局居中系统公告弹窗：
