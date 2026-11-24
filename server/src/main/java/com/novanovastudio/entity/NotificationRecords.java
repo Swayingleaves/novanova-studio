@@ -41,6 +41,18 @@ public final class NotificationRecords {
         /** 公告内容 */
         private String content;
 
+        /** 公告图片地址，可与标题、正文任意组合 */
+        private String imageUrl;
+
+        /** 引导按钮文案，为空且配置了跳转路径时默认显示「去试一试」 */
+        private String actionLabel;
+
+        /** 点击引导按钮或图片后跳转的站内路径 */
+        private String targetPath;
+
+        /** 跳转后自动预选的模型标识（channelId::modelName） */
+        private String targetModel;
+
         /** 优先级：normal/high */
         private String priority;
 

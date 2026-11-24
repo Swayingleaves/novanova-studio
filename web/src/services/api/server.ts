@@ -962,6 +962,10 @@ export type SystemNotification = {
     id: number;
     title: string;
     content: string;
+    imageUrl?: string | null;
+    actionLabel?: string | null;
+    targetPath?: string | null;
+    targetModel?: string | null;
     priority: "normal" | "high";
     status: number;
     publishedAt?: string;
@@ -1373,7 +1377,15 @@ export function listAdminNotifications() {
     return serverGet<{ notifications: SystemNotification[] }>("/admin/notification/list");
 }
 
-export function createAdminNotification(input: { title: string; content?: string; priority?: string }) {
+export function createAdminNotification(input: {
+    title?: string;
+    content?: string;
+    imageUrl?: string | null;
+    actionLabel?: string | null;
+    targetPath?: string | null;
+    targetModel?: string | null;
+    priority?: string;
+}) {
     return serverPost("/admin/notification/create", input);
 }
 
@@ -1381,7 +1393,15 @@ export function publishAdminNotification(id: number) {
     return serverPost(`/admin/notification/publish?id=${id}`, {});
 }
 
-export function updateAdminNotification(input: { id: number; title: string; content?: string }) {
+export function updateAdminNotification(input: {
+    id: number;
+    title?: string;
+    content?: string;
+    imageUrl?: string | null;
+    actionLabel?: string | null;
+    targetPath?: string | null;
+    targetModel?: string | null;
+}) {
     return serverPost("/admin/notification/update", input);
 }
 

@@ -1163,3 +1163,18 @@ V61 按空间、用户、原配置和对象键精确关联已有媒体及原文�
 | `platform_navigation_menu_configs` | `icon_key` | `VARCHAR(64)` | 自定义菜单图标标识，为空时沿用系统默认图标 |
 | `platform_navigation_menu_configs` | `badge_text` | `VARCHAR(16)` | 右上角角标文案，为空时不显示角标 |
 | `platform_navigation_menu_configs` | `badge_color` | `VARCHAR(32)` | 右上角角标文字颜色（如十六进制色值），为空时沿用系统默认颜色 |
+
+## 系统公告图片支持（V109 / 社区版 V110）
+
+| 表 | 变更字段 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| `system_notifications` | `title` | `VARCHAR(200) NOT NULL DEFAULT ''` | 放宽允许为空字符串以支持纯图片公告 |
+| `system_notifications` | `image_url` | `TEXT` | 公告图片地址，可与标题、正文任意组合，三者至少填写一项 |
+
+## 系统公告引导跳转与预选模型字段（V110 / 社区版 V111）
+
+| 表 | 新增字段 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| `system_notifications` | `action_label` | `VARCHAR(32)` | 引导按钮文案，留空且配置了 `target_path` 时前端默认展示「去试一试」 |
+| `system_notifications` | `target_path` | `VARCHAR(255)` | 点击按钮或公告图片后跳转的站内路由路径（必须以 `/` 开头） |
+| `system_notifications` | `target_model` | `VARCHAR(255)` | 跳转后自动预选的模型标识（`channelId::modelName`） |

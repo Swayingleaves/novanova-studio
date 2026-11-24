@@ -15,7 +15,7 @@ import { type Key, type ReactNode, useCallback, useEffect, useMemo, useRef, useS
 import dynamic from "next/dynamic";
 import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, App, Button, Checkbox, DatePicker, Drawer, Empty, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip } from "antd";
+import { Alert, App, Button, Checkbox, DatePicker, Drawer, Empty, Form, Image as AntdImage, Input, InputNumber, Modal, Pagination, Segmented, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Activity, Bell, BookText, Check, ChevronDown, ClipboardCheck, Coins, Edit, HardDrive, Image as ImageIcon, LayoutTemplate, Mail, Menu as MenuIcon, Palette, PanelLeft, Plus, Power, Search, Send, Settings2, ShieldCheck, Sparkles, Tags, Ticket, Trash2, Upload, UserRound, UsersRound, Video, Wallet, X } from "lucide-react";
 
@@ -69,6 +69,11 @@ import {
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { useUserStore, type ServerUserProfile, type ServerUserRole } from "@/features/auth/stores/use-user-store";
 import { getHomepageTargetPath } from "@/features/homepage/api/homepage-showcases";
+import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
+import { useAssetStore } from "@/features/assets/stores/use-asset-store";
+import { ANNOUNCEMENT_TARGET_PAGE_OPTIONS, announcementTargetCapability } from "@/features/notification/lib/announcement-action";
+import { ModelPicker } from "@/features/settings/components/model-picker";
+import { modelOptionLabel, useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { adminCreditFilterKey, adminCreditUserLabel } from "./admin-credit-utils";
 import { TeamContentScope } from "./components/team-content-scope";
 import { TeamManagement, CurrentTeamManagement } from "./components/team-management";
@@ -1156,15 +1161,29 @@ function UserManagement() {
 function NotificationManagement() {
     const translate = useTranslation();
     const { message, modal } = App.useApp();
+    const effectiveConfig = useEffectiveConfig();
     const [notifications, setNotifications] = useState<SystemNotification[]>([]);
     const [loading, setLoading] = useState(false);
     const [createOpen, setCreateOpen] = useState(false);
     const [newTitle, setNewTitle] = useState("");
     const [newContent, setNewContent] = useState("");
+    const [newImageUrl, setNewImageUrl] = useState("");
+    const [newTargetPath, setNewTargetPath] = useState("");
+    const [newTargetModel, setNewTargetModel] = useState("");
+    const [newActionLabel, setNewActionLabel] = useState("");
+    const [uploadingCreateImage, setUploadingCreateImage] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
     const [editId, setEditId] = useState<number | null>(null);
     const [editTitle, setEditTitle] = useState("");
     const [editContent, setEditContent] = useState("");
+    const [editImageUrl, setEditImageUrl] = useState("");
+    const [editTargetPath, setEditTargetPath] = useState("");
+    const [editTargetModel, setEditTargetModel] = useState("");
+    const [editActionLabel, setEditActionLabel] = useState("");
+    const [uploadingEditImage, setUploadingEditImage] = useState(false);
+    const [assetPickerTarget, setAssetPickerTarget] = useState<"create" | "edit" | null>(null);
+    const createImageInputRef = useRef<HTMLInputElement>(null);
+    const editImageInputRef = useRef<HTMLInputElement>(null);
 
     const loadNotifications = useCallback(async () => {
         setLoading(true);
@@ -1182,17 +1201,85 @@ function NotificationManagement() {
         void loadNotifications();
     }, [loadNotifications]);
 
+    const handleUploadAnnouncementImage = async (file: File | undefined, target: "create" | "edit") => {
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            message.error(translate("administration.selectAnImageFile"));
+            return;
+        }
+        const setUploading = target === "create" ? setUploadingCreateImage : setUploadingEditImage;
+        const setUrl = target === "create" ? setNewImageUrl : setEditImageUrl;
+        setUploading(true);
+        try {
+            const uploaded = await uploadImage(file);
+            setUrl(uploaded.url);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "图片上传失败");
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    const handleOpenAssetPicker = (target: "create" | "edit") => {
+        void useAssetStore.getState().hydrateAssets();
+        setAssetPickerTarget(target);
+    };
+
+    const handleInsertAssetImage = async (payload: InsertAssetPayload) => {
+        const target = assetPickerTarget;
+        if (!target) return;
+        if (payload.kind !== "image") {
+            message.warning("请选择图片类型的资产");
+            return;
+        }
+        setAssetPickerTarget(null);
+        const setUploading = target === "create" ? setUploadingCreateImage : setUploadingEditImage;
+        const setUrl = target === "create" ? setNewImageUrl : setEditImageUrl;
+        const directUrl = payload.objectStorage?.url?.trim() || (/^https?:\/\//i.test(payload.dataUrl || "") ? payload.dataUrl.trim() : "");
+        if (directUrl) {
+            setUrl(directUrl);
+            return;
+        }
+        if (!payload.dataUrl) {
+            message.error("所选资产缺少有效图片地址");
+            return;
+        }
+        setUploading(true);
+        try {
+            const uploaded = await uploadImage(payload.dataUrl);
+            setUrl(uploaded.url);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "图片上传失败");
+        } finally {
+            setUploading(false);
+        }
+    };
+
     const handleCreate = async () => {
-        if (!newTitle.trim()) {
-            message.warning(translate("administration.enterAnnouncementTitle"));
+        const title = newTitle.trim();
+        const content = newContent.trim();
+        const imageUrl = newImageUrl.trim();
+        if (!title && !content && !imageUrl) {
+            message.warning("标题、内容和图片至少填写一项");
             return;
         }
         try {
-            await createAdminNotification({ title: newTitle.trim(), content: newContent.trim() });
+            await createAdminNotification({
+                title,
+                content,
+                imageUrl: imageUrl || null,
+                targetPath: newTargetPath.trim() || null,
+                targetModel: newTargetPath.trim() ? newTargetModel.trim() || null : null,
+                actionLabel: newTargetPath.trim() ? newActionLabel.trim() || null : null,
+            });
             message.success(translate("administration.announcementCreated"));
             setCreateOpen(false);
             setNewTitle("");
             setNewContent("");
+            setNewImageUrl("");
+            setNewTargetPath("");
+            setNewTargetModel("");
+            setNewActionLabel("");
             await loadNotifications();
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("administration.failedToCreateAnnouncement"));
@@ -1201,18 +1288,41 @@ function NotificationManagement() {
 
     const handleEdit = (record: SystemNotification) => {
         setEditId(record.id);
-        setEditTitle(record.title);
+        setEditTitle(record.title || "");
         setEditContent(record.content || "");
+        setEditImageUrl(record.imageUrl || "");
+        setEditTargetPath(record.targetPath || "");
+        setEditTargetModel(record.targetModel || "");
+        setEditActionLabel(record.actionLabel || "");
         setEditOpen(true);
     };
 
     const handleEditSave = async () => {
-        if (!editTitle.trim() || editId === null) return;
+        if (editId === null) return;
+        const title = editTitle.trim();
+        const content = editContent.trim();
+        const imageUrl = editImageUrl.trim();
+        if (!title && !content && !imageUrl) {
+            message.warning("标题、内容和图片至少填写一项");
+            return;
+        }
         try {
-            await updateAdminNotification({ id: editId, title: editTitle.trim(), content: editContent.trim() });
+            await updateAdminNotification({
+                id: editId,
+                title,
+                content,
+                imageUrl: imageUrl || null,
+                targetPath: editTargetPath.trim() || null,
+                targetModel: editTargetPath.trim() ? editTargetModel.trim() || null : null,
+                actionLabel: editTargetPath.trim() ? editActionLabel.trim() || null : null,
+            });
             message.success(translate("administration.announcementUpdated"));
             setEditOpen(false);
             setEditId(null);
+            setEditImageUrl("");
+            setEditTargetPath("");
+            setEditTargetModel("");
+            setEditActionLabel("");
             await loadNotifications();
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("administration.failedToUpdateAnnouncement"));
@@ -1238,8 +1348,44 @@ function NotificationManagement() {
     };
 
     const columns: ColumnsType<SystemNotification> = [
-        { title: translate("administration.title"), dataIndex: "title", ellipsis: true },
+        {
+            title: translate("administration.title"),
+            dataIndex: "title",
+            ellipsis: true,
+            render: (text: string, record) => text?.trim() || (record.imageUrl ? "（图片公告）" : "-"),
+        },
         { title: translate("administration.content"), dataIndex: "content", ellipsis: true, render: (text: string) => text || "-" },
+        {
+            title: "图片",
+            dataIndex: "imageUrl",
+            width: 96,
+            render: (url?: string | null) =>
+                url ? (
+                    <AntdImage src={url} alt="公告图片" width={48} height={32} className="rounded object-cover" />
+                ) : (
+                    "-"
+                ),
+        },
+        {
+            title: "引导跳转",
+            dataIndex: "targetPath",
+            width: 190,
+            render: (path: string | null | undefined, record) =>
+                path ? (
+                    <div className="space-y-0.5 text-xs">
+                        <div className="font-medium text-[var(--studio-ink)]">
+                            {record.actionLabel?.trim() || "去试一试"} → {path}
+                        </div>
+                        {record.targetModel ? (
+                            <div className="truncate text-[var(--studio-muted)]" title={modelOptionLabel(effectiveConfig, record.targetModel)}>
+                                {modelOptionLabel(effectiveConfig, record.targetModel)}
+                            </div>
+                        ) : null}
+                    </div>
+                ) : (
+                    "-"
+                ),
+        },
         {
             title: translate("administration.priority"),
             dataIndex: "priority",
@@ -1280,6 +1426,126 @@ function NotificationManagement() {
         },
     ];
 
+    const renderImageUploader = (target: "create" | "edit", imageUrl: string, uploading: boolean) => {
+        const inputRef = target === "create" ? createImageInputRef : editImageInputRef;
+        const clearUrl = target === "create" ? () => setNewImageUrl("") : () => setEditImageUrl("");
+        return (
+            <div className="space-y-2">
+                <input
+                    ref={inputRef}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        event.target.value = "";
+                        void handleUploadAnnouncementImage(file, target);
+                    }}
+                />
+                <div className="flex items-center justify-between gap-2">
+                    <label className="block text-xs font-medium text-[var(--studio-ink)]">公告图片（可选）</label>
+                    <div className="flex items-center gap-2">
+                        <Button size="small" icon={<ImageIcon className="size-3.5" />} disabled={uploading} onClick={() => handleOpenAssetPicker(target)}>
+                            从我的资产选择
+                        </Button>
+                        <Button size="small" icon={<Upload className="size-3.5" />} loading={uploading} onClick={() => inputRef.current?.click()}>
+                            {imageUrl ? "更换图片" : "上传图片"}
+                        </Button>
+                        {imageUrl ? (
+                            <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={uploading} onClick={clearUrl}>
+                                移除
+                            </Button>
+                        ) : null}
+                    </div>
+                </div>
+                {imageUrl ? (
+                    <div className="flex justify-center overflow-hidden rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-2">
+                        <AntdImage src={imageUrl} alt="公告图片预览" className="max-h-48 w-auto object-contain" />
+                    </div>
+                ) : (
+                    <div className="rounded-lg border border-dashed border-[var(--studio-line)] bg-[var(--studio-surface-soft)] px-3 py-4 text-center text-xs text-[var(--studio-muted)]">
+                        支持纯图片公告；标题、内容、图片三者至少填写一项
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    const renderActionFields = (
+        targetPath: string,
+        setTargetPath: (value: string) => void,
+        targetModel: string,
+        setTargetModel: (value: string) => void,
+        actionLabel: string,
+        setActionLabel: (value: string) => void,
+    ) => {
+        const capability = announcementTargetCapability(targetPath);
+        return (
+            <div className="space-y-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
+                <div className="text-xs font-semibold text-[var(--studio-ink)]">点击引导跳转（可选）</div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                        <label className="mb-1.5 block text-xs font-medium text-[var(--studio-ink)]">目标页面</label>
+                        <Select
+                            allowClear
+                            value={targetPath || undefined}
+                            placeholder="选择跳转页面（留空则无跳转按钮）"
+                            className="w-full!"
+                            options={ANNOUNCEMENT_TARGET_PAGE_OPTIONS.map((item) => ({ value: item.value, label: item.label }))}
+                            onChange={(value) => {
+                                const nextPath = value || "";
+                                setTargetPath(nextPath);
+                                if (!nextPath) {
+                                    setTargetModel("");
+                                    setActionLabel("");
+                                } else {
+                                    const nextCap = announcementTargetCapability(nextPath);
+                                    if (nextCap && nextCap !== capability) {
+                                        setTargetModel("");
+                                    }
+                                }
+                            }}
+                        />
+                    </div>
+                    <div>
+                        <label className="mb-1.5 block text-xs font-medium text-[var(--studio-ink)]">按钮文案</label>
+                        <Input
+                            value={actionLabel}
+                            maxLength={32}
+                            disabled={!targetPath}
+                            placeholder="默认：去试一试"
+                            onChange={(e) => setActionLabel(e.target.value)}
+                        />
+                    </div>
+                </div>
+                {targetPath ? (
+                    <div>
+                        <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <label className="block text-xs font-medium text-[var(--studio-ink)]">跳转后预选模型（可选）</label>
+                            {targetModel ? (
+                                <button
+                                    type="button"
+                                    className="cursor-pointer text-xs! text-[var(--studio-muted)]! hover:text-[var(--studio-ink)]!"
+                                    onClick={() => setTargetModel("")}
+                                >
+                                    清除模型
+                                </button>
+                            ) : null}
+                        </div>
+                        <ModelPicker
+                            config={effectiveConfig}
+                            value={targetModel}
+                            onChange={setTargetModel}
+                            capability={capability}
+                            fullWidth
+                            placeholder="可选：选择用户点击后自动切换的模型"
+                        />
+                    </div>
+                ) : null}
+            </div>
+        );
+    };
+
     return (
         <div>
             <div className="mb-4 flex justify-end">
@@ -1288,19 +1554,62 @@ function NotificationManagement() {
             </div>
             <Table rowKey="id" columns={columns} dataSource={notifications} loading={loading} pagination={false} />
 
-            <Modal title={translate("administration.newAnnouncement")} open={createOpen} onOk={handleCreate} onCancel={() => setCreateOpen(false)} okText={translate("administration.create")} cancelText={translate("administration.cancel")}>
-                <div className="flex flex-col gap-4">
-                    <Input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder={translate("administration.announcementTitle")} />
-                    <Input.TextArea value={newContent} onChange={(e) => setNewContent(e.target.value)} rows={4} placeholder={translate("administration.announcementContentOptional")} />
+            <Modal
+                title={translate("administration.newAnnouncement")}
+                open={createOpen}
+                width={580}
+                mask={{ closable: false }}
+                onOk={handleCreate}
+                okButtonProps={{ disabled: uploadingCreateImage }}
+                onCancel={() => setCreateOpen(false)}
+                okText={translate("administration.create")}
+                cancelText={translate("administration.cancel")}
+            >
+                <div className="flex flex-col gap-4 pt-2">
+                    <div>
+                        <label className="mb-1.5 block text-xs font-medium text-[var(--studio-ink)]">{translate("administration.announcementTitle")}（可选）</label>
+                        <Input value={newTitle} maxLength={200} onChange={(e) => setNewTitle(e.target.value)} placeholder="可选，留空可仅发送正文或图片" />
+                    </div>
+                    <div>
+                        <label className="mb-1.5 block text-xs font-medium text-[var(--studio-ink)]">{translate("administration.content")}（可选）</label>
+                        <Input.TextArea value={newContent} onChange={(e) => setNewContent(e.target.value)} rows={4} placeholder={translate("administration.announcementContentOptional")} />
+                    </div>
+                    {renderImageUploader("create", newImageUrl, uploadingCreateImage)}
+                    {renderActionFields(newTargetPath, setNewTargetPath, newTargetModel, setNewTargetModel, newActionLabel, setNewActionLabel)}
                 </div>
             </Modal>
 
-            <Modal title={translate("administration.editAnnouncement")} open={editOpen} onOk={handleEditSave} onCancel={() => setEditOpen(false)} okText={translate("administration.save")} cancelText={translate("administration.cancel")}>
-                <div className="flex flex-col gap-4">
-                    <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={translate("administration.announcementTitle")} />
-                    <Input.TextArea value={editContent} onChange={(e) => setEditContent(e.target.value)} rows={4} placeholder={translate("administration.announcementContentOptional")} />
+            <Modal
+                title={translate("administration.editAnnouncement")}
+                open={editOpen}
+                width={580}
+                mask={{ closable: false }}
+                onOk={handleEditSave}
+                okButtonProps={{ disabled: uploadingEditImage }}
+                onCancel={() => setEditOpen(false)}
+                okText={translate("administration.save")}
+                cancelText={translate("administration.cancel")}
+            >
+                <div className="flex flex-col gap-4 pt-2">
+                    <div>
+                        <label className="mb-1.5 block text-xs font-medium text-[var(--studio-ink)]">{translate("administration.announcementTitle")}（可选）</label>
+                        <Input value={editTitle} maxLength={200} onChange={(e) => setEditTitle(e.target.value)} placeholder="可选，留空可仅发送正文或图片" />
+                    </div>
+                    <div>
+                        <label className="mb-1.5 block text-xs font-medium text-[var(--studio-ink)]">{translate("administration.content")}（可选）</label>
+                        <Input.TextArea value={editContent} onChange={(e) => setEditContent(e.target.value)} rows={4} placeholder={translate("administration.announcementContentOptional")} />
+                    </div>
+                    {renderImageUploader("edit", editImageUrl, uploadingEditImage)}
+                    {renderActionFields(editTargetPath, setEditTargetPath, editTargetModel, setEditTargetModel, editActionLabel, setEditActionLabel)}
                 </div>
             </Modal>
+
+            <AssetPickerModal
+                open={assetPickerTarget !== null}
+                defaultTab="image"
+                onInsert={(payload) => void handleInsertAssetImage(payload)}
+                onClose={() => setAssetPickerTarget(null)}
+            />
         </div>
     );
 }

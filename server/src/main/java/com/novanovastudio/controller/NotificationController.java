@@ -66,7 +66,9 @@ public class NotificationController {
     @RequireRole("admin")
     public Mono<ApiResponse<String>> updateNotification(@Valid @RequestBody NotificationDtos.UpdateNotificationRequest request) {
         return adminGuard.requireAdmin()
-                .then(notificationService.updateNotification(request.id(), request.title(), request.content()))
+                .then(notificationService.updateNotification(
+                        request.id(), request.title(), request.content(), request.imageUrl(),
+                        request.actionLabel(), request.targetPath(), request.targetModel()))
                 .thenReturn(ApiResponse.ok("ok"));
     }
 

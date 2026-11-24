@@ -26,22 +26,10 @@ public class NotificationRepository {
      */
     public Flux<NotificationRecords.SystemNotificationRecord> listAllNotifications() {
         return databaseClient.sql("""
-                SELECT id, title, content, priority, status, published_at, created_by, created_at, updated_at
+                SELECT id, title, content, image_url, action_label, target_path, target_model, priority, status, published_at, created_by, created_at, updated_at
                 FROM system_notifications
                 ORDER BY created_at DESC
-                """).map((row, metadata) -> {
-                    NotificationRecords.SystemNotificationRecord record = new NotificationRecords.SystemNotificationRecord();
-                    record.setId(row.get("id", Long.class));
-                    record.setTitle(row.get("title", String.class));
-                    record.setContent(row.get("content", String.class));
-                    record.setPriority(row.get("priority", String.class));
-                    record.setStatus(row.get("status", Integer.class));
-                    record.setPublishedAt(row.get("published_at", java.time.OffsetDateTime.class));
-                    record.setCreatedBy(row.get("created_by", Long.class));
-                    record.setCreatedAt(row.get("created_at", java.time.OffsetDateTime.class));
-                    record.setUpdatedAt(row.get("updated_at", java.time.OffsetDateTime.class));
-                    return record;
-                }).all();
+                """).map((row, metadata) -> mapNotificationRow(row)).all();
     }
 
     /**
@@ -52,23 +40,11 @@ public class NotificationRepository {
      */
     public Flux<NotificationRecords.SystemNotificationRecord> listPublishedNotifications(Long userId) {
         return databaseClient.sql("""
-                SELECT n.id, n.title, n.content, n.priority, n.status, n.published_at, n.created_by, n.created_at, n.updated_at
+                SELECT n.id, n.title, n.content, n.image_url, n.action_label, n.target_path, n.target_model, n.priority, n.status, n.published_at, n.created_by, n.created_at, n.updated_at
                 FROM system_notifications n
                 WHERE n.status = 1
                 ORDER BY n.published_at DESC
-                """).map((row, metadata) -> {
-                    NotificationRecords.SystemNotificationRecord record = new NotificationRecords.SystemNotificationRecord();
-                    record.setId(row.get("id", Long.class));
-                    record.setTitle(row.get("title", String.class));
-                    record.setContent(row.get("content", String.class));
-                    record.setPriority(row.get("priority", String.class));
-                    record.setStatus(row.get("status", Integer.class));
-                    record.setPublishedAt(row.get("published_at", java.time.OffsetDateTime.class));
-                    record.setCreatedBy(row.get("created_by", Long.class));
-                    record.setCreatedAt(row.get("created_at", java.time.OffsetDateTime.class));
-                    record.setUpdatedAt(row.get("updated_at", java.time.OffsetDateTime.class));
-                    return record;
-                }).all();
+                """).map((row, metadata) -> mapNotificationRow(row)).all();
     }
 
     /**
@@ -90,15 +66,19 @@ public class NotificationRepository {
      * @return Mono<Long> 公告ID
      */
     public Mono<Long> createNotification(NotificationRecords.SystemNotificationRecord record) {
-        return databaseClient.sql("""
-                INSERT INTO system_notifications(title, content, priority, status, created_by)
-                VALUES (:title, :content, :priority, 0, :createdBy)
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
+                INSERT INTO system_notifications(title, content, image_url, action_label, target_path, target_model, priority, status, created_by)
+                VALUES (:title, :content, :imageUrl, :actionLabel, :targetPath, :targetModel, :priority, 0, :createdBy)
                 """)
-                .bind("title", record.getTitle())
+                .bind("title", record.getTitle() == null ? "" : record.getTitle())
                 .bind("content", record.getContent() == null ? "" : record.getContent())
                 .bind("priority", record.getPriority() == null ? "normal" : record.getPriority())
-                .bind("createdBy", record.getCreatedBy())
-                .fetch()
+                .bind("createdBy", record.getCreatedBy());
+        spec = bindNullableString(spec, "imageUrl", record.getImageUrl());
+        spec = bindNullableString(spec, "actionLabel", record.getActionLabel());
+        spec = bindNullableString(spec, "targetPath", record.getTargetPath());
+        spec = bindNullableString(spec, "targetModel", record.getTargetModel());
+        return spec.fetch()
                 .rowsUpdated()
                 .then(databaseClient.sql("SELECT LASTVAL()").map((row, metadata) -> row.get(0, Long.class)).one());
     }
@@ -109,13 +89,34 @@ public class NotificationRepository {
      * @param id Long 公告ID
      * @param title String 标题
      * @param content String 内容
+     * @param imageUrl String 图片地址，可为null
+     * @param actionLabel String 引导按钮文案，可为null
+     * @param targetPath String 站内跳转路径，可为null
+     * @param targetModel String 预选模型标识，可为null
      * @return Mono<Void>
      */
-    public Mono<Void> updateNotification(Long id, String title, String content) {
-        return databaseClient.sql("""
-                UPDATE system_notifications SET title = :title, content = :content, updated_at = CURRENT_TIMESTAMP
+    public Mono<Void> updateNotification(
+            Long id, String title, String content, String imageUrl,
+            String actionLabel, String targetPath, String targetModel) {
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
+                UPDATE system_notifications
+                SET title = :title,
+                    content = :content,
+                    image_url = :imageUrl,
+                    action_label = :actionLabel,
+                    target_path = :targetPath,
+                    target_model = :targetModel,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id
-                """).bind("id", id).bind("title", title).bind("content", content).fetch().rowsUpdated().then();
+                """)
+                .bind("id", id)
+                .bind("title", title == null ? "" : title)
+                .bind("content", content == null ? "" : content);
+        spec = bindNullableString(spec, "imageUrl", imageUrl);
+        spec = bindNullableString(spec, "actionLabel", actionLabel);
+        spec = bindNullableString(spec, "targetPath", targetPath);
+        spec = bindNullableString(spec, "targetModel", targetModel);
+        return spec.fetch().rowsUpdated().then();
     }
 
     /**
@@ -160,5 +161,34 @@ public class NotificationRepository {
                 WHERE notifications.status = 1
                 ON CONFLICT (team_id, user_id, notification_id) DO NOTHING
                 """).bind("userId", userId).fetch().rowsUpdated().then();
+    }
+
+    private DatabaseClient.GenericExecuteSpec bindNullableString(
+            DatabaseClient.GenericExecuteSpec spec, String name, String value) {
+        return value == null ? spec.bindNull(name, String.class) : spec.bind(name, value);
+    }
+
+    /**
+     * 将数据库行映射为公告持久化记录。
+     *
+     * @param row io.r2dbc.spi.Row 数据库行
+     * @return SystemNotificationRecord 公告记录
+     */
+    private NotificationRecords.SystemNotificationRecord mapNotificationRow(io.r2dbc.spi.Row row) {
+        NotificationRecords.SystemNotificationRecord record = new NotificationRecords.SystemNotificationRecord();
+        record.setId(row.get("id", Long.class));
+        record.setTitle(row.get("title", String.class));
+        record.setContent(row.get("content", String.class));
+        record.setImageUrl(row.get("image_url", String.class));
+        record.setActionLabel(row.get("action_label", String.class));
+        record.setTargetPath(row.get("target_path", String.class));
+        record.setTargetModel(row.get("target_model", String.class));
+        record.setPriority(row.get("priority", String.class));
+        record.setStatus(row.get("status", Integer.class));
+        record.setPublishedAt(row.get("published_at", java.time.OffsetDateTime.class));
+        record.setCreatedBy(row.get("created_by", Long.class));
+        record.setCreatedAt(row.get("created_at", java.time.OffsetDateTime.class));
+        record.setUpdatedAt(row.get("updated_at", java.time.OffsetDateTime.class));
+        return record;
     }
 }

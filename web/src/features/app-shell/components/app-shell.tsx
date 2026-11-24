@@ -14,6 +14,7 @@ import { CreditSymbol } from "@/features/generation/constants/credits";
 import { GitHubLink } from "@/features/app-shell/components/github-link";
 import { UserCreditMenu } from "@/features/app-shell/components/user-credit-menu";
 import { WelcomeModal } from "@/features/app-shell/components/welcome-modal";
+import { AnnouncementPopupModal } from "@/features/notification/components/announcement-popup-modal";
 import { AuthModal } from "@/features/auth/components/auth-modal";
 import { BindEmailModal } from "@/features/auth/components/bind-email-modal";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -130,6 +131,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <ShareWorkDialog />
             <WatermarkSettingsDialog />
             <WelcomeModal />
+            <AnnouncementPopupModal />
             <ProductTour />
         </div>
     );

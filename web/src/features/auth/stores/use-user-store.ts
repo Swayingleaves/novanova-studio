@@ -4,6 +4,7 @@ import type { CreditAmount } from "@/shared/lib/credit-amounts";
 
 import { create } from "zustand";
 import { authenticationPath } from "@/features/auth/lib/authentication-path";
+import { clearSessionDismissedAnnouncements } from "@/features/notification/lib/announcement-popup-policy";
 import { parseSpacePath } from "@/features/team/space-path";
 
 const USER_SESSION_KEY = "novanova:user_session:v1";
@@ -89,6 +90,7 @@ export const useUserStore = create<UserStore>()((set, get) => ({
         set({ hydrated: true, ...session });
     },
     setSession: (session, authenticationRedirect = "") => {
+        clearSessionDismissedAnnouncements();
         const nextSession = { token: session.token, expiresAt: session.expiresAt, user: normalizeUser(session.user) };
         writeStoredSession(nextSession);
         set({ ...nextSession, authenticationRedirect });
@@ -128,6 +130,7 @@ export const useUserStore = create<UserStore>()((set, get) => ({
         set({ user });
     },
     clearSession: () => {
+        clearSessionDismissedAnnouncements();
         removeStoredSession();
         set({ token: "", expiresAt: "", user: null, hydrated: true, showAuthModal: false, pendingRedirect: "", authenticationRedirect: "" });
     },

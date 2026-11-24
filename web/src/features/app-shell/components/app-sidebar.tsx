@@ -115,10 +115,16 @@ export function AppSidebar() {
                                 }}
                             >
                                 <span className="flex items-start justify-between gap-2">
-                                    <span className="line-clamp-1 text-sm font-medium text-[var(--studio-ink)]">{notification.title}</span>
+                                    <span className="line-clamp-1 text-sm font-medium text-[var(--studio-ink)]">
+                                        {notification.title?.trim() || (notification.imageUrl ? "图片公告" : translate("notification.announcementDetails"))}
+                                    </span>
                                     {!notification.read ? <span className="mt-1 size-1.5 shrink-0 rounded-full bg-[var(--studio-primary)]" /> : null}
                                 </span>
-                                {notification.content ? <span className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--studio-muted)]">{notification.content}</span> : null}
+                                {notification.content ? (
+                                    <span className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--studio-muted)]">{notification.content}</span>
+                                ) : notification.imageUrl ? (
+                                    <span className="mt-1 block text-xs text-[var(--studio-faint)]">[图片]</span>
+                                ) : null}
                             </button>
                         ))}
                     </>

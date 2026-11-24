@@ -1,9 +1,14 @@
 package com.novanovastudio.service;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.dto.NotificationDtos;
+import com.novanovastudio.entity.NotificationRecords;
 import com.novanovastudio.repository.NotificationRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,42 +17,70 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 /**
- * 系统公告服务测试。
+ * NotificationService 单元测试。
  *
  * @author   zhenglin.cn.cq@gmail.com
- * @date     2026-07-19 16:10
+ * @date     2026-11-24 11:19:00
  */
 class NotificationServiceTest {
 
-    /** 公告仓储 */
-    private NotificationRepository notificationRepository;
-
-    /** 当前用户提供器 */
+    private NotificationRepository repository;
     private CurrentUserProvider currentUserProvider;
+    private NotificationService service;
 
-    /** 待测试公告服务 */
-    private NotificationService notificationService;
-
-    /**
-     * 初始化测试依赖。
-     */
     @BeforeEach
     void setUp() {
-        notificationRepository = mock(NotificationRepository.class);
+        repository = mock(NotificationRepository.class);
         currentUserProvider = mock(CurrentUserProvider.class);
-        notificationService = new NotificationService(notificationRepository, currentUserProvider);
+        when(currentUserProvider.currentUserId()).thenReturn(Mono.just(1L));
+        when(repository.createNotification(any())).thenReturn(Mono.just(10L));
+        when(repository.updateNotification(any(), any(), any(), any(), any(), any(), any())).thenReturn(Mono.empty());
+        service = new NotificationService(repository, currentUserProvider);
     }
 
-    /**
-     * 批量已读应仅使用当前用户ID。
-     */
     @Test
-    void shouldMarkAllPublishedNotificationsReadForCurrentUser() {
-        when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
-        when(notificationRepository.markAllAsRead(8L)).thenReturn(Mono.empty());
+    void createNotificationRejectsWhenTitleContentAndImageAreAllEmpty() {
+        assertThatThrownBy(() -> service.createNotification(new NotificationDtos.CreateNotificationRequest("  ", " ", "normal", "")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("至少填写一项");
+    }
 
-        StepVerifier.create(notificationService.markAllAsRead()).verifyComplete();
+    @Test
+    void createNotificationAllowsImageOnlyAnnouncement() {
+        StepVerifier.create(service.createNotification(
+                        new NotificationDtos.CreateNotificationRequest("", "", "normal", "https://cdn.example.com/poster.png")))
+                .verifyComplete();
 
-        verify(notificationRepository).markAllAsRead(8L);
+        verify(repository).createNotification(org.mockito.ArgumentMatchers.argThat((NotificationRecords.SystemNotificationRecord record) ->
+                "".equals(record.getTitle())
+                        && "".equals(record.getContent())
+                        && "https://cdn.example.com/poster.png".equals(record.getImageUrl())));
+    }
+
+    @Test
+    void createNotificationAllowsContentOnlyAnnouncement() {
+        StepVerifier.create(service.createNotification(
+                        new NotificationDtos.CreateNotificationRequest(null, "系统维护通知", "normal", null)))
+                .verifyComplete();
+
+        verify(repository).createNotification(org.mockito.ArgumentMatchers.argThat((NotificationRecords.SystemNotificationRecord record) ->
+                "".equals(record.getTitle())
+                        && "系统维护通知".equals(record.getContent())
+                        && record.getImageUrl() == null));
+    }
+
+    @Test
+    void updateNotificationRejectsWhenAllThreeFieldsEmpty() {
+        assertThatThrownBy(() -> service.updateNotification(1L, "", "   ", null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("至少填写一项");
+    }
+
+    @Test
+    void createNotificationRejectsExternalTargetPath() {
+        assertThatThrownBy(() -> service.createNotification(new NotificationDtos.CreateNotificationRequest(
+                "新模型上线", "欢迎体验", "normal", null, "去试一试", "https://evil.example.com", "ch-1::gpt-image")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("站内相对路径");
     }
 }
