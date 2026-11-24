@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { configFromModelConfigs, createModelChannel, normalizeServerModelConfig } from "@/features/settings/stores/use-config-store";
-import { groupModelOptionsByChannel, resolveActiveChannelId, resolveModelOptionPrice, resolveModelSuccessRateTone } from "@/features/settings/lib/model-picker-groups";
+import { groupModelOptionsByChannel, resolveActiveChannelId, resolveModelOptionPrice, resolveModelOptionSpecs, resolveModelSuccessRateTone } from "@/features/settings/lib/model-picker-groups";
 
 test("模型选项按渠道分组并保持渠道和模型原有顺序", () => {
     const channels = [
@@ -111,4 +111,68 @@ test("模型选择器正确解析图片/视频/文本模型单价与分档区间
     assert.equal(resolveModelOptionPrice(config, "ch-a::vid-sec", "video")?.label, "8~12/秒");
     assert.equal(resolveModelOptionPrice(config, "ch-a::text-free", "text")?.label, "免费");
     assert.equal(resolveModelOptionPrice(config, "ch-a::text-free", "text")?.isFree, true);
+});
+
+test("模型选择器正确解析视频模型的最大时长和图片/视频/音频输入上限", () => {
+    const config = {
+        videoModelBillingConfigurations: [
+            {
+                model: "ch-a::seedance-2.5",
+                capabilities: ["text-to-video", "image-to-video", "reference-to-video", "audio-input"],
+                isCustomModel: true,
+                videoBillingConfiguration: {
+                    billingUnit: "second" as const,
+                    minimumDurationSeconds: 4,
+                    maximumDurationSeconds: 30,
+                    modePrices: {},
+                },
+                videoGenerationConstraints: {
+                    "text-to-video": { maximumDurationSeconds: 30, maximumImageCount: 0 },
+                    "reference-to-video": { maximumDurationSeconds: 30, maximumImageCount: 30, maximumVideoCount: 10, maximumAudioCount: 10 },
+                },
+            },
+            {
+                model: "ch-a::seedance-builtin",
+                capabilities: ["text-to-video", "reference-to-video", "audio-input"],
+                isCustomModel: false,
+                videoBillingConfiguration: {
+                    billingUnit: "second" as const,
+                    minimumDurationSeconds: 4,
+                    maximumDurationSeconds: 15,
+                    modePrices: {},
+                },
+            },
+            {
+                model: "ch-a::i2v-only",
+                capabilities: ["image-to-video"],
+                isCustomModel: false,
+                videoBillingConfiguration: {
+                    billingUnit: "generation" as const,
+                    minimumDurationSeconds: 5,
+                    maximumDurationSeconds: -1,
+                    modePrices: {},
+                },
+            },
+        ],
+    };
+
+    assert.deepEqual(resolveModelOptionSpecs(config, "ch-a::seedance-2.5", "video"), {
+        maxDurationLabel: "最长 30s",
+        maxImageCount: 30,
+        maxVideoCount: 10,
+        maxAudioCount: 10,
+    });
+    assert.deepEqual(resolveModelOptionSpecs(config, "ch-a::seedance-builtin", "video"), {
+        maxDurationLabel: "最长 15s",
+        maxImageCount: 9,
+        maxVideoCount: 3,
+        maxAudioCount: 3,
+    });
+    assert.deepEqual(resolveModelOptionSpecs(config, "ch-a::i2v-only", "video"), {
+        maxDurationLabel: "时长不限",
+        maxImageCount: 1,
+        maxVideoCount: 0,
+        maxAudioCount: 0,
+    });
+    assert.equal(resolveModelOptionSpecs(config, "ch-a::seedance-2.5", "image"), null);
 });

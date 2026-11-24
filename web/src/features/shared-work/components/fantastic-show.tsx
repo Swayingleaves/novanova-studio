@@ -1,8 +1,10 @@
 "use client";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Alert, App, Button, Empty, Input, Modal, Tag } from "antd";
-import { Heart, Loader2, Play, Search } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Alert, App, Button, Empty, Input, Tag } from "antd";
+import { Copy, Heart, Loader2, PanelRightClose, PanelRightOpen, Play, Search, X } from "lucide-react";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
+import { useCopyText } from "@/shared/hooks/use-copy-text";
 import { FANTASTIC_SHOW_CATEGORIES } from "@/features/homepage/lib/fantastic-show";
 import { loadHomepageMedia } from "@/features/homepage/lib/homepage-media-cache";
 import { CanvasProjectPreview } from "@/features/canvas/components/canvas-project-preview";
@@ -385,9 +387,14 @@ function FantasticCard({ item, pending, onToggleLike }: { item: FantasticWork; p
                     <p className="truncate text-xs text-[var(--studio-muted)]">{item.creatorName}</p>
                 </div>
             </article>
-            <Modal open={previewing} onCancel={() => setPreviewing(false)} footer={null} width={1080} centered destroyOnHidden mask={{ closable: true }} title={item.title} styles={{ body: { maxHeight: "calc(100dvh - 140px)", overflowY: "auto" } }}>
-                {previewing ? <FantasticPreview item={item} pending={pending} onToggleLike={onToggleLike} /> : null}
-            </Modal>
+            {previewing ? (
+                <FantasticFullscreenModal
+                    item={item}
+                    pending={pending}
+                    onToggleLike={onToggleLike}
+                    onClose={() => setPreviewing(false)}
+                />
+            ) : null}
         </>
     );
 }
@@ -409,11 +416,30 @@ const generationFieldLabels: Record<string, string> = {
 };
 const generationFieldOrder = Object.keys(generationFieldLabels);
 
-function FantasticPreview({ item, pending, onToggleLike }: { item: FantasticWork; pending: boolean; onToggleLike: () => void }) {
+/**
+ * 沉浸式全屏作品预览弹窗：左侧（或全屏）为暗色影院级媒体舞台，右侧为独立滚动的玻璃态详情抽屉并支持一键收起。
+ */
+function FantasticFullscreenModal({ item, pending, onToggleLike, onClose }: { item: FantasticWork; pending: boolean; onToggleLike: () => void; onClose: () => void }) {
+    const copyText = useCopyText();
     const needsDetail = item.source === "user" && Boolean(item.shareCode);
     const [detail, setDetail] = useState<SharedWorkDetail | null>(null);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(needsDetail);
+    const [infoOpen, setInfoOpen] = useState(true);
+
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") onClose();
+        };
+        const previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        window.addEventListener("keydown", handleKeyDown);
+        return () => {
+            document.body.style.overflow = previousOverflow;
+            window.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [onClose]);
+
     useEffect(() => {
         if (!needsDetail) return;
         const controller = new AbortController();
@@ -431,57 +457,177 @@ function FantasticPreview({ item, pending, onToggleLike }: { item: FantasticWork
             });
         return () => controller.abort();
     }, [item.shareCode, needsDetail]);
+
     const entries = loading ? [] : generationEntries(detail?.snapshot.generation, item.promptContent);
-    return (
-        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(260px,340px)]">
-            <FantasticPreviewMedia item={item} snapshot={detail?.snapshot ?? null} loading={loading} />
-            <div className="space-y-4">
-                <div className="flex flex-wrap items-center gap-2">
-                    <Tag>{sharedWorkTypeNames[item.workType]}</Tag>
-                    {item.category ? <Tag>{item.category}</Tag> : null}
-                    <button
-                        type="button"
-                        aria-pressed={item.liked}
-                        aria-label={item.liked ? "取消点赞" : "点赞"}
-                        title={item.liked ? "取消点赞" : "点赞"}
-                        disabled={pending}
-                        className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-[var(--studio-line-strong)] px-3 py-1 text-xs font-medium tabular-nums text-[var(--studio-ink)] transition hover:border-[var(--studio-action)] hover:text-[var(--studio-action)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)] disabled:cursor-progress"
-                        onClick={onToggleLike}
-                    >
-                        <Heart className={item.liked ? "size-4 fill-rose-400 text-rose-400" : "size-4"} strokeWidth={1.8} aria-hidden="true" />
-                        {item.likeCount}
-                    </button>
+    const promptEntries = entries.filter((entry) => entry.key === "prompt" || entry.key === "generationPrompt");
+    const metaEntries = entries.filter((entry) => entry.key !== "prompt" && entry.key !== "generationPrompt");
+    const ambientImage = item.thumbnailUrl?.trim() || (item.workType === "image" ? item.mediaUrl?.trim() : "");
+
+    if (typeof document === "undefined") return null;
+
+    return createPortal(
+        <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={item.title}
+            className="fixed inset-0 z-[1050] flex flex-col bg-black text-white lg:flex-row"
+        >
+            {/* 主舞台：铺满全屏视口，带氛围柔光背景与悬浮控制栏 */}
+            <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black">
+                {ambientImage && item.workType !== "canvas" ? (
+                    <img
+                        src={ambientImage}
+                        alt=""
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 size-full scale-110 object-cover opacity-30 blur-3xl saturate-150"
+                    />
+                ) : null}
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/65 via-black/15 to-black/70" aria-hidden="true" />
+
+                {/* 顶部悬浮玻璃条：标题与快捷操作 */}
+                <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-3 px-4 py-3.5 sm:px-6">
+                    <div className="pointer-events-auto flex min-w-0 items-center gap-2.5">
+                        <h2 className="truncate text-base font-semibold tracking-tight text-white drop-shadow-sm sm:text-lg">
+                            {item.title}
+                        </h2>
+                        <span className="shrink-0 rounded-full border border-white/15 bg-white/10 px-2.5 py-0.5 text-[11px] font-medium text-white/90 backdrop-blur-md">
+                            {sharedWorkTypeNames[item.workType]}
+                        </span>
+                        {item.category ? (
+                            <span className="hidden shrink-0 rounded-full border border-white/15 bg-white/10 px-2.5 py-0.5 text-[11px] font-medium text-white/80 backdrop-blur-md sm:inline-flex">
+                                {item.category}
+                            </span>
+                        ) : null}
+                    </div>
+                    <div className="pointer-events-auto flex shrink-0 items-center gap-2">
+                        <button
+                            type="button"
+                            aria-pressed={item.liked}
+                            aria-label={item.liked ? "取消点赞" : "点赞"}
+                            title={item.liked ? "取消点赞" : "点赞"}
+                            disabled={pending}
+                            className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3.5 text-xs! font-medium tabular-nums text-white! backdrop-blur-md transition hover:bg-white/20 disabled:cursor-progress"
+                            onClick={onToggleLike}
+                        >
+                            <Heart className={item.liked ? "size-4 fill-rose-400 text-rose-400" : "size-4 text-white"} strokeWidth={1.8} aria-hidden="true" />
+                            <span>{item.likeCount}</span>
+                        </button>
+                        <button
+                            type="button"
+                            aria-label={infoOpen ? "收起作品信息" : "展开作品信息"}
+                            title={infoOpen ? "收起信息，全屏观看" : "展开作品信息"}
+                            className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 text-xs! font-medium text-white! backdrop-blur-md transition hover:bg-white/20"
+                            onClick={() => setInfoOpen((value) => !value)}
+                        >
+                            {infoOpen ? <PanelRightClose className="size-4" aria-hidden="true" /> : <PanelRightOpen className="size-4" aria-hidden="true" />}
+                            <span className="hidden sm:inline">{infoOpen ? "全屏" : "详情"}</span>
+                        </button>
+                        <button
+                            type="button"
+                            aria-label="关闭预览"
+                            title="关闭 (Esc)"
+                            className="grid size-9 cursor-pointer place-items-center rounded-full border border-white/15 bg-white/10 text-white! backdrop-blur-md transition hover:bg-white/25"
+                            onClick={onClose}
+                        >
+                            <X className="size-4" aria-hidden="true" />
+                        </button>
+                    </div>
                 </div>
-                <PreviewField label="标题" value={item.title} />
-                <PreviewField label={item.source === "user" ? "分享人" : "作者"} value={item.creatorName} />
-                {item.description ? <PreviewField label="简介" value={item.description} /> : null}
-                {loading ? <p className="text-sm text-[var(--studio-muted)]">正在读取提示词和作品信息</p> : null}
-                {error ? <Alert type="warning" showIcon title={error} /> : null}
-                {entries.map((entry) => (
-                    <PreviewField key={entry.key} label={entry.label} value={entry.text} />
-                ))}
+
+                {/* 媒体内容区：居中自适应充满整个舞台，无多余留白 */}
+                <div className="relative z-10 flex size-full items-center justify-center p-3 pt-16 sm:p-6 sm:pt-16">
+                    <FantasticPreviewMedia item={item} snapshot={detail?.snapshot ?? null} loading={loading} />
+                </div>
             </div>
-        </div>
+
+            {/* 右侧独立滚动的作品详情抽屉 */}
+            {infoOpen ? (
+                <aside className="thin-scrollbar flex max-h-[42dvh] w-full shrink-0 flex-col gap-5 overflow-y-auto border-t border-white/10 bg-zinc-950/95 p-5 text-white backdrop-blur-xl lg:h-full lg:max-h-none lg:w-[360px] lg:border-l lg:border-t-0 xl:w-[400px]">
+                    <div className="space-y-3 border-b border-white/10 pb-4">
+                        <div className="text-base font-semibold leading-snug text-white">{item.title}</div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-white/60">
+                            <span>{item.source === "user" ? "分享人" : "作者"}：{item.creatorName}</span>
+                            {item.category ? (
+                                <>
+                                    <span aria-hidden="true">·</span>
+                                    <span>{item.category}</span>
+                                </>
+                            ) : null}
+                        </div>
+                        {item.description ? (
+                            <p className="whitespace-pre-wrap break-words text-sm leading-6 text-white/80">{item.description}</p>
+                        ) : null}
+                    </div>
+
+                    {loading ? (
+                        <div className="flex items-center gap-2 text-sm text-white/60">
+                            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                            <span>正在读取提示词和作品信息</span>
+                        </div>
+                    ) : null}
+                    {error ? <Alert type="warning" showIcon title={error} /> : null}
+
+                    {metaEntries.length ? (
+                        <div className="flex flex-wrap gap-2">
+                            {metaEntries.map((entry) => (
+                                <div key={entry.key} className="rounded-lg border border-white/10 bg-white/[0.06] px-2.5 py-1.5">
+                                    <div className="text-[10px] text-white/50">{entry.label}</div>
+                                    <div className="mt-0.5 text-xs font-medium text-white/90">{entry.text}</div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : null}
+
+                    {promptEntries.map((entry) => (
+                        <div key={entry.key} className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-medium text-white/60">{entry.label}</span>
+                                <button
+                                    type="button"
+                                    className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[11px]! text-white/80! transition hover:bg-white/15 hover:text-white!"
+                                    onClick={() => copyText(entry.text, "已复制提示词")}
+                                >
+                                    <Copy className="size-3" aria-hidden="true" />
+                                    <span>复制</span>
+                                </button>
+                            </div>
+                            <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3.5">
+                                <p className="whitespace-pre-wrap break-words text-[13px] leading-6 text-white/85">{entry.text}</p>
+                            </div>
+                        </div>
+                    ))}
+                </aside>
+            ) : null}
+        </div>,
+        document.body,
     );
 }
 
 function FantasticPreviewMedia({ item, snapshot, loading }: { item: FantasticWork; snapshot: SharedSnapshot | null; loading: boolean }) {
     if (item.workType === "canvas") {
-        if (snapshot?.scene) return <SharedCanvasViewer snapshot={snapshot} />;
-        return <div className="grid min-h-80 place-items-center rounded-lg bg-[var(--studio-media)] text-sm text-[var(--studio-muted)]">{loading ? "正在读取画布" : "预览暂不可用"}</div>;
+        if (snapshot?.scene) {
+            return (
+                <div className="size-full overflow-hidden rounded-xl border border-white/10 bg-black">
+                    <SharedCanvasViewer snapshot={snapshot} />
+                </div>
+            );
+        }
+        return <div className="grid size-full place-items-center text-sm text-white/60">{loading ? "正在读取画布" : "预览暂不可用"}</div>;
     }
-    if (!item.mediaUrl) return <div className="grid min-h-48 place-items-center rounded-lg bg-[var(--studio-media)] text-sm text-[var(--studio-muted)]">暂无媒体</div>;
-    if (item.workType === "video") return <video src={item.mediaUrl} poster={item.thumbnailUrl || undefined} controls autoPlay playsInline className="max-h-[70vh] w-full rounded-lg bg-black object-contain" />;
-    return <CachedWorkMedia src={item.mediaUrl} alt={item.title} className="max-h-[70vh] w-full rounded-lg bg-[var(--studio-media)] object-contain" />;
-}
-
-function PreviewField({ label, value }: { label: string; value: string }) {
-    return (
-        <div>
-            <div className="text-xs text-[var(--studio-muted)]">{label}</div>
-            <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6">{value}</p>
-        </div>
-    );
+    if (!item.mediaUrl) return <div className="grid size-full place-items-center text-sm text-white/60">暂无媒体</div>;
+    if (item.workType === "video") {
+        return (
+            <video
+                src={item.mediaUrl}
+                poster={item.thumbnailUrl || undefined}
+                controls
+                autoPlay
+                playsInline
+                className="max-h-full max-w-full rounded-xl bg-black object-contain shadow-2xl"
+            />
+        );
+    }
+    return <CachedWorkMedia src={item.mediaUrl} alt={item.title} className="max-h-full max-w-full rounded-xl object-contain shadow-2xl" />;
 }
 
 function generationEntries(generation: SharedSnapshot["generation"], fallbackPrompt: string) {

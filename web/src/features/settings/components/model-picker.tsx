@@ -3,7 +3,7 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Clapperboard, Zap } from "lucide-react";
+import { AudioLines, Check, ChevronDown, ChevronRight, Clapperboard, Clock, Image as ImageIcon, Video, Zap } from "lucide-react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { App } from "antd";
 
@@ -19,7 +19,7 @@ import {
     type AiConfig,
     type ModelCapability,
 } from "@/features/settings/stores/use-config-store";
-import { groupModelOptionsByChannel, resolveActiveChannelId, resolveModelOptionPrice, resolveModelSuccessRateTone, type ModelOptionPriceBadge, type ModelSuccessRateTone } from "@/features/settings/lib/model-picker-groups";
+import { groupModelOptionsByChannel, resolveActiveChannelId, resolveModelOptionPrice, resolveModelOptionSpecs, resolveModelSuccessRateTone, type ModelOptionPriceBadge, type ModelOptionSpecs, type ModelSuccessRateTone } from "@/features/settings/lib/model-picker-groups";
 import type { ModelSuccessRateStats } from "@/services/api/server";
 
 import { MODEL_ICON_MONOCHROME_KEYS, isMonochromeModelIcon, resolveModelIcon, resolveModelIconByKey } from "./model-icon";
@@ -195,6 +195,7 @@ export function ModelPicker({
                                         const selected = model === current;
                                         const description = config.modelDescriptions?.[model.trim()];
                                         const price = resolveModelOptionPrice(config, model, capability);
+                                        const specs = resolveModelOptionSpecs(config, model, capability);
                                         return (
                                             <button
                                                 key={model}
@@ -216,6 +217,7 @@ export function ModelPicker({
                                                     <ModelSuccessRateIndicator stats={config.modelSuccessRateStats?.[model.trim()]} />
                                                     {selected ? <Check className="size-4 shrink-0 text-[var(--studio-primary)]" /> : null}
                                                 </span>
+                                                {specs ? <ModelSpecsBadges specs={specs} /> : null}
                                                 {description ? (
                                                     <span
                                                         className="mt-1 line-clamp-2 pl-7 text-xs! leading-4 break-words text-muted-foreground!"
@@ -293,6 +295,36 @@ function ModelSuccessRateIndicator({ stats, compact = false }: { stats?: ModelSu
         >
             <span className={cn("size-2 shrink-0 rounded-full", SUCCESS_RATE_DOT_CLASS[tone])} aria-hidden="true" />
             {compact ? <span className="hidden sm:inline">{rate}%</span> : <span>{rate}%</span>}
+        </span>
+    );
+}
+
+/** 展示视频模型的最大时长以及支持输入的图片、视频、音频数量上限。 */
+function ModelSpecsBadges({ specs }: { specs: ModelOptionSpecs }) {
+    const items: Array<{ key: string; icon: React.ReactNode; label: string; active: boolean }> = [
+        ...(specs.maxDurationLabel
+            ? [{ key: "duration", icon: <Clock className="size-3 shrink-0" aria-hidden="true" />, label: specs.maxDurationLabel, active: true }]
+            : []),
+        { key: "image", icon: <ImageIcon className="size-3 shrink-0" aria-hidden="true" />, label: `图 ${specs.maxImageCount}`, active: specs.maxImageCount > 0 },
+        { key: "video", icon: <Video className="size-3 shrink-0" aria-hidden="true" />, label: `视频 ${specs.maxVideoCount}`, active: specs.maxVideoCount > 0 },
+        { key: "audio", icon: <AudioLines className="size-3 shrink-0" aria-hidden="true" />, label: `音频 ${specs.maxAudioCount}`, active: specs.maxAudioCount > 0 },
+    ];
+    return (
+        <span className="mt-1 flex flex-wrap items-center gap-1 pl-7">
+            {items.map((item) => (
+                <span
+                    key={item.key}
+                    className={cn(
+                        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]! leading-3.5 tabular-nums",
+                        item.active
+                            ? "bg-muted/80 text-muted-foreground!"
+                            : "bg-muted/40 text-muted-foreground/55!",
+                    )}
+                >
+                    {item.icon}
+                    <span>{item.label}</span>
+                </span>
+            ))}
         </span>
     );
 }

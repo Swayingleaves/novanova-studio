@@ -1,4 +1,6 @@
-import { modelOptionChannel, type AiConfig, type ModelCapability } from "@/features/settings/stores/use-config-store";
+import { modelOptionChannel, type AiConfig, type ModelCapability, type VideoGenerationMode } from "@/features/settings/stores/use-config-store";
+import { SEEDANCE_REFERENCE_LIMITS } from "@/features/generation/lib/seedance-video";
+import { resolveBillingMaximumDurationSeconds } from "@/features/generation/lib/video-billing";
 import { creditAmount, creditText, type CreditAmount } from "@/shared/lib/credit-amounts";
 
 export type ModelChannelGroup = {
@@ -167,5 +169,97 @@ function buildPriceRangeBadge(
         label: `${minText}~${maxText}/${unit}`,
         title: customTitle || `消耗 ${minText}~${maxText} 积分/${unit}`,
         isFree: false,
+    };
+}
+
+export type ModelOptionSpecs = {
+    /** 支持的最大时长文案，如 "最长 30s"、"时长不限" */
+    maxDurationLabel: string | null;
+    /** 支持输入的最大图片数量 */
+    maxImageCount: number;
+    /** 支持输入的最大视频数量 */
+    maxVideoCount: number;
+    /** 支持输入的最大音频数量 */
+    maxAudioCount: number;
+};
+
+const BUILTIN_VIDEO_MAX_AUDIO_COUNT = 3;
+
+/**
+ * 解析模型在选择器中的规格能力摘要：最大时长以及支持输入的图片、视频、音频数量上限。
+ */
+export function resolveModelOptionSpecs(
+    config: Pick<AiConfig, "videoModelBillingConfigurations">,
+    model: string,
+    capability?: ModelCapability,
+): ModelOptionSpecs | null {
+    const trimmed = model.trim();
+    if (!trimmed) return null;
+    if (capability && capability !== "video") return null;
+
+    const entry = config.videoModelBillingConfigurations?.find((item) => item.model === trimmed);
+    if (!entry) return null;
+
+    const billingMax = entry.videoBillingConfiguration
+        ? resolveBillingMaximumDurationSeconds(entry.videoBillingConfiguration)
+        : undefined;
+    const capabilities = entry.capabilities || [];
+    const constraintsMap = entry.videoGenerationConstraints || {};
+    const constraintEntries = (Object.entries(constraintsMap) as Array<[VideoGenerationMode, NonNullable<typeof constraintsMap[VideoGenerationMode]>]>)
+        .filter(([mode, value]) => Boolean(value) && (!capabilities.length || capabilities.includes(mode)));
+
+    // 1. 最大时长：自定义模型结合各模式约束上限与计费上限；内置模型直接取计费配置上限
+    let maxDurationLabel: string | null = null;
+    if (entry.isCustomModel && constraintEntries.length) {
+        const constraintMaxValues = constraintEntries
+            .map(([, item]) => item.maximumDurationSeconds)
+            .filter((value): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0);
+        if (constraintMaxValues.length) {
+            const constraintMax = Math.max(...constraintMaxValues);
+            const effectiveMax = typeof billingMax === "number" ? Math.min(constraintMax, billingMax) : constraintMax;
+            maxDurationLabel = `最长 ${effectiveMax}s`;
+        }
+    }
+    if (!maxDurationLabel && billingMax !== undefined) {
+        maxDurationLabel = billingMax === null ? "时长不限" : `最长 ${billingMax}s`;
+    }
+
+    // 2. 支持输入的图片、视频、音频数量上限
+    let maxImageCount = 0;
+    let maxVideoCount = 0;
+    let maxAudioCount = 0;
+    if (entry.isCustomModel && constraintEntries.length) {
+        const audioAllowed = capabilities.includes("audio-input");
+        for (const [mode, item] of constraintEntries) {
+            if (typeof item.maximumImageCount === "number" && Number.isSafeInteger(item.maximumImageCount) && item.maximumImageCount > maxImageCount) {
+                maxImageCount = item.maximumImageCount;
+            }
+            if (mode === "reference-to-video") {
+                if (typeof item.maximumVideoCount === "number" && Number.isSafeInteger(item.maximumVideoCount) && item.maximumVideoCount > maxVideoCount) {
+                    maxVideoCount = item.maximumVideoCount;
+                }
+                if (audioAllowed && typeof item.maximumAudioCount === "number" && Number.isSafeInteger(item.maximumAudioCount) && item.maximumAudioCount > maxAudioCount) {
+                    maxAudioCount = item.maximumAudioCount;
+                }
+            }
+        }
+    } else {
+        const supportsReference = capabilities.includes("reference-to-video");
+        maxImageCount = supportsReference
+            ? SEEDANCE_REFERENCE_LIMITS.images
+            : capabilities.includes("first-last-frame-to-video")
+                ? 2
+                : capabilities.includes("image-to-video")
+                    ? 1
+                    : 0;
+        maxVideoCount = supportsReference ? SEEDANCE_REFERENCE_LIMITS.videos : 0;
+        maxAudioCount = supportsReference && capabilities.includes("audio-input") ? BUILTIN_VIDEO_MAX_AUDIO_COUNT : 0;
+    }
+
+    return {
+        maxDurationLabel,
+        maxImageCount,
+        maxVideoCount,
+        maxAudioCount,
     };
 }
