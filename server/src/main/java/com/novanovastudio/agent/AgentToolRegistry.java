@@ -151,7 +151,7 @@ public class AgentToolRegistry {
             JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"width\":{\"type\":\"number\"},\"height\":{\"type\":\"number\"},\"freeResize\":{\"type\":\"boolean\"}},\"required\":[\"id\"],\"additionalProperties\":false}"),
             true));
         register(new AgentTool("canvas_delete_nodes",
-            "删除指定节点及相关连线。",
+            "删除指定节点及相关连线（执行删除前必须先在对话中向用户确认）。",
             JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"ids\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"additionalProperties\":false}"),
             true));
         register(new AgentTool("canvas_connect_nodes",

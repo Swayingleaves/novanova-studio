@@ -595,6 +595,10 @@ public class CreationAgentOrchestrator {
                                     if (mismatchedDuration != null) {
                                         return mismatchedDuration;
                                     }
+                                    Mono<Void> canceledDelete = handleCanceledCanvasDelete(userId, session, request);
+                                    if (canceledDelete != null) {
+                                        return canceledDelete;
+                                    }
                                     return request.chatMode()
                                             ? executeChatGeneration(userId, session, request, active)
                                             : createAndExecutePlan(userId, session, request, active);
@@ -621,6 +625,26 @@ public class CreationAgentOrchestrator {
         List<AgentChoice> choices = List.of(new AgentChoice("确认", String.valueOf(mismatch.requestedSeconds()), false, "adjust_video_duration"));
         return saveClarificationRound(userId, session, request, message.diagnostic(), choices)
                 .then(completeWithMessage(userId, session.id(), message, AgentAction.choice(choices)));
+    }
+
+    /**
+     * 用户在画布删除确认中点击“取消”时直接结束，不再调用模型或执行画布操作。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 会话
+     * @param request AgentChatRequest 对话请求
+     * @return Mono<Void> 已拦截时的完成信号；无需拦截时返回 null
+     */
+    private Mono<Void> handleCanceledCanvasDelete(Long userId, AgentSession session, AgentChatRequest request) {
+        if (request == null || !CreationEntrySource.CANVAS.equals(request.entrySource())) {
+            return null;
+        }
+        if (!CanvasDeleteConfirmationSupport.isDeleteCancelMessage(request.message(), historyForAgent(request, session))) {
+            return null;
+        }
+        String reply = "已取消删除操作。";
+        return saveClarificationRound(userId, session, request, reply, List.of())
+                .then(completeWithMessage(userId, session.id(), reply, null));
     }
 
     /**
@@ -674,10 +698,12 @@ public class CreationAgentOrchestrator {
                                 .switchIfEmpty(Mono.defer(() -> callMainAgent(userId, session, request, model)
                                         .map(candidate -> validateCandidatePlan(candidate, request))
                                         .map(candidate -> resolveTaskPromptSources(candidate, session, request.message())))))
-                        .flatMap(validated -> isRequestCancellationRequested(active).flatMap(canceledAfterPlanning -> {
+                        .flatMap(rawValidated -> isRequestCancellationRequested(active).flatMap(canceledAfterPlanning -> {
                             if (Boolean.TRUE.equals(canceledAfterPlanning)) {
                                 return Mono.empty();
                             }
+                            CreationPlan validated = CanvasDeleteConfirmationSupport.enforce(
+                                    rawValidated, request, historyForAgent(request, session));
                             if (StringUtils.hasText(validated.clarificationQuestion())) {
                                 AgentAction action;
                                 if (validated.choices() != null && !validated.choices().isEmpty()) {
