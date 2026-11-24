@@ -57,19 +57,58 @@ test("服务端返回缺项或未知标识时自动过滤未知项并将缺失�
 
     assert.equal(merged.length, configurableNavigationTools.length);
     assert.deepEqual(merged.slice(0, 2), [
-        { menuKey: "prompts", enabled: false },
-        { menuKey: "image", enabled: true },
+        { menuKey: "prompts", enabled: false, displayName: null, iconKey: null, badgeText: null, badgeColor: null },
+        { menuKey: "image", enabled: true, displayName: null, iconKey: null, badgeText: null, badgeColor: null },
     ]);
     assert.equal(merged.some((item) => item.menuKey === "unknown-item"), false);
     assert.equal(merged.slice(2).every((item) => item.enabled), true);
 });
 
-test("草稿签名能准确感知顺序变化和显隐切换", () => {
+test("草稿签名能准确感知顺序变化、显隐切换和外观字段修改", () => {
     const base = defaultNavigationMenuDrafts();
     const toggled = base.map((item) => (item.menuKey === "drama" ? { ...item, enabled: false } : item));
     const reordered = [base[1], base[0], ...base.slice(2)];
+    const renamed = base.map((item) => (item.menuKey === "image" ? { ...item, displayName: "AI生图" } : item));
+    const badged = base.map((item) => (item.menuKey === "image" ? { ...item, badgeText: "HOT", badgeColor: "#ef4444" } : item));
 
     assert.equal(navigationMenuDraftSignature(base), navigationMenuDraftSignature(defaultNavigationMenuDrafts()));
     assert.notEqual(navigationMenuDraftSignature(base), navigationMenuDraftSignature(toggled));
     assert.notEqual(navigationMenuDraftSignature(base), navigationMenuDraftSignature(reordered));
+    assert.notEqual(navigationMenuDraftSignature(base), navigationMenuDraftSignature(renamed));
+    assert.notEqual(navigationMenuDraftSignature(base), navigationMenuDraftSignature(badged));
+});
+
+test("自定义名称、图标、角标及关闭默认角标均能正确解析", () => {
+    const tools = resolveVisibleNavigationTools(
+        [
+            {
+                menuKey: "image",
+                enabled: true,
+                sortOrder: 0,
+                displayName: "AI 生图",
+                iconKey: "sparkles",
+                badgeText: "HOT",
+                badgeColor: "#ef4444",
+            },
+            {
+                menuKey: "drama",
+                enabled: true,
+                sortOrder: 1,
+                displayName: null,
+                iconKey: null,
+                badgeText: null,
+                badgeColor: null,
+            },
+        ],
+        false,
+    );
+
+    const imageTool = tools.find((tool) => tool.slug === "image");
+    const dramaTool = tools.find((tool) => tool.slug === "drama");
+    assert.equal(imageTool?.displayName, "AI 生图");
+    assert.equal(imageTool?.iconKey, "sparkles");
+    assert.equal(imageTool?.badgeText, "HOT");
+    assert.equal(imageTool?.badgeColor, "#ef4444");
+    // 显式传 null 表示关闭内置 NEW 角标
+    assert.equal(dramaTool?.badgeText, null);
 });

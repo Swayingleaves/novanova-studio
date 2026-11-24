@@ -32,7 +32,7 @@ public class NavigationMenuConfigRepository {
      */
     public Flux<PlatformNavigationMenuConfigRecords.NavigationMenuConfigRecord> listOrdered() {
         return databaseClient.sql("""
-                SELECT menu_key, enabled, sort_order, created_at, updated_at
+                SELECT menu_key, enabled, sort_order, display_name, icon_key, badge_text, badge_color, created_at, updated_at
                 FROM platform_navigation_menu_configs
                 ORDER BY sort_order ASC, menu_key ASC
                 """).map((row, metadata) -> mapRecord(row)).all();
@@ -72,16 +72,31 @@ public class NavigationMenuConfigRepository {
      * @return 插入完成信号
      */
     private Mono<Void> insert(PlatformNavigationMenuConfigRecords.NavigationMenuConfigRecord record) {
-        return databaseClient.sql("""
-                INSERT INTO platform_navigation_menu_configs(menu_key, enabled, sort_order)
-                VALUES (:menuKey, :enabled, :sortOrder)
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
+                INSERT INTO platform_navigation_menu_configs(menu_key, enabled, sort_order, display_name, icon_key, badge_text, badge_color)
+                VALUES (:menuKey, :enabled, :sortOrder, :displayName, :iconKey, :badgeText, :badgeColor)
                 """)
                 .bind("menuKey", record.getMenuKey())
                 .bind("enabled", record.getEnabled())
-                .bind("sortOrder", record.getSortOrder())
-                .fetch()
-                .rowsUpdated()
-                .then();
+                .bind("sortOrder", record.getSortOrder());
+        spec = bindNullableString(spec, "displayName", record.getDisplayName());
+        spec = bindNullableString(spec, "iconKey", record.getIconKey());
+        spec = bindNullableString(spec, "badgeText", record.getBadgeText());
+        spec = bindNullableString(spec, "badgeColor", record.getBadgeColor());
+        return spec.fetch().rowsUpdated().then();
+    }
+
+    /**
+     * 绑定可空字符串参数，避免 R2DBC 绑定 null 抛出空指针。
+     *
+     * @param spec DatabaseClient.GenericExecuteSpec SQL 执行规约
+     * @param name String 参数名
+     * @param value String 参数值，可为 null
+     * @return DatabaseClient.GenericExecuteSpec 绑定后的规约
+     */
+    private DatabaseClient.GenericExecuteSpec bindNullableString(
+            DatabaseClient.GenericExecuteSpec spec, String name, String value) {
+        return value == null ? spec.bindNull(name, String.class) : spec.bind(name, value);
     }
 
     /**
@@ -96,6 +111,10 @@ public class NavigationMenuConfigRepository {
         record.setMenuKey(row.get("menu_key", String.class));
         record.setEnabled(row.get("enabled", Boolean.class));
         record.setSortOrder(row.get("sort_order", Integer.class));
+        record.setDisplayName(row.get("display_name", String.class));
+        record.setIconKey(row.get("icon_key", String.class));
+        record.setBadgeText(row.get("badge_text", String.class));
+        record.setBadgeColor(row.get("badge_color", String.class));
         record.setCreatedAt(row.get("created_at", OffsetDateTime.class));
         record.setUpdatedAt(row.get("updated_at", OffsetDateTime.class));
         return record;

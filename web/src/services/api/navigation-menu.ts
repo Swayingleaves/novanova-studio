@@ -4,11 +4,19 @@ export type NavigationMenuConfig = {
     menuKey: string;
     enabled: boolean;
     sortOrder: number;
+    displayName?: string | null;
+    iconKey?: string | null;
+    badgeText?: string | null;
+    badgeColor?: string | null;
 };
 
 export type NavigationMenuConfigInput = {
     menuKey: string;
     enabled: boolean;
+    displayName?: string | null;
+    iconKey?: string | null;
+    badgeText?: string | null;
+    badgeColor?: string | null;
 };
 
 /** 读取平台全局左侧导航菜单配置，公开接口且未登录也可访问。 */

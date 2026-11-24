@@ -39,6 +39,22 @@ public class NavigationMenuService {
     /** 允许配置的导航菜单标识集合。 */
     private static final Set<String> ALLOWED_MENU_KEYS = Set.copyOf(DEFAULT_MENU_KEYS);
 
+    /** 默认展示 NEW 角标的内置菜单标识集合（仅在菜单从未落库时生效）。 */
+    private static final Set<String> DEFAULT_NEW_BADGE_MENU_KEYS = Set.of("drama", "script", "comic-drama");
+
+    /** 合法十六进制颜色格式（3/4/6/8 位）。 */
+    private static final java.util.regex.Pattern HEX_COLOR_PATTERN =
+            java.util.regex.Pattern.compile("^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$");
+
+    /** 自定义名称最大长度。 */
+    private static final int MAX_DISPLAY_NAME_LENGTH = 32;
+
+    /** 图标标识最大长度。 */
+    private static final int MAX_ICON_KEY_LENGTH = 64;
+
+    /** 角标文案最大长度。 */
+    private static final int MAX_BADGE_TEXT_LENGTH = 16;
+
     /** 导航菜单配置仓储。 */
     private final NavigationMenuConfigRepository repository;
 
@@ -90,12 +106,21 @@ public class NavigationMenuService {
                 continue;
             }
             boolean enabled = record.getEnabled() == null || record.getEnabled();
-            merged.add(new NavigationMenuDtos.NavigationMenuConfig(menuKey, enabled, merged.size()));
+            merged.add(new NavigationMenuDtos.NavigationMenuConfig(
+                    menuKey,
+                    enabled,
+                    merged.size(),
+                    normalizeOptionalText(record.getDisplayName()),
+                    normalizeOptionalText(record.getIconKey()),
+                    normalizeOptionalText(record.getBadgeText()),
+                    normalizeOptionalText(record.getBadgeColor())));
         }
         // 新增的内置菜单尚未落库时，按默认顺序以启用状态补齐到末尾。
         for (String defaultKey : DEFAULT_MENU_KEYS) {
             if (seenKeys.add(defaultKey)) {
-                merged.add(new NavigationMenuDtos.NavigationMenuConfig(defaultKey, true, merged.size()));
+                String defaultBadge = DEFAULT_NEW_BADGE_MENU_KEYS.contains(defaultKey) ? "NEW" : null;
+                merged.add(new NavigationMenuDtos.NavigationMenuConfig(
+                        defaultKey, true, merged.size(), null, null, defaultBadge, null));
             }
         }
         return merged;
@@ -149,6 +174,10 @@ public class NavigationMenuService {
             record.setMenuKey(menuKey);
             record.setEnabled(input.enabled());
             record.setSortOrder(index);
+            record.setDisplayName(validateOptionalText(input.displayName(), MAX_DISPLAY_NAME_LENGTH, "菜单显示名称最多 " + MAX_DISPLAY_NAME_LENGTH + " 个字符"));
+            record.setIconKey(validateOptionalText(input.iconKey(), MAX_ICON_KEY_LENGTH, "菜单图标标识格式无效"));
+            record.setBadgeText(validateOptionalText(input.badgeText(), MAX_BADGE_TEXT_LENGTH, "菜单角标文案最多 " + MAX_BADGE_TEXT_LENGTH + " 个字符"));
+            record.setBadgeColor(validateBadgeColor(input.badgeColor()));
             records.add(record);
         }
         // 要求一次提交包含全部可配置菜单项，避免遗漏导致部分菜单排序失效。
@@ -167,5 +196,52 @@ public class NavigationMenuService {
      */
     private String normalize(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    /**
+     * 规范化可选文本字段，空白字符串统一转为 null。
+     *
+     * @param value String 原始文本
+     * @return String 去空白后的文本或 null
+     */
+    private String normalizeOptionalText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    /**
+     * 校验可选文本字段长度，超长抛出参数异常。
+     *
+     * @param value String 原始文本
+     * @param maxLength int 最大允许长度
+     * @param errorMessage String 超长错误提示
+     * @return String 规范化后的文本或 null
+     */
+    private String validateOptionalText(String value, int maxLength, String errorMessage) {
+        String normalized = normalizeOptionalText(value);
+        if (normalized != null && normalized.length() > maxLength) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, errorMessage);
+        }
+        return normalized;
+    }
+
+    /**
+     * 校验角标颜色格式，仅接受十六进制色值或空值。
+     *
+     * @param value String 原始颜色值
+     * @return String 规范化后的十六进制颜色或 null
+     */
+    private String validateBadgeColor(String value) {
+        String normalized = normalizeOptionalText(value);
+        if (normalized == null) {
+            return null;
+        }
+        if (!HEX_COLOR_PATTERN.matcher(normalized).matches()) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "菜单角标颜色格式无效，请使用十六进制颜色值");
+        }
+        return normalized;
     }
 }

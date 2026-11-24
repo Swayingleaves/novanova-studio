@@ -12,8 +12,8 @@ import { Popover, Tooltip } from "antd";
 import { LanguageMenu } from "@/features/locale/components/language-menu";
 import { SidebarInstallEntry } from "@/features/pwa/components/sidebar-install-entry";
 import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
-import { navigationTools, type NavigationTool, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
-import { resolveVisibleNavigationTools } from "@/features/navigation-menu/lib/navigation-menu-config";
+import { navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
+import { resolveVisibleNavigationTools, type ResolvedNavigationTool } from "@/features/navigation-menu/lib/navigation-menu-config";
 import { useNavigationMenuStore } from "@/features/navigation-menu/stores/use-navigation-menu-store";
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -72,17 +72,26 @@ export function AppSidebar() {
     const activeSlug = navigationTools.some((tool) => tool.slug === slug) ? (slug as NavigationToolSlug) : undefined;
     const showTeamSwitcher = Boolean(user && user.role !== "admin" && myTeams.data?.length);
 
-    const renderNavItem = (tool: NavigationTool) => {
+    const renderNavItem = (tool: ResolvedNavigationTool) => {
         const Icon = tool.icon;
         const active = tool.slug === activeSlug;
+        const label = tool.displayName || translate(tool.labelKey);
 
         return (
             <Link key={tool.slug} href={`/${tool.slug}`} className={cn("sidebar-rail-item", active ? "sidebar-rail-item-active" : "sidebar-rail-item-inactive")} aria-current={active ? "page" : undefined}>
                 <span className="sidebar-rail-icon">
                     <Icon className="size-5" />
                 </span>
-                <span className="sidebar-rail-label">{translate(tool.labelKey)}</span>
-                {tool.isNew ? <span className="new-badge right-0.5 top-0.5" title={translate("common.newFeature")}>NEW</span> : null}
+                <span className="sidebar-rail-label">{label}</span>
+                {tool.badgeText ? (
+                    <span
+                        className="new-badge right-0.5 top-0.5 max-w-[44px] truncate"
+                        style={!active && tool.badgeColor ? { color: tool.badgeColor } : undefined}
+                        title={tool.badgeText}
+                    >
+                        {tool.badgeText}
+                    </span>
+                ) : null}
             </Link>
         );
     };

@@ -7,8 +7,8 @@ import Link from "@/shared/lib/team-navigation";
 
 import { LanguageMenu } from "@/features/locale/components/language-menu";
 import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
-import { navigationTools, type NavigationTool, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
-import { resolveVisibleNavigationTools } from "@/features/navigation-menu/lib/navigation-menu-config";
+import { type NavigationToolSlug } from "@/shared/constants/navigation-tools";
+import { resolveVisibleNavigationTools, type ResolvedNavigationTool } from "@/features/navigation-menu/lib/navigation-menu-config";
 import { useNavigationMenuStore } from "@/features/navigation-menu/stores/use-navigation-menu-store";
 import { cn } from "@/shared/lib/utils";
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
@@ -35,9 +35,10 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
         if (open) void useNavigationMenuStore.getState().refresh();
     }, [open]);
 
-    const renderToolCard = (tool: NavigationTool) => {
+    const renderToolCard = (tool: ResolvedNavigationTool) => {
         const Icon = tool.icon;
         const active = tool.slug === activeToolSlug;
+        const label = tool.displayName || translate(tool.labelKey);
         return (
             <Link
                 key={tool.slug}
@@ -51,8 +52,16 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                 )}
             >
                 <Icon className="size-5" />
-                <span className="text-sm">{translate(tool.labelKey)}</span>
-                {tool.isNew ? <span className="new-badge right-2 top-2" title={translate("common.newFeature")}>NEW</span> : null}
+                <span className="text-sm">{label}</span>
+                {tool.badgeText ? (
+                    <span
+                        className="new-badge right-2 top-2 max-w-[64px] truncate"
+                        style={tool.badgeColor ? { color: tool.badgeColor } : undefined}
+                        title={tool.badgeText}
+                    >
+                        {tool.badgeText}
+                    </span>
+                ) : null}
             </Link>
         );
     };

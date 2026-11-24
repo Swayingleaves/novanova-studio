@@ -1154,3 +1154,12 @@ V61 按空间、用户、原配置和对象键精确关联已有媒体及原文�
 | `platform_model_stats_settings` | 单行表，`id` 固定为 1；`success_rate_window_days`（整型，默认 `3`，范围 `1~365`，控制前端模型选择器展示最近多少天的调用成功率）、`created_at`/`updated_at` |
 
 后台入口为「配置与用户偏好 · 模型成功率设置」。平台管理员读取走 `GET /api/v1/admin/platform/getModelStatsSettings`，保存走 `POST /api/v1/admin/platform/saveModelStatsSettings`（仅平台空间的全局管理员可修改）。各模型的成功/失败调用计数按自然日存储在 Redis Hash（`novanova:ai:model:stats:daily:{yyyy-MM-dd}`，TTL 366 天），服务端按配置天数聚合后随 `GET /api/v1/ai/model/listModels` 和 `GET /api/v1/config/model/listModelConfigs` 返回。
+
+## 平台导航菜单外观扩展字段（V108 / 社区版 V109）
+
+| 表 | 新增字段 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| `platform_navigation_menu_configs` | `display_name` | `VARCHAR(32)` | 自定义菜单显示名称，为空时沿用系统默认名称 |
+| `platform_navigation_menu_configs` | `icon_key` | `VARCHAR(64)` | 自定义菜单图标标识，为空时沿用系统默认图标 |
+| `platform_navigation_menu_configs` | `badge_text` | `VARCHAR(16)` | 右上角角标文案，为空时不显示角标 |
+| `platform_navigation_menu_configs` | `badge_color` | `VARCHAR(32)` | 右上角角标文字颜色（如十六进制色值），为空时沿用系统默认颜色 |

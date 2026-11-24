@@ -23,6 +23,10 @@ function normalizeConfigs(configs: readonly NavigationMenuConfig[] | null | unde
             menuKey: item.menuKey,
             enabled: Boolean(item.enabled),
             sortOrder: typeof item.sortOrder === "number" ? item.sortOrder : index,
+            displayName: item.displayName ?? null,
+            iconKey: item.iconKey ?? null,
+            badgeText: item.badgeText === undefined ? undefined : item.badgeText,
+            badgeColor: item.badgeColor ?? null,
         }))
         .sort((first, second) => first.sortOrder - second.sortOrder);
 }
@@ -103,6 +107,10 @@ export const useNavigationMenuStore = create<NavigationMenuStore>()((set, get) =
             menuKey: item.menuKey,
             enabled: Boolean(item.enabled),
             sortOrder: index,
+            displayName: item.displayName ?? null,
+            iconKey: item.iconKey ?? null,
+            badgeText: item.badgeText ?? null,
+            badgeColor: item.badgeColor ?? null,
         }));
         writeCachedConfigs(nextConfigs);
         set({ configs: nextConfigs, loaded: true });
