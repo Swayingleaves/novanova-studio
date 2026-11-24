@@ -81,7 +81,7 @@ import { TeamManagement, CurrentTeamManagement } from "./components/team-managem
 import { ModelConfigTextArea } from "./components/model-config-textarea";
 import { SkillPromptLabel } from "@/features/skill-market/components/skill-prompt-help";
 import { SKILL_PROMPT_ACTIONS } from "@/features/skill-market/lib/skill-prompt-actions";
-import { SystemConfiguration, type ConfigurationTabKey } from "./components/system-configuration";
+import { SystemConfiguration, type ConfigurationTabKey, type SystemConfigurationHandle } from "./components/system-configuration";
 import { NavigationMenuManagement } from "./components/navigation-menu-management";
 import { OAuthClientManagement } from "./components/oauth-client-management";
 import { OAuthIntegrationManagement } from "./components/oauth-integration-management";
@@ -138,7 +138,10 @@ export default function AdminSystemPage() {
     const [identityAuthTabKey, setIdentityAuthTabKey] = useState<IdentityAuthTabKey>("oauth");
     const [expandedMenuKeys, setExpandedMenuKeys] = useState<string[]>(["configuration"]);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const [pendingChannelLeaveTarget, setPendingChannelLeaveTarget] = useState<{ tab: string; sub?: string } | null>(null);
+    const [savingChannelsBeforeLeave, setSavingChannelsBeforeLeave] = useState(false);
     const pageRef = useRef<HTMLElement>(null);
+    const systemConfigRef = useRef<SystemConfigurationHandle>(null);
     const currentUser = useUserStore((state) => state.user);
     const isAdmin = canManageCurrentSpace();
     const team = useTeamStore((state) => state.team);
@@ -212,7 +215,7 @@ export default function AdminSystemPage() {
 
     // 内容区仍交给 antd Tabs 管理，保留首次访问才挂载、切回不丢表单草稿的行为，左侧菜单只负责切换。
     const tabItems = [
-        { key: "configuration", label: translate("appShell.configurationPreferences"), children: <SystemConfiguration activeTab={configurationTabKey} onTabChange={setConfigurationTabKey} /> },
+        { key: "configuration", label: translate("appShell.configurationPreferences"), children: <SystemConfiguration ref={systemConfigRef} activeTab={configurationTabKey} onTabChange={setConfigurationTabKey} /> },
         ...(!team ? [{ key: "navigationMenus", label: translate("administration.menuManagement"), children: <NavigationMenuManagement /> }] : []),
         ...(!team ? [{ key: "identityAuth", label: translate("administration.identityAuthentication"), children: <Tabs
             activeKey={identityAuthTabKey}
@@ -257,13 +260,37 @@ export default function AdminSystemPage() {
     const currentTabKey = tabItems.some((item) => item.key === activeTabKey) ? activeTabKey : tabItems[0].key;
     const activeMenuLeafKey = currentTabKey === "configuration" ? `configuration:${configurationTabKey}` : currentTabKey === "scriptPricing" ? `scriptPricing:${pricingTabKey}` : currentTabKey === "identityAuth" ? `identityAuth:${identityAuthTabKey}` : currentTabKey;
 
-    const selectMenu = (tab: string, sub?: string) => {
+    const applyMenuSelection = (tab: string, sub?: string) => {
         setActiveTabKey(tab);
         if (tab === "configuration" && sub) setConfigurationTabKey(sub as ConfigurationTabKey);
         if (tab === "scriptPricing" && sub) setPricingTabKey(sub);
         if (tab === "identityAuth" && sub) setIdentityAuthTabKey(sub as IdentityAuthTabKey);
         setMobileMenuOpen(false);
         pageRef.current?.scrollTo({ top: 0 });
+    };
+
+    const selectMenu = (tab: string, sub?: string) => {
+        const targetLeafKey = tab === "configuration" && sub ? `configuration:${sub}` : tab;
+        if (activeMenuLeafKey === "configuration:channels" && targetLeafKey !== "configuration:channels" && systemConfigRef.current?.hasUnsavedChannelChanges()) {
+            setPendingChannelLeaveTarget({ tab, sub });
+            return;
+        }
+        applyMenuSelection(tab, sub);
+    };
+
+    const handleSaveAndLeaveChannels = async () => {
+        const target = pendingChannelLeaveTarget;
+        if (!target) return;
+        setSavingChannelsBeforeLeave(true);
+        try {
+            const saved = await systemConfigRef.current?.saveChannels();
+            if (saved) {
+                setPendingChannelLeaveTarget(null);
+                applyMenuSelection(target.tab, target.sub);
+            }
+        } finally {
+            setSavingChannelsBeforeLeave(false);
+        }
     };
 
     const toggleMenuGroup = (key: string) => {
@@ -355,6 +382,38 @@ export default function AdminSystemPage() {
                     </div>
                 </div>
             </div>
+            <Modal
+                title="未保存的渠道更改"
+                open={Boolean(pendingChannelLeaveTarget)}
+                centered
+                mask={{ closable: !savingChannelsBeforeLeave }}
+                closable={!savingChannelsBeforeLeave}
+                onCancel={() => {
+                    if (!savingChannelsBeforeLeave) setPendingChannelLeaveTarget(null);
+                }}
+                footer={
+                    <div className="flex justify-end gap-2">
+                        <Button disabled={savingChannelsBeforeLeave} onClick={() => setPendingChannelLeaveTarget(null)}>
+                            取消
+                        </Button>
+                        <Button
+                            disabled={savingChannelsBeforeLeave}
+                            onClick={() => {
+                                const target = pendingChannelLeaveTarget;
+                                setPendingChannelLeaveTarget(null);
+                                if (target) applyMenuSelection(target.tab, target.sub);
+                            }}
+                        >
+                            不保存离开
+                        </Button>
+                        <Button type="primary" loading={savingChannelsBeforeLeave} onClick={() => void handleSaveAndLeaveChannels()}>
+                            保存并离开
+                        </Button>
+                    </div>
+                }
+            >
+                <p className="text-sm text-[var(--studio-text)]">「我的渠道」中有未保存的新增或编辑内容，离开前是否需要保存？</p>
+            </Modal>
         </main>
     );
 }
