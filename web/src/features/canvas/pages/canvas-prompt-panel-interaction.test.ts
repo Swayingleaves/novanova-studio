@@ -166,3 +166,21 @@ test("画布点击浮层使用不透明背景", () => {
     assert.ok(videoSettingsPopoverSource.includes("<SettingsPopoverShell"), "视频设置未复用统一浮层容器");
     assert.ok(promptPanelSource.includes("background: theme.node.panel"), "节点提示面板仍使用透明工具栏背景");
 });
+
+test("节点提示词编辑器完整保留用户原有的换行和排版", () => {
+    assert.ok(!promptPanelSource.includes(".prompt-editor div{display:inline!important}"), "提示词编辑器仍强制将块级换行折叠为行内");
+    assert.ok(!promptPanelSource.includes(".prompt-editor br{display:none!important}"), "提示词编辑器仍隐藏换行标签");
+    assert.ok(!promptPanelSource.includes('replace(/\\n/g, "")'), "提示词编辑器仍在提取或复制文本时删除换行符");
+    assert.ok(!promptPanelSource.includes("onSubmit()"), "提示词编辑器按回车仍会直接触发提交执行");
+    assert.ok(promptPanelSource.includes("extractPromptDOMText"), "提示词编辑器未通过保留排版的纯文本提取函数读取内容");
+    assert.ok(promptPanelSource.includes("insertPlainTextAtSelection"), "提示词编辑器粘贴或换行时未按纯文本保留原有排版");
+});
+
+test("节点提示词输入框放大图标改为弹窗查看并编辑提示词", () => {
+    assert.ok(promptPanelSource.includes('title="弹窗查看提示词"'), "输入框工具栏缺少弹窗查看提示词按钮");
+    assert.ok(promptPanelSource.includes("setPromptModalOpen(true)"), "点击放大图标未打开提示词弹窗");
+    assert.ok(promptPanelSource.includes("open={promptModalOpen}"), "未渲染提示词弹窗");
+    assert.ok(promptPanelSource.includes('aria-label="弹窗缩小字体"') && promptPanelSource.includes('aria-label="弹窗放大字体"'), "提示词弹窗缺少放大和缩小字体按钮");
+    assert.ok(promptPanelSource.includes("mask={{ closable: true }}"), "提示词弹窗未使用新版 mask.closable 属性");
+    assert.ok(interactionSelectorLine.includes(".ant-modal-root"), "提示面板交互白名单缺少弹窗根容器，点击弹窗遮罩可能误关面板");
+});

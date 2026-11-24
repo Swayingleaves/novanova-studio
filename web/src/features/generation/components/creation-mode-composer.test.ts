@@ -46,3 +46,15 @@ test("图片页和视频页都接入模式并透传给 Agent 请求", () => {
         assert.match(page, /creationMode !== "chat" && !ensureModelConfiguration\("text"\)/);
     });
 });
+
+test("图片和视频共享输入区支持5000字上限、回车不直接发送、保留排版及弹窗查看", () => {
+    const composer = source("features/generation/components/creation-composer.tsx");
+
+    assert.ok(composer.includes("const MAX_CREATION_PROMPT_LENGTH = 5000;"), "输入上限未调整为 5000");
+    assert.ok(!composer.includes("/ 2000"), "计数展示仍残留旧的 2000 上限");
+    assert.ok(!composer.includes("if (canSubmit && !requestActive) onSubmit()"), "按回车仍会直接触发发送执行");
+    assert.ok(composer.includes('title="弹窗查看提示词"'), "缺少放大弹窗查看提示词按钮");
+    assert.ok(composer.includes("open={promptModalOpen}"), "缺少提示词放大弹窗");
+    assert.ok(composer.includes("mask={{ closable: true }}"), "弹窗未使用新版 mask.closable 属性");
+    assert.ok(!composer.includes("A-") && !composer.includes("A+"), "图片和视频弹窗不应包含字体缩放按钮");
+});

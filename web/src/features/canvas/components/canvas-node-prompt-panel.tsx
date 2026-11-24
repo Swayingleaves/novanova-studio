@@ -8,8 +8,9 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ArrowUp, BookOpenText, ChevronDown, FileText, Image as ImageIcon, Info, LoaderCircle, Maximize2, Minimize2, Plus, Search, Sparkles, Square, AudioLines, Video, X } from "lucide-react";
+import { ArrowUp, BookOpenText, ChevronDown, Copy, FileText, Image as ImageIcon, Info, LoaderCircle, Maximize2, Plus, Search, Sparkles, Square, AudioLines, Video, X } from "lucide-react";
 import { App, Button, Modal, Tooltip } from "antd";
+import { useCopyText } from "@/shared/hooks/use-copy-text";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { listSkills, type SkillOption } from "@/services/api/server";
@@ -474,7 +475,6 @@ export function CanvasNodePromptPanel({
                 placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
                 theme={theme}
                 onChange={updatePrompt}
-                onSubmit={submit}
                 onBlur={handleBlur}
                 onMentionInput={(value, cursor, caretRect) => {
                     const beforeCursor = value.slice(0, cursor);
@@ -1138,7 +1138,6 @@ type PromptEditorProps = {
     placeholder: string;
     theme: CanvasTheme;
     onChange: (value: string) => void;
-    onSubmit: () => void;
     onBlur: () => void;
     onMentionInput?: (value: string, cursor: number, caretRect: DOMRect | null) => void;
     onMentionMenuKeyDown?: (event: React.KeyboardEvent) => boolean;
@@ -1150,10 +1149,11 @@ type PromptEditorProps = {
 export type PromptEditorHandle = { insertAtCursor: (text: string) => void; replaceTextRange: (start: number, end: number, text: string) => void; focus: () => void };
 
 const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function PromptEditor(
-    { prompt, requiredLabels, references, placeholder, theme, onChange, onSubmit, onBlur, onMentionInput, onMentionMenuKeyDown, onPasteText, onStyleInput, onStyleMenuKeyDown },
+    { prompt, requiredLabels, references, placeholder, theme, onChange, onBlur, onMentionInput, onMentionMenuKeyDown, onPasteText, onStyleInput, onStyleMenuKeyDown },
     ref,
 ) {
     const translate = useTranslation();
+    const copyText = useCopyText();
     const editorRef = useRef<HTMLDivElement>(null);
     const isComposingRef = useRef(false);
     const pendingRef = useRef<string | null>(null);
@@ -1170,7 +1170,8 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
     const buildHTML = useCallback(
         (text: string) => {
             // 生成请求可能为引用标签增加反引号，编辑器回显时隐藏这些协议标记，避免出现在缩略图两侧。
-            let html = escapeHTML(stripPromptReferenceDelimiters(text, requiredLabels));
+            const normalized = stripPromptReferenceDelimiters(text, requiredLabels).replace(/\r\n?/g, "\n");
+            let html = escapeHTML(normalized);
             const sorted = [...requiredLabels].sort((a, b) => b.length - a.length);
             sorted.forEach((label) => {
                 const ref = refByLabel.get(label);
@@ -1179,6 +1180,10 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
                 const chip = `<span contenteditable="false" data-ref-label="${escapeAttr(label)}" class="prompt-ref-chip" style="display:inline-flex;align-items:center;gap:2px;padding:0 2px 0 5px;margin:0 2px;border-radius:4px;font-size:13px;line-height:1.4;vertical-align:middle;background:rgba(47,128,255,.12);color:#2f80ff;font-weight:500;border:1px solid rgba(47,128,255,.24);user-select:none;white-space:nowrap;cursor:grab;">${thumbHTML}${escapeHTML(label)}<span data-ref-close="" class="ref-chip-close" style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;margin-left:1px;border-radius:50%;font-size:12px;line-height:1;cursor:pointer;flex-shrink:0;">×</span></span>`;
                 html = html.replace(new RegExp(escapeRegExp(label), "g"), chip);
             });
+            // 末尾为换行时补一个占位 <br>，保证末尾空行在 pre-wrap 下可见且可定位光标
+            if (normalized.endsWith("\n")) {
+                html += '<br data-prompt-sentinel="true" />';
+            }
             return html;
         },
         [requiredLabels, refByLabel],
@@ -1231,25 +1236,11 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
         };
     }, []);
 
-    // 从 DOM 提取纯文本：芯片用 data-ref-label，跳过关闭按钮文字
+    // 从 DOM 提取纯文本：保留用户原有的换行与空格排版，芯片用 data-ref-label，跳过关闭按钮和占位节点
     const extractText = useCallback(() => {
         const editor = editorRef.current;
         if (!editor) return "";
-        let text = "";
-        const walk = (node: Node) => {
-            if (node.nodeType === 3) {
-                text += node.textContent || "";
-            } else if (node.nodeType === 1) {
-                const el = node as Element;
-                if (el.classList.contains("prompt-ref-chip")) {
-                    text += el.getAttribute("data-ref-label") || "";
-                } else if (!el.hasAttribute("data-ref-close")) {
-                    el.childNodes.forEach(walk);
-                }
-            }
-        };
-        editor.childNodes.forEach(walk);
-        return text.replace(/\n/g, "").trim();
+        return extractPromptDOMText(editor);
     }, []);
 
     // 获取光标在纯文本中的偏移位置（与 extractText 使用相同的 DOM 遍历逻辑）
@@ -1276,9 +1267,14 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
                 offset += (node.textContent || "").length;
             } else if (node.nodeType === 1) {
                 const el = node as Element;
+                if (el.hasAttribute("data-ref-close") || el.hasAttribute("data-prompt-sentinel")) {
+                    return false;
+                }
                 if (el.classList.contains("prompt-ref-chip")) {
                     offset += (el.getAttribute("data-ref-label") || "").length;
-                } else if (!el.hasAttribute("data-ref-close")) {
+                } else if (el.tagName === "BR") {
+                    offset += 1;
+                } else {
                     for (let i = 0; i < el.childNodes.length; i++) {
                         if (walk(el.childNodes[i])) return true;
                     }
@@ -1351,16 +1347,6 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
 
     const handleInput = useCallback(() => {
         if (suppressInputRef.current) return;
-        // 清理浏览器自动插入的 <br> 标签（会导致异常换行）
-        const editor = editorRef.current;
-        if (editor) {
-            const brs = editor.querySelectorAll("br");
-            if (brs.length) {
-                suppressInputRef.current = true;
-                brs.forEach((br) => br.remove());
-                suppressInputRef.current = false;
-            }
-        }
         const text = extractText();
         pendingRef.current = text;
         onChange(text);
@@ -1373,12 +1359,8 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
         (event: React.KeyboardEvent) => {
             if (onMentionMenuKeyDown?.(event)) return;
             if (onStyleMenuKeyDown?.(event)) return;
-            if (event.key === "Enter" && !event.shiftKey && !isComposingRef.current) {
-                event.preventDefault();
-                onSubmit();
-            }
         },
-        [onMentionMenuKeyDown, onStyleMenuKeyDown, onSubmit],
+        [onMentionMenuKeyDown, onStyleMenuKeyDown],
     );
 
     const handleBlur = useCallback(() => {
@@ -1472,11 +1454,8 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
                     range.collapse(true);
                     range.insertNode(chip);
                 }
-                // 提取文本后立即重建 innerHTML，修复 DOM 操作造成的结构损坏
-                // 清理因芯片移动留下的多余空格
-                const text = extractText()
-                    .replace(/\s{2,}/g, " ")
-                    .trim();
+                // 提取文本后立即重建 innerHTML，修复 DOM 操作造成的结构损坏，保留原有排版
+                const text = extractText();
                 editor.innerHTML = buildHTML(text);
                 pendingRef.current = text;
                 onChange(text);
@@ -1502,13 +1481,20 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
         return () => window.removeEventListener("mouseup", handleGlobalMouseUp);
     }, [hideDragIndicator]);
 
-    // 阻止浏览器在 contentEditable 中插入块级元素（<div>、<p>、<br>）
-    const handleBeforeInput = useCallback((event: React.FormEvent<HTMLDivElement>) => {
-        const inputType = (event as unknown as { inputType?: string }).inputType;
-        if (inputType === "insertParagraph" || inputType === "insertLineBreak") {
-            event.preventDefault();
-        }
-    }, []);
+    // 换行时统一插入纯文本换行符，避免浏览器在 contentEditable 中混入 <div>/<p> 破坏排版
+    const handleBeforeInput = useCallback(
+        (event: React.FormEvent<HTMLDivElement>) => {
+            const inputType = (event as unknown as { inputType?: string }).inputType;
+            if (inputType === "insertParagraph" || inputType === "insertLineBreak") {
+                event.preventDefault();
+                const editor = editorRef.current;
+                if (!editor) return;
+                insertPlainTextAtSelection(editor, "\n");
+                handleInput();
+            }
+        },
+        [handleInput],
+    );
 
     // 点击芯片关闭按钮时删除芯片
     const handleEditorClick = useCallback(
@@ -1530,10 +1516,8 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
             // 移除芯片 DOM
             chip.remove();
 
-            // 提取文本并重建（清理多余空格）
-            const text = extractText()
-                .replace(/\s{2,}/g, " ")
-                .trim();
+            // 提取文本并重建，保留原有换行和缩进排版
+            const text = extractText();
             pendingRef.current = text;
             onChange(text);
             // 重建 innerHTML 规范化结构
@@ -1551,19 +1535,14 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
         isComposingRef.current = true;
     }, []);
 
-    // 复制时把芯片替换为标签文字，避免 contenteditable="false" 导致复制为空
+    // 复制时把芯片替换为标签文字，避免 contenteditable="false" 导致复制为空，并保留原有换行
     const handleCopy = useCallback((event: React.ClipboardEvent) => {
         const sel = window.getSelection();
         if (!sel || !sel.rangeCount) return;
         const range = sel.getRangeAt(0);
         if (range.collapsed) return;
         const fragment = range.cloneContents();
-        fragment.querySelectorAll(".prompt-ref-chip").forEach((chip) => {
-            const label = chip.getAttribute("data-ref-label") || "";
-            chip.replaceWith(document.createTextNode(`\`${label}\``));
-        });
-        fragment.querySelectorAll("[data-ref-close]").forEach((el) => el.remove());
-        const text = (fragment.textContent || "").replace(/\n/g, "");
+        const text = extractPromptDOMText(fragment, { quoteChips: true });
         event.clipboardData.setData("text/plain", text);
         event.preventDefault();
     }, []);
@@ -1576,19 +1555,25 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
     const handlePaste = useCallback(
         (event: React.ClipboardEvent<HTMLDivElement>) => {
             const text = event.clipboardData.getData("text/plain");
-            if (text && onPasteText?.(text)) event.preventDefault();
+            if (!text) return;
+            event.preventDefault();
+            if (onPasteText?.(text)) return;
+            const editor = editorRef.current;
+            if (!editor) return;
+            insertPlainTextAtSelection(editor, text);
+            handleInput();
         },
-        [onPasteText],
+        [handleInput, onPasteText],
     );
 
     const isEmpty = !prompt;
     const [editorHeight, setEditorHeight] = useState(128);
+    const [promptModalOpen, setPromptModalOpen] = useState(false);
     const [fontSize, setFontSize] = useState(() => {
         if (typeof window === "undefined") return 14;
         const stored = Number(window.localStorage.getItem("novanova:canvas_prompt_font_size"));
         return Number.isFinite(stored) && stored >= 12 && stored <= 28 ? stored : 14;
     });
-    const isExpanded = editorHeight > 200;
 
     const updateFontSize = useCallback((delta: number) => {
         setFontSize((current) => {
@@ -1640,7 +1625,7 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
                     {placeholder}
                 </div>
             ) : null}
-            <style>{".prompt-editor div{display:inline!important}.prompt-editor br{display:none!important}.ref-chip-close{opacity:.45}.prompt-ref-chip:hover .ref-chip-close{opacity:1}.ref-chip-close:hover{background:rgba(0,0,0,.12)}"}</style>
+            <style>{".ref-chip-close{opacity:.45}.prompt-ref-chip:hover .ref-chip-close{opacity:1}.ref-chip-close:hover{background:rgba(0,0,0,.12)}"}</style>
             <div
                 ref={editorRef}
                 contentEditable
@@ -1692,15 +1677,15 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
                         A+
                     </button>
                 </Tooltip>
-                <Tooltip title={isExpanded ? "缩小输入框" : "放大输入框"}>
+                <Tooltip title="弹窗查看提示词">
                     <button
                         type="button"
-                        aria-label={isExpanded ? "缩小输入框" : "放大输入框"}
+                        aria-label="弹窗查看提示词"
                         className="inline-flex size-6 items-center justify-center rounded opacity-70 transition hover:opacity-100"
                         style={{ color: theme.node.muted }}
-                        onClick={() => setEditorHeight((current) => (current > 200 ? 128 : 320))}
+                        onClick={() => setPromptModalOpen(true)}
                     >
-                        {isExpanded ? <Minimize2 className="size-3.5" aria-hidden="true" /> : <Maximize2 className="size-3.5" aria-hidden="true" />}
+                        <Maximize2 className="size-3.5" aria-hidden="true" />
                     </button>
                 </Tooltip>
             </div>
@@ -1715,6 +1700,87 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
             >
                 <span className="h-0.5 w-8 rounded-full opacity-30 transition group-hover:opacity-80" style={{ background: theme.node.muted }} />
             </div>
+            <Modal
+                title={
+                    <div className="flex items-center justify-between gap-3 pr-7">
+                        <div className="flex items-center gap-2">
+                            <span>提示词</span>
+                            <span className="text-xs font-normal" style={{ color: theme.node.muted }}>
+                                共 {prompt.length} 字
+                            </span>
+                        </div>
+                        <div className="inline-flex items-center gap-0.5 rounded-md border p-0.5" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
+                            <Tooltip title={`缩小字体 (${fontSize}px)`}>
+                                <button
+                                    type="button"
+                                    aria-label="弹窗缩小字体"
+                                    disabled={fontSize <= 12}
+                                    className="inline-flex h-6 px-1.5 items-center justify-center rounded text-[11px]! font-medium opacity-75 transition hover:opacity-100 disabled:opacity-25"
+                                    style={{ color: theme.node.muted }}
+                                    onClick={() => updateFontSize(-2)}
+                                >
+                                    A-
+                                </button>
+                            </Tooltip>
+                            <span className="px-1 text-[11px] font-normal tabular-nums" style={{ color: theme.node.muted }}>
+                                {fontSize}px
+                            </span>
+                            <Tooltip title={`放大字体 (${fontSize}px)`}>
+                                <button
+                                    type="button"
+                                    aria-label="弹窗放大字体"
+                                    disabled={fontSize >= 28}
+                                    className="inline-flex h-6 px-1.5 items-center justify-center rounded text-[11px]! font-medium opacity-75 transition hover:opacity-100 disabled:opacity-25"
+                                    style={{ color: theme.node.muted }}
+                                    onClick={() => updateFontSize(2)}
+                                >
+                                    A+
+                                </button>
+                            </Tooltip>
+                        </div>
+                    </div>
+                }
+                open={promptModalOpen}
+                centered
+                width="min(860px, 92vw)"
+                mask={{ closable: true }}
+                destroyOnHidden
+                onCancel={() => setPromptModalOpen(false)}
+                footer={
+                    <div className="flex items-center justify-between gap-2">
+                        <Button icon={<Copy className="size-3.5" />} disabled={!prompt} onClick={() => copyText(prompt)}>
+                            复制提示词
+                        </Button>
+                        <Button type="primary" onClick={() => setPromptModalOpen(false)}>
+                            完成
+                        </Button>
+                    </div>
+                }
+            >
+                <textarea
+                    value={prompt}
+                    placeholder={placeholder}
+                    aria-label="提示词内容"
+                    className="thin-scrollbar block h-[65vh] w-full resize-none rounded-xl border p-3.5 outline-none transition focus:border-[#2f80ff] focus:ring-2 focus:ring-[#2f80ff]/25"
+                    style={{
+                        background: theme.node.fill,
+                        borderColor: theme.node.stroke,
+                        color: theme.node.text,
+                        fontSize,
+                        lineHeight: `${lineHeight}px`,
+                        whiteSpace: "pre-wrap",
+                        overflowWrap: "break-word",
+                    }}
+                    onChange={(event) => onChange(event.target.value)}
+                    onKeyDown={(event) => event.stopPropagation()}
+                    onWheel={(event) => {
+                        event.stopPropagation();
+                        if (!event.ctrlKey && !event.metaKey) return;
+                        event.preventDefault();
+                        updateFontSize(event.deltaY < 0 ? 2 : -2);
+                    }}
+                />
+            </Modal>
         </div>
     );
 });
@@ -1749,6 +1815,78 @@ function placeCaretAtEnd(element: HTMLElement) {
     sel?.addRange(range);
 }
 
+const PROMPT_BLOCK_TAGS = new Set(["DIV", "P", "LI"]);
+
+/** 从 contentEditable DOM 或选区片段中提取纯文本，保留用户原有的换行与空格排版 */
+function extractPromptDOMText(root: Node, options?: { quoteChips?: boolean }): string {
+    // 浏览器清空 contentEditable 后常残留单个占位 <br> 或 <div><br></div>，视为空内容
+    if (root.childNodes.length === 1) {
+        const only = root.firstChild;
+        if (only?.nodeType === 1) {
+            const el = only as Element;
+            if (el.tagName === "BR") return "";
+            if (PROMPT_BLOCK_TAGS.has(el.tagName) && el.childNodes.length === 1 && el.firstChild?.nodeType === 1 && (el.firstChild as Element).tagName === "BR") {
+                return "";
+            }
+        }
+    }
+    let text = "";
+    const walk = (node: Node) => {
+        if (node.nodeType === 3) {
+            text += (node.textContent || "").replace(/\r\n?/g, "\n");
+            return;
+        }
+        if (node.nodeType !== 1) return;
+        const el = node as Element;
+        if (el.hasAttribute("data-ref-close") || el.hasAttribute("data-prompt-sentinel")) return;
+        if (el.classList.contains("prompt-ref-chip")) {
+            const label = el.getAttribute("data-ref-label") || "";
+            text += options?.quoteChips ? `\`${label}\`` : label;
+            return;
+        }
+        if (el.tagName === "BR") {
+            text += "\n";
+            return;
+        }
+        if (PROMPT_BLOCK_TAGS.has(el.tagName)) {
+            if (text.length > 0 && !text.endsWith("\n")) {
+                text += "\n";
+            }
+            if (el.childNodes.length === 1 && el.firstChild?.nodeType === 1 && (el.firstChild as Element).tagName === "BR") {
+                text += "\n";
+                return;
+            }
+            el.childNodes.forEach(walk);
+            return;
+        }
+        el.childNodes.forEach(walk);
+    };
+    root.childNodes.forEach(walk);
+    return text;
+}
+
+/** 在 contentEditable 当前选区位置插入纯文本，完整保留换行与空格并维护末尾占位换行 */
+function insertPlainTextAtSelection(editor: HTMLElement, rawText: string) {
+    const normalized = rawText.replace(/\r\n?/g, "\n");
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !editor.contains(sel.anchorNode)) return;
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    const textNode = document.createTextNode(normalized);
+    range.insertNode(textNode);
+    const nextRange = document.createRange();
+    nextRange.setStart(textNode, normalized.length);
+    nextRange.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(nextRange);
+    editor.querySelectorAll("[data-prompt-sentinel]").forEach((el) => el.remove());
+    if (extractPromptDOMText(editor).endsWith("\n")) {
+        const sentinel = document.createElement("br");
+        sentinel.setAttribute("data-prompt-sentinel", "true");
+        editor.appendChild(sentinel);
+    }
+}
+
 /** 在 contentEditable 中将光标定位到纯文本的指定偏移位置 */
 function setCaretAtTextOffset(editor: HTMLElement, fullText: string, offset: number) {
     const sel = window.getSelection();
@@ -1769,6 +1907,9 @@ function setCaretAtTextOffset(editor: HTMLElement, fullText: string, offset: num
             remaining -= len;
         } else if (node.nodeType === 1) {
             const el = node as Element;
+            if (el.hasAttribute("data-ref-close") || el.hasAttribute("data-prompt-sentinel")) {
+                return false;
+            }
             if (el.classList.contains("prompt-ref-chip")) {
                 const label = el.getAttribute("data-ref-label") || "";
                 if (remaining <= label.length) {
@@ -1781,7 +1922,17 @@ function setCaretAtTextOffset(editor: HTMLElement, fullText: string, offset: num
                     return true;
                 }
                 remaining -= label.length;
-            } else if (!el.hasAttribute("data-ref-close")) {
+            } else if (el.tagName === "BR") {
+                if (remaining <= 1) {
+                    const range = document.createRange();
+                    range.setStartAfter(el);
+                    range.collapse(true);
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                    return true;
+                }
+                remaining -= 1;
+            } else {
                 for (let i = 0; i < el.childNodes.length; i++) {
                     if (walk(el.childNodes[i])) return true;
                 }

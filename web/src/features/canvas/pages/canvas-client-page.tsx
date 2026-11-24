@@ -239,7 +239,7 @@ const PROMPT_PANEL_HEIGHT = 196;
 const PROMPT_PANEL_GAP = 16;
 const IMAGE_GENERATION_NODE_WIDTH = 480;
 const IMAGE_GENERATION_NODE_HEIGHT = 330;
-const PROMPT_PANEL_INTERACTION_IGNORE_SELECTOR = '[data-canvas-prompt-panel],[data-canvas-settings-popover],[data-model-picker-content],[data-radix-popper-content-wrapper],[data-slot="select-content"],.react-flow__node,.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown';
+const PROMPT_PANEL_INTERACTION_IGNORE_SELECTOR = '[data-canvas-prompt-panel],[data-canvas-settings-popover],[data-model-picker-content],[data-radix-popper-content-wrapper],[data-slot="select-content"],.react-flow__node,.ant-modal,.ant-modal-root,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown';
 const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;

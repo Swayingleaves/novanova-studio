@@ -4,10 +4,10 @@ import { currentLanguageTag } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { App, Button, Input, Popover, Segmented, Tooltip } from "antd";
+import { App, Button, Input, Modal, Popover, Segmented, Tooltip } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { Fragment, useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
-import { ArrowUp, Bot, LoaderCircle, Square, X } from "lucide-react";
+import { ArrowUp, Bot, Copy, LoaderCircle, Maximize2, Square, X } from "lucide-react";
 
 import type { CreationComposerProps, CreationStyleOption } from "@/features/generation/components/creation-workspace-types";
 import type { CreationMode } from "@/features/generation/lib/creation-mode-preference";
@@ -15,8 +15,11 @@ import { CreditCostDisplay } from "@/features/generation/constants/credits";
 import { GenerationStyleCover, GenerationStyleMenu } from "@/features/generation/components/generation-style-picker";
 import { filterGenerationStyles, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { getStyleCommandRange, parseGenerationStyleMessage, removeStyleCommand } from "@/features/generation/lib/style-command";
+import { useCopyText } from "@/shared/hooks/use-copy-text";
 import { useSpaceBrand } from "@/features/team/use-space-brand";
 import { ReferencePromptInput, type ReferencePromptInputHandle } from "@/features/generation/components/reference-prompt-input";
+
+const MAX_CREATION_PROMPT_LENGTH = 5000;
 
 export function CreationComposer({
     agentLabel,
@@ -53,10 +56,12 @@ export function CreationComposer({
 }: CreationComposerProps) {
     const translate = useTranslation();
     const brand = useSpaceBrand();
+    const copyText = useCopyText();
     const { message } = App.useApp();
     const inputRef = useRef<TextAreaRef>(null);
     const referenceInputRef = useRef<ReferencePromptInputHandle>(null);
     const focusedValueRef = useRef(false);
+    const [promptModalOpen, setPromptModalOpen] = useState(false);
     const [styleMenuOpen, setStyleMenuOpenState] = useState(false);
     const [styleQuery, setStyleQuery] = useState("");
     const [styleCommand, setStyleCommand] = useState<{ start: number; end: number } | null>(null);
@@ -101,8 +106,10 @@ export function CreationComposer({
     }, [chatMode]);
 
     const updatePrompt = (nextValue: string, cursor: number) => {
-        onChange(nextValue);
-        const command = chatMode ? null : getStyleCommandRange(nextValue, cursor);
+        const clampedValue = nextValue.length > MAX_CREATION_PROMPT_LENGTH ? nextValue.slice(0, MAX_CREATION_PROMPT_LENGTH) : nextValue;
+        const clampedCursor = Math.min(cursor, clampedValue.length);
+        onChange(clampedValue);
+        const command = chatMode ? null : getStyleCommandRange(clampedValue, clampedCursor);
         if (!command) {
             setStyleCommand(null);
             closeStyleMenu();
@@ -156,13 +163,13 @@ export function CreationComposer({
         if (additions.length > remaining) {
             message.warning(translate("generation.selectUpToStyles", { value0: MAX_GENERATION_STYLE_SELECTION_COUNT }));
         }
-        const nextValue = `${value.slice(0, start)}${parsed.prompt}${value.slice(end)}`;
+        const nextValue = `${value.slice(0, start)}${parsed.prompt}${value.slice(end)}`.slice(0, MAX_CREATION_PROMPT_LENGTH);
         additions.slice(0, remaining).forEach((style) => onStyleSelect(style));
         onChange(nextValue);
         setStyleCommand(null);
         setStyleQuery("");
         closeStyleMenu();
-        requestAnimationFrame(() => focusInput(start + parsed.prompt.length));
+        requestAnimationFrame(() => focusInput(Math.min(start + parsed.prompt.length, nextValue.length)));
         return true;
     };
 
@@ -205,10 +212,6 @@ export function CreationComposer({
                 closeStyleMenu();
                 return;
             }
-        }
-        if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            if (canSubmit && !requestActive) onSubmit();
         }
     };
 
@@ -259,7 +262,19 @@ export function CreationComposer({
                             </span>
                             {headerExtra}
                         </span>
-                        <span>{queued ? translate("generation.queued") : running ? translate("generation.generating") : `${value.length} / 2000`}</span>
+                        <span className="inline-flex shrink-0 items-center gap-2">
+                            <span>{queued ? translate("generation.queued") : running ? translate("generation.generating") : `${value.length} / ${MAX_CREATION_PROMPT_LENGTH}`}</span>
+                            <Tooltip title="弹窗查看提示词">
+                                <button
+                                    type="button"
+                                    aria-label="弹窗查看提示词"
+                                    className="inline-flex size-6 items-center justify-center rounded text-[var(--studio-muted)]! opacity-75 transition hover:bg-[var(--studio-surface-hover)] hover:opacity-100"
+                                    onClick={() => setPromptModalOpen(true)}
+                                >
+                                    <Maximize2 className="size-3.5" aria-hidden="true" />
+                                </button>
+                            </Tooltip>
+                        </span>
                     </div>
                     {notice}
 
@@ -308,6 +323,7 @@ export function CreationComposer({
                         /> : <Input.TextArea
                             ref={inputRef}
                             value={value}
+                            maxLength={MAX_CREATION_PROMPT_LENGTH}
                             autoSize={compact ? { minRows: 1, maxRows: 6 } : { minRows: 3, maxRows: 6 }}
                             placeholder={placeholder}
                             className="creation-composer-textarea"
@@ -395,6 +411,42 @@ export function CreationComposer({
                     </div>
                 </div>
             </div>
+            <Modal
+                title={
+                    <div className="flex items-center justify-between gap-3 pr-7">
+                        <span>提示词</span>
+                        <span className="text-xs font-normal text-[var(--studio-muted)]">
+                            {value.length} / {MAX_CREATION_PROMPT_LENGTH}
+                        </span>
+                    </div>
+                }
+                open={promptModalOpen}
+                centered
+                width="min(860px, 92vw)"
+                mask={{ closable: true }}
+                destroyOnHidden
+                onCancel={() => setPromptModalOpen(false)}
+                footer={
+                    <div className="flex items-center justify-between gap-2">
+                        <Button icon={<Copy className="size-3.5" />} disabled={!value} onClick={() => copyText(value)}>
+                            复制提示词
+                        </Button>
+                        <Button type="primary" onClick={() => setPromptModalOpen(false)}>
+                            完成
+                        </Button>
+                    </div>
+                }
+            >
+                <textarea
+                    value={value}
+                    maxLength={MAX_CREATION_PROMPT_LENGTH}
+                    placeholder={placeholder}
+                    aria-label="提示词内容"
+                    className="thin-scrollbar block h-[65vh] w-full resize-none rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] p-3.5 text-[15px] leading-7 text-[var(--studio-ink)] outline-none transition focus:border-[#2f80ff] focus:ring-2 focus:ring-[#2f80ff]/25"
+                    style={{ whiteSpace: "pre-wrap", overflowWrap: "break-word" }}
+                    onChange={(event) => onChange(event.target.value.slice(0, MAX_CREATION_PROMPT_LENGTH))}
+                />
+            </Modal>
         </div>
     );
 }
