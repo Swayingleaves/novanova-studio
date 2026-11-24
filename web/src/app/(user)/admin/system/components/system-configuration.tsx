@@ -12,7 +12,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 import { Alert, App, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Tabs } from "antd";
 import { nanoid } from "nanoid";
 import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Copy, Image, Info, Monitor, Pencil, Plus, RefreshCw, Search, Sparkles, TextCursorInput, Trash2, Upload, Video, Wifi } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { ModelIcon } from "@/features/settings/components/model-picker";
@@ -342,6 +342,13 @@ const createObjectStorageProviderFields = (
     },
 });
 
+export type SystemConfigurationHandle = {
+    /** 当前「我的渠道」是否存在未保存的新增、编辑或删除更改 */
+    hasUnsavedChannelChanges: () => boolean;
+    /** 触发保存当前「我的渠道」草稿，保存成功返回 true */
+    saveChannels: () => Promise<boolean>;
+};
+
 /**
  * 系统配置面板。
  *
@@ -349,7 +356,10 @@ const createObjectStorageProviderFields = (
  * @param onTabChange 页签变化回调，用于把当前页签同步给左侧菜单
  * @return 配置面板
  */
-export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChange }: { activeTab?: ConfigurationTabKey; onTabChange?: (tabKey: ConfigurationTabKey) => void }) {
+export const SystemConfiguration = forwardRef<SystemConfigurationHandle, { activeTab?: ConfigurationTabKey; onTabChange?: (tabKey: ConfigurationTabKey) => void }>(function SystemConfiguration(
+    { activeTab: controlledActiveTab, onTabChange },
+    ref,
+) {
     const translate = useTranslation();
     const { message, modal } = App.useApp();
     const copyText = useCopyText();
@@ -601,13 +611,13 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
         }
     };
 
-    const saveChannels = async () => {
+    const saveChannels = async (): Promise<boolean> => {
         const baselineById = new Map(channelBaseline.map((channel) => [channel.id, channel]));
         const draftIds = new Set(draftChannels.map((channel) => channel.id));
         const deletedChannels = channelBaseline.filter((channel) => !draftIds.has(channel.id));
         if (deletedChannels.some((channel) => modelConfigBaseline.some((model) => model.channelId === channel.id))) {
             message.error(translate("appShell.deleteLinkedModelsInMyModelsAndSaveBefore"));
-            return;
+            return false;
         }
         setSavingTab("channels");
         try {
@@ -633,14 +643,21 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
                 );
             }
             message.success(translate("appShell.channelConfigurationSaved"));
+            return true;
         } catch (error) {
             await refreshChannels().catch(() => undefined);
             setChannelBaseline(cloneChannels(useConfigStore.getState().managedChannels));
             message.error(error instanceof Error ? error.message : translate("appShell.failedToSaveChannelConfiguration"));
+            return false;
         } finally {
             setSavingTab("");
         }
     };
+
+    useImperativeHandle(ref, () => ({
+        hasUnsavedChannelChanges: () => draftsReady && channelsDirty,
+        saveChannels,
+    }));
 
     const updateCapabilityModels = (group: ModelGroup, models: string[]) => {
         const values = uniqueModels(models.map((model) => normalizeModelOptionValue(model, draftChannels)).filter(Boolean));
@@ -2864,7 +2881,7 @@ export function SystemConfiguration({ activeTab: controlledActiveTab, onTabChang
             {autoFillConfigMode && editingModelConfig ? <ModelConfigAutoFillModal config={editingModelConfig} mode={autoFillConfigMode} onCancel={() => setAutoFillConfigMode(null)} onFill={autoFillCustomConfig} /> : null}
         </div>
     );
-}
+});
 
 function cloneChannels(channels: ModelChannel[]) {
     return channels.map((channel) => ({ ...channel, models: [...channel.models] }));
