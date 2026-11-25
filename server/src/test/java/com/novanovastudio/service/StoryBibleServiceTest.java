@@ -377,7 +377,7 @@ class StoryBibleServiceTest {
     void shouldRejectBatchWithNonPendingItem() {
         when(sourceRepository.findByProject(USER_ID, PROJECT_ID)).thenReturn(Mono.just(document(3, 3L)));
         var confirmed = new StoryBibleRepository.Item("item-1", PROJECT_ID, "doc-1", "character", "林远", "",
-                new JSONObject(), "ai", "confirmed", true, null, "林远", 0, "", "uncertain", null, 5);
+                new JSONObject(), "ai", "confirmed", true, null, "林远", 0, "", "uncertain", 5);
         when(repository.findItemsForUpdate(PROJECT_ID, List.of("item-1")))
                 .thenReturn(reactor.core.publisher.Flux.just(confirmed));
         when(repository.findItemsForUpdate(PROJECT_ID, List.of())).thenReturn(reactor.core.publisher.Flux.empty());
@@ -447,7 +447,7 @@ class StoryBibleServiceTest {
     void shouldRejectMergingDifferentTypes() {
         when(sourceRepository.findByProject(USER_ID, PROJECT_ID)).thenReturn(Mono.just(document(3, 3L)));
         StoryBibleRepository.Item location = new StoryBibleRepository.Item("item-2", PROJECT_ID, "doc-1", "location", "长安", "",
-                new JSONObject(), "ai", "pending", false, null, "长安", 0, "", "uncertain", null, 0);
+                new JSONObject(), "ai", "pending", false, null, "长安", 0, "", "uncertain", 0);
         when(repository.getItem(PROJECT_ID, "item-1")).thenReturn(Mono.just(item("item-1", null)));
         when(repository.getItem(PROJECT_ID, "item-2")).thenReturn(Mono.just(location));
         StepVerifier.create(service.mergeEntities(new StoryBibleDtos.MergeRequest(PROJECT_ID, "item-1", 0, "item-2", 0)))
@@ -506,6 +506,6 @@ class StoryBibleServiceTest {
      */
     private StoryBibleRepository.Item item(String id, String suggestFor) {
         return new StoryBibleRepository.Item(id, PROJECT_ID, "doc-1", "character", "林远", "", new JSONObject(), "ai",
-                "pending", false, suggestFor, "林远", 0, "", "uncertain", null, 5);
+                "pending", false, suggestFor, "林远", 0, "", "uncertain", 5);
     }
 }

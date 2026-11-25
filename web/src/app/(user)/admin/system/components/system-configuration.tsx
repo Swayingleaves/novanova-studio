@@ -2635,6 +2635,8 @@ export const SystemConfiguration = forwardRef<SystemConfigurationHandle, { activ
                             {(() => {
                                 const mode = selectedVideoMode;
                                 const prices = editingModelConfig.videoBillingConfiguration?.modePrices?.[mode.value] || {};
+                                const referenceVideoInputPrices = editingModelConfig.videoBillingConfiguration?.referenceVideoInputPrices || {};
+                                const isReferenceMode = mode.value === "reference-to-video";
                                 const modeEnabled = editingModelConfig.capabilities.includes(mode.value);
                                 const description = selectedVideoModeIndex === 0 ? translate("appShell.generateVideoFromText") : selectedVideoModeIndex === 1 ? translate("appShell.generateVideoFromImage") : translate("appShell.generateVideoFromTextImagesAndMultimodalReferences");
                                 return (
@@ -2666,27 +2668,80 @@ export const SystemConfiguration = forwardRef<SystemConfigurationHandle, { activ
                                                 {editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.creditsS") : translate("appShell.creditsRun")}）
                                             </div>
                                             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                                                {VIDEO_RESOLUTION_OPTIONS.filter((resolution) => resolution.value !== "auto").map((resolution) => (
-                                                    <label key={resolution.value} className="block rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2.5 py-1.5">
-                                                        <span className="block text-xs font-medium text-[var(--studio-muted)]">{resolution.label}</span>
-                                                        <InputNumber<string>
-                                                            stringMode
-                                                            min="0"
-                                                            precision={6}
-                                                            size="small"
-                                                            placeholder={translate("appShell.notConfigured")}
-                                                            value={prices[resolution.value] === undefined ? undefined : String(prices[resolution.value])}
-                                                            className="mt-1 w-full!"
-                                                            disabled={!modeEnabled}
-                                                            controls={false}
-                                                            onChange={(value) =>
-                                                                updateEditingModelConfig({
-                                                                    videoBillingConfiguration: updateVideoResolutionPrice(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value, resolution.value, value),
-                                                                })
-                                                            }
-                                                        />
-                                                    </label>
-                                                ))}
+                                                {VIDEO_RESOLUTION_OPTIONS.filter((resolution) => resolution.value !== "auto").map((resolution) =>
+                                                    isReferenceMode ? (
+                                                        <div key={resolution.value} className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2.5 py-2 space-y-2">
+                                                            <div className="text-xs font-semibold text-[var(--studio-ink)]">{resolution.label}</div>
+                                                            <label className="block">
+                                                                <span className="block text-[11px] text-[var(--studio-muted)]">{translate("appShell.withoutVideoInput")}</span>
+                                                                <InputNumber<string>
+                                                                    stringMode
+                                                                    min="0"
+                                                                    precision={6}
+                                                                    size="small"
+                                                                    placeholder={translate("appShell.notConfigured")}
+                                                                    value={prices[resolution.value] === undefined ? undefined : String(prices[resolution.value])}
+                                                                    className="mt-1 w-full!"
+                                                                    disabled={!modeEnabled}
+                                                                    controls={false}
+                                                                    onChange={(value) =>
+                                                                        updateEditingModelConfig({
+                                                                            videoBillingConfiguration: updateVideoResolutionPrice(
+                                                                                editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(),
+                                                                                mode.value,
+                                                                                resolution.value,
+                                                                                value,
+                                                                            ),
+                                                                        })
+                                                                    }
+                                                                />
+                                                            </label>
+                                                            <label className="block">
+                                                                <span className="block text-[11px] text-[var(--studio-muted)]">{translate("appShell.withVideoInput")}</span>
+                                                                <InputNumber<string>
+                                                                    stringMode
+                                                                    min="0"
+                                                                    precision={6}
+                                                                    size="small"
+                                                                    placeholder={translate("appShell.notConfigured")}
+                                                                    value={referenceVideoInputPrices[resolution.value] === undefined ? undefined : String(referenceVideoInputPrices[resolution.value])}
+                                                                    className="mt-1 w-full!"
+                                                                    disabled={!modeEnabled}
+                                                                    controls={false}
+                                                                    onChange={(value) =>
+                                                                        updateEditingModelConfig({
+                                                                            videoBillingConfiguration: updateVideoReferenceVideoInputPrice(
+                                                                                editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(),
+                                                                                resolution.value,
+                                                                                value,
+                                                                            ),
+                                                                        })
+                                                                    }
+                                                                />
+                                                            </label>
+                                                        </div>
+                                                    ) : (
+                                                        <label key={resolution.value} className="block rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2.5 py-1.5">
+                                                            <span className="block text-xs font-medium text-[var(--studio-muted)]">{resolution.label}</span>
+                                                            <InputNumber<string>
+                                                                stringMode
+                                                                min="0"
+                                                                precision={6}
+                                                                size="small"
+                                                                placeholder={translate("appShell.notConfigured")}
+                                                                value={prices[resolution.value] === undefined ? undefined : String(prices[resolution.value])}
+                                                                className="mt-1 w-full!"
+                                                                disabled={!modeEnabled}
+                                                                controls={false}
+                                                                onChange={(value) =>
+                                                                    updateEditingModelConfig({
+                                                                        videoBillingConfiguration: updateVideoResolutionPrice(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value, resolution.value, value),
+                                                                    })
+                                                                }
+                                                            />
+                                                        </label>
+                                                    ),
+                                                )}
                                             </div>
                                         </div>
 
@@ -2941,6 +2996,7 @@ function normalizeModelConfigForSave(config: ServerModelConfig): ServerModelConf
                   modePrices: Object.fromEntries(
                       Object.entries(config.videoBillingConfiguration.modePrices || {}).filter(([mode]) => mode !== "audio-input" && supportedCapabilities.has(mode) && capabilities.includes(mode)),
                   ) as VideoBillingConfiguration["modePrices"],
+                  referenceVideoInputPrices: capabilities.includes("reference-to-video") ? { ...(config.videoBillingConfiguration.referenceVideoInputPrices || {}) } : {},
               }
             : config.videoBillingConfiguration;
     // 自定义模型配置只保留已勾选能力的键，避免残留未启用能力的模板。
@@ -3058,6 +3114,7 @@ function cloneVideoBillingConfiguration(configuration: VideoBillingConfiguration
     return {
         ...configuration,
         modePrices: Object.fromEntries(Object.entries(configuration.modePrices || {}).map(([mode, prices]) => [mode, { ...prices }])) as VideoBillingConfiguration["modePrices"],
+        referenceVideoInputPrices: { ...(configuration.referenceVideoInputPrices || {}) },
     };
 }
 
@@ -3070,10 +3127,18 @@ function updateVideoResolutionPrice(configuration: VideoBillingConfiguration, mo
     return { ...configuration, modePrices };
 }
 
+function updateVideoReferenceVideoInputPrice(configuration: VideoBillingConfiguration, resolution: VideoResolution, value: CreditAmount | null) {
+    const referenceVideoInputPrices = { ...(configuration.referenceVideoInputPrices || {}) };
+    if (value === null) delete referenceVideoInputPrices[resolution];
+    else referenceVideoInputPrices[resolution] = creditText(value);
+    return { ...configuration, referenceVideoInputPrices };
+}
+
 function clearVideoModePrices(configuration: VideoBillingConfiguration, mode: VideoGenerationMode): VideoBillingConfiguration {
     return {
         ...configuration,
         modePrices: { ...configuration.modePrices, [mode]: {} },
+        ...(mode === "reference-to-video" ? { referenceVideoInputPrices: {} } : {}),
     };
 }
 

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { configFromModelConfigs, normalizeServerModelConfig, defaultConfig } from "@/features/settings/stores/use-config-store";
+import { configFromModelConfigs, normalizeServerModelConfig, defaultConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 import { availableVideoResolutions, quoteVideoGeneration, videoGenerationReferenceIssue, videoModelSupportsMode } from "./video-billing";
 
-function configFor(billingUnit: "generation" | "second" = "generation") {
+function configFor(billingUnit: "generation" | "second" = "generation"): AiConfig {
     return {
         ...defaultConfig,
         videoModels: ["video-model"],
@@ -173,4 +173,33 @@ test("配置最长时间后超出上限不可报价，默认15秒、-1不限制�
         quoteVideoGeneration({ config, model: "video-model", mode: "text-to-video", resolution: "720p", seconds: 3 }),
         { available: false, reason: "当前模型最长时间配置无效" },
     );
+});
+
+test("全能参考按是否有视频输入自动选择对应分辨率价格，未单独配置时沿用无视频输入价格", () => {
+    const config = configFor("generation");
+    config.videoModelBillingConfigurations[0].videoBillingConfiguration!.referenceVideoInputPrices = {
+        "720p": 35,
+        "4k": 90,
+    };
+
+    // 720p：无视频输入用 20，有视频输入用 35
+    assertQuoteCredits(quoteVideoGeneration({ config, model: "video-model", mode: "reference-to-video", resolution: "720p", seconds: 5, imageReferenceCount: 1, videoReferenceCount: 0 }), 20);
+    assertQuoteCredits(quoteVideoGeneration({ config, model: "video-model", mode: "reference-to-video", resolution: "720p", seconds: 5, videoReferenceCount: 1 }), 35);
+
+    // 1080p：未配置有视频输入独立价格，有视频输入时沿用无视频输入价格 32
+    assertQuoteCredits(quoteVideoGeneration({ config, model: "video-model", mode: "reference-to-video", resolution: "1080p", seconds: 5, videoReferenceCount: 1 }), 32);
+
+    // 4k：仅配置有视频输入价格，无视频输入时提示未配置，有视频输入时按 90 计费
+    assert.equal(availableVideoResolutions(config, "video-model", "reference-to-video").includes("4k"), true);
+    assert.deepEqual(
+        quoteVideoGeneration({ config, model: "video-model", mode: "reference-to-video", resolution: "4k", seconds: 5, imageReferenceCount: 1, videoReferenceCount: 0 }),
+        { available: false, reason: "当前模式未配置所选分辨率价格" },
+    );
+    assertQuoteCredits(quoteVideoGeneration({ config, model: "video-model", mode: "reference-to-video", resolution: "4k", seconds: 5, videoReferenceCount: 1 }), 90);
+
+    // 仅配置有视频输入价格时也应视为支持全能参考模式
+    const onlyVideoInputConfig = configFor("generation");
+    onlyVideoInputConfig.videoModelBillingConfigurations[0].videoBillingConfiguration!.modePrices["reference-to-video"] = {};
+    onlyVideoInputConfig.videoModelBillingConfigurations[0].videoBillingConfiguration!.referenceVideoInputPrices = { "720p": 45 };
+    assert.equal(videoModelSupportsMode(onlyVideoInputConfig, "video-model", "reference-to-video"), true);
 });

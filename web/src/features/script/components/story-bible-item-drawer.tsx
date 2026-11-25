@@ -4,7 +4,7 @@ import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { App, Alert, Button, Checkbox, Drawer, Empty, Input, InputNumber, Select, Spin, Tag } from "antd";
+import { App, Alert, Button, Checkbox, Drawer, Empty, Input, Select, Spin, Tag } from "antd";
 import { Check, Lock, X } from "lucide-react";
 
 import {
@@ -24,9 +24,9 @@ export const getItemStatusLabels = (translate = translateMessage): Record<StoryB
 
 const getRoleLabels = (translate = translateMessage): Record<StoryBibleLinkRole, string> => ({ relation_source: translate("script.relationshipSource"), relation_target: translate("script.relationshipTarget"), participant: translate("script.participants"), location: translate("script.location"), storyline_event: translate("script.includedEvents") });
 
-type Draft = { name: string; summary: string; aliases: string[]; storyTime: string; storyTimeKnown: boolean; storyOrder: number | null; relationType: string; source: string; target: string; participants: string[]; location: string; events: string[] };
+type Draft = { name: string; summary: string; aliases: string[]; storyTime: string; storyTimeKnown: boolean; relationType: string; source: string; target: string; participants: string[]; location: string; events: string[] };
 
-const EMPTY_DRAFT: Draft = { name: "", summary: "", aliases: [], storyTime: "", storyTimeKnown: false, storyOrder: null, relationType: "", source: "", target: "", participants: [], location: "", events: [] };
+const EMPTY_DRAFT: Draft = { name: "", summary: "", aliases: [], storyTime: "", storyTimeKnown: false, relationType: "", source: "", target: "", participants: [], location: "", events: [] };
 
 /** 条目详情抽屉：编辑、确认、拒绝、证据侧栏、待审建议以及人物地点的合并拆分。 */
 export function StoryBibleItemDrawer({ projectId, itemId, createType, onClose, onChanged, onOpenSource }: {
@@ -131,7 +131,6 @@ export function StoryBibleItemDrawer({ projectId, itemId, createType, onClose, o
             links,
             storyTime: draft.storyTime,
             storyTimeStatus: draft.storyTimeKnown ? "known" : "uncertain",
-            storyOrder: draft.storyOrder,
         }), translate("script.savedAndLockedFutureAnalysisWillNotOverwriteIt"));
     };
 
@@ -223,7 +222,6 @@ export function StoryBibleItemDrawer({ projectId, itemId, createType, onClose, o
                         <Field label={translate("script.participatingCharacters")}><ItemSelect projectId={projectId} itemType="character" multiple value={draft.participants} onChange={(participants) => setDraft({ ...draft, participants })} /></Field>
                         <Field label={translate("script.location")}><ItemSelect projectId={projectId} itemType="location" value={draft.location} onChange={(location) => setDraft({ ...draft, location })} /></Field>
                         <Field label={translate("script.storyTime")}><div className="flex items-center gap-2"><Input value={draft.storyTime} maxLength={255} onChange={(event) => setDraft({ ...draft, storyTime: event.target.value })} placeholder={translate("script.forExampleThreeYearsAgoTheNextMorning")} /><Checkbox checked={draft.storyTimeKnown} onChange={(event) => setDraft({ ...draft, storyTimeKnown: event.target.checked })}>{translate("script.confirmed")}</Checkbox></div></Field>
-                        <Field label={translate("script.storyOrder")}><InputNumber className="w-40" value={draft.storyOrder} onChange={(storyOrder) => setDraft({ ...draft, storyOrder: storyOrder ?? null })} placeholder={translate("script.lowerNumbersAppearEarlier")} /></Field>
                     </> : null}
                     {itemType === "storyline" ? <Field label={translate("script.includedEvents")}><ItemSelect projectId={projectId} itemType="event" multiple value={draft.events} onChange={(events) => setDraft({ ...draft, events })} /></Field> : null}
                     <Field label={translate("script.summary")}><Input.TextArea value={draft.summary} maxLength={5000} autoSize={{ minRows: 3, maxRows: 10 }} onChange={(event) => setDraft({ ...draft, summary: event.target.value })} /></Field>
@@ -234,7 +232,7 @@ export function StoryBibleItemDrawer({ projectId, itemId, createType, onClose, o
                 <div className="space-y-5">
                     {item?.summary ? <p className="whitespace-pre-wrap text-sm text-[var(--studio-text)]">{item.summary}</p> : null}
                     {item?.attributes?.uncertain === true ? <Alert type="warning" showIcon title={translate("script.aiIsUnsureWhetherTheseReferToTheSameSubject")} /> : null}
-                    {item?.itemType === "event" ? <p className="text-xs text-[var(--studio-muted)]">{translate("script.storyTimeCountcount_2dee0a", { value0: item.storyTimeStatus === "known" ? item.storyTime : translate("script.pendingCount", { value0: item.storyTime ? `（${item.storyTime}）` : "" }), value1: item.storyOrder != null ? translate("script.orderCount", { value0: item.storyOrder }) : "" })}</p> : null}
+                    {item?.itemType === "event" ? <p className="text-xs text-[var(--studio-muted)]">{translate("script.storyTimeCountcount_2dee0a", { value0: item.storyTimeStatus === "known" ? item.storyTime : translate("script.pendingCount", { value0: item.storyTime ? `（${item.storyTime}）` : "" }), value1: "" })}</p> : null}
                     {entity ? (
                         <section>
                             <div className="mb-2 flex items-center gap-2"><h3 className="text-sm font-semibold">{translate("script.aliases")}</h3><span className="flex-1" /><Button size="small" onClick={merge}>{translate("script.mergeOtherEntries")}</Button><Button size="small" disabled={!splitAliasIds.length && !splitEvidenceIds.length} onClick={split}>{translate("script.splitSelected")}</Button></div>
@@ -324,7 +322,6 @@ function toDraft(detail: StoryBibleItemDetail): Draft {
         aliases: detail.aliases.map((alias) => alias.alias).filter((alias) => alias !== item.name),
         storyTime: item.storyTime,
         storyTimeKnown: item.storyTimeStatus === "known",
-        storyOrder: item.storyOrder,
         relationType: typeof item.attributes?.relationType === "string" ? item.attributes.relationType : "",
         source: pick("relation_source")[0] || "",
         target: pick("relation_target")[0] || "",

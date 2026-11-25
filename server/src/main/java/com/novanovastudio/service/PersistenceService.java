@@ -645,7 +645,24 @@ public class PersistenceService {
             }
             normalizedPrices.put(mode, Map.copyOf(normalizedModePrices));
         }
-        return new VideoBillingConfiguration(billingUnit, minimumDurationSeconds, maximumDurationSeconds, Map.copyOf(normalizedPrices));
+        Map<String, BigDecimal> normalizedReferenceVideoInputPrices = new LinkedHashMap<>();
+        Map<String, BigDecimal> inputReferenceVideoPrices = configuration.referenceVideoInputPrices();
+        if (inputReferenceVideoPrices != null && !inputReferenceVideoPrices.isEmpty()) {
+            if (!capabilities.contains(VideoGenerationMode.REFERENCE_TO_VIDEO)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.onlySelectedModesMayHavePrices"));
+            }
+            for (Map.Entry<String, BigDecimal> entry : inputReferenceVideoPrices.entrySet()) {
+                if (!VideoResolution.isSupported(entry.getKey())) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoPriceTableContainsAnUnsupportedResolution"));
+                }
+                if (entry.getValue() == null || entry.getValue().signum() < 0) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoResolutionPriceMustBeANonnegativeInteger"));
+                }
+                normalizedReferenceVideoInputPrices.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return new VideoBillingConfiguration(billingUnit, minimumDurationSeconds, maximumDurationSeconds,
+                Map.copyOf(normalizedPrices), Map.copyOf(normalizedReferenceVideoInputPrices));
     }
 
     /**

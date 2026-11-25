@@ -28,6 +28,8 @@ export type VideoBillingConfiguration = {
     minimumDurationSeconds: number;
     maximumDurationSeconds?: number | null;
     modePrices: Partial<Record<VideoGenerationMode, Partial<Record<VideoResolution, CreditAmount>>>>;
+    /** 全能参考模式下有视频输入时的分辨率单价表；未配置档位时沿用 modePrices["reference-to-video"] 的无视频输入价格。 */
+    referenceVideoInputPrices?: Partial<Record<VideoResolution, CreditAmount>>;
 };
 /** 图片模型按 1K、2K、4K 清晰度配置的积分单价，空表示沿用模型单价。 */
 export type ImageBillingConfiguration = {

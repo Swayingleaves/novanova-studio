@@ -308,6 +308,34 @@ class ScriptAgentServiceTest {
     }
 
     /**
+     * 验证对白引用了正式人物但未列在场次 characterIds 时（如电话/画外音），自动补齐并放行；非法人物标识仍拒绝。
+     */
+    @Test
+    void shouldSyncValidDialogueCharacterIntoSceneAndStillRejectUnknown() {
+        ScriptDtos.ProjectSnapshot snapshot = adaptationSnapshot();
+        ScriptDtos.EpisodeSummary episode = snapshot.project().episodes().getFirst();
+        ScriptDtos.ScriptBlock phoneReply = new ScriptDtos.ScriptBlock("block-1", "dialogue", "character-1",
+                "喂，爸，怎么了？", "adapted", 0);
+        ScriptDtos.Scene scene = new ScriptDtos.Scene("scene-a", "location-0", 1, "电话报丧", "interior", "夜",
+                "", "", "", "", "", 0, List.of("character-0"), List.of(phoneReply));
+        JSONObject validDraft = JSON.parseObject(JSON.toJSONString(new ScriptDtos.EpisodeDetail(episode, List.of(scene))));
+
+        JSONObject validated = service.validateWholeBookDraft(validDraft, "episode", episode.id(), snapshot).block();
+        assertEquals(List.of("character-0", "character-1"),
+                validated.getJSONArray("scenes").getJSONObject(0).getJSONArray("characterIds").toJavaList(String.class));
+
+        ScriptDtos.ScriptBlock unknownReply = new ScriptDtos.ScriptBlock("block-2", "dialogue", "invented-character",
+                "未知人物台词", "adapted", 0);
+        ScriptDtos.Scene invalidScene = new ScriptDtos.Scene("scene-b", "location-0", 1, "非法对白", "interior", "夜",
+                "", "", "", "", "", 0, List.of("character-0"), List.of(unknownReply));
+        JSONObject invalidDraft = JSON.parseObject(JSON.toJSONString(new ScriptDtos.EpisodeDetail(episode, List.of(invalidScene))));
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.validateWholeBookDraft(invalidDraft, "episode", episode.id(), snapshot).block());
+        assertTrue(error.getMessage().contains("无效的正文人物引用"));
+    }
+
+    /**
      * 验证整集、单场与正文块生成在模型输入中使用短序号，并在结构校验前还原正式引用。
      *
      * @param targetType String 本次生成的局部目标类型

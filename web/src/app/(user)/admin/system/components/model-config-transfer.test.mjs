@@ -106,6 +106,26 @@ test("未启用能力的自定义配置不会导入", () => {
     assert.equal(result.patch.videoBillingConfiguration.modePrices["image-to-video"], undefined);
 });
 
+test("全能参考有视频输入价格支持导出和导入，未启用全能参考时自动忽略", () => {
+    const enabled = videoConfig({
+        capabilities: ["text-to-video", "reference-to-video"],
+        videoBillingConfiguration: {
+            billingUnit: "generation",
+            minimumDurationSeconds: 5,
+            modePrices: { "text-to-video": { "720p": "10" }, "reference-to-video": { "720p": "55" } },
+            referenceVideoInputPrices: { "720p": "75" },
+        },
+    });
+    const imported = parseCustomModelTransfer(buildCustomModelTransferJson(enabled), "video");
+    assert.equal(imported.ok, true);
+    assert.equal(imported.patch.videoBillingConfiguration.referenceVideoInputPrices["720p"], "75");
+    assert.equal(imported.summary.priceCount, 3);
+
+    const disabled = parseCustomModelTransfer(buildCustomModelTransferJson({ ...enabled, capabilities: ["text-to-video"] }), "video");
+    assert.equal(disabled.ok, true);
+    assert.deepEqual(disabled.patch.videoBillingConfiguration.referenceVideoInputPrices, {});
+});
+
 test("图片配置保留尺寸映射与异步查询开关", () => {
     const result = parseCustomModelTransfer(buildCustomModelTransferJson(imageConfig()), "image");
     assert.equal(result.ok, true);

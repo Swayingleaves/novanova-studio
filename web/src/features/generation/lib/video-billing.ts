@@ -82,8 +82,14 @@ export function readVideoModelBillingConfiguration(config: AiConfig, model: stri
 
 export function videoModelSupportsMode(config: AiConfig, model: string, mode: VideoGenerationMode) {
     const billing = readVideoModelBillingConfiguration(config, model);
-    const prices = billing?.videoBillingConfiguration?.modePrices?.[mode];
-    return Boolean(billing?.capabilities.includes(mode) && prices && Object.values(prices).some(isValidVideoPrice));
+    if (!billing?.capabilities.includes(mode)) return false;
+    const prices = billing.videoBillingConfiguration?.modePrices?.[mode];
+    if (prices && Object.values(prices).some(isValidVideoPrice)) return true;
+    if (mode === "reference-to-video") {
+        const videoInputPrices = billing.videoBillingConfiguration?.referenceVideoInputPrices;
+        if (videoInputPrices && Object.values(videoInputPrices).some(isValidVideoPrice)) return true;
+    }
+    return false;
 }
 
 export function availableVideoModelsForMode(config: AiConfig, mode: VideoGenerationMode) {
@@ -91,8 +97,24 @@ export function availableVideoModelsForMode(config: AiConfig, mode: VideoGenerat
 }
 
 export function availableVideoResolutions(config: AiConfig, model: string, mode: VideoGenerationMode) {
-    const prices = readVideoModelBillingConfiguration(config, model)?.videoBillingConfiguration?.modePrices?.[mode] || {};
-    return VIDEO_RESOLUTION_OPTIONS.filter((option) => isValidVideoPrice(prices[option.value])).map((option) => option.value);
+    const configuration = readVideoModelBillingConfiguration(config, model)?.videoBillingConfiguration;
+    const prices = configuration?.modePrices?.[mode] || {};
+    const videoInputPrices = mode === "reference-to-video" ? configuration?.referenceVideoInputPrices || {} : {};
+    return VIDEO_RESOLUTION_OPTIONS.filter((option) => isValidVideoPrice(prices[option.value]) || isValidVideoPrice(videoInputPrices[option.value])).map((option) => option.value);
+}
+
+/** 根据模式、分辨率和是否包含视频参考输入解析单价；全能参考有视频输入时优先使用独立价格，未配置时回退无视频输入价格。 */
+export function resolveVideoUnitPrice(
+    configuration: VideoBillingConfiguration | null | undefined,
+    mode: VideoGenerationMode,
+    resolution: VideoResolution,
+    hasVideoReference: boolean,
+): CreditAmount | undefined {
+    if (mode === "reference-to-video" && hasVideoReference) {
+        const videoInputPrice = configuration?.referenceVideoInputPrices?.[resolution];
+        if (isValidVideoPrice(videoInputPrice)) return videoInputPrice;
+    }
+    return configuration?.modePrices?.[mode]?.[resolution];
 }
 
 export function quoteVideoGeneration(input: VideoGenerationQuoteInput): VideoGenerationQuote {
@@ -114,7 +136,8 @@ export function quoteVideoGeneration(input: VideoGenerationQuoteInput): VideoGen
     if (!VIDEO_RESOLUTION_OPTIONS.some((option) => option.value === resolution)) {
         return { available: false, reason: translate("generation.selectedVideoResolutionIsUnsupported") };
     }
-    const unitPrice = configuration.modePrices?.[input.mode]?.[resolution];
+    const hasVideoReference = (input.videoReferenceCount || 0) > 0;
+    const unitPrice = resolveVideoUnitPrice(configuration, input.mode, resolution, hasVideoReference);
     if (!isValidVideoPrice(unitPrice)) return { available: false, reason: translate("generation.selectedResolutionHasNoPrice") };
     const seconds = parsePositiveInteger(input.seconds);
     if (seconds === null) return { available: false, reason: translate("generation.videoDurationMustBeAPositiveInteger") };
@@ -152,6 +175,7 @@ export function createVideoBillingConfiguration(): VideoBillingConfiguration {
             "reference-to-video": {},
             "first-last-frame-to-video": {},
         },
+        referenceVideoInputPrices: {},
     };
 }
 

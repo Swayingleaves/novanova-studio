@@ -38,19 +38,18 @@ const POLL_INTERVAL_MILLISECONDS = 2500;
 /** 列表每页显示条数选项。 */
 const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
 
-const getTypeTabs = (translate = translateMessage): Array<{ value: StoryBibleItemType | "timeline"; label: string }> => ([
+const getTypeTabs = (translate = translateMessage): Array<{ value: StoryBibleItemType; label: string }> => ([
     { value: "character", label: translate("script.character") },
     { value: "location", label: translate("script.location") },
     { value: "relationship", label: translate("script.relationship") },
     { value: "event", label: translate("script.event") },
     { value: "storyline", label: translate("script.storyline") },
-    { value: "timeline", label: translate("script.timeline") },
 ]);
 
 const getJobStatusLabels = (translate = translateMessage): Record<StoryBibleJob["status"], string> => ({ queued: translate("script.queued"), running: translate("script.analyzing"), retryable: translate("script.interruptedCanResume"), completed: translate("script.completed"), partial: translate("script.partiallyCompleted"), failed: translate("script.failedRefunded"), canceled: translate("script.canceledChargedByBatch") });
 const getStageLabels = (translate = translateMessage): Record<string, string> => ({ extract: translate("script.batchExtraction"), book: translate("script.storylineSynthesis"), done: translate("script.completed") });
 
-/** 故事知识库：分析任务、条目列表、时间线与条目详情。 */
+/** 故事知识库：分析任务、条目列表与条目详情。 */
 export function StoryBiblePanel({ onOpenSource }: { onOpenSource: (start: number, end: number) => void }) {
     const translate = useTranslation();
     const projectId = useScriptStore((state) => state.project?.id || "");
@@ -59,8 +58,7 @@ export function StoryBiblePanel({ onOpenSource }: { onOpenSource: (start: number
     const { message, modal } = App.useApp();
     const [tree, setTree] = useState<ScriptSourceTree | null>(null);
     const [treeError, setTreeError] = useState("");
-    const [tab, setTab] = useState<StoryBibleItemType | "timeline">("character");
-    const [timelineOrder, setTimelineOrder] = useState<"narrative" | "story">("narrative");
+    const [tab, setTab] = useState<StoryBibleItemType>("character");
     const [status, setStatus] = useState<StoryBibleItemStatus | "">("");
     const [keyword, setKeyword] = useState("");
     const [page, setPage] = useState(1);
@@ -81,15 +79,14 @@ export function StoryBiblePanel({ onOpenSource }: { onOpenSource: (start: number
         setData(null);
         setListError("");
         try {
-            const itemType: StoryBibleItemType = tab === "timeline" ? "event" : tab;
-            const next = await listStoryBibleItems({ projectId, itemType, status: status || undefined, keyword: keyword.trim() || undefined, order: tab === "timeline" ? timelineOrder : "narrative", page, pageSize });
+            const next = await listStoryBibleItems({ projectId, itemType: tab, status: status || undefined, keyword: keyword.trim() || undefined, page, pageSize });
             if (requestSequence === listRequestSequence.current) setData(next);
         } catch (error) {
             if (requestSequence === listRequestSequence.current) setListError(error instanceof Error ? error.message : translate("script.couldNotLoadTheEntry"));
         } finally {
             if (requestSequence === listRequestSequence.current) setLoading(false);
         }
-    }, [hasSource, keyword, page, pageSize, projectId, status, tab, timelineOrder]);
+    }, [hasSource, keyword, page, pageSize, projectId, status, tab]);
 
     useEffect(() => { void load(); }, [load, refreshKey]);
     const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
@@ -137,15 +134,14 @@ export function StoryBiblePanel({ onOpenSource }: { onOpenSource: (start: number
     };
 
     const confirmAllPending = () => {
-        const itemType: StoryBibleItemType = tab === "timeline" ? "event" : tab;
         modal.confirm({
-            title: translate("script.confirmAllPendingContentUnderCount", { value0: getItemTypeLabels(translate)[itemType] }),
+            title: translate("script.confirmAllPendingContentUnderCount", { value0: getItemTypeLabels(translate)[tab] }),
             content: translate("script.includesAllPendingEntriesInThisCategoryRegardlessOfPagination"),
             okText: translate("script.confirmAll"),
             cancelText: translate("script.cancel"),
             onOk: async () => {
                 try {
-                    const result = await confirmAllStoryBibleItems(projectId, itemType);
+                    const result = await confirmAllStoryBibleItems(projectId, tab);
                     if (!result.confirmedCount) {
                         message.info(translate("script.thisCategoryHasNoPendingContent"));
                         return;
@@ -163,7 +159,7 @@ export function StoryBiblePanel({ onOpenSource }: { onOpenSource: (start: number
 
     useEffect(() => {
         setSelectedItemIds([]);
-    }, [keyword, page, pageSize, projectId, refreshKey, status, tab, timelineOrder]);
+    }, [keyword, page, pageSize, projectId, refreshKey, status, tab]);
 
     if (!projectId) return null;
 
@@ -174,7 +170,6 @@ export function StoryBiblePanel({ onOpenSource }: { onOpenSource: (start: number
             <AnalysisBar key={projectId} projectId={projectId} tree={tree} treeError={treeError} onCompleted={refresh} />
             <div className="flex flex-wrap items-center gap-2 border-b border-[var(--studio-line)] px-4 py-3 sm:px-6">
                 <Segmented value={tab} options={getTypeTabs(translate)} onChange={(value) => { setTab(value as typeof tab); setPage(1); }} />
-                {tab === "timeline" ? <Segmented value={timelineOrder} options={[{ value: "narrative", label: translate("script.narrativeOrder") }, { value: "story", label: translate("script.storyTime") }]} onChange={(value) => { setTimelineOrder(value as typeof timelineOrder); setPage(1); }} /> : null}
                 <Select className="w-28" value={status} onChange={(value) => { setStatus(value); setPage(1); }} options={[{ value: "", label: translate("script.allActive") }, { value: "pending", label: translate("script.pendingApproval") }, { value: "confirmed", label: translate("script.confirmed") }, { value: "rejected", label: translate("script.rejected") }]} />
                 <Input.Search className="max-w-56" allowClear placeholder={translate("script.searchNamesOrAliases")} onSearch={(value) => { setKeyword(value); setPage(1); }} />
                 <span className="flex-1" />
@@ -182,7 +177,7 @@ export function StoryBiblePanel({ onOpenSource }: { onOpenSource: (start: number
                 <Button size="small" type="primary" disabled={!selectedPendingIds.length} onClick={confirmSelected}>{translate("script.confirmSelectedCount_be301e", { value0: selectedPendingIds.length ? `（${selectedPendingIds.length}）` : "" })}</Button>
                 {data && data.total ? <Button size="small" onClick={confirmAllPending}>{translate("script.confirmAll")}</Button> : null}
                 <Button size="small" icon={<RefreshCw className="size-3.5" />} onClick={refresh}>{translate("script.refresh")}</Button>
-                <Button size="small" icon={<Plus className="size-3.5" />} onClick={() => setCreating(tab === "timeline" ? "event" : tab)}>{translate("script.createCount_8187fe", { value0: getItemTypeLabels(translate)[tab === "timeline" ? "event" : tab] })}</Button>
+                <Button size="small" icon={<Plus className="size-3.5" />} onClick={() => setCreating(tab)}>{translate("script.createCount_8187fe", { value0: getItemTypeLabels(translate)[tab] })}</Button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
                 {listError ? <Alert type="error" showIcon title={listError} action={<Button size="small" onClick={refresh}>{translate("script.retry")}</Button>} /> : null}
@@ -190,12 +185,12 @@ export function StoryBiblePanel({ onOpenSource }: { onOpenSource: (start: number
                 {data && !data.items.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("script.noEntriesYetAnalyzeTheSourceOrCreateOneManually")} /> : null}
                 {(tab === "character" || tab === "location") && data?.items.length ? <p className="mb-3 text-xs text-[var(--studio-muted)]">{translate("script.cardShadingReflectsTheEvidenceCountOnThisPageMore")}</p> : null}
                 <div className={tab === "character" || tab === "location" ? "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,18rem),1fr))]" : "flex flex-col gap-2"}>
-                    {data?.items.map((item, index) => {
+                    {data?.items.map((item) => {
                         const onOpen = () => setOpenItemId(item.id);
                         const onEvidence = item.narrativeOffset != null ? () => onOpenSource(item.narrativeOffset as number, (item.narrativeOffset as number) + 1) : undefined;
                         return tab === "character" || tab === "location"
                             ? <ItemCard key={item.id} item={item} maximumEvidenceCount={maximumEvidenceCount} selected={selectedItemIds.includes(item.id)} onToggle={toggleItem} onOpen={onOpen} onEvidence={onEvidence} />
-                            : <ItemRow key={item.id} item={item} index={tab === "timeline" ? (data.page - 1) * data.pageSize + index + 1 : null} selected={selectedItemIds.includes(item.id)} onToggle={toggleItem} onOpen={onOpen} onEvidence={onEvidence} />;
+                            : <ItemRow key={item.id} item={item} selected={selectedItemIds.includes(item.id)} onToggle={toggleItem} onOpen={onOpen} onEvidence={onEvidence} />;
                     })}
                 </div>
                 {data && data.total ? <Pagination className="mt-4" size="small" current={data.page} pageSize={data.pageSize} pageSizeOptions={PAGE_SIZE_OPTIONS} total={data.total} showSizeChanger onChange={(nextPage, nextPageSize) => { if (nextPageSize !== pageSize) { setPageSize(nextPageSize); setPage(1); } else setPage(nextPage); }} /> : null}
@@ -243,13 +238,12 @@ function ItemCard({ item, maximumEvidenceCount, selected, onToggle, onOpen, onEv
     );
 }
 
-function ItemRow({ item, index, selected, onToggle, onOpen, onEvidence }: { item: StoryBibleItem; index: number | null; selected: boolean; onToggle: (itemId: string, checked: boolean) => void; onOpen: () => void; onEvidence?: () => void }) {
+function ItemRow({ item, selected, onToggle, onOpen, onEvidence }: { item: StoryBibleItem; selected: boolean; onToggle: (itemId: string, checked: boolean) => void; onOpen: () => void; onEvidence?: () => void }) {
     const translate = useTranslation();
     const uncertain = item.attributes?.uncertain === true;
     return (
         <div className="flex items-start gap-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] px-3 py-2">
             {item.status === "pending" ? <div className="pt-0.5" onClick={(event) => event.stopPropagation()}><Checkbox aria-label={translate("script.selectCount_501c10", { value0: item.name })} checked={selected} onChange={(event) => onToggle(item.id, event.target.checked)} /></div> : null}
-            {index != null ? <span className="w-8 shrink-0 pt-0.5 text-right text-xs text-[var(--studio-faint)]">{index}</span> : null}
             <button type="button" className="min-w-0 flex-1 text-left focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" onClick={onOpen}>
                 <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-semibold text-[var(--studio-ink)]">{item.name}</span>

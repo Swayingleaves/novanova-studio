@@ -271,7 +271,7 @@ class WholeBookAdaptationPlannerTest {
         return IntStream.range(0, count)
                 .mapToObj(index -> new StoryBibleRepository.Item(type + "-" + index, "project", "document", type,
                         type + index, "摘要", new JSONObject(), "ai", "confirmed", false, null,
-                        "match-" + type + index, index * 100, "", "certain", null, 0))
+                        "match-" + type + index, index * 100, "", "certain", 0))
                 .toList();
     }
 

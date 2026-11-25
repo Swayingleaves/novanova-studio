@@ -187,10 +187,9 @@ public class StoryBibleService {
         String keyword = trimToNull(request.keyword());
         int page = request.page() == null || request.page() < 1 ? 1 : request.page();
         int pageSize = request.pageSize() == null ? 20 : Math.min(Math.max(request.pageSize(), 1), 200);
-        boolean storyOrder = "story".equals(request.order());
         return owned(request.projectId()).flatMap(owned -> {
             String projectId = owned.document().projectId();
-            return Mono.zip(repository.listItems(projectId, itemType, status, keyword, storyOrder, (page - 1) * pageSize, pageSize).collectList(),
+            return Mono.zip(repository.listItems(projectId, itemType, status, keyword, (page - 1) * pageSize, pageSize).collectList(),
                             repository.countItems(projectId, itemType, status, keyword))
                     .map(tuple -> new StoryBibleDtos.ItemPage(tuple.getT1(), tuple.getT2(), page, pageSize));
         });
@@ -245,7 +244,7 @@ public class StoryBibleService {
                     StoryBibleRepository.Item item = new StoryBibleRepository.Item(id, projectId, owned.document().id(), itemType,
                             name, summary, attributes, optional.map(StoryBibleRepository.Item::origin).orElse("manual"),
                             "confirmed", true, null, matchKey, optional.map(StoryBibleRepository.Item::narrativeOffset).orElse(null),
-                            storyTime, timeStatus, request.storyOrder(), request.expectedRevision());
+                            storyTime, timeStatus, request.expectedRevision());
                     Mono<Void> write = optional.isPresent()
                             ? repository.updateItem(item, null).flatMap(this::requireUpdated)
                             : repository.insertItem(item, null);
@@ -476,7 +475,7 @@ public class StoryBibleService {
                     String createdId = UUID.randomUUID().toString();
                     StoryBibleRepository.Item created = new StoryBibleRepository.Item(createdId, item.projectId(), item.documentId(),
                             item.itemType(), name, "", new JSONObject(), "manual", "confirmed", true, null,
-                            StoryBibleSupport.normalize(name), null, "", "uncertain", null, 0);
+                            StoryBibleSupport.normalize(name), null, "", "uncertain", 0);
                     return transactionalOperator.transactional(repository.updateItem(withReview(item, request.expectedRevision()), null)
                                     .flatMap(this::requireUpdated)
                                     .then(repository.insertItem(created, null))
@@ -705,7 +704,7 @@ public class StoryBibleService {
     private StoryBibleRepository.Item withReview(StoryBibleRepository.Item item, long expectedRevision) {
         return new StoryBibleRepository.Item(item.id(), item.projectId(), item.documentId(), item.itemType(), item.name(),
                 item.summary(), item.attributes(), item.origin(), "confirmed", true, null, item.matchKey(),
-                item.narrativeOffset(), item.storyTime(), item.storyTimeStatus(), item.storyOrder(), expectedRevision);
+                item.narrativeOffset(), item.storyTime(), item.storyTimeStatus(), expectedRevision);
     }
 
     /**

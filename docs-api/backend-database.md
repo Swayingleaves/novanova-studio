@@ -874,7 +874,7 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 - 计费字数为所选范围内非空白 Unicode 码点数；任务创建与积分预扣在同一事务中完成，积分流水操作标识为任务标识。
 - 任务状态：`queued`、`running`、`retryable`、`completed`、`partial`、`failed`、`canceled`。可重试任务续跑不再扣费；主动取消保留已完成内容，仅按成功完成的初始批次分摊扣费，未成功批次退款向下取整；拆分批次全部叶子成功才算原批次成功，补分析不额外分摊；最终失败全额退款。任务状态接口以 `credits` 返回预扣积分、`refundedCredits` 返回已退积分。
 - `origin` 区分 AI 与人工条目；人工编辑、确认、合并、拆分后 `locked=TRUE`。重分析只更新未锁定 AI 条目；命中锁定条目时写入待审建议；`rejected` 条目保留以抑制重复生成。
-- 时间线：叙事顺序按 `narrative_offset`（首条证据起点）；故事时间按 `story_order`、`story_time_status`、`narrative_offset` 排序，时间不明的事件保持 `uncertain`。
+- 叙事顺序：事件等条目按 `narrative_offset`（首条证据起点）排序；时间不明的事件保持 `uncertain`。`V114__Drop_Story_Bible_Story_Order.sql`（社区版 `V115`）移除了未参与改编流程的 `story_order` 字段。
 
 ### V41 接口
 

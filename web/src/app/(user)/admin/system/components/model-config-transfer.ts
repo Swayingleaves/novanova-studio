@@ -165,7 +165,9 @@ export function parseCustomModelTransfer(text: string, targetModelType: ServerMo
         patch.imageBillingConfiguration = null;
         patch.convertImageSizeToPixels = false;
         patch.imageSizeMappings = null;
-        priceCount = Object.values(videoBilling.modePrices || {}).reduce((total, prices) => total + Object.keys(prices || {}).length, 0);
+        priceCount =
+            Object.values(videoBilling.modePrices || {}).reduce((total, prices) => total + Object.keys(prices || {}).length, 0) +
+            Object.keys(videoBilling.referenceVideoInputPrices || {}).length;
     }
 
     return {
@@ -258,7 +260,14 @@ function parseVideoBilling(value: unknown, capabilities: string[]): VideoBilling
         }
         modePrices[mode] = resolutionPrices;
     }
-    return { billingUnit, minimumDurationSeconds, maximumDurationSeconds, modePrices };
+    const referenceVideoInputPrices: Partial<Record<VideoResolution, CreditAmount>> = {};
+    if (capabilities.includes("reference-to-video") && isRecord(value.referenceVideoInputPrices)) {
+        for (const { value: resolution } of VIDEO_RESOLUTION_OPTIONS) {
+            const price = readCreditValue(value.referenceVideoInputPrices[resolution]);
+            if (price !== null) referenceVideoInputPrices[resolution] = price;
+        }
+    }
+    return { billingUnit, minimumDurationSeconds, maximumDurationSeconds, modePrices, referenceVideoInputPrices };
 }
 
 /** 导出时把视频价格统一成普通十进制字符串。 */
@@ -273,6 +282,10 @@ function normalizeVideoBilling(configuration: VideoBillingConfiguration): VideoB
         }
         if (Object.keys(normalized).length) modePrices[mode] = normalized;
     }
+    const referenceVideoInputPrices: Partial<Record<VideoResolution, CreditAmount>> = {};
+    for (const [resolution, price] of Object.entries(configuration.referenceVideoInputPrices || {})) {
+        if (String(price ?? "").trim() !== "") referenceVideoInputPrices[resolution as VideoResolution] = amountText(price);
+    }
     const minimumDurationSeconds = Math.max(1, Math.floor(configuration.minimumDurationSeconds || 1));
     const rawMaximum = configuration.maximumDurationSeconds;
     const maximumDurationSeconds =
@@ -286,6 +299,7 @@ function normalizeVideoBilling(configuration: VideoBillingConfiguration): VideoB
         minimumDurationSeconds,
         maximumDurationSeconds,
         modePrices,
+        ...(Object.keys(referenceVideoInputPrices).length ? { referenceVideoInputPrices } : {}),
     };
 }
 

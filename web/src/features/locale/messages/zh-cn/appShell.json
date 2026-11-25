@@ -191,6 +191,8 @@
     "disabled": "未启用",
     "configuration": "{value0}{value1}配置",
     "resolutionPricing": "分辨率价格（",
+    "withoutVideoInput": "无视频输入",
+    "withVideoInput": "有视频输入",
     "notConfigured": "未配置",
     "concurrency": "同时并发数",
     "tasks": "个任务",

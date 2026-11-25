@@ -325,7 +325,7 @@ export function cancelStoryBibleAnalysis(projectId: string, jobId: string) {
     return serverPost<StoryBibleJob>(`${STORY_BIBLE_PATH}/cancelAnalysis`, { projectId, jobId });
 }
 
-export function listStoryBibleItems(input: { projectId: string; itemType?: StoryBibleItemType; status?: StoryBibleItemStatus; keyword?: string; order?: "narrative" | "story"; page: number; pageSize: number }) {
+export function listStoryBibleItems(input: { projectId: string; itemType?: StoryBibleItemType; status?: StoryBibleItemStatus; keyword?: string; page: number; pageSize: number }) {
     return serverPost<StoryBibleItemPage>(`${STORY_BIBLE_PATH}/listItems`, input);
 }
 

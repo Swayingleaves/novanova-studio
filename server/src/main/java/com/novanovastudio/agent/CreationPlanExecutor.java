@@ -1380,11 +1380,11 @@ public class CreationPlanExecutor {
             Set<String> capabilities = modelConfig.capabilities() == null ? Set.of() : Set.copyOf(modelConfig.capabilities());
             List<String> modes = definition.videoGenerationModes(task, configuredMode, capabilities);
             String resolution = settings.resolution() == null ? "" : settings.resolution().trim().toLowerCase();
+            boolean hasVideoReference = attachments != null
+                    && attachments.stream().anyMatch(item -> item.type() != null && item.type().startsWith("video/"));
             List<String> pricedModes = modes.stream()
                     .filter(mode -> modelConfig.videoBillingConfiguration() != null
-                            && modelConfig.videoBillingConfiguration().modePrices() != null
-                            && modelConfig.videoBillingConfiguration().modePrices().get(mode) != null
-                            && modelConfig.videoBillingConfiguration().modePrices().get(mode).containsKey(resolution))
+                            && modelConfig.videoBillingConfiguration().hasPrice(mode, resolution, hasVideoReference))
                     .toList();
             if (pricedModes.isEmpty()) throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.noPriceForResolutionInThisWorkflowMode", resolution));
             if (!Boolean.TRUE.equals(modelConfig.isCustomModel())) return pricedModes.getFirst();

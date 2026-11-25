@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import com.novanovastudio.common.CreditAmounts;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentScopeAgentFactory;
 import com.novanovastudio.agent.AgentScopeModelFactory;
@@ -608,8 +609,14 @@ public class ScriptAgentService {
                 case "characters" -> validateCharacterDraft(ScriptStructuredDraftParser.parseCharacterDraft(draft));
                 case "world" -> validateWorldDraft(ScriptStructuredDraftParser.parseWorldDraft(draft));
                 case "episodes" -> validateEpisodePlanDraft(ScriptStructuredDraftParser.parseEpisodePlanDraft(draft));
-                case "episode" -> validateEpisodeDetail(ScriptStructuredDraftParser.parseEpisodeDetail(draft), targetId, snapshot);
-                case "scene" -> validateScene(ScriptStructuredDraftParser.parseScene(draft), targetId, snapshot);
+                case "episode" -> {
+                    syncDialogueCharactersIntoScenes(draft, snapshot);
+                    validateEpisodeDetail(ScriptStructuredDraftParser.parseEpisodeDetail(draft), targetId, snapshot);
+                }
+                case "scene" -> {
+                    syncDialogueCharactersIntoScene(draft, formalCharacterIds(snapshot));
+                    validateScene(ScriptStructuredDraftParser.parseScene(draft), targetId, snapshot);
+                }
                 case "block" -> validateBlock(ScriptStructuredDraftParser.parseScriptBlock(draft), targetId, snapshot);
                 default -> throw invalidAgentResult("剧本Agent返回了不支持的目标类型");
             }
@@ -738,6 +745,74 @@ public class ScriptAgentService {
         requireAgentResult(ids.size() == draft.episodes().size(), "剧本Agent返回了重复的分集标识");
         draft.episodes().forEach(episode -> requireAgentResult(episode.episodeNumber() == episode.sortOrder() + 1,
                 "剧本Agent返回的集号不连续"));
+    }
+
+    /**
+     * 补齐整集草稿各场次的出场人物列表：对白块中合法的正式人物（如电话、画外音或模型漏列）自动并入所属场次。
+     *
+     * @param episodeDraft JSONObject 整集草稿对象
+     * @param snapshot ProjectSnapshot 当前正式项目快照
+     */
+    private void syncDialogueCharactersIntoScenes(JSONObject episodeDraft, ScriptDtos.ProjectSnapshot snapshot) {
+        JSONArray scenes = episodeDraft.getJSONArray("scenes");
+        if (scenes == null || scenes.isEmpty()) {
+            return;
+        }
+        Set<String> validCharacterIds = formalCharacterIds(snapshot);
+        for (int index = 0; index < scenes.size(); index++) {
+            JSONObject scene = scenes.getJSONObject(index);
+            if (scene != null) {
+                syncDialogueCharactersIntoScene(scene, validCharacterIds);
+            }
+        }
+    }
+
+    /**
+     * 将单个场次对白块中已存在于正式人物表的 characterId 去重补入场次 characterIds，非法标识保持原样交由后续校验拒绝。
+     *
+     * @param scene JSONObject 场次草稿对象
+     * @param validCharacterIds Set&lt;String&gt; 正式项目人物标识集合
+     */
+    private void syncDialogueCharactersIntoScene(JSONObject scene, Set<String> validCharacterIds) {
+        JSONArray blocks = scene.getJSONArray("blocks");
+        if (blocks == null || blocks.isEmpty()) {
+            return;
+        }
+        JSONArray characterIds = scene.getJSONArray("characterIds");
+        Set<String> present = new java.util.LinkedHashSet<>();
+        if (characterIds != null) {
+            for (int index = 0; index < characterIds.size(); index++) {
+                String existing = characterIds.getString(index);
+                if (existing != null) {
+                    present.add(existing);
+                }
+            }
+        }
+        for (int index = 0; index < blocks.size(); index++) {
+            JSONObject block = blocks.getJSONObject(index);
+            if (block == null || !"dialogue".equals(block.getString("blockType"))) {
+                continue;
+            }
+            String speakerId = block.getString("characterId");
+            if (StringUtils.hasText(speakerId) && validCharacterIds.contains(speakerId) && present.add(speakerId)) {
+                if (characterIds == null) {
+                    characterIds = new JSONArray();
+                    scene.put("characterIds", characterIds);
+                }
+                characterIds.add(speakerId);
+            }
+        }
+    }
+
+    /**
+     * 提取当前项目快照中的正式人物标识集合。
+     *
+     * @param snapshot ProjectSnapshot 当前正式项目快照
+     * @return Set&lt;String&gt; 正式人物标识集合
+     */
+    private Set<String> formalCharacterIds(ScriptDtos.ProjectSnapshot snapshot) {
+        return snapshot.project().characters().stream().map(ScriptDtos.Character::id)
+                .collect(java.util.stream.Collectors.toSet());
     }
 
     /**

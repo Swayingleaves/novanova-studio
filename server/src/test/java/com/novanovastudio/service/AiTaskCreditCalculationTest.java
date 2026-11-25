@@ -123,6 +123,68 @@ class AiTaskCreditCalculationTest {
         Assertions.assertEquals(0, java.math.BigDecimal.valueOf(14).compareTo(credits));
     }
 
+    /** 全能参考模式配置有/无视频输入价格时，应按是否传入视频参考素材自动计费；未单独配置有视频输入价格时沿用无视频输入价格。 */
+    @Test
+    void shouldChargeUniversalReferenceByVideoInputPresence() {
+        VideoBillingConfiguration billing = new VideoBillingConfiguration(
+                "generation",
+                3,
+                15,
+                Map.of(VideoGenerationMode.REFERENCE_TO_VIDEO, Map.of(
+                        "720p", java.math.BigDecimal.valueOf(55),
+                        "1080p", java.math.BigDecimal.valueOf(80))),
+                Map.of("720p", java.math.BigDecimal.valueOf(75)));
+        AiTaskDtos.AiTaskMediaReference imageRef = new AiTaskDtos.AiTaskMediaReference(
+                "img-1", "img.png", "image/png", "k1", "https://example.com/1.png", "reference");
+        AiTaskDtos.AiTaskMediaReference videoRef = new AiTaskDtos.AiTaskMediaReference(
+                "vid-1", "vid.mp4", "video/mp4", "k2", "https://example.com/1.mp4", "reference");
+
+        var withoutVideo = calculateWithVideoBilling(new AiTaskDtos.CreateAiTaskRequest(
+                "video", "生成视频", "channel::model", Map.of("seconds", "5", "resolution", "720p"),
+                List.of(imageRef), List.of(), "videoPage", null, null, VideoGenerationMode.REFERENCE_TO_VIDEO),
+                List.of(VideoGenerationMode.REFERENCE_TO_VIDEO), billing);
+        var withVideo = calculateWithVideoBilling(new AiTaskDtos.CreateAiTaskRequest(
+                "video", "生成视频", "channel::model", Map.of("seconds", "5", "resolution", "720p"),
+                List.of(), List.of(videoRef), "videoPage", null, null, VideoGenerationMode.REFERENCE_TO_VIDEO),
+                List.of(VideoGenerationMode.REFERENCE_TO_VIDEO), billing);
+        var fallbackWithoutSpecificVideoPrice = calculateWithVideoBilling(new AiTaskDtos.CreateAiTaskRequest(
+                "video", "生成视频", "channel::model", Map.of("seconds", "5", "resolution", "1080p"),
+                List.of(), List.of(videoRef), "videoPage", null, null, VideoGenerationMode.REFERENCE_TO_VIDEO),
+                List.of(VideoGenerationMode.REFERENCE_TO_VIDEO), billing);
+
+        Assertions.assertEquals(0, java.math.BigDecimal.valueOf(55).compareTo(withoutVideo));
+        Assertions.assertEquals(0, java.math.BigDecimal.valueOf(75).compareTo(withVideo));
+        Assertions.assertEquals(0, java.math.BigDecimal.valueOf(80).compareTo(fallbackWithoutSpecificVideoPrice));
+    }
+
+    /** 使用自定义视频分档配置调用私有计费方法。 */
+    private java.math.BigDecimal calculateWithVideoBilling(AiTaskDtos.CreateAiTaskRequest request,
+                                                           List<String> capabilities,
+                                                           VideoBillingConfiguration videoBillingConfiguration) {
+        try {
+            Class<?> resolvedModelType = Class.forName("com.novanovastudio.service.AiTaskService$ResolvedModel");
+            Constructor<?> constructor = resolvedModelType.getDeclaredConstructor(
+                    AiTaskDtos.AiChannelConfig.class, String.class, String.class, java.math.BigDecimal.class, String.class,
+                    List.class, VideoBillingConfiguration.class, boolean.class, String.class, com.alibaba.fastjson2.JSONObject.class,
+                    boolean.class, Map.class, boolean.class, Map.class, com.novanovastudio.dto.ImageBillingConfiguration.class);
+            constructor.setAccessible(true);
+            Object resolvedModel = constructor.newInstance(
+                    new AiTaskDtos.AiChannelConfig("channel", "测试渠道", "https://example.com", "key", "openai", List.of("model")),
+                    "model", "model-config", java.math.BigDecimal.ZERO, videoBillingConfiguration.billingUnit(),
+                    capabilities, videoBillingConfiguration, true, "high",
+                    new com.alibaba.fastjson2.JSONObject(),
+                    false, Map.of(), false, null, null);
+            Method method = AiTaskService.class.getDeclaredMethod("calculateTaskCredits", AiTaskDtos.CreateAiTaskRequest.class, resolvedModelType);
+            method.setAccessible(true);
+            return (java.math.BigDecimal) method.invoke(new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), null, null, null, null, null, null, null, null, null, null, null, null, null, null, null), request, resolvedModel);
+        } catch (InvocationTargetException exception) {
+            if (exception.getCause() instanceof RuntimeException runtimeException) throw runtimeException;
+            throw new IllegalStateException(exception.getCause());
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
     /**
      * 未配置图片分辨率价目表时的计算入口。
      *

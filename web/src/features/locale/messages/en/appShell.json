@@ -191,6 +191,8 @@
     "disabled": "Disabled",
     "configuration": "{value0}{value1} configuration",
     "resolutionPricing": "Resolution pricing (",
+    "withoutVideoInput": "Without video input",
+    "withVideoInput": "With video input",
     "notConfigured": "Not configured",
     "concurrency": "Concurrency",
     "tasks": "tasks",

@@ -58,7 +58,7 @@ public class StoryBibleRepository {
     public record Item(String id, String projectId, String documentId, String itemType, String name, String summary,
                        JSONObject attributes, String origin, String status, boolean locked, String suggestForItemId,
                        String matchKey, Integer narrativeOffset, String storyTime, String storyTimeStatus,
-                       Integer storyOrder, long revision) { }
+                       long revision) { }
 
     /** 写入分析结果时用于匹配的条目索引。 */
     public record MatchEntry(String id, String itemType, String status, boolean locked, String origin, String matchKey,
@@ -349,23 +349,19 @@ public class StoryBibleRepository {
     // ---------------------------------------------------------------- 条目
 
     /**
-     * 分页查询条目，不含待审建议。
+     * 分页查询条目，不含待审建议，按原文叙事偏移顺序返回。
      * @param projectId String 项目标识
      * @param itemType String 条目类型，可为空
      * @param status String 状态，为空时排除已拒绝
      * @param keyword String 关键字，可为空
-     * @param storyOrder boolean 是否按故事时间排序
      * @param offset int 偏移
      * @param limit int 数量
      * @return Flux<ItemSummary> 条目
      */
     public Flux<StoryBibleDtos.ItemSummary> listItems(String projectId, String itemType, String status, String keyword,
-                                                      boolean storyOrder, int offset, int limit) {
-        String order = storyOrder
-                ? " ORDER BY i.story_order NULLS LAST,CASE i.story_time_status WHEN 'known' THEN 0 ELSE 1 END,i.narrative_offset NULLS LAST,i.name"
-                : " ORDER BY i.narrative_offset NULLS LAST,i.name";
+                                                      int offset, int limit) {
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("SELECT " + ITEM_COLUMNS + " FROM story_bible_items i"
-                        + itemFilter(itemType, status, keyword) + order + " LIMIT :limit OFFSET :offset")
+                        + itemFilter(itemType, status, keyword) + " ORDER BY i.narrative_offset NULLS LAST,i.name LIMIT :limit OFFSET :offset")
                 .bind("limit", limit).bind("offset", offset);
         return bindItemFilter(spec, projectId, itemType, status, keyword).map((row, metadata) -> mapSummary(row)).all();
     }
@@ -464,7 +460,7 @@ public class StoryBibleRepository {
      * @return Mono<Void> 写入结果
      */
     public Mono<Void> insertItem(Item item, String jobId) {
-        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("INSERT INTO story_bible_items(id,project_id,document_id,item_type,name,summary,attributes,origin,status,locked,suggest_for_item_id,match_key,narrative_offset,story_time,story_time_status,story_order,last_job_id) VALUES (:id,:projectId,:documentId,:type,:name,:summary,:attributes::jsonb,:origin,:status,:locked,:suggestFor,:matchKey,:narrativeOffset,:storyTime,:storyTimeStatus,:storyOrder,:jobId)")
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("INSERT INTO story_bible_items(id,project_id,document_id,item_type,name,summary,attributes,origin,status,locked,suggest_for_item_id,match_key,narrative_offset,story_time,story_time_status,last_job_id) VALUES (:id,:projectId,:documentId,:type,:name,:summary,:attributes::jsonb,:origin,:status,:locked,:suggestFor,:matchKey,:narrativeOffset,:storyTime,:storyTimeStatus,:jobId)")
                 .bind("id", item.id()).bind("projectId", item.projectId()).bind("documentId", item.documentId())
                 .bind("type", item.itemType()).bind("name", item.name()).bind("summary", item.summary())
                 .bind("attributes", item.attributes().toJSONString()).bind("origin", item.origin()).bind("status", item.status())
@@ -472,7 +468,6 @@ public class StoryBibleRepository {
                 .bind("storyTimeStatus", item.storyTimeStatus());
         spec = bindNullable(spec, "suggestFor", item.suggestForItemId(), String.class);
         spec = bindNullable(spec, "narrativeOffset", item.narrativeOffset(), Integer.class);
-        spec = bindNullable(spec, "storyOrder", item.storyOrder(), Integer.class);
         spec = bindNullable(spec, "jobId", jobId, String.class);
         return spec.fetch().rowsUpdated().then();
     }
@@ -484,11 +479,10 @@ public class StoryBibleRepository {
      * @return Mono<Boolean> 是否更新成功
      */
     public Mono<Boolean> updateItem(Item item, String jobId) {
-        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("UPDATE story_bible_items SET name=:name,summary=:summary,attributes=:attributes::jsonb,status=:status,locked=:locked,match_key=:matchKey,story_time=:storyTime,story_time_status=:storyTimeStatus,story_order=:storyOrder,last_job_id=COALESCE(:jobId,last_job_id),revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=:id AND revision=:revision")
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("UPDATE story_bible_items SET name=:name,summary=:summary,attributes=:attributes::jsonb,status=:status,locked=:locked,match_key=:matchKey,story_time=:storyTime,story_time_status=:storyTimeStatus,last_job_id=COALESCE(:jobId,last_job_id),revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=:id AND revision=:revision")
                 .bind("id", item.id()).bind("revision", item.revision()).bind("name", item.name()).bind("summary", item.summary())
                 .bind("attributes", item.attributes().toJSONString()).bind("status", item.status()).bind("locked", item.locked())
                 .bind("matchKey", item.matchKey()).bind("storyTime", item.storyTime()).bind("storyTimeStatus", item.storyTimeStatus());
-        spec = bindNullable(spec, "storyOrder", item.storyOrder(), Integer.class);
         spec = bindNullable(spec, "jobId", jobId, String.class);
         return spec.fetch().rowsUpdated().map(count -> count > 0);
     }
@@ -905,7 +899,7 @@ public class StoryBibleRepository {
                 JSON.parseObject(row.get("attributes", String.class)), row.get("origin", String.class), row.get("status", String.class),
                 Boolean.TRUE.equals(row.get("locked", Boolean.class)), row.get("suggest_for_item_id", String.class),
                 row.get("match_key", String.class), row.get("narrative_offset", Integer.class), row.get("story_time", String.class),
-                row.get("story_time_status", String.class), row.get("story_order", Integer.class), row.get("revision", Long.class));
+                row.get("story_time_status", String.class), row.get("revision", Long.class));
     }
 
     /**
@@ -917,7 +911,7 @@ public class StoryBibleRepository {
         Item item = mapItem(row);
         return new StoryBibleDtos.ItemSummary(item.id(), item.itemType(), item.name(), item.summary(), item.attributes(),
                 item.origin(), item.status(), item.locked(), item.suggestForItemId(), item.narrativeOffset(), item.storyTime(),
-                item.storyTimeStatus(), item.storyOrder(), item.revision(),
+                item.storyTimeStatus(), item.revision(),
                 JSON.parseArray(row.get("alias_list", String.class), String.class),
                 row.get("evidence_count", Long.class).intValue(), row.get("suggestion_count", Long.class).intValue());
     }

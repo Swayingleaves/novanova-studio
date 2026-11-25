@@ -48,14 +48,14 @@ public final class StoryBibleDtos {
     /** 未完成的章节片段，偏移起点含、终点不含。 */
     public record AnalysisGap(String sectionId, String title, int startOffset, int endOffset, String reason) { }
 
-    /** 条目分页查询请求，order为narrative叙事顺序或story故事时间。 */
-    public record ListItemsRequest(String projectId, String itemType, String status, String keyword, String order,
+    /** 条目分页查询请求，按原文叙事偏移顺序返回。 */
+    public record ListItemsRequest(String projectId, String itemType, String status, String keyword,
                                    Integer page, Integer pageSize) { }
 
     /** 条目列表项。 */
     public record ItemSummary(String id, String itemType, String name, String summary, JSONObject attributes,
                               String origin, String status, boolean locked, String suggestForItemId,
-                              Integer narrativeOffset, String storyTime, String storyTimeStatus, Integer storyOrder,
+                              Integer narrativeOffset, String storyTime, String storyTimeStatus,
                               long revision, List<String> aliases, int evidenceCount, int suggestionCount) { }
 
     /** 条目分页结果。 */
@@ -98,7 +98,7 @@ public final class StoryBibleDtos {
     /** 新建或编辑条目请求，itemId为空表示人工新建。 */
     public record SaveItemRequest(String projectId, String itemId, long expectedRevision, String itemType, String name,
                                   String summary, JSONObject attributes, List<String> aliases, List<LinkInput> links,
-                                  String storyTime, String storyTimeStatus, Integer storyOrder) { }
+                                  String storyTime, String storyTimeStatus) { }
 
     /** 合并人物或地点请求，源条目并入目标条目。 */
     public record MergeRequest(String projectId, String targetItemId, long targetRevision, String sourceItemId,

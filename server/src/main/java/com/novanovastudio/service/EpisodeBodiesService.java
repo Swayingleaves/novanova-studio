@@ -297,6 +297,7 @@ public class EpisodeBodiesService {
                 + ScriptDurationBudget.episodeBodyInstruction(episodeSeconds)
                 + "characters和locations是正式剧本的引用列表，只列出本集事实涉及的人物与地点："
                 + "场次characterIds与对白characterId只能使用characters中的id，"
+                + "场次内所有对白块的characterId（含电话或画外音）都必须同时列入该场次的characterIds，"
                 + "场次locationId只能使用locations中的id，没有对应正式地点时留空；"
                 + "需要列表中不存在的人物或地点时，用动作或旁白描述，不得编造引用标识。"
                 + "confirmedFacts中的id是故事知识库事实标识，不能作为人物或地点引用，也不能自行创建引用标识。"

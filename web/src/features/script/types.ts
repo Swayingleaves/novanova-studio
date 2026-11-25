@@ -348,7 +348,6 @@ export type StoryBibleItem = {
     narrativeOffset: number | null;
     storyTime: string;
     storyTimeStatus: "known" | "uncertain";
-    storyOrder: number | null;
     revision: number;
     aliases: string[];
     evidenceCount: number;
@@ -378,7 +377,6 @@ export type StoryBibleSaveItemInput = {
     links?: Array<{ relatedItemId: string; role: StoryBibleLinkRole }>;
     storyTime: string;
     storyTimeStatus: "known" | "uncertain";
-    storyOrder: number | null;
 };
 export type StoryBiblePricingTier = { minChars: number; maxChars: number | null; credits: CreditAmount };
 export type StoryBibleModelPricing = { modelConfigId: string; model: string; displayName: string; tiers: StoryBiblePricingTier[]; revision: number; quickConfiguration: StoryBibleQuickConfiguration | null };

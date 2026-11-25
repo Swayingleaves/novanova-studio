@@ -111,6 +111,12 @@ export function resolveModelOptionPrice(
                 }
             }
         }
+        if (videoConfig?.referenceVideoInputPrices) {
+            for (const price of Object.values(videoConfig.referenceVideoInputPrices)) {
+                const parsed = parseValidCreditAmount(price);
+                if (parsed) tieredAmounts.push(parsed);
+            }
+        }
         if (tieredAmounts.length) {
             return buildPriceRangeBadge(tieredAmounts, unit);
         }

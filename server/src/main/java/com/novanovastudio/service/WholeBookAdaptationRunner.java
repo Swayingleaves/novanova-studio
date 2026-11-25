@@ -199,7 +199,8 @@ public class WholeBookAdaptationRunner {
             Map<String, Object> input = new LinkedHashMap<>();
             input.put("requestType", "strategy");
             input.put("instruction", "归纳全书故事阶段与主线，给出建议集数与压缩取舍。"
-                    + "arcs 的 sourceKeys 必须精确取自输入的 sources.key；每个来源至少被一个阶段引用，不得遗漏或编造；"
+                    + "arcs 必须对输入的 sources 做严格顺序切分：arcs 数量不超过 " + sourceKeys.size()
+                    + "（只有 1 个来源时只输出 1 个阶段），每个 sources.key 必须且只能出现一次，依次拼接与输入顺序完全一致，不得重复、遗漏、编造或打乱顺序；"
                     + "recommendedEpisodes 是建议集数，最终集数由用户确认。");
             input.put("context", context);
             return scriptAgentService.callWholeBookUnit(job.userId(), operationId, job.modelValue(),

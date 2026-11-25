@@ -829,7 +829,7 @@ public class StoryBibleAnalysisRunner {
             return new StoryBibleRepository.Item(id, context.job().projectId(), context.job().documentId(), candidate.itemType(),
                     candidate.name(), candidate.summary() == null ? "" : candidate.summary(), attributes, "ai", "pending", false,
                     suggestFor, matchKey, candidate.evidences().getFirst().start(),
-                    storyTime.length() > 255 ? storyTime.substring(0, 255) : storyTime, timeStatus, null, 0);
+                    storyTime.length() > 255 ? storyTime.substring(0, 255) : storyTime, timeStatus, 0);
         }
 
         /**

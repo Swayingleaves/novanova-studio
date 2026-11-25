@@ -1697,8 +1697,9 @@ public class AiTaskService {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.invalidVideoTierPricing"));
         }
         String resolution = videoResolution(request.parameters());
-        Map<String, BigDecimal> modePrices = configuration.modePrices() == null ? null : configuration.modePrices().get(mode);
-        if (modePrices == null || !modePrices.containsKey(resolution)) {
+        boolean hasVideoReference = !videoReferences.isEmpty();
+        BigDecimal unitPrice = configuration.resolveUnitPrice(mode, resolution, hasVideoReference);
+        if (unitPrice == null) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.noPriceForResolutionInThisMode", resolution));
         }
         int seconds = videoSeconds(request.parameters());
@@ -1708,8 +1709,7 @@ public class AiTaskService {
         if (effectiveMaximumDuration != null && seconds > effectiveMaximumDuration) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoDurationMustNotExceedSeconds", effectiveMaximumDuration));
         }
-        BigDecimal unitPrice = modePrices.get(resolution);
-        if (unitPrice == null || CreditAmounts.of(unitPrice).compareTo(CreditAmounts.of(0)) < 0) {
+        if (CreditAmounts.of(unitPrice).compareTo(CreditAmounts.of(0)) < 0) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.invalidVideoResolutionPrices"));
         }
         try {
