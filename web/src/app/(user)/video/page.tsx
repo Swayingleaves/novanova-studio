@@ -109,7 +109,7 @@ import {
     type ServerVideoWorkflowStageQuote,
 } from "@/services/api/server";
 import { findLatestPlayableVideo, hasPlayableVideoUrl } from "./video-display";
-import { extractVideoKeyframes } from "@/features/whitemodel/video-keyframes";
+import { PoseWhitemodelCard } from "@/features/whitemodel/pose-whitemodel-card";
 
 type GeneratedVideo = {
     id: string;
@@ -320,6 +320,9 @@ export default function VideoPage() {
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [videoChoicePickerOpen, setVideoChoicePickerOpen] = useState(false);
+    const [poseWhitemodelJobs, setPoseWhitemodelJobs] = useState<
+        Record<string, { source: File | string; videoName: string; previewVideoUrl: string }>
+    >({});
     const [durationContinueReady, setDurationContinueReady] = useState(false);
     const [durationContinuePrompt, setDurationContinuePrompt] = useState("");
     const durationAdjustPendingRef = useRef(false);
@@ -1278,38 +1281,30 @@ export default function VideoPage() {
         clearDurationContinue();
         clearModelConfigContinue();
 
+        // 「白膜制作」技能：直接在浏览器本地逐帧捕捉 3D 人体骨骼动作并生成 1:1 对齐的 3D 关节白模，不再让大模型猜 scene.json
+        if (isWhitemodelWorkflow && videoReferences.length > 0) {
+            const firstVideo = videoReferences[0];
+            const videoSource = localVideoFilesRef.current.get(firstVideo.id) || referenceMediaUrl(firstVideo);
+            const previewUrl = referenceMediaUrl(firstVideo);
+            if (videoSource && previewUrl) {
+                startPoseWhitemodelJob(videoSource, firstVideo.name || "参考视频.mp4", previewUrl, attachments, text);
+                if (isNewConversation) void clearNewConversationDraft("video", userId);
+                setPrompt("");
+                setReferences([]);
+                setVideoReferences([]);
+                setAudioReferences([]);
+                setSelectedStyles([]);
+                return;
+            }
+        }
+
         setChatMessages((prev) => {
             const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments, generationStyles: selectedStyles, skill: selectedSkill }];
             chatMessagesRef.current = next;
             return next;
         });
 
-        // 白膜制作技能：若用户本轮上传了参考视频，优先使用本地 File 抽取关键帧拼图与精确时长/画幅，避免远程 URL CORS 失败
-        let outboundText = text;
-        let outboundRefs = allRefs;
-        if (isWhitemodelWorkflow && videoReferences.length > 0) {
-            const firstVideo = videoReferences[0];
-            const videoSource = localVideoFilesRef.current.get(firstVideo.id) || referenceMediaUrl(firstVideo);
-            if (videoSource) {
-                try {
-                    const extracted = await extractVideoKeyframes(videoSource);
-                    outboundText = `${text}\n[参考视频实测元信息：时长 ${extracted.durationSeconds}s，画幅 ${extracted.aspect}，分辨率 ${extracted.width}×${extracted.height}。附图为按时间均匀抽取的 ${extracted.frameCount} 张带时间戳关键帧拼图，请严格使用 duration=${extracted.durationSeconds} 和 aspect="${extracted.aspect}"]`;
-                    outboundRefs = [
-                        ...allRefs,
-                        {
-                            type: "image/jpeg",
-                            url: extracted.contactSheetDataUrl,
-                            name: `whitemodel_keyframes_${extracted.durationSeconds}s_${extracted.aspect}.jpg`,
-                        },
-                    ];
-                } catch (error) {
-                    console.warn("提取参考视频关键帧失败:", error);
-                    message.warning("参考视频关键帧提取失败，将仅基于文本生成");
-                }
-            }
-        }
-
-        await sendMessage(outboundText, outboundRefs.length ? outboundRefs : undefined, {
+        await sendMessage(text, allRefs.length ? allRefs : undefined, {
             model: videoModel,
             imageModel: workflowImageModel,
             imageSize: workflowImageSize,
@@ -1465,11 +1460,43 @@ export default function VideoPage() {
         input.click();
     };
 
+    /** 在对话中直接启动浏览器本地 3D 骨骼捕捉白膜制作任务（1:1 逐帧还原动作、画幅与时长）。 */
+    const startPoseWhitemodelJob = (
+        source: File | string,
+        videoName: string,
+        previewVideoUrl: string,
+        attachments: ChatAttachment[],
+        userText: string,
+    ) => {
+        const userRoundId = nanoid();
+        setPoseWhitemodelJobs((prev) => ({
+            ...prev,
+            [userRoundId]: { source, videoName, previewVideoUrl },
+        }));
+        setChatMessages((prev) => {
+            const next = [
+                ...prev,
+                { id: userRoundId, role: "user" as const, text: userText, attachments, skill: selectedSkill },
+                {
+                    id: nanoid(),
+                    role: "assistant" as const,
+                    text: `已接收参考视频「${videoName}」，正在浏览器本地逐帧捕捉 3D 人体骨骼动作并生成与原片 1:1 对齐的 3D 白膜：`,
+                    action: {
+                        type: "choice" as const,
+                        label: "重新上传视频",
+                        options: [{ label: "重新上传视频", value: "ask_user_upload_video", action: "ask_user_upload_video" }],
+                    },
+                },
+            ];
+            chatMessagesRef.current = next;
+            return next;
+        });
+    };
+
     /** 直接使用「最近上传」中的视频响应技能的上传视频引导。 */
     const handleSelectRecentVideoForChoice = async (asset: RecentReferenceAsset) => {
         setVideoChoicePickerOpen(false);
         if (isStreaming || isQueued) return;
-        if (!ensureModelConfiguration("video", model) || !ensureModelConfiguration("text")) return;
         const videoRef: ReferenceVideo = {
             id: nanoid(),
             name: asset.name || "参考视频.mp4",
@@ -1480,37 +1507,23 @@ export default function VideoPage() {
         };
         const attachments = videoReferenceAttachments([videoRef]);
         if (!attachments.length) return;
+        const text = isWhitemodelWorkflow ? "已选择最近上传的参考视频，制作 3D 白膜" : "已上传参考视频";
+        if (isWhitemodelWorkflow && asset.url) {
+            startPoseWhitemodelJob(asset.url, videoRef.name, asset.url, buildChatAttachments(attachments), text);
+            return;
+        }
+        if (!ensureModelConfiguration("video", model) || !ensureModelConfiguration("text")) return;
         const videoModel = effectiveConfig.videoModel || effectiveConfig.model || model;
         const size = config.size || "16:9";
         const seconds = config.videoSeconds || "5";
         const quality = config.vquality || "720p";
         const watermark = config.videoWatermark ?? true;
-        const text = isWhitemodelWorkflow ? "已选择最近上传的参考视频，请根据视频制作 3D 白膜" : "已上传参考视频";
         setChatMessages((prev) => {
             const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments: buildChatAttachments(attachments), skill: selectedSkill }];
             chatMessagesRef.current = next;
             return next;
         });
-        let outboundText = text;
-        let outboundAttachments = attachments;
-        if (isWhitemodelWorkflow && asset.url) {
-            try {
-                const extracted = await extractVideoKeyframes(asset.url);
-                outboundText = `${text}\n[参考视频实测元信息：时长 ${extracted.durationSeconds}s，画幅 ${extracted.aspect}，分辨率 ${extracted.width}×${extracted.height}。附图为按时间均匀抽取的 ${extracted.frameCount} 张带时间戳关键帧拼图，请严格使用 duration=${extracted.durationSeconds} 和 aspect="${extracted.aspect}"]`;
-                outboundAttachments = [
-                    ...attachments,
-                    {
-                        type: "image/jpeg",
-                        url: extracted.contactSheetDataUrl,
-                        name: `whitemodel_keyframes_${extracted.durationSeconds}s_${extracted.aspect}.jpg`,
-                    },
-                ];
-            } catch (error) {
-                console.warn("提取最近上传视频关键帧失败:", error);
-                message.warning("参考视频关键帧提取失败，将仅基于文本生成");
-            }
-        }
-        await sendMessage(outboundText, outboundAttachments.length ? outboundAttachments : undefined, {
+        await sendMessage(text, attachments.length ? attachments : undefined, {
             model: videoModel,
             imageModel: workflowImageModel,
             imageSize: workflowImageSize,
@@ -1538,7 +1551,20 @@ export default function VideoPage() {
         const seconds = config.videoSeconds || "5";
         const quality = config.vquality || "720p";
         const watermark = config.videoWatermark ?? true;
-        const text = isWhitemodelWorkflow && videos.length ? "已上传参考视频，请根据视频制作 3D 白膜" : translate("video.productImageUploaded");
+        const text = isWhitemodelWorkflow && videos.length ? "已上传参考视频，制作 3D 白膜" : translate("video.productImageUploaded");
+        if (isWhitemodelWorkflow && videos.length > 0) {
+            const firstVideo = videos[0];
+            const videoSource =
+                localVideoFilesRef.current.get(firstVideo.id)
+                || Array.from(files || []).find((file) => file.type.startsWith("video/"))
+                || referenceMediaUrl(firstVideo);
+            const previewUrl = referenceMediaUrl(firstVideo);
+            if (videoSource && previewUrl) {
+                startPoseWhitemodelJob(videoSource, firstVideo.name || "参考视频.mp4", previewUrl, buildChatAttachments(attachments), text);
+                setVideoReferences([]);
+                return;
+            }
+        }
         if (!isWhitemodelWorkflow) {
             const selectedVideoQuote = quoteVideoGeneration({
                 config: effectiveConfig,
@@ -1561,32 +1587,7 @@ export default function VideoPage() {
             chatMessagesRef.current = next;
             return next;
         });
-        let outboundText = text;
-        let outboundAttachments = attachments;
-        if (isWhitemodelWorkflow && videos.length > 0) {
-            const firstVideo = videos[0];
-            const videoSource = localVideoFilesRef.current.get(firstVideo.id)
-                || Array.from(files || []).find((file) => file.type.startsWith("video/"))
-                || referenceMediaUrl(firstVideo);
-            if (videoSource) {
-                try {
-                    const extracted = await extractVideoKeyframes(videoSource);
-                    outboundText = `${text}\n[参考视频实测元信息：时长 ${extracted.durationSeconds}s，画幅 ${extracted.aspect}，分辨率 ${extracted.width}×${extracted.height}。附图为按时间均匀抽取的 ${extracted.frameCount} 张带时间戳关键帧拼图，请严格使用 duration=${extracted.durationSeconds} 和 aspect="${extracted.aspect}"]`;
-                    outboundAttachments = [
-                        ...attachments,
-                        {
-                            type: "image/jpeg",
-                            url: extracted.contactSheetDataUrl,
-                            name: `whitemodel_keyframes_${extracted.durationSeconds}s_${extracted.aspect}.jpg`,
-                        },
-                    ];
-                } catch (error) {
-                    console.warn("提取参考视频关键帧失败:", error);
-                    message.warning("参考视频关键帧提取失败，将仅基于文本生成");
-                }
-            }
-        }
-        await sendMessage(outboundText, outboundAttachments.length ? outboundAttachments : undefined, {
+        await sendMessage(text, attachments.length ? attachments : undefined, {
             model: videoModel,
             imageModel: workflowImageModel,
             imageSize: workflowImageSize,
@@ -2185,6 +2186,24 @@ export default function VideoPage() {
         (call) => renderPendingImageToolCall(call) ?? renderPendingVideoToolCall(call),
         workflowConfirmDisabledReasons,
         (roundId) => {
+            const poseJob = poseWhitemodelJobs[roundId];
+            if (poseJob) {
+                return (
+                    <PoseWhitemodelCard
+                        source={poseJob.source}
+                        videoName={poseJob.videoName}
+                        previewVideoUrl={poseJob.previewVideoUrl}
+                        onUploaded={(uploaded) => {
+                            recordRecentReferenceAsset({
+                                kind: "video",
+                                url: uploaded.objectStorage?.url || uploaded.url,
+                                storageKey: uploaded.storageKey,
+                                name: `${poseJob.videoName.replace(/\.[^.]+$/, "")}-白膜.mp4`,
+                            });
+                        }}
+                    />
+                );
+            }
             if (draftChoiceUserRoundId && roundId === draftChoiceUserRoundId) return workflowImageSettingsNode;
             if (imageConfirmUserRoundId && roundId === imageConfirmUserRoundId) return workflowVideoSettingsNode;
             return null;

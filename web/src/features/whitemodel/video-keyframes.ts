@@ -60,8 +60,18 @@ function waitForEvent(target: EventTarget, eventName: string, timeoutMs = 10000)
     });
 }
 
+async function seekTo(video: HTMLVideoElement, targetTime: number): Promise<void> {
+    // 浏览器中将 currentTime 设为与当前值相同（例如初始即为 0 时设 0）不会触发 seeked 事件，必须跳过等待
+    if (Math.abs(video.currentTime - targetTime) < 0.015 && video.readyState >= 2) {
+        return;
+    }
+    const seeked = waitForEvent(video, "seeked");
+    video.currentTime = targetTime;
+    await seeked;
+}
+
 /**
- * 从本地 File 或视频 URL 中抽取 9 张均匀分布的关键帧，拼成 3×3 带时间戳的网格图。
+ * 从本地 File 或视频 URL 中抽取 6~9 张均匀分布的关键帧，拼成带时间戳的网格图。
  */
 export async function extractVideoKeyframes(source: File | string): Promise<ExtractedVideoKeyframes> {
     const isLocalFile = typeof source !== "string";
@@ -88,7 +98,9 @@ export async function extractVideoKeyframes(source: File | string): Promise<Extr
     video.src = objectUrl ?? (typeof source === "string" ? source : "");
 
     try {
-        await waitForEvent(video, "loadedmetadata");
+        if (video.readyState < 2) {
+            await waitForEvent(video, "loadeddata");
+        }
         const duration = Number.isFinite(video.duration) && video.duration > 0 ? Math.min(60, video.duration) : 5;
         const width = video.videoWidth || 1280;
         const height = video.videoHeight || 720;
@@ -111,9 +123,8 @@ export async function extractVideoKeyframes(source: File | string): Promise<Extr
         ctx.fillRect(0, 0, sheet.width, sheet.height);
 
         for (let i = 0; i < count; i++) {
-            const targetTime = Math.min(Math.max(0, duration - 0.05), (duration * i) / (count - 1));
-            video.currentTime = targetTime;
-            await waitForEvent(video, "seeked");
+            const targetTime = Math.min(Math.max(0.05, duration - 0.05), i === 0 ? 0.05 : (duration * i) / (count - 1));
+            await seekTo(video, targetTime);
             const col = i % cols;
             const row = Math.floor(i / cols);
             const dx = col * cw;

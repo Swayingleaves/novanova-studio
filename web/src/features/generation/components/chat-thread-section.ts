@@ -76,7 +76,7 @@ export function buildChatThreadSection(
     for (const msg of messages) {
         if (msg.role === "user") {
             if (currentUserText || currentActivities.length) {
-                rounds.push(makeRound(currentRoundId, currentUserText, currentUserStyles, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, buildResultContent(), currentAction, choiceDisabledReasons, isChoiceConfirmRound(currentAction) ? renderChoiceSettings?.(currentRoundId) : null, renderUserContent?.({ id: currentRoundId, userText: currentUserText, attachments: currentRawAttachments })));
+                rounds.push(makeRound(currentRoundId, currentUserText, currentUserStyles, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, buildResultContent(), currentAction, choiceDisabledReasons, renderChoiceSettings?.(currentRoundId) ?? null, renderUserContent?.({ id: currentRoundId, userText: currentUserText, attachments: currentRawAttachments })));
             }
             currentRoundId = msg.id;
             currentUserText = msg.text;
@@ -118,7 +118,7 @@ export function buildChatThreadSection(
         }
     }
     if (currentUserText || currentActivities.length) {
-        rounds.push(makeRound(currentRoundId, currentUserText, currentUserStyles, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, buildResultContent(), currentAction, choiceDisabledReasons, isChoiceConfirmRound(currentAction) ? renderChoiceSettings?.(currentRoundId) : null, renderUserContent?.({ id: currentRoundId, userText: currentUserText, attachments: currentRawAttachments })));
+        rounds.push(makeRound(currentRoundId, currentUserText, currentUserStyles, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, buildResultContent(), currentAction, choiceDisabledReasons, renderChoiceSettings?.(currentRoundId) ?? null, renderUserContent?.({ id: currentRoundId, userText: currentUserText, attachments: currentRawAttachments })));
     }
 
     const latestConversationRound = rounds.findLast((round) => Boolean(round.userText || round.userAttachments));
