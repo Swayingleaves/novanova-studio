@@ -976,7 +976,7 @@ public class CreationAgentOrchestrator {
         VideoWorkflowDefinition definition = videoWorkflowRegistry.require(context.workflowType());
         return callWorkflowConversationAgent(userId, session, request, model, definition, context, "pending_confirm")
                 .flatMap(turn -> {
-                    if (turn.isConfirm() && context.hasDraftedPrompts()) {
+                    if (turn.isConfirm() && context.hasDraftedPrompts() && !definition.isClientOnlyArtifact()) {
                         // 确认草案：推进到已规划状态；两阶段工作流执行图片阶段计划，一次性工作流执行完整计划。
                         // 用户确认草案时可能已在卡片调整图片模型/比例/清晰度/画质，先合并最新请求设置，
                         // 否则图片阶段会沿用上下文初始默认值（如 1:1/2K），用户选择不生效。
@@ -1103,20 +1103,103 @@ public class CreationAgentOrchestrator {
         }
         input.put("history", historyForAgent(request, session));
         input.put("message", request.message());
+        List<Map<String, Object>> attachmentSummaries = workflowAttachmentSummaries(request.attachments());
+        if (!attachmentSummaries.isEmpty()) {
+            input.put("attachments", attachmentSummaries);
+        }
         ReActAgent agent = agentFactory.workflowConversationAgent(model, workflowConversationPrompt(definition, context));
         String streamAssistantId = UUID.randomUUID().toString();
-        return agent.call(JSON.toJSONString(input), VideoWorkflowConversationTurn.class, RuntimeContext.builder()
-                        .sessionId(session.id() + ":workflow")
-                        .userId(String.valueOf(userId))
-                        .put(AgentThinkingEventMiddleware.ThinkingEventContext.class,
-                                new AgentThinkingEventMiddleware.ThinkingEventContext(userId, session.id()))
-                        .put(CreationReplyStreamMiddleware.CreationReplyStreamContext.class,
-                                new CreationReplyStreamMiddleware.CreationReplyStreamContext(
-                                        userId, session.id(), streamAssistantId, List.of("message")))
-                        .build())
+        RuntimeContext runtimeContext = RuntimeContext.builder()
+                .sessionId(session.id() + ":workflow")
+                .userId(String.valueOf(userId))
+                .put(AgentThinkingEventMiddleware.ThinkingEventContext.class,
+                        new AgentThinkingEventMiddleware.ThinkingEventContext(userId, session.id()))
+                .put(CreationReplyStreamMiddleware.CreationReplyStreamContext.class,
+                        new CreationReplyStreamMiddleware.CreationReplyStreamContext(
+                                userId, session.id(), streamAssistantId, List.of("message")))
+                .build();
+        List<io.agentscope.core.message.ContentBlock> imageBlocks = workflowImageBlocks(request.attachments());
+        Mono<io.agentscope.core.message.Msg> callMono;
+        if (imageBlocks.isEmpty()) {
+            callMono = agent.call(JSON.toJSONString(input), VideoWorkflowConversationTurn.class, runtimeContext);
+        } else {
+            List<io.agentscope.core.message.ContentBlock> blocks = new ArrayList<>();
+            blocks.add(io.agentscope.core.message.TextBlock.builder().text(JSON.toJSONString(input)).build());
+            blocks.addAll(imageBlocks);
+            io.agentscope.core.message.Msg userMsg = io.agentscope.core.message.Msg.builder()
+                    .role(io.agentscope.core.message.MsgRole.USER)
+                    .content(blocks)
+                    .build();
+            callMono = agent.call(List.of(userMsg), VideoWorkflowConversationTurn.class, runtimeContext);
+        }
+        return callMono
                 .timeout(Duration.ofSeconds(60))
                 .map(message -> parseWorkflowConversationTurn(message, definition.clarificationQuestion()))
                 .doFinally(signal -> agent.close());
+    }
+
+    /**
+     * 提取工作流请求附件的轻量摘要，供对话助手感知用户是否已上传参考视频或图片。
+     *
+     * @param attachments List<Attachment> 当前请求附件
+     * @return List<Map<String, Object>> 附件摘要列表
+     */
+    private List<Map<String, Object>> workflowAttachmentSummaries(List<AgentChatRequest.Attachment> attachments) {
+        if (attachments == null || attachments.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (AgentChatRequest.Attachment attachment : attachments) {
+            if (attachment == null) {
+                continue;
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("type", attachment.type() == null ? "" : attachment.type());
+            item.put("name", attachment.name() == null ? "" : attachment.name());
+            if (StringUtils.hasText(attachment.role())) {
+                item.put("role", attachment.role());
+            }
+            list.add(item);
+        }
+        return list;
+    }
+
+    /**
+     * 将请求中的图片附件（含视频抽帧 data URL）转换为 AgentScope 多模态 ImageBlock。
+     *
+     * @param attachments List<Attachment> 当前请求附件
+     * @return List<ContentBlock> 图片内容块列表
+     */
+    private List<io.agentscope.core.message.ContentBlock> workflowImageBlocks(List<AgentChatRequest.Attachment> attachments) {
+        if (attachments == null || attachments.isEmpty()) {
+            return List.of();
+        }
+        List<io.agentscope.core.message.ContentBlock> blocks = new ArrayList<>();
+        for (AgentChatRequest.Attachment attachment : attachments) {
+            if (attachment == null || !StringUtils.hasText(attachment.url())) {
+                continue;
+            }
+            String type = attachment.type() == null ? "" : attachment.type().toLowerCase(java.util.Locale.ROOT);
+            String url = attachment.url().trim();
+            if (!type.startsWith("image/") && !url.startsWith("data:image/")) {
+                continue;
+            }
+            if (url.startsWith("data:image/")) {
+                int commaIndex = url.indexOf(',');
+                int semiIndex = url.indexOf(';');
+                if (commaIndex > 0) {
+                    String mediaType = semiIndex > 5 && semiIndex < commaIndex
+                            ? url.substring(5, semiIndex) : "image/jpeg";
+                    String base64 = url.substring(commaIndex + 1);
+                    blocks.add(new io.agentscope.core.message.ImageBlock(
+                            new io.agentscope.core.message.Base64Source(mediaType, base64)));
+                }
+            } else if (url.startsWith("http://") || url.startsWith("https://")) {
+                blocks.add(new io.agentscope.core.message.ImageBlock(
+                        new io.agentscope.core.message.URLSource(url)));
+            }
+        }
+        return blocks;
     }
 
     /**
@@ -1267,12 +1350,19 @@ public class CreationAgentOrchestrator {
                                                    String replyMessage, List<AgentChoice> turnChoices) {
         String message = StringUtils.hasText(replyMessage) ? replyMessage : definition.clarificationQuestion();
         List<AgentChoice> choices;
-        if (context.hasDraftedPrompts()) {
+        if (context.hasDraftedPrompts() && !definition.isClientOnlyArtifact()) {
             List<AgentChoice> draftChoices = new ArrayList<>();
             draftChoices.add(new AgentChoice("确认生成", "确认生成", null, null));
             draftChoices.add(new AgentChoice("调整提示词", "我想调整提示词", null, null));
             draftChoices.addAll(SkillPromptActions.userActions(turnChoices));
             choices = draftChoices;
+        } else if (context.hasDraftedPrompts() && definition.isClientOnlyArtifact()) {
+            List<AgentChoice> artifactChoices = new ArrayList<>();
+            artifactChoices.add(new AgentChoice("重新上传视频", SkillPromptActions.ASK_USER_UPLOAD_VIDEO, false, SkillPromptActions.ASK_USER_UPLOAD_VIDEO));
+            if (turnChoices != null) {
+                artifactChoices.addAll(turnChoices);
+            }
+            choices = artifactChoices;
         } else {
             choices = turnChoices == null ? List.of() : turnChoices;
         }

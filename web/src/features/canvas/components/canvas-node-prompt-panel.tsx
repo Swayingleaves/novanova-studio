@@ -684,29 +684,33 @@ export function CanvasNodePromptPanel({
                             />
                         </Tooltip>
                     ) : null}
-                    <Button
-                        type="primary"
-                        className="!h-10 !min-w-[88px] shrink-0 !justify-center !rounded-full !px-3"
-                        danger={isRunning}
-                        disabled={isPromptGenerating || uploadingReference || (!isRunning && (!canSubmit || balanceInsufficient || (mode === "video" && !videoQuote?.available)))}
-                        onClick={() => (isRunning ? onStop(node.id) : submit())}
-                        aria-label={isRunning ? translate("canvas.stopGeneration") : creditCost === null ? translate("canvas.videoQuoteUnavailable") : translate("canvas.generateCostsCredits", { value0: creditCost.toLocaleString(currentLanguageTag()) })}
-                    >
-                        <span className="flex items-center gap-1.5">
-                            {isRunning ? (
-                                <>
-                                    <LoaderCircle className="size-4 animate-spin" />
-                                    <Square className="size-3.5 fill-current" />
-                                    <span className="text-xs font-medium">{translate("canvas.stop")}</span>
-                                </>
-                            ) : (
-                                <>
-                                    {creditCost === null ? <span className="text-xs font-medium">{translate("canvas.quoteUnavailable")}</span> : <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />}
-                                    <ArrowUp className="size-4" />
-                                </>
-                            )}
+                    <Tooltip title={!isRunning && creditCost === null ? ((videoQuote && !videoQuote.available ? videoQuote.reason : "") || translate("canvas.videoQuoteUnavailable")) : undefined}>
+                        <span className="inline-flex shrink-0">
+                            <Button
+                                type="primary"
+                                className="!h-10 !min-w-[88px] shrink-0 !justify-center !rounded-full !px-3"
+                                danger={isRunning}
+                                disabled={isPromptGenerating || uploadingReference || (!isRunning && (!canSubmit || balanceInsufficient || (mode === "video" && !videoQuote?.available)))}
+                                onClick={() => (isRunning ? onStop(node.id) : submit())}
+                                aria-label={isRunning ? translate("canvas.stopGeneration") : creditCost === null ? ((videoQuote && !videoQuote.available ? videoQuote.reason : "") || translate("canvas.videoQuoteUnavailable")) : translate("canvas.generateCostsCredits", { value0: creditCost.toLocaleString(currentLanguageTag()) })}
+                            >
+                                <span className="flex items-center gap-1.5">
+                                    {isRunning ? (
+                                        <>
+                                            <LoaderCircle className="size-4 animate-spin" />
+                                            <Square className="size-3.5 fill-current" />
+                                            <span className="text-xs font-medium">{translate("canvas.stop")}</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            {creditCost === null ? <span className="text-xs font-medium">{translate("canvas.quoteUnavailable")}</span> : <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />}
+                                            <ArrowUp className="size-4" />
+                                        </>
+                                    )}
+                                </span>
+                            </Button>
                         </span>
-                    </Button>
+                    </Tooltip>
                 </div>
             </div>
             <Modal title={referencePreview?.title || translate("canvas.referenceImage")} open={Boolean(referencePreview?.previewUrl)} centered footer={null} width="auto" destroyOnHidden onCancel={() => setReferencePreview(null)}>

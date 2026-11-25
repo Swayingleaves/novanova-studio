@@ -142,6 +142,8 @@ export type CreationComposerProps = {
     canSubmit: boolean;
     /** 下一句将消耗的积分；null 表示无法报价，undefined 表示本次提交不涉及扣费、不展示价格。 */
     creditCost?: CreditAmount | null;
+    /** 不可报价时的具体原因说明，鼠标悬停在“不可报价”按钮上时展示。 */
+    quoteUnavailableReason?: string | null;
     /** 输入框上方展示的通用提示内容（如工作流参数选择卡片）。 */
     notice?: ReactNode;
     compact?: boolean;

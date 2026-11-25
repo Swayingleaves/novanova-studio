@@ -8,7 +8,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { App, Button, Checkbox, Modal, Tag } from "antd";
+import { App, Button, Checkbox, Modal, Tag, Tooltip } from "antd";
 import { Clapperboard } from "lucide-react";
 
 import { modelCreditBalance } from "@/features/team/credit-balance";
@@ -140,6 +140,12 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
         });
     };
 
+    const quoteUnavailableTooltip = totalCredits === null
+        ? (!modelReady
+            ? translate("canvas.selectAnEnabledVideoModelWithPricing")
+            : (!videoQuote.available ? videoQuote.reason : "") || translate("canvas.videoQuoteUnavailable"))
+        : undefined;
+
     return (
         <Modal
             title={translate("canvas.generateStoryboardVideosInBatch")}
@@ -150,9 +156,13 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
             footer={[
                 <Button key="cancel" onClick={onClose}>
                     {translate("canvas.cancel")}</Button>,
-                <Button key="generate" type="primary" icon={<Clapperboard className="size-4" />} loading={generating} disabled={!selectedShots.length || !modelReady || !videoQuote.available || balanceInsufficient} onClick={confirmGenerate}>
-                    {translate("canvas.generateSelectedShots")}{selectedShots.length} {translate("canvas.items_d98006")}{totalCredits === null ? translate("canvas.quoteUnavailable") : translate("canvas.credits", { value0: totalCredits })}）
-                </Button>,
+                <Tooltip key="generate" title={quoteUnavailableTooltip}>
+                    <span className="inline-flex">
+                        <Button type="primary" icon={<Clapperboard className="size-4" />} loading={generating} disabled={!selectedShots.length || !modelReady || !videoQuote.available || balanceInsufficient} onClick={confirmGenerate}>
+                            {translate("canvas.generateSelectedShots")}{selectedShots.length} {translate("canvas.items_d98006")}{totalCredits === null ? translate("canvas.quoteUnavailable") : translate("canvas.credits", { value0: totalCredits })}）
+                        </Button>
+                    </span>
+                </Tooltip>,
             ]}
         >
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -218,11 +228,15 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
                         </div>
                         <div className="flex items-center justify-between gap-3">
                             <span className="text-[var(--studio-muted)]">{translate("canvas.billingMethod")}</span>
-                            <span>{creditUnit === "second" ? translate("canvas.perSecond") : creditUnit === "generation" ? translate("canvas.perRun") : translate("canvas.quoteUnavailable")}</span>
+                            <Tooltip title={creditUnit !== "second" && creditUnit !== "generation" ? quoteUnavailableTooltip : undefined}>
+                                <span>{creditUnit === "second" ? translate("canvas.perSecond") : creditUnit === "generation" ? translate("canvas.perRun") : translate("canvas.quoteUnavailable")}</span>
+                            </Tooltip>
                         </div>
                         <div className="flex items-center justify-between gap-3 font-semibold">
                             <span>{translate("canvas.estimatedCost")}</span>
-                            <span>{totalCredits === null ? translate("canvas.quoteUnavailable") : translate("canvas.credits", { value0: totalCredits })}</span>
+                            <Tooltip title={quoteUnavailableTooltip}>
+                                <span>{totalCredits === null ? translate("canvas.quoteUnavailable") : translate("canvas.credits", { value0: totalCredits })}</span>
+                            </Tooltip>
                         </div>
                     </div>
                     {!modelReady ? <p className="text-xs text-red-500">{translate("canvas.selectAnEnabledVideoModelWithPricing")}</p> : null}

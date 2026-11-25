@@ -105,6 +105,16 @@ public interface VideoWorkflowDefinition {
     }
 
     /**
+     * 判断工作流是否仅产出前端可直接预览与导出的客户端产物（如 3D 白膜），不触发后端收费模型生成任务。
+     * 默认返回 false。
+     *
+     * @return boolean 是否为纯客户端产物工作流
+     */
+    default boolean isClientOnlyArtifact() {
+        return false;
+    }
+
+    /**
      * 判断工作流是否支持"图片待确认"两阶段执行（先出图、用户确认后再出视频）。
      * 默认返回 false（一次性执行完整计划）。
      *

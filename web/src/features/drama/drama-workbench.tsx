@@ -696,7 +696,7 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
                         <div className="mx-auto w-full max-w-[1600px]">
-                            <DramaArtifact stage={viewed} version={selected} durationSeconds={project.durationSeconds} durationDisabled={busy} aspectRatio={dramaAspectRatio(project.aspectRatio)} onAspect={(aspectRatio) => void saveSettings({ aspectRatio })} onDuration={(durationSeconds) => void saveSettings({ durationSeconds })} mediaByKey={mediaByKey} pendingKeys={pendingKeys} shotRefs={productionShotRefs} shotDurations={mergedShotDurations} projectId={project.id} onWorkspace={setWorkspace} onGenerate={(targetKey) => void generate(targetKey)} onStop={(media) => void stopMedia(media)} stoppingTaskId={stoppingTaskId} />
+                            <DramaArtifact stage={viewed} version={selected} generating={Boolean((busy || sending) && viewed === project.currentStage)} durationSeconds={project.durationSeconds} durationDisabled={busy} aspectRatio={dramaAspectRatio(project.aspectRatio)} onAspect={(aspectRatio) => void saveSettings({ aspectRatio })} onDuration={(durationSeconds) => void saveSettings({ durationSeconds })} mediaByKey={mediaByKey} pendingKeys={pendingKeys} shotRefs={productionShotRefs} shotDurations={mergedShotDurations} projectId={project.id} onWorkspace={setWorkspace} onGenerate={(targetKey) => void generate(targetKey)} onStop={(media) => void stopMedia(media)} stoppingTaskId={stoppingTaskId} />
                         </div>
                     </div>
                 </section>

@@ -47,6 +47,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -1902,7 +1903,7 @@ public class CreationPlanExecutor {
         round.put("workflowType", plan.workflowType());
         round.put("workflowStatus", workflowStatus);
         round.put("references", workflowResultReferences(plan, resultByTaskId));
-        round.put("videoReferences", List.of());
+        round.put("videoReferences", workflowVideoReferences(request == null ? List.of() : request.attachments()));
         round.put("audioReferences", workflowAudioReferences(request == null ? List.of() : request.attachments()));
         round.put("createdAt", System.currentTimeMillis());
         if (StringUtils.hasText(error)) {
@@ -2009,6 +2010,34 @@ public class CreationPlanExecutor {
             reference.put("storageKey", attachment.storageKey());
             reference.put("url", attachment.url());
             reference.put("role", attachment.role());
+            references.add(reference);
+        }
+        return List.copyOf(references);
+    }
+
+    /**
+     * 将工作流请求中的视频附件转换为可恢复的生成记录引用。
+     *
+     * @param attachments List<Attachment> 当前工作流的全部附件
+     * @return List<Map<String, Object>> 视频引用列表
+     */
+    private List<Map<String, Object>> workflowVideoReferences(List<AgentChatRequest.Attachment> attachments) {
+        if (attachments == null || attachments.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> references = new ArrayList<>();
+        for (AgentChatRequest.Attachment attachment : attachments) {
+            if (attachment == null || !StringUtils.hasText(attachment.type())
+                    || !attachment.type().toLowerCase(Locale.ROOT).startsWith("video/")
+                    || !StringUtils.hasText(attachment.storageKey())) {
+                continue;
+            }
+            Map<String, Object> reference = new LinkedHashMap<>();
+            reference.put("id", attachment.storageKey());
+            reference.put("name", StringUtils.hasText(attachment.name()) ? attachment.name() : "参考视频");
+            reference.put("mimeType", attachment.type());
+            reference.put("storageKey", attachment.storageKey());
+            reference.put("url", "");
             references.add(reference);
         }
         return List.copyOf(references);

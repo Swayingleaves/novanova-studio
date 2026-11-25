@@ -538,6 +538,7 @@ export function HomepageGenerationComposer({ prompt, onPromptChange, target, onT
                 running={false}
                 canSubmit={canSubmit}
                 creditCost={creditCost}
+                quoteUnavailableReason={quoteIssue || undefined}
                 headerExtra={(
                     <Segmented
                         className="creation-composer-mode"

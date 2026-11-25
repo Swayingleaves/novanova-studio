@@ -2,6 +2,8 @@
 import { useTranslation } from "@/features/locale/use-translation";
 import { ASK_USER_CONFIRM, ASK_USER_MODEL_CONFIG, ASK_USER_UPLOAD_IMAGE, ASK_USER_UPLOAD_VIDEO, CONTINUE_AFTER_MODEL_CONFIG, SKILL_CONFIRM_MESSAGE } from "@/features/skill-market/lib/skill-prompt-actions";
 import { useActionLabel } from "@/features/locale/use-action-label";
+import { extractWhitemodelScene, stripWhitemodelSceneBlock } from "@/features/whitemodel/solver";
+import { WhitemodelPreviewCard } from "@/features/whitemodel/whitemodel-preview-card";
 
 
 import { Button, Input, Modal, Tooltip } from "antd";
@@ -103,7 +105,9 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                         ) : null}
                                         <div className="space-y-3">
                                             {(() => {
-                                                const dialogueText = composeDialogueText(round.assistantText, round.activities);
+                                                const rawDialogueText = composeDialogueText(round.assistantText, round.activities);
+                                                const whitemodelScene = extractWhitemodelScene(rawDialogueText, round.draftedPrompts);
+                                                const dialogueText = stripWhitemodelSceneBlock(rawDialogueText);
                                                 const showAnimatedBubble = Boolean(round.streamingReply || round.thinkingReply || round.awaitingReply);
                                                 const isThinkingState = Boolean((round.thinkingReply || round.awaitingReply) && !dialogueText);
                                                 const showStatusText = Boolean(round.statusText && (!dialogueText || round.statusText.startsWith("❌")));
@@ -128,6 +132,11 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                                                     placement="inline"
                                                                     onClick={() => copyText(dialogueText, translate("generation.assistantMessageCopied"))}
                                                                 />
+                                                            </div>
+                                                        ) : null}
+                                                        {whitemodelScene ? (
+                                                            <div className="max-w-3xl">
+                                                                <WhitemodelPreviewCard scene={whitemodelScene} />
                                                             </div>
                                                         ) : null}
                                                         {showStatusText ? <div className="text-xs font-medium text-[var(--studio-muted)]">{round.statusText}</div> : null}

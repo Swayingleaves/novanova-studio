@@ -109,6 +109,7 @@ import {
     type ServerVideoWorkflowStageQuote,
 } from "@/services/api/server";
 import { findLatestPlayableVideo, hasPlayableVideoUrl } from "./video-display";
+import { extractVideoKeyframes } from "@/features/whitemodel/video-keyframes";
 
 type GeneratedVideo = {
     id: string;
@@ -237,6 +238,7 @@ export default function VideoPage() {
     const { message, modal } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const uploadChoiceInputRef = useRef<HTMLInputElement>(null);
+    const localVideoFilesRef = useRef<Map<string, File>>(new Map());
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -317,6 +319,7 @@ export default function VideoPage() {
     }, [promptReferences]);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [videoChoicePickerOpen, setVideoChoicePickerOpen] = useState(false);
     const [durationContinueReady, setDurationContinueReady] = useState(false);
     const [durationContinuePrompt, setDurationContinuePrompt] = useState("");
     const durationAdjustPendingRef = useRef(false);
@@ -569,7 +572,8 @@ export default function VideoPage() {
     // 历史刷新场景兜底：最新落库轮次是图片待确认状态（刷新/切换会话后从记录恢复时命中）。
     const historyWorkflowImageConfirmNext = Boolean(selectedSkill?.workflowType) && latestRound?.workflowStatus === "image_pending_confirm" && Boolean(latestRound.choices?.length);
     // 工作流对话轮免费；仅当处于"草案待确认"（下一步可能确认生成并扣费）时才展示和校验报价。
-    const workflowChargingNext = Boolean(selectedSkill?.workflowType) && (Boolean(liveDraftChoiceRound) || historyWorkflowChargingNext);
+    const isWhitemodelWorkflow = selectedSkill?.workflowType === "whitemodel-video";
+    const workflowChargingNext = Boolean(selectedSkill?.workflowType) && !isWhitemodelWorkflow && (Boolean(liveDraftChoiceRound) || historyWorkflowChargingNext);
     // 图片阶段完成后的二次确认轮：下一步确认将生成视频并扣费，同样需要校验视频报价。
     const workflowImageConfirmNext = Boolean(selectedSkill?.workflowType) && (Boolean(liveImageConfirmChoiceRound) || historyWorkflowImageConfirmNext);
     // 草案轮绑定标识：实时对话用聊天消息 id，历史刷新场景用落库轮次 id
@@ -846,7 +850,7 @@ export default function VideoPage() {
         requireReferences: false,
     });
     useEffect(() => {
-        if (!selectedSkill?.workflowType) {
+        if (!selectedSkill?.workflowType || isWhitemodelWorkflow) {
             setServerWorkflowQuote(null);
             return;
         }
@@ -867,7 +871,7 @@ export default function VideoPage() {
         return () => {
             cancelled = true;
         };
-    }, [config.size, config.videoSeconds, config.vquality, workflowImageModel, workflowDraftRoundId, workflowImageConfirmNext, workflowVideoResolution, workflowVideoSeconds, workflowVideoSize, model, selectedSkill?.aspectRatio, selectedSkill?.workflowType]);
+    }, [config.size, config.videoSeconds, config.vquality, isWhitemodelWorkflow, workflowImageModel, workflowDraftRoundId, workflowImageConfirmNext, workflowVideoResolution, workflowVideoSeconds, workflowVideoSize, model, selectedSkill?.aspectRatio, selectedSkill?.workflowType]);
     // 图片确认轮：本次确认仅生成视频，报价只取视频阶段（首/尾帧图片已按草案确认时参数生成完毕）。
     const workflowVideoStageQuote = workflowImageConfirmNext && serverWorkflowQuote ? (serverWorkflowQuote.stages.find((stage) => stage.role === "video") ?? null) : null;
     const workflowImageConfirmQuote = workflowVideoStageQuote
@@ -878,11 +882,13 @@ export default function VideoPage() {
               stages: serverWorkflowQuote?.stages ?? [],
           } as { available: boolean; credits: CreditAmount; reason?: string; stages: ServerVideoWorkflowStageQuote[] })
         : null;
-    const activeQuote = selectedSkill?.workflowType
-        ? workflowChargingNext
-            ? (serverWorkflowQuote ?? { available: false as const, reason: translate("video.fetchingWorkflowQuote") })
-            : (workflowImageConfirmQuote ?? (workflowImageConfirmNext ? { available: false as const, reason: translate("video.fetchingWorkflowQuote") } : null))
-        : videoQuote;
+    const activeQuote = isWhitemodelWorkflow
+        ? null
+        : selectedSkill?.workflowType
+          ? workflowChargingNext
+              ? (serverWorkflowQuote ?? { available: false as const, reason: translate("video.fetchingWorkflowQuote") })
+              : (workflowImageConfirmQuote ?? (workflowImageConfirmNext ? { available: false as const, reason: translate("video.fetchingWorkflowQuote") } : null))
+          : videoQuote;
     // 计算当前对话可复用的参考素材：优先使用本轮输入框素材；未选时在带图/参考模式下自动继承本对话最近一次参考素材。
     const currentAttachments = [...imageReferenceAttachments(references), ...videoReferenceAttachments(videoReferences), ...audioReferenceAttachments(audioReferences)];
     const previousConversationAttachments = (() => {
@@ -920,7 +926,7 @@ export default function VideoPage() {
     const quoteReady = workflowSkillConversation || activeQuote === null || (activeQuote.available && !balanceInsufficient);
     // 工作流会自行生成阶段素材，不要求页面先上传普通视频参考素材。
     const referenceReady = Boolean(selectedSkill?.workflowType) || !referenceIssue;
-    const canGenerate = Boolean(prompt.trim()) && quoteReady && referenceReady && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
+    const canGenerate = (Boolean(prompt.trim()) || (isWhitemodelWorkflow && videoReferences.length > 0)) && quoteReady && referenceReady && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
 
     // SSE 请求状态丢失（刷新页面、连接中断或服务重启）但记录轮次仍在生成时，直接取消底层AI任务实现停止。
@@ -1025,12 +1031,16 @@ export default function VideoPage() {
                 type: file.type,
                 dataUrl: URL.createObjectURL(file),
             }));
-            const videoPlaceholders = videoFiles.map((file) => ({
-                id: nanoid(),
-                name: file.name,
-                type: file.type,
-                url: URL.createObjectURL(file),
-            }));
+            const videoPlaceholders = videoFiles.map((file) => {
+                const id = nanoid();
+                localVideoFilesRef.current.set(id, file);
+                return {
+                    id,
+                    name: file.name,
+                    type: file.type,
+                    url: URL.createObjectURL(file),
+                };
+            });
             const audioPlaceholders: ReferenceAudio[] = audioFiles.map((file) => ({
                 id: nanoid(),
                 name: file.name,
@@ -1186,7 +1196,7 @@ export default function VideoPage() {
 
     const generate = async () => {
         if (isStreaming || isQueued) return;
-        const text = prompt.trim();
+        const text = prompt.trim() || (isWhitemodelWorkflow && videoReferences.length > 0 ? "已上传参考视频，请根据视频制作 3D 白膜" : "");
         if (!text) {
             message.error(translate("video.enterVideoPrompt"));
             return;
@@ -1219,9 +1229,9 @@ export default function VideoPage() {
             audioReferenceCount: allRefs.filter((reference) => reference.type.startsWith("audio/")).length,
         });
         // 无技能时每次提交都是真实视频生成；选择技能后仅在即将创建生成任务的确认阶段校验报价与余额。
-        // 技能市场的开场白只负责开始引导，这一轮还不创建视频任务。
+        // 技能市场的开场白与「白膜制作」本地渲染工作流不触发收费视频模型，无需报价拦截。
         const startingSkillGuide = Boolean(selectedSkill) && text === skillMarketKickoff(selectedSkill?.name || "");
-        const shouldValidateQuote = !startingSkillGuide && (!selectedSkill?.workflowType || workflowChargingNext || workflowImageConfirmNext);
+        const shouldValidateQuote = !isWhitemodelWorkflow && !startingSkillGuide && (!selectedSkill?.workflowType || workflowChargingNext || workflowImageConfirmNext);
         if (shouldValidateQuote) {
             // 每次确认生成都必须先显式选择图片模型与参数
             if (workflowChargingNext && !workflowImageSelectionComplete) {
@@ -1274,7 +1284,32 @@ export default function VideoPage() {
             return next;
         });
 
-        await sendMessage(text, allRefs.length ? allRefs : undefined, {
+        // 白膜制作技能：若用户本轮上传了参考视频，优先使用本地 File 抽取关键帧拼图与精确时长/画幅，避免远程 URL CORS 失败
+        let outboundText = text;
+        let outboundRefs = allRefs;
+        if (isWhitemodelWorkflow && videoReferences.length > 0) {
+            const firstVideo = videoReferences[0];
+            const videoSource = localVideoFilesRef.current.get(firstVideo.id) || referenceMediaUrl(firstVideo);
+            if (videoSource) {
+                try {
+                    const extracted = await extractVideoKeyframes(videoSource);
+                    outboundText = `${text}\n[参考视频实测元信息：时长 ${extracted.durationSeconds}s，画幅 ${extracted.aspect}，分辨率 ${extracted.width}×${extracted.height}。附图为按时间均匀抽取的 ${extracted.frameCount} 张带时间戳关键帧拼图，请严格使用 duration=${extracted.durationSeconds} 和 aspect="${extracted.aspect}"]`;
+                    outboundRefs = [
+                        ...allRefs,
+                        {
+                            type: "image/jpeg",
+                            url: extracted.contactSheetDataUrl,
+                            name: `whitemodel_keyframes_${extracted.durationSeconds}s_${extracted.aspect}.jpg`,
+                        },
+                    ];
+                } catch (error) {
+                    console.warn("提取参考视频关键帧失败:", error);
+                    message.warning("参考视频关键帧提取失败，将仅基于文本生成");
+                }
+            }
+        }
+
+        await sendMessage(outboundText, outboundRefs.length ? outboundRefs : undefined, {
             model: videoModel,
             imageModel: workflowImageModel,
             imageSize: workflowImageSize,
@@ -1418,12 +1453,77 @@ export default function VideoPage() {
         void handleActionReply(values.video.trim());
     };
 
-    /** 按动作打开图片或视频文件选择。上传完成后仍走同一条参考素材回传。 */
+    /** 按动作打开图片或视频选择；视频存在最近上传记录时弹出选择器，支持直接复用或从本地上传。 */
     const openReferenceUpload = (kind: "image" | "video") => {
+        if (kind === "video" && recentReferenceAssets.some((asset) => asset.kind === "video")) {
+            setVideoChoicePickerOpen(true);
+            return;
+        }
         const input = uploadChoiceInputRef.current;
         if (!input) return;
         input.accept = kind === "video" ? "video/mp4,video/quicktime,video/*" : "image/*";
         input.click();
+    };
+
+    /** 直接使用「最近上传」中的视频响应技能的上传视频引导。 */
+    const handleSelectRecentVideoForChoice = async (asset: RecentReferenceAsset) => {
+        setVideoChoicePickerOpen(false);
+        if (isStreaming || isQueued) return;
+        if (!ensureModelConfiguration("video", model) || !ensureModelConfiguration("text")) return;
+        const videoRef: ReferenceVideo = {
+            id: nanoid(),
+            name: asset.name || "参考视频.mp4",
+            type: "video/mp4",
+            url: asset.url,
+            storageKey: asset.storageKey,
+            durationMs: asset.durationMs,
+        };
+        const attachments = videoReferenceAttachments([videoRef]);
+        if (!attachments.length) return;
+        const videoModel = effectiveConfig.videoModel || effectiveConfig.model || model;
+        const size = config.size || "16:9";
+        const seconds = config.videoSeconds || "5";
+        const quality = config.vquality || "720p";
+        const watermark = config.videoWatermark ?? true;
+        const text = isWhitemodelWorkflow ? "已选择最近上传的参考视频，请根据视频制作 3D 白膜" : "已上传参考视频";
+        setChatMessages((prev) => {
+            const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments: buildChatAttachments(attachments), skill: selectedSkill }];
+            chatMessagesRef.current = next;
+            return next;
+        });
+        let outboundText = text;
+        let outboundAttachments = attachments;
+        if (isWhitemodelWorkflow && asset.url) {
+            try {
+                const extracted = await extractVideoKeyframes(asset.url);
+                outboundText = `${text}\n[参考视频实测元信息：时长 ${extracted.durationSeconds}s，画幅 ${extracted.aspect}，分辨率 ${extracted.width}×${extracted.height}。附图为按时间均匀抽取的 ${extracted.frameCount} 张带时间戳关键帧拼图，请严格使用 duration=${extracted.durationSeconds} 和 aspect="${extracted.aspect}"]`;
+                outboundAttachments = [
+                    ...attachments,
+                    {
+                        type: "image/jpeg",
+                        url: extracted.contactSheetDataUrl,
+                        name: `whitemodel_keyframes_${extracted.durationSeconds}s_${extracted.aspect}.jpg`,
+                    },
+                ];
+            } catch (error) {
+                console.warn("提取最近上传视频关键帧失败:", error);
+                message.warning("参考视频关键帧提取失败，将仅基于文本生成");
+            }
+        }
+        await sendMessage(outboundText, outboundAttachments.length ? outboundAttachments : undefined, {
+            model: videoModel,
+            imageModel: workflowImageModel,
+            imageSize: workflowImageSize,
+            imageResolution: workflowImageResolution,
+            imageQuality: workflowImageQuality,
+            size,
+            resolution: quality,
+            quality: quality.includes("1080") ? "high" : quality.includes("480") ? "low" : "medium",
+            seconds,
+            watermark: String(watermark).toLowerCase() === "true",
+            videoGenerationMode: "reference-to-video",
+            ...(selectedStyles.length ? { generationStyleIds: selectedStyles.map((style) => style.id) } : {}),
+        });
     };
 
     /** 技能引导中"上传图片"按钮选择文件后：上传参考素材并在对话区回显，随后自动发送带附件的消息。 */
@@ -1438,28 +1538,55 @@ export default function VideoPage() {
         const seconds = config.videoSeconds || "5";
         const quality = config.vquality || "720p";
         const watermark = config.videoWatermark ?? true;
-        const text = translate("video.productImageUploaded");
-        const selectedVideoQuote = quoteVideoGeneration({
-            config: effectiveConfig,
-            model: videoModel,
-            // 上传时可能刚从文生视频自动切到图生视频，这里必须用切换后的模式报价
-            mode,
-            resolution: quality,
-            seconds,
-            size,
-            imageReferenceCount: attachments.filter((reference) => reference.type.startsWith("image/")).length,
-            videoReferenceCount: attachments.filter((reference) => reference.type.startsWith("video/")).length,
-        });
-        if (!selectedVideoQuote.available) {
-            message.error(selectedVideoQuote.reason);
-            return;
+        const text = isWhitemodelWorkflow && videos.length ? "已上传参考视频，请根据视频制作 3D 白膜" : translate("video.productImageUploaded");
+        if (!isWhitemodelWorkflow) {
+            const selectedVideoQuote = quoteVideoGeneration({
+                config: effectiveConfig,
+                model: videoModel,
+                // 上传时可能刚从文生视频自动切到图生视频，这里必须用切换后的模式报价
+                mode,
+                resolution: quality,
+                seconds,
+                size,
+                imageReferenceCount: attachments.filter((reference) => reference.type.startsWith("image/")).length,
+                videoReferenceCount: attachments.filter((reference) => reference.type.startsWith("video/")).length,
+            });
+            if (!selectedVideoQuote.available) {
+                message.error(selectedVideoQuote.reason);
+                return;
+            }
         }
         setChatMessages((prev) => {
             const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments: buildChatAttachments(attachments), skill: selectedSkill }];
             chatMessagesRef.current = next;
             return next;
         });
-        await sendMessage(text, attachments.length ? attachments : undefined, {
+        let outboundText = text;
+        let outboundAttachments = attachments;
+        if (isWhitemodelWorkflow && videos.length > 0) {
+            const firstVideo = videos[0];
+            const videoSource = localVideoFilesRef.current.get(firstVideo.id)
+                || Array.from(files || []).find((file) => file.type.startsWith("video/"))
+                || referenceMediaUrl(firstVideo);
+            if (videoSource) {
+                try {
+                    const extracted = await extractVideoKeyframes(videoSource);
+                    outboundText = `${text}\n[参考视频实测元信息：时长 ${extracted.durationSeconds}s，画幅 ${extracted.aspect}，分辨率 ${extracted.width}×${extracted.height}。附图为按时间均匀抽取的 ${extracted.frameCount} 张带时间戳关键帧拼图，请严格使用 duration=${extracted.durationSeconds} 和 aspect="${extracted.aspect}"]`;
+                    outboundAttachments = [
+                        ...attachments,
+                        {
+                            type: "image/jpeg",
+                            url: extracted.contactSheetDataUrl,
+                            name: `whitemodel_keyframes_${extracted.durationSeconds}s_${extracted.aspect}.jpg`,
+                        },
+                    ];
+                } catch (error) {
+                    console.warn("提取参考视频关键帧失败:", error);
+                    message.warning("参考视频关键帧提取失败，将仅基于文本生成");
+                }
+            }
+        }
+        await sendMessage(outboundText, outboundAttachments.length ? outboundAttachments : undefined, {
             model: videoModel,
             imageModel: workflowImageModel,
             imageSize: workflowImageSize,
@@ -2132,6 +2259,60 @@ export default function VideoPage() {
                     event.target.value = "";
                 }}
             />
+            <Modal
+                open={videoChoicePickerOpen}
+                title="选择参考视频"
+                footer={null}
+                mask={{ closable: true }}
+                onCancel={() => setVideoChoicePickerOpen(false)}
+                width={520}
+            >
+                <div className="space-y-4 pt-2">
+                    <Button
+                        type="primary"
+                        block
+                        icon={<Upload className="size-4" />}
+                        onClick={() => {
+                            setVideoChoicePickerOpen(false);
+                            const input = uploadChoiceInputRef.current;
+                            if (!input) return;
+                            input.accept = "video/mp4,video/quicktime,video/*";
+                            input.click();
+                        }}
+                    >
+                        从本地上传视频
+                    </Button>
+                    <div>
+                        <div className="mb-2 text-xs font-medium text-[var(--studio-muted)]">或直接使用最近上传的视频</div>
+                        <div className="grid max-h-72 grid-cols-3 gap-2.5 overflow-y-auto">
+                            {recentReferenceAssets
+                                .filter((asset) => asset.kind === "video")
+                                .map((asset) => (
+                                    <button
+                                        key={asset.storageKey || asset.url}
+                                        type="button"
+                                        className="group relative aspect-square overflow-hidden rounded-lg border border-[var(--studio-line)] bg-black/80 text-left transition hover:border-[var(--studio-action)]"
+                                        onClick={() => void handleSelectRecentVideoForChoice(asset)}
+                                    >
+                                        <video
+                                            src={asset.url}
+                                            muted
+                                            playsInline
+                                            preload="metadata"
+                                            className="h-full w-full object-cover"
+                                        />
+                                        <span className="absolute inset-0 flex items-center justify-center bg-black/25 transition group-hover:bg-black/40">
+                                            <Play className="size-5 text-white" />
+                                        </span>
+                                        <span className="absolute inset-x-0 bottom-0 truncate bg-black/65 px-1.5 py-0.5 text-[11px] text-white">
+                                            {asset.name}
+                                        </span>
+                                    </button>
+                                ))}
+                        </div>
+                    </div>
+                </div>
+            </Modal>
 
             <CreationWorkspace
                 sidebar={{
@@ -2212,6 +2393,7 @@ export default function VideoPage() {
                     stopping: isStopping || pendingStopping,
                     focusWhenValueSet: focusInitialPrompt,
                     creditCost,
+                    quoteUnavailableReason: activeQuote && !activeQuote.available ? activeQuote.reason : undefined,
                     onChange: setPrompt,
                     onStyleSelect: (style) => setSelectedStyles([style]),
                     onStyleRemove: (styleId) => setSelectedStyles((current) => current.filter((style) => style.id !== styleId)),

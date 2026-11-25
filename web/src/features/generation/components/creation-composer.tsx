@@ -38,6 +38,7 @@ export function CreationComposer({
     queued = false,
     canSubmit,
     creditCost,
+    quoteUnavailableReason,
     compact,
     focusWhenValueSet,
     stopping,
@@ -384,23 +385,33 @@ export function CreationComposer({
                                     />
                                 </Tooltip>
                             ) : (
-                                <button
-                                    type="button"
-                                    data-tour="creation-submit"
-                                    className="creation-composer-submit-trigger creation-composer-submit-trigger-cost"
-                                    disabled={!canSubmit || requestActive}
-                                    onClick={onSubmit}
-                                    aria-label={queued ? translate("generation.queued") : running ? translate("generation.generating") : creditCost === undefined ? translate("generation.generate") : creditCost === null ? translate("generation.quoteUnavailableForThisConfiguration") : translate("generation.generateCostsCredits", { value0: creditCost.toLocaleString(currentLanguageTag()) })}
+                                <Tooltip
+                                    title={
+                                        !queued && !running && creditCost === null
+                                            ? quoteUnavailableReason?.trim() || translate("generation.quoteUnavailableForThisConfiguration")
+                                            : undefined
+                                    }
                                 >
-                                    {queued || running ? (
-                                        queued ? translate("generation.queued") : translate("generation.generating")
-                                    ) : (
-                                        <>
-                                            {creditCost === undefined ? null : creditCost === null ? <span className="text-xs font-medium">{translate("generation.quoteUnavailable")}</span> : <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />}
-                                            <ArrowUp className="size-[18px] shrink-0" strokeWidth={2.1} />
-                                        </>
-                                    )}
-                                </button>
+                                    <span className="inline-flex">
+                                        <button
+                                            type="button"
+                                            data-tour="creation-submit"
+                                            className="creation-composer-submit-trigger creation-composer-submit-trigger-cost"
+                                            disabled={!canSubmit || requestActive}
+                                            onClick={onSubmit}
+                                            aria-label={queued ? translate("generation.queued") : running ? translate("generation.generating") : creditCost === undefined ? translate("generation.generate") : creditCost === null ? quoteUnavailableReason?.trim() || translate("generation.quoteUnavailableForThisConfiguration") : translate("generation.generateCostsCredits", { value0: creditCost.toLocaleString(currentLanguageTag()) })}
+                                        >
+                                            {queued || running ? (
+                                                queued ? translate("generation.queued") : translate("generation.generating")
+                                            ) : (
+                                                <>
+                                                    {creditCost === undefined ? null : creditCost === null ? <span className="text-xs font-medium">{translate("generation.quoteUnavailable")}</span> : <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />}
+                                                    <ArrowUp className="size-[18px] shrink-0" strokeWidth={2.1} />
+                                                </>
+                                            )}
+                                        </button>
+                                    </span>
+                                </Tooltip>
                             )}
                         </div>
                     </div>

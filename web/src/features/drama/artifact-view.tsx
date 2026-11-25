@@ -8,6 +8,7 @@ import { ResultDetailDialog, type ResultDetail } from "@/features/generation/com
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { saveDramaCut, type DramaMedia, type DramaStage, type DramaVersion, type DramaWorkspace } from "@/services/api/drama";
 import { composeVideo, waitVideoCompositionTask, type VideoCompositionTask } from "@/services/api/video-composition";
+import { dramaStageMeta } from "./stage-meta";
 import { DramaAspectPicker } from "./aspect-ratio";
 
 type Row = Record<string, unknown>;
@@ -61,6 +62,159 @@ function refsOf(value: unknown) {
 function EmptyStage() {
     const translate = useTranslation();
     return <div className="studio-empty px-6 py-12 text-center text-sm">{translate("drama.noVersion")}</div>;
+}
+
+function SkeletonBar({ className = "" }: { className?: string }) {
+    return <div className={`studio-skeleton min-h-0! ${className}`} aria-hidden="true" />;
+}
+
+/** 各阶段 AI 生成时的骨架屏加载动画，布局与真实产物卡片保持一致。 */
+function StageSkeleton({ stage }: { stage: DramaStage }) {
+    const translate = useTranslation();
+    const stageLabel = translate(dramaStageMeta[stage].label);
+    return (
+        <div className="flex flex-col gap-4" role="status" aria-live="polite" aria-label={`AI 正在生成${stageLabel}`}>
+            <div className="flex items-center gap-2 text-xs font-medium text-[var(--studio-muted)]">
+                <LoaderCircle className="size-3.5 animate-spin text-[var(--studio-action)]" aria-hidden="true" />
+                <span>AI 正在生成{stageLabel}…</span>
+            </div>
+            {stage === "plan" ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                    {[0, 1].map((index) => (
+                        <div key={index} className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] px-4 py-3.5">
+                            <SkeletonBar className="h-3 w-16 rounded" />
+                            <SkeletonBar className="mt-2.5 h-4 w-3/4 rounded" />
+                        </div>
+                    ))}
+                    {[0, 1].map((index) => (
+                        <div key={index} className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] px-4 py-3.5 md:col-span-2">
+                            <SkeletonBar className="h-3 w-20 rounded" />
+                            <SkeletonBar className="mt-2.5 h-3.5 w-full rounded" />
+                            <SkeletonBar className="mt-2 h-3.5 w-5/6 rounded" />
+                            <SkeletonBar className="mt-2 h-3.5 w-2/3 rounded" />
+                        </div>
+                    ))}
+                </div>
+            ) : stage === "script" ? (
+                <div className="flex flex-col gap-4">
+                    <div className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] px-4 py-3.5">
+                        <SkeletonBar className="h-3 w-16 rounded" />
+                        <SkeletonBar className="mt-2.5 h-3.5 w-full rounded" />
+                        <SkeletonBar className="mt-2 h-3.5 w-4/5 rounded" />
+                    </div>
+                    {[0, 1, 2].map((index) => (
+                        <article key={index} className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] p-4">
+                            <div className="flex items-center gap-3">
+                                <SkeletonBar className="size-6 shrink-0 rounded-full!" />
+                                <SkeletonBar className="h-4 w-48 rounded" />
+                            </div>
+                            <SkeletonBar className="mt-3.5 h-3.5 w-full rounded" />
+                            <SkeletonBar className="mt-2 h-3.5 w-11/12 rounded" />
+                            <div className="mt-3.5 flex flex-col gap-2">
+                                <SkeletonBar className="h-9 w-full rounded-lg" />
+                                <SkeletonBar className="h-9 w-5/6 rounded-lg" />
+                            </div>
+                        </article>
+                    ))}
+                </div>
+            ) : stage === "cast" ? (
+                <div className="flex flex-col gap-6">
+                    <section className="flex flex-col gap-3">
+                        <SkeletonBar className="h-4 w-20 rounded" />
+                        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                            {[0, 1, 2, 3].map((index) => (
+                                <article key={index} className="overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
+                                    <div className="studio-skeleton studio-skeleton-media aspect-[3/2] w-full" aria-hidden="true" />
+                                    <div className="flex flex-col gap-2.5 p-4">
+                                        <SkeletonBar className="h-4 w-24 rounded" />
+                                        <SkeletonBar className="h-3 w-full rounded" />
+                                        <SkeletonBar className="h-3 w-5/6 rounded" />
+                                        <SkeletonBar className="h-3 w-2/3 rounded" />
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+                    </section>
+                    <section className="flex flex-col gap-3">
+                        <SkeletonBar className="h-4 w-20 rounded" />
+                        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                            {[0, 1].map((index) => (
+                                <article key={index} className="overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
+                                    <div className="studio-skeleton studio-skeleton-media aspect-video w-full" aria-hidden="true" />
+                                    <div className="flex flex-col gap-2.5 p-4">
+                                        <SkeletonBar className="h-4 w-28 rounded" />
+                                        <SkeletonBar className="h-3 w-full rounded" />
+                                        <SkeletonBar className="h-3 w-3/4 rounded" />
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+                    </section>
+                </div>
+            ) : stage === "shot" ? (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {[0, 1, 2].map((index) => (
+                        <article key={index} className="flex flex-col overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
+                            <div className="flex items-center gap-2 border-b border-[var(--studio-line)] px-4 py-3">
+                                <SkeletonBar className="size-6 shrink-0 rounded-full!" />
+                                <SkeletonBar className="h-3.5 w-10 rounded" />
+                                <SkeletonBar className="h-5 w-16 rounded-full!" />
+                                <SkeletonBar className="ml-auto h-3.5 w-10 rounded" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2.5 p-3">
+                                <div className="flex flex-col gap-1.5">
+                                    <SkeletonBar className="h-3 w-10 rounded" />
+                                    <div className="studio-skeleton aspect-video w-full rounded-xl" aria-hidden="true" />
+                                </div>
+                                <div className="flex flex-col gap-1.5">
+                                    <SkeletonBar className="h-3 w-10 rounded" />
+                                    <div className="studio-skeleton aspect-video w-full rounded-xl" aria-hidden="true" />
+                                </div>
+                            </div>
+                            <div className="flex flex-col gap-2 px-4 pb-3">
+                                <SkeletonBar className="h-3 w-12 rounded" />
+                                <SkeletonBar className="h-3.5 w-full rounded" />
+                                <SkeletonBar className="h-3.5 w-5/6 rounded" />
+                                <SkeletonBar className="mt-1 h-3 w-16 rounded" />
+                                <SkeletonBar className="h-3.5 w-full rounded" />
+                                <SkeletonBar className="h-3.5 w-3/4 rounded" />
+                            </div>
+                            <div className="px-3 pb-3">
+                                <div className="studio-skeleton aspect-video w-full rounded-xl" aria-hidden="true" />
+                            </div>
+                        </article>
+                    ))}
+                </div>
+            ) : (
+                <div className="flex flex-col gap-4">
+                    <div className="flex gap-2">
+                        <SkeletonBar className="h-8 w-28 rounded-lg" />
+                        <SkeletonBar className="h-8 w-24 rounded-lg" />
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                        <div className="studio-skeleton aspect-video w-full rounded-xl" aria-hidden="true" />
+                        <div className="studio-skeleton aspect-video w-full rounded-xl" aria-hidden="true" />
+                    </div>
+                    <div className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] px-4 py-3.5">
+                        <SkeletonBar className="h-3 w-16 rounded" />
+                        <SkeletonBar className="mt-2.5 h-3.5 w-full rounded" />
+                        <SkeletonBar className="mt-2 h-3.5 w-4/5 rounded" />
+                    </div>
+                    <section className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] p-4">
+                        <SkeletonBar className="h-4 w-20 rounded" />
+                        <div className="mt-3 flex flex-col gap-2.5">
+                            {[0, 1, 2, 3].map((index) => (
+                                <div key={index} className="flex items-center gap-2.5">
+                                    <SkeletonBar className="size-5 shrink-0 rounded-full!" />
+                                    <SkeletonBar className="h-3.5 w-3/4 rounded" />
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+                </div>
+            )}
+        </div>
+    );
 }
 
 function MediaFrame({
@@ -135,6 +289,7 @@ function MediaFrame({
 export function DramaArtifact({
     stage,
     version,
+    generating = false,
     durationSeconds,
     durationDisabled,
     onDuration,
@@ -152,6 +307,7 @@ export function DramaArtifact({
 }: {
     stage: DramaStage;
     version: DramaVersion | undefined;
+    generating?: boolean;
     durationSeconds: number;
     durationDisabled: boolean;
     onDuration: (seconds: number) => void;
@@ -233,18 +389,24 @@ export function DramaArtifact({
                     <div className="mt-3"><DramaAspectPicker value={aspectRatio} disabled={durationDisabled || !onAspect} onChange={(ratio) => onAspect?.(ratio)} /></div>
                 </div>
                 {version ? (
-                    <div className="grid gap-3 md:grid-cols-2">
+                    <div className={`grid gap-3 md:grid-cols-2 ${generating ? "pointer-events-none opacity-60 transition-opacity" : ""}`}>
+                        {generating ? (
+                            <div className="flex items-center gap-2 text-xs font-medium text-[var(--studio-muted)] md:col-span-2" role="status">
+                                <LoaderCircle className="size-3.5 animate-spin text-[var(--studio-action)]" aria-hidden="true" />
+                                <span>AI 正在更新{translate(dramaStageMeta[stage].label)}…</span>
+                            </div>
+                        ) : null}
                         <Field label={translate("drama.genre")} value={text(content.genre)} />
                         <Field label={translate("drama.style")} value={text(content.style)} />
                         <Field className="md:col-span-2" label={translate("drama.understanding")} value={text(content.understanding)} />
                         <Field className="md:col-span-2" label={translate("drama.storyDirection")} value={text(content.storyDirection)} />
                         <p className="text-xs tabular-nums text-[var(--studio-muted)] md:col-span-2">{translate("drama.seconds", { value0: text(content.durationSeconds) || durationSeconds })}</p>
                     </div>
-                ) : <EmptyStage />}
+                ) : generating ? <StageSkeleton stage="plan" /> : <EmptyStage />}
             </div>
         );
     }
-    if (!version) return <EmptyStage />;
+    if (!version) return generating ? <StageSkeleton stage={stage} /> : <EmptyStage />;
     if (stage === "script") {
         const scenes = rows(content.scenes);
         return (
