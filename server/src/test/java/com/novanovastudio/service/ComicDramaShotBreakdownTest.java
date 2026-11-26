@@ -109,9 +109,12 @@ class ComicDramaShotBreakdownTest {
                 .thenReturn(Mono.just(new StoryboardAgentService.StoryboardSegmentsResult(
                         List.of(firstSegment, secondSegment), BigDecimal.valueOf(2))));
 
+        PersistenceService persistenceService = mock(PersistenceService.class);
+        when(persistenceService.deleteMediaForUser(any(), any())).thenReturn(Mono.empty());
+        when(repository.listMediaPayloads(eq("proj-1"), any())).thenReturn(Flux.empty());
         ComicDramaService service = new ComicDramaService(currentUserProvider, repository, scriptService,
                 storyboardAgentService, mock(ComicDramaFinalPromptPricingService.class), mock(AiTaskService.class),
-                mock(PersistenceService.class), transaction, new NovanovaProperties(), MediaAccessTestSupport.echo());
+                persistenceService, transaction, new NovanovaProperties(), MediaAccessTestSupport.echo());
 
         ComicDramaDtos.ShotDraft draft = service.generateShotDraft(new ComicDramaDtos.GenerateShotDraftRequest(
                 "proj-1", "ep-1", null, null, "紧凑利落", "", "medium", "channel::gpt", true)).block();

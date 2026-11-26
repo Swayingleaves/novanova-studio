@@ -5,9 +5,12 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.StorageFileDtos;
 import com.novanovastudio.repository.StorageFileRepository;
+import com.novanovastudio.repository.StorageReferenceRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.security.TeamScope;
 import com.novanovastudio.storage.MediaAccessService;
 import java.time.Instant;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +37,8 @@ public class StorageFileService {
     private static final Set<String> SORTS = Set.of("newest", "oldest", "largest", "smallest");
     /** 文件数据访问。 */
     private final StorageFileRepository repository;
+    /** 当前空间的业务引用。 */
+    private final StorageReferenceRepository referenceRepository;
     /** 当前登录用户。 */
     private final CurrentUserProvider currentUserProvider;
     /** 只在验证对象所有权后加载原存储配置。 */
@@ -98,9 +103,10 @@ public class StorageFileService {
     public Mono<JSONObject> deleteFile(String objectId) {
         return currentUserProvider.currentUserId().flatMap(userId -> owned(userId, objectId).flatMap(object -> {
             if (object.get("deletedAt") != null) return Mono.just(JSONObject.of("objectId", objectId, "status", "deleted"));
-            return repository.sharedWorkReference(object.getString("storageId"), object.getString("objectKey"))
-                    .flatMap(referenced -> referenced ? Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT, "文件正在用于分享或画布复制，请等待准备完成或先在我的分享中撤回作品"))
-                            : repository.requestDeletion(userId, object.getLongValue("objectId")))
+            long identifier = object.getLongValue("objectId");
+            return TeamScope.current().flatMap(scope -> referenceRepository.referencedObjects(scope.teamId(), userId, List.of(identifier)).hasElements())
+                    .flatMap(referenced -> referenced ? Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT, "文件仍被其他内容或任务引用，请先解除引用再删除"))
+                            : repository.requestDeletion(userId, identifier))
                     .thenReturn(JSONObject.of("objectId", objectId, "status", "pendingDeletion"))
                     .doOnSuccess(result -> log.info("登记本人云文件删除：userId={}, objectId={}", userId, objectId));
         })).as(transactionalOperator::transactional);

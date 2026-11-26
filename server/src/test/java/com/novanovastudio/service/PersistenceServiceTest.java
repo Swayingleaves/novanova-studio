@@ -114,6 +114,10 @@ class PersistenceServiceTest {
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(JSONObject.class)))
                 .thenReturn(new JSONArray());
         org.mockito.Mockito.lenient().when(repository.listPlatformObjectStorages()).thenReturn(Flux.empty());
+        org.mockito.Mockito.lenient().when(repository.getProject(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Mono.empty());
+        org.mockito.Mockito.lenient().when(repository.findProjectData(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Mono.empty());
         teamRepository = com.novanovastudio.TeamTestSupport.teamRepository();
         service = new PersistenceService(repository, sharedMediaAccess(), teamRepository, com.novanovastudio.TeamTestSupport.storageBilling(), aiTaskRepository, agentActivityService, aiHttpClient, mediaAccess(), currentUserProvider, properties, objectStorageService, modelTaskExecutionDispatcher);
         org.mockito.Mockito.lenient().when(modelTaskExecutionDispatcher.refresh(org.mockito.ArgumentMatchers.anyString())).thenReturn(Mono.empty());

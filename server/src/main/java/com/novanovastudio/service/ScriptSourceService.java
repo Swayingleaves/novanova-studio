@@ -581,7 +581,8 @@ public class ScriptSourceService {
         try {
             temp = Files.createTempFile("script-source-parse-", "." + document.fileExtension());
         } catch (IOException exception) {
-            return repository.fail(document.id(), "无法创建解析暂存文件");
+            return repository.fail(document.id(), "无法创建解析暂存文件")
+                    .then(releaseOriginalIfProjectDeleted(document));
         }
         Path staged = temp;
         return teamTaskScopeService.requireCurrentActive().then(downloadAndParse(document, staged))
@@ -590,6 +591,7 @@ public class ScriptSourceService {
                     log.error("原文解析失败: documentId={}", document.id(), error);
                     return repository.fail(document.id(), errorMessage(error));
                 })
+                .then(Mono.defer(() -> releaseOriginalIfProjectDeleted(document)))
                 .doFinally(signal -> deleteQuietly(staged));
     }
 
@@ -794,6 +796,19 @@ public class ScriptSourceService {
      */
     private Mono<Void> deleteStoredObject(Prepared prepared) {
         return storageBillingService.requestObjectDeletion(prepared.storageId(), prepared.objectKey());
+    }
+
+    /**
+     * 导入结束时，如果所属项目已经删除，回收这次仍占用的原文件。
+     *
+     * @param document 原文记录
+     * @return 登记完成信号
+     */
+    private Mono<Void> releaseOriginalIfProjectDeleted(ScriptSourceRepository.Document document) {
+        return repository.isProjectDeleted(document.userId(), document.projectId())
+                .flatMap(deleted -> deleted
+                        ? storageBillingService.requestObjectDeletion(document.storageConfigId(), document.objectKey())
+                        : Mono.empty());
     }
 
     /**

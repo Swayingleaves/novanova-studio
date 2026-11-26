@@ -1515,8 +1515,8 @@ export function renameGenerationLogTitle(id: string, title: string) {
     return serverPost("/generationLogs/renameGenerationLogTitle", { id, title });
 }
 
-export function deleteGenerationLogs(ids: string[]) {
-    return serverPost("/generationLogs/deleteGenerationLogs", { ids });
+export function deleteGenerationLogs(ids: string[], storageKeys: string[] = []) {
+    return serverPost("/generationLogs/deleteGenerationLogs", { ids, storageKeys: [...new Set(storageKeys)] });
 }
 
 export function markGenerationLogViewed(id: string) {

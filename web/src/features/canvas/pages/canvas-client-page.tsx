@@ -3300,7 +3300,7 @@ function CanvasWorkspacePage() {
             addAsset({
                 kind: "image",
                 title: node.generation.prompt.slice(0, 24) || translate("canvas.canvasImage"),
-                coverUrl: node.content.source,
+                coverUrl: node.content.storageKey ? "" : node.content.source,
                 tags: [],
                 source: "Canvas",
                 data: {

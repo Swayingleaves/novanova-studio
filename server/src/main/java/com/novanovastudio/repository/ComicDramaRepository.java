@@ -667,6 +667,49 @@ public class ComicDramaRepository {
                 .bind("projectId", projectId).bind("shotId", item.getT2()).fetch().rowsUpdated()).then();
     }
 
+    /**
+     * 读取项目或指定镜头仍登记的媒体文本，供删除前收集存储键。
+     *
+     * @param projectId 漫剧项目标识
+     * @param shotIds 只收集这些镜头时传入；为空表示整个项目
+     * @return 结果 JSON、参考媒体 JSON 或音频存储键
+     */
+    public Flux<String> listMediaPayloads(String projectId, List<String> shotIds) {
+        if (shotIds != null && shotIds.isEmpty()) {
+            return Flux.empty();
+        }
+        boolean scoped = shotIds != null;
+        String sql = scoped ? """
+                SELECT result_data::text AS payload FROM comic_drama_media_results
+                WHERE script_project_id=:projectId AND target_type='shot' AND target_id IN (:shotIds)
+                UNION ALL
+                SELECT audio_storage_key FROM comic_drama_voice_tracks
+                WHERE script_project_id=:projectId AND shot_id IN (:shotIds) AND COALESCE(audio_storage_key, '') <> ''
+                """ : """
+                SELECT result_data::text AS payload FROM comic_drama_media_results WHERE script_project_id=:projectId
+                UNION ALL
+                SELECT reference_media::text FROM comic_drama_asset_versions version
+                JOIN comic_drama_assets asset ON asset.id=version.asset_id
+                WHERE asset.script_project_id=:projectId
+                UNION ALL
+                SELECT audio_storage_key FROM comic_drama_voice_tracks
+                WHERE script_project_id=:projectId AND COALESCE(audio_storage_key, '') <> ''
+                """;
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(sql).bind("projectId", projectId);
+        if (scoped) {
+            spec = spec.bind("shotIds", shotIds);
+        }
+        return spec.map((row, metadata) -> row.get("payload", String.class)).all();
+    }
+
+    /** 删除镜头自己的媒体结果，资产版本上的共享参考图不在此列。 */
+    public Mono<Void> deleteShotMediaResults(String projectId, String shotId) {
+        return databaseClient.sql("""
+                DELETE FROM comic_drama_media_results
+                WHERE script_project_id=:projectId AND target_type='shot' AND target_id=:shotId
+                """).bind("projectId", projectId).bind("shotId", shotId).fetch().rowsUpdated().then();
+    }
+
     /** 删除项目内指定镜头。 */
     public Mono<Long> deleteShot(String projectId, String shotId) {
         return databaseClient.sql("DELETE FROM comic_drama_shots WHERE script_project_id=:projectId AND id=:shotId")

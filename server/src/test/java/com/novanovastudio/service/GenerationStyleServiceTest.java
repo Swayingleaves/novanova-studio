@@ -42,13 +42,19 @@ class GenerationStyleServiceTest {
     @Mock
     private AiHttpClient mediaClient;
 
+    /** 旧封面回收。 */
+    @Mock
+    private PersistenceService persistenceService;
+
     /** 风格服务。 */
     private GenerationStyleService service;
 
     /** 初始化服务。 */
     @BeforeEach
     void setUp() {
-        service = new GenerationStyleService(repository, com.novanovastudio.MediaAccessTestSupport.echo(), mediaClient);
+        org.mockito.Mockito.lenient().when(persistenceService.releaseUnreferencedMediaByUrls(any()))
+                .thenReturn(Mono.empty());
+        service = new GenerationStyleService(repository, com.novanovastudio.MediaAccessTestSupport.echo(), mediaClient, persistenceService);
     }
 
     /** 普通生成应解析用户选择的启用风格。 */

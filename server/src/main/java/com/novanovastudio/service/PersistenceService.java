@@ -1137,7 +1137,9 @@ public class PersistenceService {
             record.setUserId(userId);
             record.setTitle(metadata.title());
             record.setData(toJson(project));
-            return repository.saveProject(record);
+            return repository.findProjectData(userId, metadata.id()).defaultIfEmpty("")
+                    .flatMap(previous -> repository.saveProject(record).thenReturn(previous))
+                    .flatMap(previous -> releaseRemovedMedia(userId, previous, record.getData()));
         });
     }
 
@@ -1160,8 +1162,10 @@ public class PersistenceService {
      * @return Mono<Void> 操作结果
      */
     public Mono<Void> deleteProjects(List<String> ids) {
-        // 批量删除时仍限定当前用户，避免删除他人项目。
-        return currentUserProvider.currentUserId().flatMap(userId -> repository.deleteProjects(userId, ids));
+        // 批量删除时仍限定当前用户，避免删除他人项目。软删除后按引用检查回收已无引用的媒体。
+        return currentUserProvider.currentUserId().flatMap(userId -> repository.listProjectData(userId, ids).collectList()
+                .flatMap(payloads -> repository.deleteProjects(userId, ids)
+                        .then(deleteMediaForUser(userId, MediaStorageKeys.fromPayloads(payloads)))));
     }
 
     /**
@@ -1208,8 +1212,10 @@ public class PersistenceService {
      * @return Mono<Void> 操作结果
      */
     public Mono<Void> deleteAssets(List<String> ids) {
-        // 素材删除限定当前用户范围。
-        return currentUserProvider.currentUserId().flatMap(userId -> repository.deleteAssets(userId, ids));
+        // 素材删除限定当前用户范围。软删除后按引用检查回收已无引用的媒体。
+        return currentUserProvider.currentUserId().flatMap(userId -> repository.listAssetData(userId, ids).collectList()
+                .flatMap(payloads -> repository.deleteAssets(userId, ids)
+                        .then(deleteMediaForUser(userId, MediaStorageKeys.fromPayloads(payloads)))));
     }
 
     /**
@@ -1534,12 +1540,14 @@ public class PersistenceService {
     /**
      * 删除生成记录
      *
-     * @param ids List<String> 记录ID列表
-     * @return Mono<Void> 操作结果
+     * @param ids 记录标识列表
+     * @param storageKeys 界面提交的生成产物候选键
+     * @return 操作结果
      */
-    public Mono<Void> deleteGenerationLogs(List<String> ids) {
-        // 批量删除限定当前用户范围。
-        return currentUserProvider.currentUserId().flatMap(userId -> repository.deleteGenerationLogs(userId, ids));
+    @Transactional
+    public Mono<Void> deleteGenerationLogs(List<String> ids, List<String> storageKeys) {
+        return currentUserProvider.currentUserId().flatMap(userId -> repository.deleteGenerationLogs(userId, ids)
+                .then(Mono.defer(() -> deleteMediaForUser(userId, storageKeys))));
     }
 
     /**
@@ -2281,9 +2289,9 @@ public class PersistenceService {
      * @param storageKeys List<String> 媒体存储键列表
      * @return Mono<Void> 操作结果
      */
+    @Transactional
     public Mono<Void> deleteMedia(List<String> storageKeys) {
-        // 删除媒体只移除当前用户的媒体记录。
-        return currentUserProvider.currentUserId().flatMap(userId -> storageBillingService.requestMediaDeletion(userId, storageKeys).then(repository.deleteMedia(userId, storageKeys)));
+        return currentUserProvider.currentUserId().flatMap(userId -> deleteMediaForUser(userId, storageKeys));
     }
 
     /**
@@ -2295,8 +2303,55 @@ public class PersistenceService {
      * @param storageKeys List<String> 媒体存储键列表
      * @return Mono<Void> 删除结果
      */
+    @Transactional
+    /**
+     * 按对象地址回收当前空间中已无引用的媒体。地址对不上已登记文件时不处理。
+     *
+     * @param urls 去掉查询参数后的对象地址
+     * @return 回收完成信号
+     */
+    public Mono<Void> releaseUnreferencedMediaByUrls(List<String> urls) {
+        List<String> normalized = urls == null ? List.of() : urls.stream()
+                .filter(StringUtils::hasText)
+                .map(url -> {
+                    String value = url.trim();
+                    int query = value.indexOf('?');
+                    int hash = value.indexOf('#');
+                    int end = query < 0 ? hash : hash < 0 ? query : Math.min(query, hash);
+                    return end < 0 ? value : value.substring(0, end);
+                })
+                .distinct()
+                .toList();
+        if (normalized.isEmpty()) {
+            return Mono.empty();
+        }
+        return repository.findMediaByUrls(normalized).collectList().flatMap(records -> Flux.fromIterable(records)
+                .groupBy(PersistenceRecords.MediaFileRecord::getUserId)
+                .concatMap(group -> group.map(PersistenceRecords.MediaFileRecord::getStorageKey).collectList()
+                        .flatMap(keys -> deleteMediaForUser(group.key(), keys)))
+                .then());
+    }
+
+    /**
+     * 保存替换快照后，回收旧快照里已经没有引用的媒体。
+     *
+     * @param userId 媒体所属用户
+     * @param previous 保存前快照
+     * @param next 保存后快照
+     * @return 回收完成信号
+     */
+    private Mono<Void> releaseRemovedMedia(Long userId, String previous, String next) {
+        return deleteMediaForUser(userId, MediaStorageKeys.removed(previous, next));
+    }
+
     public Mono<Void> deleteMediaForUser(Long userId, List<String> storageKeys) {
-        return storageBillingService.requestMediaDeletion(userId, storageKeys).then(repository.deleteMedia(userId, storageKeys));
+        if (storageKeys == null || storageKeys.isEmpty()) return Mono.empty();
+        List<String> candidates = storageKeys.stream().filter(StringUtils::hasText).map(String::trim).distinct().toList();
+        return storageBillingService.referencedMediaKeys(userId, candidates).flatMap(referenced -> {
+            List<String> unreferenced = candidates.stream().filter(key -> !referenced.contains(key)).toList();
+            return storageBillingService.requestMediaDeletion(userId, unreferenced)
+                    .then(repository.deleteUntrackedMedia(userId, unreferenced));
+        });
     }
 
     /**

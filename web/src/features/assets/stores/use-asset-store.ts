@@ -7,6 +7,7 @@ import { deleteAsset, listAssets, saveAsset } from "@/services/api/server";
 import { cleanupUnusedImages, resolveImageUrl, uploadImage } from "@/features/storage/services/image-storage";
 import { cleanupUnusedMedia, resolveMediaUrl, uploadMediaFile } from "@/features/storage/services/file-storage";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
+import { isOwnImageCover } from "../lib/asset-cover-request";
 
 export type AssetKind = "text" | "image" | "video";
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
@@ -95,7 +96,7 @@ async function hydrateAsset(asset: Asset): Promise<Asset> {
     const dataUrl = await resolveImageUrl(asset.data.storageKey, asset.data.dataUrl);
     return {
         ...asset,
-        coverUrl: asset.coverUrl.startsWith("blob:") || asset.coverUrl === "" ? dataUrl : asset.coverUrl,
+        coverUrl: isOwnImageCover(asset) ? dataUrl : asset.coverUrl,
         data: { ...asset.data, dataUrl },
     };
 }

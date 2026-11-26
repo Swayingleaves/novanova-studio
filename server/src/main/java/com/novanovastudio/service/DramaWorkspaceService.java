@@ -726,9 +726,13 @@ public class DramaWorkspaceService {
                         return Mono.error(conflict());
                     }
                     return requireIdle(project)
-                            .then(dramaMediaService.deleteGenerated(user.userId(), user.teamId(), project.id()))
-                            .then(dramaRepository.deleteProject(user.userId(), user.teamId(), project.id(), project.revision()))
-                            .flatMap(deleted -> deleted ? dramaRepository.deleteSession(project.sessionId(), user.userId()) : Mono.error(conflict()));
+                            .then(Mono.defer(() -> dramaMediaService.collectGeneratedForDeletion(user.userId(), user.teamId(), project.id())))
+                            .flatMap(storageKeys -> transactionalOperator.transactional(
+                                    dramaRepository.deleteProject(user.userId(), user.teamId(), project.id(), project.revision())
+                                            .flatMap(deleted -> deleted
+                                                    ? dramaRepository.deleteSession(project.sessionId(), user.userId())
+                                                            .then(Mono.defer(() -> dramaMediaService.releaseGeneratedAfterDeletion(user.userId(), project.id(), storageKeys)))
+                                                    : Mono.error(conflict()))));
                 })).then();
     }
 
@@ -820,12 +824,21 @@ public class DramaWorkspaceService {
                                         target.stage().equals(item.stage()) && !item.id().equals(target.id()));
                                 String stage = target.stage().equals(project.currentStage()) && lastOfStage
                                         ? DramaStageRules.previous(target.stage()) : project.currentStage();
-                                return transactionalOperator.transactional(dramaRepository.deleteMediaByVersion(project.id(), target.id())
-                                                .then(dramaRepository.deleteVersion(project.id(), target.id()))
-                                                .then(dramaRepository.saveProgress(user.userId(), user.teamId(), project.id(), project.revision(),
-                                                        stage, "active", "", project.durationSeconds(), project.name())
-                                                        .flatMap(this::requireUpdated).then()))
-                                        .then(workspace(user, project.id()));
+                                return dramaRepository.listMedia(project.id(), user.teamId()).collectList().flatMap(media -> {
+                                    List<String> storageKeys = media.stream()
+                                            .filter(item -> target.id().equals(item.versionId()))
+                                            .map(DramaRepository.MediaRow::storageKey)
+                                            .filter(StringUtils::hasText)
+                                            .distinct()
+                                            .toList();
+                                    return transactionalOperator.transactional(dramaRepository.deleteMediaByVersion(project.id(), target.id())
+                                                    .then(dramaRepository.deleteVersion(project.id(), target.id()))
+                                                    .then(dramaRepository.saveProgress(user.userId(), user.teamId(), project.id(), project.revision(),
+                                                            stage, "active", "", project.durationSeconds(), project.name())
+                                                            .flatMap(this::requireUpdated).then())
+                                                    .then(dramaMediaService.releaseGeneratedAfterDeletion(user.userId(), project.id(), storageKeys)))
+                                            .then(workspace(user, project.id()));
+                                });
                             }));
                 }));
     }

@@ -72,6 +72,9 @@ public class ScriptService {
     /** 私有存储桶读地址签发。 */
     private final MediaAccessService mediaAccessService;
 
+    /** 对象删除登记。 */
+    private final StorageBillingService storageBillingService;
+
     /** 概览与世界观基调这类单对象追溯目标使用的固定标识，与前端停点界面的勾选项一致。 */
     private static final String OVERVIEW_TARGET_ID = "overview";
     private static final String WORLD_SETTING_TARGET_ID = "worldSetting";
@@ -197,7 +200,24 @@ public class ScriptService {
                         Flux.fromIterable(projects).concatMap(project -> repository.deleteProject(
                                         userId, project.projectId(), project.expectedRevision())
                                 .switchIfEmpty(Mono.error(conflictException()))).collectList())
+                .flatMap(deleted -> Flux.fromIterable(deleted)
+                        .concatMap(project -> releaseImportedOriginal(userId, project.projectId()))
+                        .then(Mono.just(deleted)))
                 .doOnSuccess(deleted -> log.info("剧本项目删除完成: userId={}, projectCount={}", userId, deleted.size())));
+    }
+
+    /**
+     * 项目已经软删除且原文不在导入中时，登记回收项目专用原文件。
+     *
+     * @param userId 当前用户
+     * @param projectId 已删除的剧本项目
+     * @return 登记完成信号
+     */
+    private Mono<Void> releaseImportedOriginal(long userId, String projectId) {
+        return scriptSourceRepository.findOwnedDocument(userId, projectId)
+                .filter(document -> !"queued".equals(document.status()) && !"parsing".equals(document.status()))
+                .flatMap(document -> storageBillingService.requestObjectDeletion(document.storageConfigId(), document.objectKey()))
+                .then();
     }
 
     /**

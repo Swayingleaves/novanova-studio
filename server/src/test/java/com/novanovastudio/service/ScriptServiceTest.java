@@ -61,6 +61,8 @@ class ScriptServiceTest {
     @Mock private NovelAdaptationRepository novelAdaptationRepository;
     /** 原文导入仓储，项目详情需要它回传原文类型。 */
     @Mock private ScriptSourceRepository scriptSourceRepository;
+    /** 原文对象删除登记。 */
+    @Mock private StorageBillingService storageBillingService;
     /** 结构校验器。 */
     private Validator validator;
     /** 被测剧本服务。 */
@@ -76,9 +78,10 @@ class ScriptServiceTest {
                 .thenReturn(Mono.just(0L));
         // 概览保存会读项目详情，详情里包含原文类型：这些用例不关心原文，统一当作未导入。
         lenient().when(scriptSourceRepository.findSourceTypeByProject(anyLong(), anyString())).thenReturn(Mono.just(""));
+        lenient().when(scriptSourceRepository.findOwnedDocument(anyLong(), anyString())).thenReturn(Mono.empty());
         service = new ScriptService(repository, currentUserProvider, transactionalOperator, validator,
                 comicDramaImpactService, novelAdaptationRepository, scriptSourceRepository,
-                com.novanovastudio.MediaAccessTestSupport.echo());
+                com.novanovastudio.MediaAccessTestSupport.echo(), storageBillingService);
     }
 
     /**

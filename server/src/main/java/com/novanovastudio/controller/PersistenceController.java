@@ -543,8 +543,8 @@ public class PersistenceController {
      * @return Mono<ApiResponse<String>> 响应
      */
     @PostMapping("/generationLogs/deleteGenerationLogs")
-    public Mono<ApiResponse<String>> deleteGenerationLogs(@Valid @RequestBody PersistenceDtos.DeleteIdsRequest request) {
-        return persistenceService.deleteGenerationLogs(request.ids()).thenReturn(ApiResponse.ok("ok"));
+    public Mono<ApiResponse<String>> deleteGenerationLogs(@Valid @RequestBody PersistenceDtos.DeleteGenerationLogsRequest request) {
+        return persistenceService.deleteGenerationLogs(request.ids(), request.storageKeys()).thenReturn(ApiResponse.ok("ok"));
     }
 
     /**

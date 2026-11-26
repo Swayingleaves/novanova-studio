@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.config.TeamDatabaseConfiguration;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.dto.StorageCapacityDtos;
@@ -99,10 +100,12 @@ class StorageCapacityServiceIntegrationTest {
         when(objectStorage.createReadUrl(any(), anyString(), any(), any(), anyBoolean(), any())).thenReturn("https://example.com/signed-object");
         ObjectProvider<StorageCapacityService> capacityProvider = mock(ObjectProvider.class);
         repository = new StorageCapacityRepository(client, teamRepository);
-        billing = new StorageBillingService(new StorageBillingRepository(client, teamRepository), teamRepository, userProvider, grants, persistenceProvider, capacityProvider, objectStorage, transaction);
+        billing = new StorageBillingService(new StorageBillingRepository(client, teamRepository), new StorageReferenceRepository(client), teamRepository, userProvider, grants, persistenceProvider, capacityProvider, objectStorage, transaction);
         service = new StorageCapacityService(repository, teamRepository, credits, grants, userProvider, billing, persistenceProvider, objectStorage, transaction);
-        var mediaAccess = new com.novanovastudio.storage.MediaAccessService(persistenceProvider, objectStorage, new com.novanovastudio.config.NovanovaProperties());
-        fileService = new StorageFileService(new StorageFileRepository(client, teamRepository), userProvider, persistenceProvider, mediaAccess, transaction);
+        var properties = new NovanovaProperties();
+        properties.getObjectStorage().getSignTtl().setPreviewSeconds(300);
+        var mediaAccess = new com.novanovastudio.storage.MediaAccessService(persistenceProvider, objectStorage, properties);
+        fileService = new StorageFileService(new StorageFileRepository(client, teamRepository), new StorageReferenceRepository(client), userProvider, persistenceProvider, mediaAccess, transaction);
         when(capacityProvider.getObject()).thenReturn(service);
     }
 
@@ -384,6 +387,74 @@ class StorageCapacityServiceIntegrationTest {
         assertEquals("0", run(service.getCapacity()).getString("pendingDeletionBytes"));
         assertEquals("deleted", run(fileService.deleteFile(objectId)).getString("status"));
         assertEquals(0, run(fileService.listFiles(new com.novanovastudio.dto.StorageFileDtos.ListRequest(null, null, null, null, null))).getLongValue("total"));
+    }
+
+    /**
+     * 收藏、画布和其他生成会话分别保护仍在使用的媒体键。
+     *
+     * @throws Exception 测试数据写入失败时抛出
+     */
+    @Test
+    void referencedMediaIncludesActiveSnapshotsAndIgnoresDeletedConversation() throws Exception {
+        execute("""
+                INSERT INTO media_files(storage_key,user_id,kind,mime_type)
+                VALUES ('image:favorite-%1$d',%1$d,'image','image/png'),
+                       ('image:canvas-%1$d',%1$d,'image','image/png'),
+                       ('image:conversation-%1$d',%1$d,'image','image/png'),
+                       ('image:deleted-%1$d',%1$d,'image','image/png');
+                INSERT INTO assets(id,user_id,kind,title,asset_data)
+                VALUES ('asset-refs-%1$d',%1$d,'image','收藏','{"data":{"storageKey":"image:favorite-%1$d"}}');
+                INSERT INTO canvas_projects(id,user_id,title,project_data)
+                VALUES ('canvas-refs-%1$d',%1$d,'画布','{"nodes":[{"content":{"storageKey":"image:canvas-%1$d"}}]}');
+                INSERT INTO generation_logs(id,user_id,log_type,title,log_data,status)
+                VALUES ('keep-refs-%1$d',%1$d,'image','会话','{"rounds":[{"reference":[{"storageKey":"image:conversation-%1$d"}]}]}',1),
+                       ('removed-refs-%1$d',%1$d,'image','会话','{"rounds":[{"result":{"storageKey":"image:deleted-%1$d"}}]}',0);
+                """.formatted(userId));
+
+        var protectedKeys = run(billing.referencedMediaKeys(userId, java.util.List.of("image:favorite-" + userId,
+                "image:canvas-" + userId, "image:conversation-" + userId, "image:deleted-" + userId)));
+        assertEquals(java.util.Set.of("image:favorite-" + userId, "image:canvas-" + userId, "image:conversation-" + userId), protectedKeys);
+    }
+
+    /**
+     * 已入队后出现的新引用保护视频及封面，解除引用后才允许删除原文件。
+     *
+     * @throws Exception 测试台账查询或业务数据写入失败时抛出
+     */
+    @Test
+    void lateCanvasReferenceProtectsQueuedVideoAndItsCover() throws Exception {
+        run(service.storeObject(config(storageId), "queued-video.mp4", 100, () -> "上传完成"));
+        run(service.storeObject(config(storageId), "queued-cover.jpg", 10, () -> "上传完成"));
+        execute("""
+                INSERT INTO media_files(storage_key,user_id,kind,mime_type,object_storage_config_id,
+                                        object_storage_key,object_storage_url,metadata)
+                VALUES ('video:queued-%1$d',%1$d,'video','video/mp4','%2$s','queued-video.mp4',
+                        'https://example.com/queued-video.mp4','{"coverObjectKey":"queued-cover.jpg"}');
+                """.formatted(userId, storageId));
+        String videoId = query("SELECT id FROM storage_objects WHERE user_id=" + userId + " AND object_key='queued-video.mp4'");
+        String coverId = query("SELECT id FROM storage_objects WHERE user_id=" + userId + " AND object_key='queued-cover.jpg'");
+        run(billing.requestMediaDeletion(userId, java.util.List.of("video:queued-" + userId)));
+        assertEquals("110", run(service.getCapacity()).getString("pendingDeletionBytes"));
+        execute("""
+                INSERT INTO canvas_projects(id,user_id,title,project_data)
+                VALUES ('late-reference-%1$d',%1$d,'画布',
+                        '{"nodes":[{"content":{"source":"https://example.com/queued-video.mp4?signature=new"}}]}');
+                """.formatted(userId));
+
+        run(billing.deletePendingObjects());
+        assertEquals("0", run(service.getCapacity()).getString("pendingDeletionBytes"));
+        assertEquals("110", run(service.getCapacity()).getString("usedBytes"));
+        assertEquals("1", query("SELECT status FROM media_files WHERE storage_key='video:queued-" + userId + "'"));
+        assertThrows(BusinessException.class, () -> run(fileService.deleteFile(videoId)));
+        assertThrows(BusinessException.class, () -> run(fileService.deleteFile(coverId)));
+        verify(objectStorage, never()).deletePrivateObject(any(), anyString());
+
+        execute("UPDATE canvas_projects SET status=0 WHERE id='late-reference-" + userId + "'");
+        run(fileService.deleteFile(videoId));
+        run(billing.deletePendingObjects());
+        verify(objectStorage).deletePrivateObject(any(), eq("queued-video.mp4"));
+        assertEquals("0", query("SELECT status FROM media_files WHERE storage_key='video:queued-" + userId + "'"));
+        assertEquals("10", run(service.getCapacity()).getString("usedBytes"));
     }
 
     /**

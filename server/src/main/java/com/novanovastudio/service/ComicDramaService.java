@@ -103,10 +103,19 @@ public class ComicDramaService {
      * @return 已删除的项目ID
      */
     public Mono<List<String>> deleteProjects(List<ComicDramaDtos.ProjectDeletion> projects) {
-        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
-                        Flux.fromIterable(projects).concatMap(project -> repository.deleteProject(
-                                        userId, project.projectId(), project.expectedRevision())
-                                .switchIfEmpty(conflict())).collectList())
+        return currentUserProvider.currentUserId().flatMap(userId -> Flux.fromIterable(projects)
+                .concatMap(project -> repository.listMediaPayloads(project.projectId(), null).collectList()
+                        .map(payloads -> new ProjectMedia(project, payloads)))
+                .collectList()
+                .flatMap(entries -> {
+                    List<String> storageKeys = MediaStorageKeys.fromPayloads(entries.stream()
+                            .flatMap(entry -> entry.payloads().stream()).toList());
+                    return transactionalOperator.transactional(Flux.fromIterable(entries)
+                                    .concatMap(entry -> repository.deleteProject(userId, entry.project().projectId(), entry.project().expectedRevision())
+                                            .switchIfEmpty(conflict()))
+                                    .collectList())
+                            .flatMap(deleted -> persistenceService.deleteMediaForUser(userId, storageKeys).thenReturn(deleted));
+                })
                 .doOnSuccess(deleted -> log.info("漫剧项目删除完成: userId={}, projectCount={}", userId, deleted.size())));
     }
 
@@ -374,7 +383,8 @@ public class ComicDramaService {
                                             boolean hasKeptShots = !replacementPlan.keptBefore().isEmpty()
                                                     || !replacementPlan.keptAfter().isEmpty();
 
-                                            return transactionalOperator.transactional(
+                                            return repository.listMediaPayloads(request.projectId(), replacementPlan.replacedShotIds()).collectList()
+                                                    .flatMap(payloads -> transactionalOperator.transactional(
                                                     persistDraftAssets(request.projectId(), assetPlans.values())
                                                             .then(repository.deleteShotsForReplacement(
                                                                     request.projectId(), replacementPlan.replacedShotIds()))
@@ -392,7 +402,9 @@ public class ComicDramaService {
                                                                     .flatMap(count -> count == 1 ? Mono.empty() : conflict()))
                                                             .then(advance(userId, request.projectId(), request.expectedRevision()))
                                                             .then(repository.refreshProjectProductionStatus(request.projectId()))
-                                                            .then(requireProject(userId, request.projectId())).map(this::mutationResult));
+                                                            .then(requireProject(userId, request.projectId())).map(this::mutationResult))
+                                                    .flatMap(result -> persistenceService.deleteMediaForUser(userId,
+                                                            MediaStorageKeys.fromPayloads(payloads)).thenReturn(result)));
                                         })));
                     });
                 })));
@@ -468,8 +480,12 @@ public class ComicDramaService {
         if (!request.confirm()) {
             return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "删除镜头前必须先查询影响范围并明确确认"));
         }
-        return mutate(request.projectId(), request.expectedRevision(), repository.deleteShot(request.projectId(), request.shotId())
-                .flatMap(rows -> rows > 0 ? Mono.empty() : notFound("镜头不存在")));
+        return currentUserProvider.currentUserId().flatMap(userId -> repository.listMediaPayloads(request.projectId(), List.of(request.shotId())).collectList()
+                .flatMap(payloads -> mutate(request.projectId(), request.expectedRevision(),
+                        repository.deleteShotMediaResults(request.projectId(), request.shotId())
+                                .then(repository.deleteShot(request.projectId(), request.shotId()))
+                                .flatMap(rows -> rows > 0 ? Mono.empty() : notFound("镜头不存在")))
+                        .flatMap(result -> persistenceService.deleteMediaForUser(userId, MediaStorageKeys.fromPayloads(payloads)).thenReturn(result))));
     }
 
     /** 查询镜头删除影响范围，供二次确认弹窗展示。 */
@@ -1716,6 +1732,10 @@ public class ComicDramaService {
             default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "分镜头时长档位无效");
         }
         return Math.min(maximum, Math.max(minimum, seconds));
+    }
+
+    /** 删除前暂存的项目媒体文本。 */
+    private record ProjectMedia(ComicDramaDtos.ProjectDeletion project, List<String> payloads) {
     }
 
     /** 标准化可选文本。 */

@@ -5,15 +5,19 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.StorageFileDtos;
 import com.novanovastudio.repository.StorageBillingRepository;
+import com.novanovastudio.repository.StorageReferenceRepository;
 import com.novanovastudio.repository.TeamRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.TeamScope;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
@@ -29,6 +33,8 @@ import reactor.core.scheduler.Schedulers;
 public class StorageBillingService {
     /** 存储计量仓储。 */
     private final StorageBillingRepository repository;
+    /** 实际物理删除前再次检查持久化的引用。 */
+    private final StorageReferenceRepository referenceRepository;
     /** 资源所有权查询。 */
     private final TeamRepository teamRepository;
     /** 当前用户。 */
@@ -174,15 +180,58 @@ public class StorageBillingService {
      * @return 完成信号
      */
     public Mono<Void> deletePendingObjects() {
-        return repository.pendingDeletions().concatMap(object -> persistenceServiceProvider.getObject()
-                .getObjectStorageForCleanup(object.getString("storageId"))
+        return repository.pendingDeletions().collectList()
+                .flatMapMany(objects -> Flux.fromIterable(objects.stream().collect(Collectors.groupingBy(object ->
+                        new DeletionOwner(object.getLongValue("teamId"), object.getLongValue("userId")))).entrySet()))
+                .concatMap(group -> {
+                    DeletionOwner owner = group.getKey();
+                    List<Long> protectedCandidates = group.getValue().stream().filter(object -> !object.getBooleanValue("ownerRemoved"))
+                            .map(object -> object.getLongValue("id")).toList();
+                    return referenceRepository.referencedObjects(owner.teamId(), owner.userId(), protectedCandidates)
+                            .collect(Collectors.toSet())
+                            .flatMapMany(referenced -> Flux.fromIterable(group.getValue()).concatMap(object -> {
+                                long id = object.getLongValue("id");
+                                return repository.lockPendingDeletion(id).filter(Boolean::booleanValue).flatMap(locked -> {
+                                    if (referenced.contains(id)) {
+                                        log.info("对象仍被引用，撤销删除登记：对象标识={}", id);
+                                        return repository.cancelDeletion(id);
+                                    }
+                                    return deletePendingObject(object);
+                                }).as(transactionalOperator::transactional);
+                            }));
+                }).then().contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
+    }
+
+    /**
+     * 按对象原存储位置执行删除。
+     *
+     * @param object 待删除的台账对象
+     * @return 完成信号，失败留待重试
+     */
+    private Mono<Void> deletePendingObject(JSONObject object) {
+        return persistenceServiceProvider.getObject().getObjectStorageForCleanup(object.getString("storageId"))
                 .flatMap(config -> Mono.fromRunnable(() -> objectStorageService.deletePrivateObject(config, object.getString("objectKey")))
                         .subscribeOn(Schedulers.boundedElastic()))
                 .then(repository.deletionResult(object.getLongValue("id"), ""))
                 .onErrorResume(error -> {
                     log.error("实际存储对象删除失败，保留待重试：objectId={}", object.getLongValue("id"), error);
                     return repository.deletionResult(object.getLongValue("id"), error.getMessage() == null ? "删除失败" : error.getMessage());
-                })).then().contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
+                });
+    }
+
+    /** 删除时批量扫描同一所有者的业务引用。 */
+    private record DeletionOwner(long teamId, long userId) { }
+
+    /**
+     * 查找当前空间仍被引用的候选媒体键。
+     *
+     * @param userId 媒体所属用户
+     * @param keys 待检查的媒体键
+     * @return 保留的媒体键集合
+     */
+    public Mono<Set<String>> referencedMediaKeys(long userId, List<String> keys) {
+        return TeamScope.current().flatMap(scope -> referenceRepository.referencedMedia(scope.teamId(), userId, keys)
+                .collect(Collectors.toSet()));
     }
 
     /**

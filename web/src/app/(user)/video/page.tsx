@@ -43,7 +43,7 @@ import type { ReferenceAudio, ReferenceVideo } from "@/features/generation/types
 import { PromptSelectDialog } from "@/features/prompts/components/prompt-select-dialog";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useConfigStore, useEffectiveConfig, type AiConfig, type VideoGenerationMode } from "@/features/settings/stores/use-config-store";
-import { deleteStoredMedia, resolveMediaStorageInfo, resolveMediaUrl, uploadMediaFile } from "@/features/storage/services/file-storage";
+import { resolveMediaStorageInfo, resolveMediaUrl, uploadMediaFile } from "@/features/storage/services/file-storage";
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
 import { resolveImageUrl, uploadImage } from "@/features/storage/services/image-storage";
@@ -1748,7 +1748,7 @@ export default function VideoPage() {
             return;
         }
         const mediaKeys = conversations.filter((conversation) => selectedIds.includes(conversation.id)).flatMap((conversation) => collectRoundMediaKeys(conversation.rounds));
-        void Promise.all([deleteStoredMedia(mediaKeys), deleteGenerationLogs(selectedIds)]).then(refreshConversations);
+        void deleteGenerationLogs(selectedIds, mediaKeys).then(refreshConversations);
         if (activeId && selectedIds.includes(activeId)) {
             setActiveId(null);
             activeIdRef.current = null;
@@ -1902,7 +1902,7 @@ export default function VideoPage() {
         }
         const conversation = conversationsRef.current.find((item) => item.id === conversationId);
         const mediaKeys = collectRoundMediaKeys(conversation?.rounds || []);
-        await Promise.all([deleteStoredMedia(mediaKeys), deleteGenerationLogs([conversationId])]);
+        await deleteGenerationLogs([conversationId], mediaKeys);
         if (activeIdRef.current === conversationId) {
             newConversation();
         }

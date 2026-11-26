@@ -71,9 +71,6 @@ public class DramaMediaService {
     /** 媒体库和对象存储。 */
     private final PersistenceService persistenceService;
 
-    /** 对象存储的实际删除。 */
-    private final StorageBillingService storageBillingService;
-
     /**
      * 批量读取项目封面图，并按需签名可预览地址。
      *
@@ -215,18 +212,18 @@ public class DramaMediaService {
     }
 
     /**
-     * 删除项目已经生成的图片和视频，并尽量取消还没发出的生成任务。
+     * 删除项目之前收集已生成媒体，并尽量取消还没发出的生成任务。
      *
      * @param userId 用户ID
      * @param teamId 团队空间
      * @param projectId 项目ID
-     * @return 完成信号
+     * @return 待检查和回收的媒体键
      */
-    public Mono<Void> deleteGenerated(long userId, long teamId, String projectId) {
+    public Mono<List<String>> collectGeneratedForDeletion(long userId, long teamId, String projectId) {
         return dramaRepository.listMedia(projectId, teamId).collectList()
                 .flatMap(rows -> cancelOpenTasks(userId, rows).then(refresh(userId, teamId, rows)))
                 .then(dramaRepository.listMedia(projectId, teamId).collectList())
-                .flatMap(rows -> deleteStoredMedia(userId, projectId, storageKeys(rows)));
+                .map(this::storageKeys);
     }
 
     /**
@@ -258,16 +255,18 @@ public class DramaMediaService {
         return rows.stream().map(DramaRepository.MediaRow::storageKey).filter(StringUtils::hasText).distinct().toList();
     }
 
-    private Mono<Void> deleteStoredMedia(long userId, String projectId, List<String> storageKeys) {
-        if (storageKeys.isEmpty()) {
-            return Mono.empty();
-        }
-        log.info("删除短剧生成的图片和视频: projectId={}, count={}", projectId, storageKeys.size());
-        return persistenceService.deleteMediaForUser(userId, storageKeys)
-                .then(storageBillingService.deletePendingObjects().onErrorResume(error -> {
-                    log.warn("短剧媒体对象删除将稍后重试: projectId={}, message={}", projectId, error.getMessage());
-                    return Mono.empty();
-                }));
+    /**
+     * 在项目记录移除后登记未被其他内容引用的媒体。
+     *
+     * @param userId 所属用户
+     * @param projectId 已删除的项目标识
+     * @param storageKeys 待回收媒体
+     * @return 登记完成信号
+     */
+    public Mono<Void> releaseGeneratedAfterDeletion(long userId, String projectId, List<String> storageKeys) {
+        if (storageKeys.isEmpty()) return Mono.empty();
+        log.info("检查已删除短剧的生成媒体：项目标识={}，候选数量={}", projectId, storageKeys.size());
+        return persistenceService.deleteMediaForUser(userId, storageKeys);
     }
 
     private Mono<Void> persist(long userId, long teamId, String projectId, String versionId, DramaDtos.GenerateMediaRequest request,

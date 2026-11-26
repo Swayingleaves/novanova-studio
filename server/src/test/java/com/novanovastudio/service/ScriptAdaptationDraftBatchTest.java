@@ -55,6 +55,8 @@ class ScriptAdaptationDraftBatchTest {
     @Mock private NovelAdaptationRepository novelAdaptationRepository;
     /** 原文导入仓储，项目详情需要它回传原文类型。 */
     @Mock private ScriptSourceRepository scriptSourceRepository;
+    /** 原文对象删除登记。 */
+    @Mock private StorageBillingService storageBillingService;
     /** 当前用户提供器。 */
     @Mock private CurrentUserProvider currentUserProvider;
     /** 下游影响服务。 */
@@ -79,7 +81,7 @@ class ScriptAdaptationDraftBatchTest {
     void setUp() {
         service = new ScriptService(repository, currentUserProvider, TransactionalOperator.create(transactionManager),
                 Validation.buildDefaultValidatorFactory().getValidator(), comicDramaImpactService, novelAdaptationRepository,
-                scriptSourceRepository, com.novanovastudio.MediaAccessTestSupport.echo());
+                scriptSourceRepository, com.novanovastudio.MediaAccessTestSupport.echo(), storageBillingService);
         lenient().when(scriptSourceRepository.findSourceTypeByProject(anyLong(), anyString())).thenReturn(Mono.just(""));
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
         when(transactionManager.getReactiveTransaction(any())).thenReturn(Mono.just(transaction));

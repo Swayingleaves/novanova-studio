@@ -432,6 +432,16 @@ public final class PersistenceDtos {
     }
 
     /**
+     * 删除生成会话并检查其中的媒体是否可回收。
+     *
+     * @param ids 会话标识列表
+     * @param storageKeys 可选的媒体回收候选键
+     */
+    public record DeleteGenerationLogsRequest(@NotEmpty(message = "business.iDIsRequired_03ffcc") List<String> ids,
+                                              List<String> storageKeys) {
+    }
+
+    /**
      * 保存素材请求
      *
      * @param asset JSONObject 素材JSON

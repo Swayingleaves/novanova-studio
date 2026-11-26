@@ -5,7 +5,7 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { nanoid } from "nanoid";
 
 import { readImageMeta } from "@/features/generation/lib/image-utils";
-import { deleteServerMedia, downloadServerMedia, getServerMediaInfo, registerRemoteMedia, uploadServerMedia } from "@/services/api/server";
+import { downloadServerMedia, getServerMediaInfo, registerRemoteMedia, uploadServerMedia } from "@/services/api/server";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { mergeMediaStorageInfo } from "./media-storage-info";
 
@@ -144,12 +144,6 @@ export async function imageToDataUrl(image: { url?: string; dataUrl?: string; st
     const url = image.url || "";
     if (!url || url.startsWith("data:")) return url;
     return blobToDataUrl(await (await fetch(url)).blob());
-}
-
-export async function deleteStoredImages(keys: Iterable<string>) {
-    const storageKeys = Array.from(new Set(keys)).filter(Boolean);
-    storageKeys.forEach((key) => resolvedUrls.delete(key));
-    if (storageKeys.length) await deleteServerMedia(storageKeys);
 }
 
 export async function cleanupUnusedImages(_usedData: unknown) {

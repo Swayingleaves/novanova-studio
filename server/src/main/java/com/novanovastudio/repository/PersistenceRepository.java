@@ -726,12 +726,78 @@ public class PersistenceRepository {
     }
 
     /**
-     * 删除画布项目
+     * 读取仍有效的画布项目快照，用于比较被移除的媒体。
      *
-     * @param userId Long 用户ID
-     * @param ids List<String> 项目ID列表
-     * @return Mono<Void> 操作结果
+     * @param userId 用户标识
+     * @param id 项目标识
+     * @return 项目快照文本
      */
+    public Mono<String> findProjectData(Long userId, String id) {
+        return databaseClient.sql("""
+                SELECT project_data::text AS record_data FROM canvas_projects
+                WHERE user_id = :userId AND id = :id AND status = 1
+                """).bind("userId", userId).bind("id", id)
+                .map((row, metadata) -> row.get("record_data", String.class)).one();
+    }
+
+    /**
+     * 读取即将软删除的画布项目快照。
+     *
+     * @param userId 用户标识
+     * @param ids 项目标识
+     * @return 项目快照文本
+     */
+    public Flux<String> listProjectData(Long userId, List<String> ids) {
+        return listSnapshotData("canvas_projects", "project_data", userId, ids);
+    }
+
+    /**
+     * 读取即将软删除的素材快照。
+     *
+     * @param userId 用户标识
+     * @param ids 素材标识
+     * @return 素材快照文本
+     */
+    public Flux<String> listAssetData(Long userId, List<String> ids) {
+        return listSnapshotData("assets", "asset_data", userId, ids);
+    }
+
+    /**
+     * 按规范化地址查找当前空间里的媒体键。
+     *
+     * @param urls 去掉查询参数后的地址
+     * @return 媒体所属用户和存储键
+     */
+    public Flux<PersistenceRecords.MediaFileRecord> findMediaByUrls(List<String> urls) {
+        if (urls == null || urls.isEmpty()) {
+            return Flux.empty();
+        }
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
+                SELECT storage_key, user_id, kind, source_url, object_storage_config_id, object_storage_provider,
+                       object_storage_url, object_storage_key, bucket, region, mime_type, bytes, width, height,
+                       duration_ms, metadata::text AS metadata, status, created_at, updated_at
+                FROM media_files
+                WHERE team_id = current_team_id() AND status = 1
+                  AND (split_part(split_part(COALESCE(object_storage_url, ''), '?', 1), '#', 1) IN (%s)
+                    OR split_part(split_part(COALESCE(source_url, ''), '?', 1), '#', 1) IN (%s))
+                """.formatted(R2dbcBindings.namedPlaceholders("url", urls.size()), R2dbcBindings.namedPlaceholders("sourceUrl", urls.size())));
+        spec = R2dbcBindings.bindList(spec, "url", urls);
+        spec = R2dbcBindings.bindList(spec, "sourceUrl", urls);
+        return spec.map((row, metadata) -> RowMappers.media(row)).all();
+    }
+
+    private Flux<String> listSnapshotData(String table, String dataColumn, Long userId, List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Flux.empty();
+        }
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
+                SELECT %s::text AS record_data FROM %s
+                WHERE user_id = :userId AND status = 1 AND id IN (%s)
+                """.formatted(dataColumn, table, R2dbcBindings.namedPlaceholders("id", ids.size())))
+                .bind("userId", userId);
+        return R2dbcBindings.bindList(spec, "id", ids).map((row, metadata) -> row.get("record_data", String.class)).all();
+    }
+
     public Mono<Void> deleteProjects(Long userId, List<String> ids) {
         if (ids == null || ids.isEmpty()) {
             return Mono.empty();
@@ -1078,6 +1144,27 @@ public class PersistenceRepository {
         String sql = "SELECT storage_key, user_id, kind, source_url, object_storage_config_id, object_storage_provider, object_storage_url, object_storage_key, bucket, region, mime_type, bytes, width, height, duration_ms, metadata::text AS metadata, status, created_at, updated_at FROM media_files WHERE status = 1 AND storage_key IN (" + R2dbcBindings.namedPlaceholders("storageKey", storageKeys.size()) + ")";
         DatabaseClient.GenericExecuteSpec spec = R2dbcBindings.bindList(databaseClient.sql(sql), "storageKey", storageKeys);
         return spec.map((row, metadata) -> RowMappers.media(row)).all();
+    }
+
+    /**
+     * 仅软删除没有活动台账对象的媒体，例如未转存的远程链接。
+     * 已入队的文件由物理删除成功后的台账结算同步更新元数据。
+     *
+     * @param userId 媒体所属用户
+     * @param storageKeys 通过引用检查的媒体键
+     * @return 完成信号
+     */
+    public Mono<Void> deleteUntrackedMedia(Long userId, List<String> storageKeys) {
+        if (storageKeys.isEmpty()) return Mono.empty();
+        return databaseClient.sql("""
+                UPDATE media_files media SET status = 0, updated_at = CURRENT_TIMESTAMP
+                WHERE media.team_id = current_team_id() AND media.user_id = :userId AND media.storage_key IN (:storageKeys)
+                  AND media.status = 1 AND NOT EXISTS (
+                      SELECT 1 FROM storage_objects file
+                      WHERE file.team_id = media.team_id AND file.user_id = media.user_id AND file.deleted_at IS NULL
+                        AND file.storage_id = media.object_storage_config_id AND file.object_key = media.object_storage_key
+                  )
+                """).bind("userId", userId).bind("storageKeys", storageKeys).fetch().rowsUpdated().then();
     }
 
     /**

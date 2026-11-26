@@ -287,7 +287,28 @@ public class StorageBillingRepository {
 
     /** @return 待删除对象 */
     public Flux<JSONObject> pendingDeletions() {
-        return teamRepository.query("SELECT * FROM storage_objects WHERE deletion_requested_at IS NOT NULL AND deleted_at IS NULL ORDER BY deletion_last_attempt_at NULLS FIRST, id LIMIT 200", Map.of());
+        return teamRepository.query("""
+                SELECT file.*, EXISTS (
+                    SELECT 1 FROM team_members member
+                    WHERE member.team_id = file.team_id AND member.user_id = file.user_id AND member.member_status = 'removed'
+                ) AS owner_removed
+                FROM storage_objects file
+                WHERE file.deletion_requested_at IS NOT NULL AND file.deleted_at IS NULL
+                ORDER BY file.deletion_last_attempt_at NULLS FIRST, file.id LIMIT 200
+                """, Map.of());
+    }
+
+    /**
+     * 锁定仍待删除的对象，跳过已撤销的对象和其他实例正在处理的对象。
+     *
+     * @param id 台账对象标识
+     * @return 当前事务可处理时返回 true
+     */
+    public Mono<Boolean> lockPendingDeletion(long id) {
+        return databaseClient.sql("""
+                SELECT id FROM storage_objects WHERE id = :id AND deletion_requested_at IS NOT NULL
+                  AND deleted_at IS NULL FOR UPDATE SKIP LOCKED
+                """).bind("id", id).map((row, metadata) -> true).one().defaultIfEmpty(false);
     }
 
     /**
@@ -297,7 +318,31 @@ public class StorageBillingRepository {
      * @return 完成信号
      */
     public Mono<Void> deletionResult(long id, String error) {
-        return databaseClient.sql("UPDATE storage_objects SET deletion_last_attempt_at = CURRENT_TIMESTAMP, deleted_at = CASE WHEN :error = '' THEN COALESCE(deleted_at, CURRENT_TIMESTAMP) ELSE deleted_at END, deletion_error = CASE WHEN deleted_at IS NULL THEN :error ELSE NULL END WHERE id = :id")
+        return databaseClient.sql("""
+                WITH updated_object AS (
+                    UPDATE storage_objects SET deletion_last_attempt_at = CURRENT_TIMESTAMP,
+                        deleted_at = CASE WHEN :error = '' THEN COALESCE(deleted_at, CURRENT_TIMESTAMP) ELSE deleted_at END,
+                        deletion_error = CASE WHEN deleted_at IS NULL THEN :error ELSE NULL END
+                    WHERE id = :id RETURNING team_id, user_id, storage_id, object_key
+                )
+                UPDATE media_files media SET status = 0, updated_at = CURRENT_TIMESTAMP
+                FROM updated_object file WHERE :error = '' AND media.status = 1
+                    AND media.team_id = file.team_id AND media.user_id = file.user_id
+                    AND media.object_storage_config_id = file.storage_id AND media.object_storage_key = file.object_key
+                """)
                 .bind("id", id).bind("error", error).fetch().rowsUpdated().then();
+    }
+
+    /**
+     * 后台发现新增引用时撤销待删除标记，恢复云文件访问。
+     *
+     * @param id 对象标识
+     * @return 完成信号
+     */
+    public Mono<Void> cancelDeletion(long id) {
+        return databaseClient.sql("""
+                UPDATE storage_objects SET deletion_requested_at = NULL, deletion_last_attempt_at = NULL, deletion_error = NULL
+                WHERE id = :id AND deleted_at IS NULL AND deletion_requested_at IS NOT NULL
+                """).bind("id", id).fetch().rowsUpdated().then();
     }
 }

@@ -48,6 +48,34 @@ public class ScriptSourceRepository {
     }
 
     /**
+     * 读取项目原文，包含已软删除的项目，供项目删除后回收原文件。
+     *
+     * @param userId 用户标识
+     * @param projectId 剧本项目标识
+     * @return 原文记录
+     */
+    public Mono<Document> findOwnedDocument(long userId, String projectId) {
+        return databaseClient.sql("SELECT * FROM script_source_documents WHERE user_id=:userId AND project_id=:projectId")
+                .bind("userId", userId).bind("projectId", projectId).map((row, metadata) -> mapDocument(row)).one();
+    }
+
+    /**
+     * 判断剧本项目是否已经软删除。
+     *
+     * @param userId 用户标识
+     * @param projectId 剧本项目标识
+     * @return 已删除时为 true
+     */
+    public Mono<Boolean> isProjectDeleted(long userId, String projectId) {
+        return databaseClient.sql("SELECT status FROM script_projects WHERE user_id=:userId AND id=:projectId")
+                .bind("userId", userId).bind("projectId", projectId)
+                .map((row, metadata) -> {
+                    Object status = row.get("status");
+                    return status instanceof Number number && number.intValue() == 0;
+                }).one();
+    }
+
+    /**
      * 读取项目原文的类型，供项目详情直接告知前端该项目是否由原文导入创建。
      * @param userId long 用户标识
      * @param projectId String 项目标识

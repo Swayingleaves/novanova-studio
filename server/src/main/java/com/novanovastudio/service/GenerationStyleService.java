@@ -58,6 +58,9 @@ public class GenerationStyleService {
     /** 已配置存储桶的媒体读取。 */
     private final AiHttpClient mediaClient;
 
+    /** 封面替换后回收已无引用的旧图。 */
+    private final PersistenceService persistenceService;
+
     /**
      * 查询用户侧启用风格。
      *
@@ -147,8 +150,10 @@ public class GenerationStyleService {
         record.setCoverUrl(required(request.coverUrl(), SystemMessage.of("business.styleCoverIsRequired")));
         applyThumbnail(record, required(request.coverThumbnail(), SystemMessage.of("business.invalidStyleThumbnail")));
         return currentCover(request.id(), request.coverRevision())
-                .flatMap(previousCoverUrl -> repository.replaceCover(record, previousCoverUrl))
-                .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(coverChanged()))
+                .flatMap(previousCoverUrl -> repository.replaceCover(record, previousCoverUrl)
+                        .flatMap(rows -> rows > 0
+                                ? persistenceService.releaseUnreferencedMediaByUrls(List.of(previousCoverUrl))
+                                : Mono.error(coverChanged())))
                 .doOnSuccess(ignored -> log.info("压缩并更新风格封面成功，风格标识={}", request.id()));
     }
 

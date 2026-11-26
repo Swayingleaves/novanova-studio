@@ -59,7 +59,7 @@ import type { ReferenceImage } from "@/features/generation/types/image";
 import { PromptSelectDialog } from "@/features/prompts/components/prompt-select-dialog";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
-import { deleteStoredImages, resolveImageStorageInfo, resolveImageUrl, reuseOrUploadImage, uploadImage } from "@/features/storage/services/image-storage";
+import { resolveImageStorageInfo, resolveImageUrl, reuseOrUploadImage, uploadImage } from "@/features/storage/services/image-storage";
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
 import { uploadRemoteObjectToStorage } from "@/features/storage/services/object-storage";
@@ -950,7 +950,7 @@ export default function ImagePage() {
         const imageKeys = conversations
             .filter((conversation) => selectedIds.includes(conversation.id))
             .flatMap((conversation) => conversation.rounds.flatMap((round) => round.results.flatMap((result) => (result.image?.storageKey ? [result.image.storageKey] : []))));
-        void Promise.all([deleteStoredImages(imageKeys), deleteGenerationLogs(selectedIds)]).then(refreshConversations);
+        void deleteGenerationLogs(selectedIds, imageKeys).then(refreshConversations);
         if (activeId && selectedIds.includes(activeId)) {
             setActiveId(null);
             activeIdRef.current = null;
@@ -1015,7 +1015,7 @@ export default function ImagePage() {
         addAsset({
             kind: "image",
             title: translate("image.generationResult", { value0: index + 1 }),
-            coverUrl: image.dataUrl,
+            coverUrl: "",
             tags: [],
             source: "生图工作台",
             data: {
@@ -1111,7 +1111,7 @@ export default function ImagePage() {
         }
         const conversation = conversationsRef.current.find((item) => item.id === conversationId);
         const imageKeys = conversation?.rounds.flatMap((round) => round.results.flatMap((result) => (result.image?.storageKey ? [result.image.storageKey] : []))) || [];
-        await Promise.all([deleteStoredImages(imageKeys), deleteGenerationLogs([conversationId])]);
+        await deleteGenerationLogs([conversationId], imageKeys);
         if (activeIdRef.current === conversationId) {
             newConversation();
         }

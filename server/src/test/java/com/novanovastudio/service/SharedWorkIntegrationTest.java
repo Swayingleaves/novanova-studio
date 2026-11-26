@@ -79,7 +79,7 @@ class SharedWorkIntegrationTest {
         persistenceService = mock(PersistenceService.class); storage = mock(ObjectStorageService.class);
         var provider = (ObjectProvider<PersistenceService>) mock(ObjectProvider.class); when(provider.getObject()).thenReturn(persistenceService);
         var capacityProvider = (ObjectProvider<StorageCapacityService>) mock(ObjectProvider.class);
-        billing = new StorageBillingService(new StorageBillingRepository(client, teams), teams, users, grants, provider, capacityProvider, storage, transaction);
+        billing = new StorageBillingService(new StorageBillingRepository(client, teams), new StorageReferenceRepository(client), teams, users, grants, provider, capacityProvider, storage, transaction);
         capacity = new StorageCapacityService(new StorageCapacityRepository(client, teams), teams, credits, grants, users, billing, provider, storage, transaction); when(capacityProvider.getObject()).thenReturn(capacity);
         lenient().when(persistenceService.getPlatformObjectStorageConfig()).thenAnswer(ignored -> Mono.just(config()));
         lenient().when(persistenceService.getObjectStorageForCleanup(anyString())).thenAnswer(ignored -> Mono.just(config()));

@@ -2,7 +2,7 @@
 
 import { nanoid } from "nanoid";
 
-import { deleteServerMedia, downloadServerMedia, getServerMediaInfo, registerRemoteMedia, uploadServerMedia } from "@/services/api/server";
+import { downloadServerMedia, getServerMediaInfo, registerRemoteMedia, uploadServerMedia } from "@/services/api/server";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { mergeMediaStorageInfo } from "./media-storage-info";
 
@@ -92,12 +92,6 @@ export async function setMediaBlob(storageKey: string, blob: Blob) {
     const media = await uploadServerMedia(blob, { kind: storageKey.split(":", 1)[0] || "file", storageKey, mimeType: blob.type || "application/octet-stream", ...meta }, "media.bin");
     writeCachedUrl(storageKey, media.url, media.expiresAt);
     return media.url;
-}
-
-export async function deleteStoredMedia(keys: Iterable<string>) {
-    const storageKeys = Array.from(new Set(keys)).filter(Boolean);
-    storageKeys.forEach((key) => resolvedUrls.delete(key));
-    if (storageKeys.length) await deleteServerMedia(storageKeys);
 }
 
 export async function cleanupUnusedMedia(_usedData: unknown) {

@@ -18,6 +18,25 @@ test("默认图片封面通过媒体键取缩略图，签名刷新不会改变�
     assert.deepEqual(getAssetCoverRequest({ ...image, coverUrl: signedUrl, data: { ...image.data, dataUrl: signedUrl } }), {
         kind: "image", key: "image:1",
     });
+    assert.deepEqual(getAssetCoverRequest({
+        ...image,
+        coverUrl: "https://example.com/source.png?signature=old",
+        data: { ...image.data, dataUrl: "https://example.com/source.png?signature=new" },
+    }), { kind: "image", key: "image:1" });
+    assert.deepEqual(getAssetCoverRequest({
+        ...image,
+        coverUrl: "https://example.com/source.png?signature=old",
+        data: { ...image.data, dataUrl: "" },
+    }), { kind: "image", key: "image:1" });
+    assert.deepEqual(getAssetCoverRequest({
+        ...image,
+        coverUrl: "https://cdn.example.com/media/source.png?signature=old",
+        data: {
+            ...image.data,
+            dataUrl: "",
+            objectStorage: { provider: "aliyunOss", url: "https://bucket.oss.example.com/media/source.png", key: "media/source.png", bucket: "media", region: "cn", bytes: 1000, mimeType: "image/png", uploadedAt: "2026-11-26" },
+        },
+    }), { kind: "image", key: "image:1" });
 });
 
 test("自定义封面使用资产版本缓存，组合视频封面时仍只传图片地址", () => {
@@ -31,5 +50,10 @@ test("自定义封面使用资产版本缓存，组合视频封面时仍只传�
 test("视频列表只请求封面，有无存储键都不读取视频地址", () => {
     assert.deepEqual(getAssetCoverRequest(video), { kind: "video", key: "video:1" });
     assert.deepEqual(getAssetCoverRequest({ ...video, coverUrl: video.data.url }), { kind: "video", key: "video:1" });
+    assert.deepEqual(getAssetCoverRequest({
+        ...video,
+        coverUrl: "https://example.com/source.mp4?signature=old",
+        data: { ...video.data, url: "https://example.com/source.mp4?signature=new" },
+    }), { kind: "video", key: "video:1" });
     assert.equal(getAssetCoverRequest({ ...video, data: { ...video.data, storageKey: undefined } }), undefined);
 });

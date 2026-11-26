@@ -113,6 +113,6 @@
 
 购买响应包含 `purchaseId,walletTeamId,creditBalance,capacity`，其中 `capacity` 为 `freeBytes,purchasedBytes,totalBytes,usedBytes,reservedBytes,pendingDeletionBytes,categories`，分类项为 `category,fileCount,usedBytes`。待删除容量已包含在已用容量中。重试沿用同一 `clientRequestId`，不同的一次购买使用新标识；套餐变价、下架或默认存储提供方变化时返回冲突，需重新确认。`storage_purchase` 流水表示实际扩容支出，不计入模型生成统计。
 
-文件列表返回 `items,total,page,pageSize`，每项包含 `objectId,fileName,category,mimeType,sourceType,fileBytes,storedAt,status`。对象标识和字节值为十进制字符串，状态为 `available/pendingDeletion/deletionFailed`；仅远程链接不列入实际云文件。名称搜索按字面匹配，不将百分号或下划线解释成通配符。图片、视频、音频可预览，文档及其他文件下载后查看。删除会使其他业务中的文件引用失效，但不删除业务记录和已解析内容。
+文件列表返回 `items,total,page,pageSize`，每项包含 `objectId,fileName,category,mimeType,sourceType,fileBytes,storedAt,status`。对象标识和字节值为十进制字符串，状态为 `available/pendingDeletion/deletionFailed`；仅远程链接不列入实际云文件。名称搜索按字面匹配，不将百分号或下划线解释成通配符。图片、视频、音频可预览，文档及其他文件下载后查看。登记删除和后台实际回收前都会检查仍有效的业务引用。云文件入口拒绝删除仍被引用的文件。会话或短剧项目删除后，只登记其中没有其他有效引用的媒体，已被收藏或复用的文件继续保留。
 
 不再生成任何新月费账单或补出旧月份账单，费率维护接口已移除。已出账费用继续原钱包结清，欠费仍限制新增。上传租约先持久化预占服务端真实字节数，成功后原子转入对象台账；失败或中断后的预占在物理删除成功后释放。
