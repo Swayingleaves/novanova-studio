@@ -103,6 +103,7 @@ import {
     markGenerationLogViewed,
     quoteVideoWorkflow as quoteVideoWorkflowOnServer,
     renameGenerationLogTitle,
+    waitAiTask,
     type GenerationStyleSnapshot,
     type SkillOption,
     type ServerVideoWorkflowQuote,
@@ -110,6 +111,7 @@ import {
 } from "@/services/api/server";
 import { findLatestPlayableVideo, hasPlayableVideoUrl } from "./video-display";
 import { PoseWhitemodelCard } from "@/features/whitemodel/pose-whitemodel-card";
+import { RequeryFailedTaskButton } from "@/features/ai-task/requery-failed-task-button";
 
 type GeneratedVideo = {
     id: string;
@@ -127,7 +129,8 @@ type GeneratedVideo = {
 type GenerationResult = {
     id: string;
     taskId?: string;
-    status: "pending" | "success" | "failed" | "canceled";
+    status: "pending" | "running" | "success" | "failed" | "canceled";
+    canRequery?: boolean;
     progress?: number;
     video?: GeneratedVideo;
     error?: string;
@@ -1651,6 +1654,29 @@ export default function VideoPage() {
         setSelectedStyles([]);
     };
 
+    const resumeFailedVideo = async (roundId: string, resultId: string | undefined, stagePlanTaskId: string | undefined, taskId: string) => {
+        const apply = (progress: number) => {
+            setConversations((current) => current.map((conversation) => ({
+                ...conversation,
+                rounds: conversation.rounds.map((round) => {
+                    if (round.id !== roundId) return round;
+                    return {
+                        ...round,
+                        result: resultId && round.result?.id === resultId ? { ...round.result, status: "pending", progress, error: undefined, canRequery: false } : round.result,
+                        stages: round.stages?.map((stage) => stage.planTaskId === stagePlanTaskId ? { ...stage, status: "pending", progress, error: undefined } : stage),
+                    };
+                }),
+            })));
+        };
+        apply(0);
+        try {
+            await waitAiTask(taskId, { onProgress: (task) => apply(task.progress || 0) });
+        } catch {
+            // 终态交给生成记录刷新回写。
+        }
+        await refreshConversations();
+    };
+
     const newConversation = () => {
         setActiveId(null);
         activeIdRef.current = null;
@@ -2237,6 +2263,7 @@ export default function VideoPage() {
               onUploadObjectStorage: uploadResultToObjectStorage,
               onOpenDetail: openVideoResultDetail,
               onRegenerate: regenerateRound,
+              onResumeFailed: resumeFailedVideo,
               onAdjustDuration: beginDurationAdjustment,
               onOpenModelSettings: beginModelConfigAdjustment,
               onModelConfigContinue: () => void handleActionReply(MODEL_CONFIG_CONFIRMED_MESSAGE),
@@ -2712,6 +2739,7 @@ function buildVideoThreadSections(
         onUploadObjectStorage: (video: GeneratedVideo) => void;
         onOpenDetail: (video: GeneratedVideo, round: Round) => void;
         onRegenerate: (round: Round) => Promise<void>;
+        onResumeFailed: (roundId: string, resultId: string | undefined, stagePlanTaskId: string | undefined, taskId: string) => Promise<void>;
         onAdjustDuration: (seconds: string, prompt: string) => void;
         onOpenModelSettings: (roundId: string) => void;
         onModelConfigContinue: () => void;
@@ -2830,7 +2858,7 @@ function buildVideoThreadSections(
                                         onRegenerate={() => void handlers.onRegenerate(round)}
                                     />
                                 ) : result.status === "failed" || result.status === "canceled" ? (
-                                    <FailedCard key={result.id} error={result.error || translate("video.generationFailed")} canceled={result.status === "canceled"} />
+                                    <FailedCard key={result.id} error={result.error || translate("video.generationFailed")} canceled={result.status === "canceled"} taskId={result.taskId} canRequery={result.canRequery} onRestarted={(task) => void handlers.onResumeFailed(round.id, result.id, undefined, task.id)} />
                                 ) : (
                                     <VideoGeneratingCard key={result.id} size={round.config.size} progress={result.progress} />
                                 ),
@@ -2926,6 +2954,7 @@ function renderWorkflowStages(
         onUploadObjectStorage: (video: GeneratedVideo) => void;
         onOpenDetail: (video: GeneratedVideo, round: Round) => void;
         onRegenerate: (round: Round) => Promise<void>;
+        onResumeFailed: (roundId: string, resultId: string | undefined, stagePlanTaskId: string | undefined, taskId: string) => Promise<void>;
     },
 ): React.ReactNode {
     const compactFramePreview = round.workflowStatus === "image_pending_confirm"
@@ -2961,7 +2990,7 @@ function renderWorkflowStages(
                                 />
                             ))}
                         {stage.status === "failed" || stage.status === "canceled" || stage.status === "skipped" ? (
-                            <FailedCard error={stage.error || (stage.status === "skipped" ? translate("video.dependencyStageFailedThisStageWasSkipped") : translate("video.generationFailed"))} canceled={stage.status === "canceled"} skipped={stage.status === "skipped"} />
+                            <FailedCard error={stage.error || (stage.status === "skipped" ? translate("video.dependencyStageFailedThisStageWasSkipped") : translate("video.generationFailed"))} canceled={stage.status === "canceled"} skipped={stage.status === "skipped"} taskId={stage.taskId} onRestarted={(task) => void handlers.onResumeFailed(round.id, undefined, stage.planTaskId, task.id)} />
                         ) : null}
                         {["pending", "running"].includes(stage.status) ? <VideoGeneratingCard size={round.config.size} progress={stage.progress} /> : null}
                     </div>
@@ -3191,7 +3220,7 @@ function ResultCard({
     );
 }
 
-function FailedCard({ error, canceled, skipped }: { error: string; canceled?: boolean; skipped?: boolean }) {
+function FailedCard({ error, canceled, skipped, taskId, canRequery, onRestarted }: { error: string; canceled?: boolean; skipped?: boolean; taskId?: string; canRequery?: boolean; onRestarted?: (task: { id: string }) => void }) {
     const translate = useTranslation();
     return (
         <div className="overflow-hidden rounded-xl border border-red-300/40 bg-red-500/10">
@@ -3200,6 +3229,7 @@ function FailedCard({ error, canceled, skipped }: { error: string; canceled?: bo
                 <Typography.Paragraph ellipsis={{ rows: 3 }} className="!mb-0 !text-xs !text-red-400">
                     {error}
                 </Typography.Paragraph>
+                {canceled || skipped ? null : <RequeryFailedTaskButton taskId={taskId} canRequery={canRequery} onRestarted={onRestarted} />}
             </div>
         </div>
     );

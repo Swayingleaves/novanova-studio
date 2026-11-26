@@ -11,6 +11,7 @@ import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface, NodeMediaLo
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
 import { WatermarkBadge } from "@/features/watermark/components/watermark-badge";
+import { RequeryFailedTaskButton } from "@/features/ai-task/requery-failed-task-button";
 
 const BATCH_COLLAPSE_TRANSITION_MS = 260;
 
@@ -227,6 +228,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                             <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center" style={{ color: theme.node.muted }}>
                                 <AlertTriangle className="size-6 text-red-400" />
                                 <span className="text-xs text-red-400">{data.execution.errorMessage || translate("canvas.generationFailed")}</span>
+                                <RequeryFailedTaskButton taskId={data.execution.taskId} onRestarted={() => actions.onResumeFailedTask?.(data)} />
                             </div>
                         ) : isMediaUnavailable ? (
                             <NodeMediaUnavailable kind="image" />

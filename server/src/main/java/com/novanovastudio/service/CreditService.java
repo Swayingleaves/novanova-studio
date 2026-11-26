@@ -59,6 +59,9 @@ public class CreditService {
     /** 任务退款流水类型 */
     public static final String TRANSACTION_TASK_REFUND = "task_refund";
 
+    /** 失败任务再次查询成功后的补扣流水类型 */
+    public static final String TRANSACTION_TASK_REQUERY_CHARGE = "task_requery_charge";
+
     /** 管理员调整流水类型 */
     public static final String TRANSACTION_ADMIN_ADJUSTMENT = "admin_adjustment";
 
@@ -241,6 +244,26 @@ public class CreditService {
         return creditRepository.originalWallet(taskId, userId, "").flatMap(wallet -> creditRepository.getTaskChargeAmount(taskId)
                 .flatMap(credits -> creditRepository.claimTaskTransaction(userId, taskId, TRANSACTION_TASK_REFUND, credits, taskReason(taskType, "退款"), null)
                         .flatMap(transactionId -> creditRepository.changeBalance(userId, credits)
+                                .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
+                        .then())
+                .as(transactionalOperator::transactional).contextWrite(context -> context.put(TeamScope.WALLET_KEY, wallet)));
+    }
+
+    /**
+     * 失败任务再次查询并成功落库后，按已退回的原扣费金额再扣一次。
+     * <p>没有退款或已经补扣过时直接结束，避免重复扣费。</p>
+     *
+     * @param userId Long 用户ID
+     * @param taskId String AI任务ID
+     * @param taskType String 任务类型
+     * @return Mono<Void> 操作完成信号
+     */
+    public Mono<Void> chargeRefundedTask(Long userId, String taskId, String taskType) {
+        return creditRepository.originalWallet(taskId, userId, "").flatMap(wallet -> creditRepository.getTaskRefundAmount(taskId)
+                .filter(credits -> CreditAmounts.of(credits).compareTo(CreditAmounts.of(0)) > 0)
+                .flatMap(credits -> creditRepository.claimTaskTransaction(userId, taskId, TRANSACTION_TASK_REQUERY_CHARGE, credits.negate(), taskReason(taskType, "再次查询扣费"), null)
+                        .flatMap(transactionId -> creditGrantService.consumeCredits(userId, credits)
+                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.insufficientCreditsToRequeryTask"))))
                                 .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
                         .then())
                 .as(transactionalOperator::transactional).contextWrite(context -> context.put(TeamScope.WALLET_KEY, wallet)));

@@ -10,6 +10,7 @@ import type { CanvasNode } from "../types";
 import { useNodeActions } from "./node-action-context";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
+import { RequeryFailedTaskButton } from "@/features/ai-task/requery-failed-task-button";
 
 /** 共享加载状态组件 */
 export function NodeLoading() {
@@ -52,11 +53,13 @@ export function NodeMediaLoading({ progress }: { progress?: number }) {
 /** 共享错误状态组件 */
 export function NodeError({ node, onRetry }: { node: CanvasNode; onRetry?: (node: CanvasNode) => void }) {
     const translate = useTranslation();
+    const actions = useNodeActions();
     const t = useCanvasTheme();
     return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center" style={{ color: t.node.muted }}>
             <AlertTriangle className="size-6 text-red-400" />
             <span className="text-xs text-red-400">{node.execution.errorMessage || translate("canvas.generationFailed")}</span>
+            <RequeryFailedTaskButton taskId={node.execution.taskId} onRestarted={() => actions.onResumeFailedTask?.(node)} />
             {onRetry ? (
                 <button type="button" className="mt-1 rounded-full border border-red-400/40 px-3 py-0.5 text-xs text-red-400 transition hover:bg-red-400/10" onClick={() => onRetry(node)}>
                     {translate("canvas.retry")}</button>

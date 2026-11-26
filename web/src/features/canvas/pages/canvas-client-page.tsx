@@ -5193,6 +5193,18 @@ function CanvasWorkspacePage() {
             },
             onCaptureVideoFrame: captureVideoFrame,
             onRetry: (n) => (isStoryboardNode(n) ? void handleGenerateStoryboard(n) : void handleRetryNode(n)),
+            onResumeFailedTask: (node) => {
+                const taskId = node.execution.taskId;
+                if (!taskId) return;
+                setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "running", errorMessage: "", progress: node.execution.progress || 0 }) : item)));
+                void waitAiTask(taskId, {
+                    onProgress: (current) => setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { progress: current.progress || 0 }) : item))),
+                }).then((completed) => {
+                    setNodes((prev) => updateNodeWithTaskResult(prev, node.id, completed));
+                }).catch((error) => {
+                    setNodes((prev) => markTaskNodeFailed(prev, node.id, error instanceof Error ? error.message : translate("canvas.failedToRecoverGeneration")));
+                });
+            },
             onOpenStoryboard: (node) => setStoryboardWorkspaceNodeId(node.id),
             onOpenDirectorDesk: (node) => setDirectorDeskWorkspaceNodeId(node.id),
             onStoryboardInstructionChange: handleStoryboardInstructionChange,

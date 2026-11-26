@@ -105,6 +105,7 @@ export type ServerAiTask = {
     status: ServerAiTaskStatus;
     progress: number;
     providerRequestSent?: boolean;
+    canRequery?: boolean;
     requestData: unknown;
     resultData?: unknown;
     errorMessage?: string;
@@ -1618,6 +1619,11 @@ const generationCancelForfeitTaskIds = new Set<string>();
 /** 记录用户已确认放弃退款的任务，供等待中的中止路径沿用。 */
 export function markGenerationCancelForfeit(taskIds: string[]) {
     taskIds.forEach((taskId) => generationCancelForfeitTaskIds.add(taskId));
+}
+
+/** 继续查询已失败、但保存了供应商任务号的任务，不重新提交生成。 */
+export function requeryAiTask(taskId: string) {
+    return serverPost<ServerAiTask>("/ai/task/requeryTask", { taskId });
 }
 
 export function cancelAiTask(taskId: string, options: { forfeitRefund?: boolean } = {}) {

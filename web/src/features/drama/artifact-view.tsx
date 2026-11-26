@@ -10,6 +10,7 @@ import { saveDramaCut, type DramaMedia, type DramaStage, type DramaVersion, type
 import { composeVideo, waitVideoCompositionTask, type VideoCompositionTask } from "@/services/api/video-composition";
 import { dramaStageMeta } from "./stage-meta";
 import { DramaAspectPicker } from "./aspect-ratio";
+import { RequeryFailedTaskButton } from "@/features/ai-task/requery-failed-task-button";
 
 type Row = Record<string, unknown>;
 
@@ -226,6 +227,7 @@ function MediaFrame({
     bare = false,
     onGenerate,
     onStop,
+    onRequeried,
     stoppingTaskId = "",
 }: {
     media: DramaMedia | undefined;
@@ -236,6 +238,7 @@ function MediaFrame({
     bare?: boolean;
     onGenerate?: (targetKey: string) => void;
     onStop?: (media: DramaMedia) => void;
+    onRequeried?: () => void;
     stoppingTaskId?: string;
 }) {
     const translate = useTranslation();
@@ -260,6 +263,7 @@ function MediaFrame({
             {!ready && !running ? (
                 <div className={`${aspect} grid w-full place-items-center px-4 text-center text-xs leading-5 text-[var(--studio-muted)]`}>
                     {failed ? (media?.errorMessage || translate("drama.statusFailed")) : kind === "video" ? translate("drama.noVideoYet") : translate("drama.noImageYet")}
+                    {media?.status === "failed" ? <div className="mt-2"><RequeryFailedTaskButton taskId={media.taskId} onRestarted={() => onRequeried?.()} /></div> : null}
                 </div>
             ) : null}
             {onGenerate ? (
@@ -301,6 +305,7 @@ export function DramaArtifact({
     shotDurations = {},
     onGenerate,
     onStop,
+    onRequeried,
     stoppingTaskId = "",
     projectId,
     onWorkspace,
@@ -319,6 +324,7 @@ export function DramaArtifact({
     shotDurations?: Record<string, number>;
     onGenerate?: (targetKey: string) => void;
     onStop?: (media: DramaMedia) => void;
+    onRequeried?: () => void;
     stoppingTaskId?: string;
     projectId?: string;
     onWorkspace?: (workspace: DramaWorkspace) => void;
@@ -444,7 +450,7 @@ export function DramaArtifact({
                             const targetKey = `character:${text(person.ref)}`;
                             return (
                                 <article key={text(person.id) || targetKey || index} className="overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
-                                    <MediaFrame bare media={mediaByKey[targetKey]} kind="image" targetKey={targetKey} pending={pendingKeys.includes(targetKey)} aspect="aspect-[3/2]" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                                    <MediaFrame bare media={mediaByKey[targetKey]} kind="image" targetKey={targetKey} pending={pendingKeys.includes(targetKey)} aspect="aspect-[3/2]" onGenerate={onGenerate} onStop={onStop} onRequeried={onRequeried} stoppingTaskId={stoppingTaskId} />
                                     <div className="flex flex-col gap-3 p-4">
                                         <p className="text-sm font-semibold text-[var(--studio-ink)]">{text(person.name)}</p>
                                         <Field plain label={translate("drama.personality")} value={text(person.personality)} />
@@ -462,7 +468,7 @@ export function DramaArtifact({
                             const targetKey = `location:${text(place.ref)}`;
                             return (
                                 <article key={text(place.id) || targetKey || index} className="overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
-                                    <MediaFrame bare media={mediaByKey[targetKey]} kind="image" targetKey={targetKey} pending={pendingKeys.includes(targetKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                                    <MediaFrame bare media={mediaByKey[targetKey]} kind="image" targetKey={targetKey} pending={pendingKeys.includes(targetKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} onRequeried={onRequeried} stoppingTaskId={stoppingTaskId} />
                                     <div className="flex flex-col gap-3 p-4">
                                         <p className="text-sm font-semibold text-[var(--studio-ink)]">{text(place.name)}</p>
                                         <Field plain label={translate("drama.visual")} value={text(place.visual)} />
@@ -499,11 +505,11 @@ export function DramaArtifact({
                             <div className="grid grid-cols-2 gap-2.5 p-3">
                                 <div className="flex flex-col gap-1.5">
                                     <p className="text-xs font-medium text-[var(--studio-faint)]">{translate("drama.firstFrame")}</p>
-                                    <MediaFrame media={mediaByKey[firstKey]} kind="image" targetKey={firstKey} pending={pendingKeys.includes(firstKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                                    <MediaFrame media={mediaByKey[firstKey]} kind="image" targetKey={firstKey} pending={pendingKeys.includes(firstKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} onRequeried={onRequeried} stoppingTaskId={stoppingTaskId} />
                                 </div>
                                 <div className="flex flex-col gap-1.5">
                                     <p className="text-xs font-medium text-[var(--studio-faint)]">{translate("drama.lastFrame")}</p>
-                                    <MediaFrame media={mediaByKey[lastKey]} kind="image" targetKey={lastKey} pending={pendingKeys.includes(lastKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                                    <MediaFrame media={mediaByKey[lastKey]} kind="image" targetKey={lastKey} pending={pendingKeys.includes(lastKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} onRequeried={onRequeried} stoppingTaskId={stoppingTaskId} />
                                 </div>
                             </div>
                             <div className="flex flex-1 flex-col gap-3 px-4 pb-3">
@@ -512,7 +518,7 @@ export function DramaArtifact({
                                 <Field plain label={translate("drama.videoPrompt")} value={text(shot?.videoPrompt)} />
                             </div>
                             <div className="px-3 pb-3">
-                                <MediaFrame media={mediaByKey[videoKey]} kind="video" targetKey={videoKey} pending={pendingKeys.includes(videoKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />
+                                <MediaFrame media={mediaByKey[videoKey]} kind="video" targetKey={videoKey} pending={pendingKeys.includes(videoKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} onRequeried={onRequeried} stoppingTaskId={stoppingTaskId} />
                             </div>
                         </article>
                     );
@@ -532,7 +538,7 @@ export function DramaArtifact({
                 <div className="grid gap-3 md:grid-cols-2">
                     {shotRefs.map((ref) => {
                         const targetKey = `shot-video:${ref}`;
-                        return <MediaFrame key={targetKey} media={mediaByKey[targetKey]} kind="video" targetKey={targetKey} pending={pendingKeys.includes(targetKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} stoppingTaskId={stoppingTaskId} />;
+                        return <MediaFrame key={targetKey} media={mediaByKey[targetKey]} kind="video" targetKey={targetKey} pending={pendingKeys.includes(targetKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} onRequeried={onRequeried} stoppingTaskId={stoppingTaskId} />;
                     })}
                 </div>
             ) : <p className="text-sm leading-6 text-[var(--studio-muted)]">{translate("drama.noVideoYet")}</p>}

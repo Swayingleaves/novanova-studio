@@ -21,28 +21,30 @@ type JsonRecord = Record<string, unknown>;
 export async function reconcileGenerationLogTasks<Log extends GenerationTaskLog>(logType: GenerationLogType, logs: Log[]): Promise<Log[]> {
     const taskIds = [...new Set(logs.flatMap((log) => findTaskIdsToReconcile(logType, log)))];
     const tasks = new Map<string, ServerAiTask>();
+    const reopened = new Map<string, ServerAiTask>();
     await Promise.all(
         taskIds.map(async (taskId) => {
             try {
                 const task = await getAiTaskInfo(taskId);
                 if (isTerminalTaskStatus(task.status)) tasks.set(taskId, task);
+                else if (task.status === "pending" || task.status === "running") reopened.set(taskId, task);
             } catch (error) {
                 console.error("查询生成任务状态失败", error);
             }
         }),
     );
-    if (taskIds.length && !tasks.size) return logs;
+    if (taskIds.length && !tasks.size && !reopened.size) return logs;
     // 查询与后台终态保存可能并发，不能把读取到的旧快照回写并覆盖完整媒体或其他轮次。
-    return logs.map((log) => reconcileGenerationLog(logType, log, tasks));
+    return logs.map((log) => reconcileGenerationLog(logType, log, tasks, reopened));
 }
 
-function reconcileGenerationLog<Log extends GenerationTaskLog>(logType: GenerationLogType, log: Log, tasks: ReadonlyMap<string, ServerAiTask>): Log {
+function reconcileGenerationLog<Log extends GenerationTaskLog>(logType: GenerationLogType, log: Log, tasks: ReadonlyMap<string, ServerAiTask>, reopened: ReadonlyMap<string, ServerAiTask>): Log {
     if (!Array.isArray(log.rounds)) return log;
 
     let changed = false;
     const rounds = log.rounds.map((round) => {
         if (!isRecord(round)) return round;
-        const nextRound = reconcileRound(logType, round, tasks);
+        const nextRound = reconcileRound(logType, round, tasks, reopened);
         changed ||= nextRound !== round;
         return nextRound;
     });
@@ -51,7 +53,7 @@ function reconcileGenerationLog<Log extends GenerationTaskLog>(logType: Generati
     return { ...log, rounds, generationStatus: generationStatus(rounds) } as Log;
 }
 
-function reconcileRound(logType: GenerationLogType, round: JsonRecord, tasks: ReadonlyMap<string, ServerAiTask>): JsonRecord {
+function reconcileRound(logType: GenerationLogType, round: JsonRecord, tasks: ReadonlyMap<string, ServerAiTask>, reopened: ReadonlyMap<string, ServerAiTask>): JsonRecord {
     const roundTaskId = text(round.taskId);
     const resultKeys = ["results", "result"] as const;
     let changed = false;
@@ -60,14 +62,14 @@ function reconcileRound(logType: GenerationLogType, round: JsonRecord, tasks: Re
     for (const key of resultKeys) {
         const value = round[key];
         if (Array.isArray(value)) {
-            const results = value.flatMap((result) => reconcileResult(logType, result, roundTaskId, tasks));
+            const results = value.flatMap((result) => reconcileResult(logType, result, roundTaskId, tasks, reopened));
             if (results.length !== value.length || results.some((result, index) => result !== value[index])) {
                 nextRound[key] = results;
                 changed = true;
             }
             continue;
         }
-        const result = reconcileResult(logType, value, roundTaskId, tasks)[0];
+        const result = reconcileResult(logType, value, roundTaskId, tasks, reopened)[0];
         if (result !== value) {
             nextRound[key] = result;
             changed = true;
@@ -77,7 +79,7 @@ function reconcileRound(logType: GenerationLogType, round: JsonRecord, tasks: Re
     for (const key of ["stages", "tasks"] as const) {
         const value = round[key];
         if (!Array.isArray(value)) continue;
-        const nextItems = value.map((item) => reconcileWorkflowItem(item, tasks));
+        const nextItems = value.map((item) => reconcileWorkflowItem(item, tasks, reopened));
         if (nextItems.some((item, index) => item !== value[index])) {
             nextRound[key] = nextItems;
             changed = true;
@@ -89,18 +91,30 @@ function reconcileRound(logType: GenerationLogType, round: JsonRecord, tasks: Re
     return task ? updatePendingResult(round, task) : roundTaskId ? round : updateMissingTaskResult(round);
 }
 
-function reconcileWorkflowItem(value: unknown, tasks: ReadonlyMap<string, ServerAiTask>): unknown {
-    if (!isRecord(value) || !["pending", "running"].includes(text(value.status))) return value;
+function reconcileWorkflowItem(value: unknown, tasks: ReadonlyMap<string, ServerAiTask>, reopened: ReadonlyMap<string, ServerAiTask>): unknown {
+    if (!isRecord(value)) return value;
+    const status = text(value.status);
     const taskId = text(value.taskId);
+    if (status === "failed" && taskId) {
+        const resumed = reopened.get(taskId);
+        if (resumed) return updatePendingResult(value, resumed);
+        const failed = tasks.get(taskId);
+        return failed ? updatePendingResult(value, failed) : value;
+    }
+    if (!["pending", "running"].includes(status)) return value;
     const task = taskId ? tasks.get(taskId) : undefined;
     if (!task) return taskId ? value : updateMissingTaskResult(value);
     return updatePendingResult(value, task);
 }
 
 /** 同时恢复终态与媒体，一次生成多张图片时展开全部结果，并保持结果标识稳定。 */
-function reconcileResult(logType: GenerationLogType, value: unknown, roundTaskId: string, tasks: ReadonlyMap<string, ServerAiTask>): unknown[] {
+function reconcileResult(logType: GenerationLogType, value: unknown, roundTaskId: string, tasks: ReadonlyMap<string, ServerAiTask>, reopened: ReadonlyMap<string, ServerAiTask>): unknown[] {
     if (!needsResultReconciliation(logType, value)) return [value];
     const taskId = text(value.taskId) || roundTaskId;
+    if (isRecord(value) && text(value.status) === "failed") {
+        const resumed = taskId ? reopened.get(taskId) : undefined;
+        if (resumed) return [updatePendingResult(value, resumed)];
+    }
     const task = taskId ? tasks.get(taskId) : undefined;
     if (!task) return [taskId ? value : updateMissingTaskResult(value)];
     const result = updatePendingResult(value, task);
@@ -127,7 +141,7 @@ function reconcileResult(logType: GenerationLogType, value: unknown, roundTaskId
 /** 已完成却没有媒体的历史结果也需查询任务，不能只检查pending。 */
 function needsResultReconciliation(logType: GenerationLogType, value: unknown): value is JsonRecord {
     if (!isRecord(value)) return false;
-    if (text(value.status) === "pending") return true;
+    if (text(value.status) === "pending" || (text(value.status) === "failed" && text(value.taskId))) return true;
     if (text(value.status) !== "success") return false;
     const media = value[logType];
     return !isRecord(media) || ![media.url, media.storageKey, ...(logType === "image" ? [media.dataUrl] : [])].some((value) => Boolean(text(value)));
@@ -137,8 +151,9 @@ function updatePendingResult(result: JsonRecord, task: ServerAiTask): JsonRecord
     const status = task.status;
     return {
         ...result,
-        status,
+        status: status === "running" ? "pending" : status,
         progress: status === "success" || status === "failed" || status === "canceled" ? 100 : task.progress,
+        ...(task.canRequery ? { canRequery: true } : { canRequery: false }),
         ...(status === "failed" || status === "canceled" ? { error: task.errorMessage || (status === "canceled" ? translate("generation.taskCanceled") : translate("generation.generationFailed")) } : {}),
     };
 }
@@ -158,7 +173,7 @@ function findTaskIdsToReconcile(logType: GenerationLogType, log: GenerationTaskL
         ];
         const taskIds = results.flatMap((result) => needsResultReconciliation(logType, result) ? [text(result.taskId) || roundTaskId] : []);
         const workflowTaskIds = ["stages", "tasks"].flatMap((key) => Array.isArray(round[key])
-            ? round[key].flatMap((item) => isRecord(item) && ["pending", "running"].includes(text(item.status)) && text(item.taskId) ? [text(item.taskId)] : [])
+            ? round[key].flatMap((item) => isRecord(item) && ["pending", "running", "failed"].includes(text(item.status)) && text(item.taskId) ? [text(item.taskId)] : [])
             : []);
         return [...taskIds.filter(Boolean), ...workflowTaskIds].length
             ? [...taskIds.filter(Boolean), ...workflowTaskIds]

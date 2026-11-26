@@ -286,7 +286,7 @@ public class DramaMediaService {
     }
 
     private Mono<Void> refresh(long userId, long teamId, List<DramaRepository.MediaRow> rows) {
-        return Flux.fromIterable(rows).filter(row -> open(row.status())).concatMap(row -> aiTaskService.getTaskForUser(userId, row.taskId())
+        return Flux.fromIterable(rows).filter(row -> open(row.status()) || "failed".equals(row.status())).concatMap(row -> aiTaskService.getTaskForUser(userId, row.taskId())
                 .flatMap(task -> syncMedia(userId, teamId, row, task))
                 .onErrorResume(error -> {
                     log.warn("同步短剧媒体任务失败: mediaId={}, taskId={}, message={}", row.id(), row.taskId(), error.getMessage());

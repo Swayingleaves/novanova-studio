@@ -595,6 +595,19 @@ public class CreditRepository {
     }
 
     /**
+     * 查询任务已退回的积分。没有退款流水时为空。
+     *
+     * @param taskId String AI任务ID
+     * @return Mono<BigDecimal> 已退积分
+     */
+    public Mono<BigDecimal> getTaskRefundAmount(String taskId) {
+        return databaseClient.sql("SELECT change_amount FROM user_credit_transactions WHERE task_id = :taskId AND transaction_type = 'task_refund'")
+                .bind("taskId", taskId)
+                .map((row, metadata) -> row.get("change_amount", BigDecimal.class))
+                .one();
+    }
+
+    /**
      * 查询任务原始扣费金额。
      *
      * @param taskId String AI任务ID

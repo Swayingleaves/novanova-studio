@@ -74,7 +74,8 @@ import { clearResumedSkillConversation, skillOptionFromSnapshot, writeResumedSki
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
-import { deleteGenerationLogs, getAgentSessionHistory, getAiTaskPollingIntervalMilliseconds, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
+import { deleteGenerationLogs, getAgentSessionHistory, getAiTaskPollingIntervalMilliseconds, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, waitAiTask, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
+import { RequeryFailedTaskButton } from "@/features/ai-task/requery-failed-task-button";
 
 type GeneratedImage = {
     id: string;
@@ -90,8 +91,9 @@ type GeneratedImage = {
 
 type GenerationResult = {
     id: string;
-    status: "pending" | "success" | "failed" | "canceled";
+    status: "pending" | "running" | "success" | "failed" | "canceled";
     taskId?: string;
+    canRequery?: boolean;
     progress?: number;
     image?: GeneratedImage;
     error?: string;
@@ -843,6 +845,25 @@ export default function ImagePage() {
         setSelectedStyles([]);
     };
 
+    const resumeFailedResult = async (roundId: string, resultId: string, taskId: string) => {
+        const apply = (progress: number) => {
+            setConversations((current) => current.map((conversation) => ({
+                ...conversation,
+                rounds: conversation.rounds.map((round) => round.id !== roundId ? round : {
+                    ...round,
+                    results: round.results.map((result) => result.id !== resultId ? result : { ...result, status: "pending", progress, error: undefined, canRequery: false }),
+                }),
+            })));
+        };
+        apply(0);
+        try {
+            await waitAiTask(taskId, { onProgress: (task) => apply(task.progress || 0) });
+        } catch {
+            // 终态交给生成记录刷新回写。
+        }
+        await refreshConversations();
+    };
+
     const newConversation = () => {
         const savedDraft = peekNewConversationDraft("image", userId);
         setActiveId(null);
@@ -1215,6 +1236,7 @@ export default function ImagePage() {
               onUploadObjectStorage: uploadResultToObjectStorage,
               onOpenDetail: openImageResultDetail,
               onRegenerate: regenerateRound,
+              onResumeFailed: resumeFailedResult,
               interactiveChoiceRoundId,
               onChoiceReply: (value) => void handleActionReply(value),
               onOpenModelSettings: beginModelConfigAdjustment,
@@ -1567,6 +1589,7 @@ function buildImageThreadSections(
         onUploadObjectStorage: (image: GeneratedImage, index: number) => void;
         onOpenDetail: (image: GeneratedImage, index: number, round: Round) => void;
         onRegenerate: (round: Round) => Promise<void>;
+        onResumeFailed: (roundId: string, resultId: string, taskId: string) => Promise<void>;
         interactiveChoiceRoundId?: string;
         onChoiceReply: (value: string) => void;
         onOpenModelSettings: (roundId: string) => void;
@@ -1652,8 +1675,8 @@ function buildImageThreadSections(
                                 onRegenerate={() => void handlers.onRegenerate(round)}
                             />
                         ) : result.status === "failed" || result.status === "canceled" ? (
-                            <FailedCard key={result.id} error={result.error || translate("image.generationFailed")} canceled={result.status === "canceled"} />
-                        ) : result.status === "pending" ? (
+                            <FailedCard key={result.id} error={result.error || translate("image.generationFailed")} canceled={result.status === "canceled"} taskId={result.taskId || round.taskId} canRequery={result.canRequery} onRestarted={(task) => void handlers.onResumeFailed(round.id, result.id, task.id)} />
+                        ) : result.status === "pending" || result.status === "running" ? (
                             <ImageGeneratingCard key={result.id} size={round.config.size} progress={result.progress} />
                         ) : (
                             <FailedCard key={result.id} error={translate("generation.imageTaskCompletedWithoutImages")} />
@@ -1956,7 +1979,7 @@ async function readImageContentLength(url: string): Promise<number> {
     }
 }
 
-function FailedCard({ error, canceled }: { error: string; canceled?: boolean }) {
+function FailedCard({ error, canceled, taskId, canRequery, onRestarted }: { error: string; canceled?: boolean; taskId?: string; canRequery?: boolean; onRestarted?: (task: { id: string }) => void }) {
     const translate = useTranslation();
     return (
         <div className="w-full overflow-hidden rounded-xl border border-red-300/40 bg-red-500/10 sm:w-[240px]">
@@ -1965,6 +1988,7 @@ function FailedCard({ error, canceled }: { error: string; canceled?: boolean }) 
                 <Typography.Paragraph ellipsis={{ rows: 3 }} className="!mb-0 !text-xs !text-red-400">
                     {error}
                 </Typography.Paragraph>
+                {canceled ? null : <RequeryFailedTaskButton taskId={taskId} canRequery={canRequery} onRestarted={onRestarted} />}
             </div>
         </div>
     );

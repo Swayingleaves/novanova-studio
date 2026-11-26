@@ -77,6 +77,17 @@ public class AiTaskController {
      * @param request AiTaskIdRequest 请求
      * @return Mono<ApiResponse<AiGenerationTaskResponse>> 任务详情
      */
+    /**
+     * 对已保存供应商任务号的失败任务继续查询上游状态，不重新提交生成。
+     *
+     * @param request AiTaskIdRequest 请求
+     * @return Mono<ApiResponse<AiGenerationTaskResponse>> 重新打开后的任务
+     */
+    @PostMapping("/task/requeryTask")
+    public Mono<ApiResponse<AiTaskDtos.AiGenerationTaskResponse>> requeryTask(@Valid @RequestBody AiTaskDtos.AiTaskIdRequest request) {
+        return aiTaskService.requeryFailedTask(request.taskId()).flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
+    }
+
     @PostMapping("/task/cancelTask")
     public Mono<ApiResponse<AiTaskDtos.AiGenerationTaskResponse>> cancelTask(@Valid @RequestBody AiTaskDtos.AiTaskIdRequest request) {
         return aiTaskService.cancelTask(request.taskId(), Boolean.TRUE.equals(request.forfeitRefund())).flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));

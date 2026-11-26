@@ -37,6 +37,8 @@
     "s": "{value0} 秒",
     "results": "{value0} 个结果",
     "generationFailed": "生成失败",
+    "requeryTask": "再次查询",
+    "requeryTaskFailed": "再次查询失败",
     "done": "完成",
     "aIIsTyping": "AI 正在输入...",
     "waitingForReply": "正在处理...",

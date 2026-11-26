@@ -9,6 +9,7 @@ import { Clapperboard, ExternalLink, LoaderCircle, RefreshCw } from "lucide-reac
 import { App } from "antd";
 import { NodeResizer, type NodeProps } from "@xyflow/react";
 
+import { RequeryFailedTaskButton } from "@/features/ai-task/requery-failed-task-button";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import type { CanvasStoryboardNode } from "../types";
@@ -183,9 +184,12 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
                         </span>
                     </div>
                     {failed && data.execution.errorMessage ? (
-                        <p className="text-xs leading-5" style={{ color: "var(--studio-danger)" }}>
-                            {data.execution.errorMessage}
-                        </p>
+                        <div className="space-y-2">
+                            <p className="text-xs leading-5" style={{ color: "var(--studio-danger)" }}>
+                                {data.execution.errorMessage}
+                            </p>
+                            <RequeryFailedTaskButton taskId={data.execution.taskId} onRestarted={() => actions.onResumeFailedTask?.(data)} />
+                        </div>
                     ) : null}
                     {generated ? (
                         <dl className="mt-auto grid grid-cols-2 overflow-hidden rounded-md border" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>

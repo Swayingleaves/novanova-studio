@@ -259,7 +259,7 @@ V53 新增 `episode_bodies_pricing`（`model_config_id` 主键、`credits`、`re
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `transaction_type` | `VARCHAR(30)` | 新增 `invitation_reward` 邀请奖励类型。 |
+| `transaction_type` | `VARCHAR(30)` | 新增 `invitation_reward` 邀请奖励类型；`task_requery_charge` 表示失败任务再次查询成功后补扣已退积分，同一任务最多一条。 |
 | `invited_user_id` | `BIGINT` | 邀请奖励关联的被邀请新用户 ID；通过部分唯一索引保证每名新用户最多产生一条邀请奖励流水。 |
 
 配置为 `0` 时仅保留 `users.invited_by_user_id` 邀请关系，不修改余额，也不创建零金额积分流水。

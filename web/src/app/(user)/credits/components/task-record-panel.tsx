@@ -8,6 +8,7 @@ import { Button, Empty, Input, Modal, Pagination, Segmented, Skeleton, Table, Ta
 import { Image as ImageIcon, Play, Search, Video } from "lucide-react";
 
 import { listAdminTaskRecords, listTaskRecords, type ServerAdminTaskRecord, type ServerTaskRecord } from "@/services/api/server";
+import { RequeryFailedTaskButton } from "@/features/ai-task/requery-failed-task-button";
 import { ImageListThumbnail } from "@/features/generation/components/image-list-thumbnail";
 import { VideoListCover } from "@/features/generation/components/video-list-cover";
 
@@ -249,7 +250,7 @@ export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
                 </div>
             ) : null}
 
-            <TaskRecordDetail record={detail} admin={admin} onClose={() => setDetailId(null)} onPreview={setPreview} onExpired={refreshExpiredResult} />
+            <TaskRecordDetail record={detail} admin={admin} onClose={() => setDetailId(null)} onPreview={setPreview} onExpired={refreshExpiredResult} onRequeried={() => void recordsQuery.refetch()} />
             <MediaPreviewDialog preview={preview} url={previewUrl} onClose={() => setPreview(null)} onExpired={refreshExpiredResult} />
         </div>
     );
@@ -317,7 +318,7 @@ function TaskRecordThumbnails({ record, onPreview, onExpired, compact }: { recor
  * @param props 任务记录、关闭回调与媒体预览回调
  * @return 任务详情弹窗
  */
-function TaskRecordDetail({ record, admin = false, onClose, onPreview, onExpired }: { record: TaskRecordView | null; admin?: boolean; onClose: () => void; onPreview: (preview: MediaPreview) => void; onExpired: (taskId: string) => void }) {
+function TaskRecordDetail({ record, admin = false, onClose, onPreview, onExpired, onRequeried }: { record: TaskRecordView | null; admin?: boolean; onClose: () => void; onPreview: (preview: MediaPreview) => void; onExpired: (taskId: string) => void; onRequeried?: () => void }) {
     const translate = useTranslation();
     const details = record ? [
         { label: translate("credits.model"), value: record.model || "—" },
@@ -362,6 +363,7 @@ function TaskRecordDetail({ record, admin = false, onClose, onPreview, onExpired
                         <div>
                             <p className="text-xs text-[var(--studio-muted)]">{translate("credits.failureReason")}</p>
                             <p className="mt-1 whitespace-pre-wrap break-words text-sm text-[var(--studio-danger)]">{record.errorMessage}</p>
+                            {admin || record.status !== "failed" ? null : <div className="mt-3"><RequeryFailedTaskButton taskId={record.taskId} onRestarted={() => onRequeried?.()} /></div>}
                         </div>
                     ) : null}
                     <div>

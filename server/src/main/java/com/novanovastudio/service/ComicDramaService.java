@@ -806,7 +806,7 @@ public class ComicDramaService {
             return Mono.just(media);
         }
         return aiTaskService.getTaskForUser(userId, media.taskId()).flatMap(task -> {
-            String status = List.of("queued", "processing").contains(media.status())
+            String status = List.of("queued", "processing", "failed").contains(media.status())
                     ? normalizeMediaStatus(task.status()) : media.status();
             String failureReason = StringUtils.hasText(task.errorMessage()) ? task.errorMessage() : "";
             return repository.updateMediaTaskState(projectId, media.taskId(), status,

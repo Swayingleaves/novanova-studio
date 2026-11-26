@@ -37,6 +37,8 @@
     "s": "{value0} s",
     "results": "{value0, plural, one {# result} other {# results}}",
     "generationFailed": "Generation failed",
+    "requeryTask": "Check again",
+    "requeryTaskFailed": "Couldn't check this task again",
     "done": "Done",
     "aIIsTyping": "AI is typing...",
     "waitingForReply": "Still working...",

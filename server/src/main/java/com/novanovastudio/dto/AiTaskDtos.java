@@ -159,6 +159,7 @@ public final class AiTaskDtos {
      * @param createdAt String 创建时间
      * @param updatedAt String 更新时间
      * @param providerRequestSent Boolean 图片或视频生成请求是否已经发往供应商
+     * @param canRequery Boolean 失败任务是否还能按已保存的供应商任务号再次查询
      */
     public record AiGenerationTaskResponse(String id,
                                            String taskType,
@@ -174,14 +175,15 @@ public final class AiTaskDtos {
                                            String completedAt,
                                            String createdAt,
                                            String updatedAt,
-                                           Boolean providerRequestSent) {
+                                           Boolean providerRequestSent,
+                                           Boolean canRequery) {
         /**
-         * 保持尚未返回供应商请求标记的调用，默认视为尚未发出。
+         * 保持尚未返回供应商请求标记的调用，默认视为尚未发出，也不能再次查询。
          */
         public AiGenerationTaskResponse(String id, String taskType, String model, String provider, String status, Integer progress,
                                         JSONObject requestData, JSONObject resultData, String errorMessage, SystemMessage systemMessage,
                                         String startedAt, String completedAt, String createdAt, String updatedAt) {
-            this(id, taskType, model, provider, status, progress, requestData, resultData, errorMessage, systemMessage, startedAt, completedAt, createdAt, updatedAt, false);
+            this(id, taskType, model, provider, status, progress, requestData, resultData, errorMessage, systemMessage, startedAt, completedAt, createdAt, updatedAt, false, false);
         }
 
         /**
@@ -190,7 +192,7 @@ public final class AiTaskDtos {
          * @return AiGenerationTaskResponse 当前语言任务快照
          */
         public AiGenerationTaskResponse withLocale(java.util.Locale locale) {
-            return new AiGenerationTaskResponse(id, taskType, model, provider, status, progress, requestData, resultData, systemMessage == null ? errorMessage : systemMessage.render(locale), systemMessage, startedAt, completedAt, createdAt, updatedAt, providerRequestSent);
+            return new AiGenerationTaskResponse(id, taskType, model, provider, status, progress, requestData, resultData, systemMessage == null ? errorMessage : systemMessage.render(locale), systemMessage, startedAt, completedAt, createdAt, updatedAt, providerRequestSent, canRequery);
         }
     }
 

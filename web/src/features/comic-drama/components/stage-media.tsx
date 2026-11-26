@@ -4,6 +4,7 @@ import type { CreditAmount } from "@/shared/lib/credit-amounts";
 
 
 import { productionParameterLabel } from "../lib/production-labels";
+import { RequeryFailedTaskButton } from "@/features/ai-task/requery-failed-task-button";
 
 import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
@@ -562,15 +563,20 @@ export function StageMedia() {
                                                 {translate("comicDrama.stop")}</Button>
                                         )}
 
-                                        {media.status === "failed" && targetShot && (
-                                            <Button
-                                                size="small"
-                                                danger
-                                                icon={<RotateCcw className="size-3.5" />}
-                                                onClick={() => openGenModal(targetShot.id, isVideo ? "video" : "image")}
-                                            >
-                                                {translate("comicDrama.retry")}</Button>
-                                        )}
+                                        {media.status === "failed" ? (
+                                            <div className="flex items-center gap-2">
+                                                <RequeryFailedTaskButton taskId={media.taskId || undefined} onRestarted={() => void syncNow()} />
+                                                {targetShot ? (
+                                                    <Button
+                                                        size="small"
+                                                        danger
+                                                        icon={<RotateCcw className="size-3.5" />}
+                                                        onClick={() => openGenModal(targetShot.id, isVideo ? "video" : "image")}
+                                                    >
+                                                        {translate("comicDrama.retry")}</Button>
+                                                ) : null}
+                                            </div>
+                                        ) : null}
                                     </div>
                                 </div>
                             </div>

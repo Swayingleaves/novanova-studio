@@ -102,6 +102,13 @@ test("仍在执行的任务保持生成中，下一次任务完成时才恢复�
     assert.ok((finished.rounds[0].results[0] as Record<string, unknown>).image);
 });
 
+test("失败记录在上游任务恢复后继续显示查询进度，成功后写回结果", async (context) => {
+    const requests = mockTaskQueries(context, { "task-1": { status: "running", resultData: {} } });
+    const [resumed] = await reconcileGenerationLogTasks("image", [imageLog("failed")]);
+    assert.equal(resumed.rounds[0].results[0].status, "pending");
+    assert.deepEqual(requests, ["GET /api/v1/ai/task/getTaskInfo"]);
+});
+
 test("失败和取消任务停止等待并保留服务端原因", async (context) => {
     mockTaskQueries(context, {
         "task-1": { status: "failed", errorMessage: "供应商拒绝请求" },

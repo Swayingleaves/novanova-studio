@@ -255,6 +255,28 @@ public class AiTaskRepository {
     }
 
     /**
+     * 把已记录供应商任务号的失败任务重新打开为等待状态，保留上游任务号。
+     *
+     * @param userId Long 任务所属用户
+     * @param taskId String 站内任务ID
+     * @return Mono<Boolean> 是否成功从失败状态重新打开
+     */
+    public Mono<Boolean> reopenFailedTask(Long userId, String taskId) {
+        return databaseClient.sql("""
+                UPDATE ai_generation_tasks
+                SET status = 'pending', error_message = '', error_message_key = '', error_message_arguments = '[]'::jsonb,
+                    completed_at = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = :taskId AND user_id = :userId AND NOT data_purged AND status = 'failed'
+                  AND provider_task_id IS NOT NULL AND btrim(provider_task_id) <> ''
+                """)
+                .bind("taskId", taskId)
+                .bind("userId", userId)
+                .fetch()
+                .rowsUpdated()
+                .map(rows -> rows > 0);
+    }
+
+    /**
      * 持久化供应商返回的异步任务ID，供服务重启后恢复轮询。
      *
      * @param taskId String 站内任务ID

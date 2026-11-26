@@ -737,7 +737,30 @@ public class AiTaskService {
     }
 
     /**
-     * 查询当前用户单个任务
+     * 再次查询已失败、但已经拿到供应商任务号的任务。只恢复轮询，不重新提交。
+     *
+     * @param taskId String 任务ID
+     * @return Mono<AiGenerationTaskResponse> 重新打开后的任务
+     */
+    public Mono<AiTaskDtos.AiGenerationTaskResponse> requeryFailedTask(String taskId) {
+        return currentUserProvider.currentUserId().flatMap(userId -> repository.getTask(userId, taskId)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.taskNotFound"))))
+                .flatMap(task -> {
+                    if (!STATUS_FAILED.equals(task.getStatus()) || !StringUtils.hasText(task.getProviderTaskId())) {
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCannotRequery")));
+                    }
+                    return repository.reopenFailedTask(userId, taskId).flatMap(reopened -> {
+                        if (!Boolean.TRUE.equals(reopened)) {
+                            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCannotRequery")));
+                        }
+                        log.info("再次查询失败的上游任务: taskId={}, providerTaskId={}", taskId, task.getProviderTaskId());
+                        return dispatchRecoveredTask(task).then(getTaskResponse(taskId, userId));
+                    });
+                }));
+    }
+
+    /**
+     * 查询当前用户单个任务。
      *
      * @param taskId String 任务ID
      * @return Mono<AiGenerationTaskResponse> 任务响应
@@ -1065,8 +1088,14 @@ public class AiTaskService {
                     }
                     return repository.updateTaskIfNotTerminal(taskId, values, resultData)
                             .flatMap(updated -> {
-                                if (!Boolean.TRUE.equals(updated) || (!STATUS_FAILED.equals(status) && !STATUS_CANCELED.equals(status))) {
-                                    return Mono.just(Boolean.TRUE.equals(updated));
+                                if (!Boolean.TRUE.equals(updated)) {
+                                    return Mono.just(false);
+                                }
+                                if (STATUS_SUCCESS.equals(status)) {
+                                    return creditService.chargeRefundedTask(task.getUserId(), taskId, task.getTaskType()).thenReturn(true);
+                                }
+                                if (!STATUS_FAILED.equals(status) && !STATUS_CANCELED.equals(status)) {
+                                    return Mono.just(true);
                                 }
                                 if (!STATUS_CANCELED.equals(status)) {
                                     return creditService.refundTask(task.getUserId(), taskId, task.getTaskType()).thenReturn(true);
@@ -1213,7 +1242,7 @@ public class AiTaskService {
         // 结果JSON里的本系统媒体地址按预览用途现签，空结果保持原样。
         return mediaAccessService.signJson(resultData, MediaAccessService.Purpose.PREVIEW)
                 .defaultIfEmpty(resultData)
-                .map(signed -> new AiTaskDtos.AiGenerationTaskResponse(task.getId(), task.getTaskType(), task.getModel(), task.getProvider(), task.getStatus(), task.getProgress(), requestData, signed, SystemMessage.sanitizeUserMessage(empty(task.getErrorMessage())), SystemMessage.stored(task.getErrorMessageKey(), task.getErrorMessageArguments()), formatTime(task.getStartedAt()), formatTime(task.getCompletedAt()), formatTime(task.getCreatedAt()), formatTime(task.getUpdatedAt()), Boolean.TRUE.equals(task.getProviderRequestSent())));
+                .map(signed -> new AiTaskDtos.AiGenerationTaskResponse(task.getId(), task.getTaskType(), task.getModel(), task.getProvider(), task.getStatus(), task.getProgress(), requestData, signed, SystemMessage.sanitizeUserMessage(empty(task.getErrorMessage())), SystemMessage.stored(task.getErrorMessageKey(), task.getErrorMessageArguments()), formatTime(task.getStartedAt()), formatTime(task.getCompletedAt()), formatTime(task.getCreatedAt()), formatTime(task.getUpdatedAt()), Boolean.TRUE.equals(task.getProviderRequestSent()), STATUS_FAILED.equals(task.getStatus()) && StringUtils.hasText(task.getProviderTaskId())));
     }
 
     /**
