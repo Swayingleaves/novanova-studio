@@ -163,7 +163,7 @@ export function AnnouncementPopupModal() {
 
     const userIdKey = user?.id != null ? String(user.id) : "";
     const isAdminRoute = pathname.startsWith("/admin/") || pathname === "/admin";
-    const shouldBlockPopup = !userIdKey || !loaded || showAuthModal || isAdminRoute || user?.welcomeRead === false;
+    const shouldBlockPopup = !userIdKey || !loaded || showAuthModal || isAdminRoute || user?.welcomeRead === false || Boolean(user?.emailBindingRequired);
 
     const popupItems = useMemo(() => {
         if (shouldBlockPopup || !userIdKey) return [];

@@ -23,6 +23,9 @@ export function BindEmailModal() {
 
     const [email, setEmail] = useState("");
     const [code, setCode] = useState("");
+    const [emailError, setEmailError] = useState<string | null>(null);
+    const [codeError, setCodeError] = useState<string | null>(null);
+    const [formError, setFormError] = useState<string | null>(null);
     const [sendingCode, setSendingCode] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [countdown, setCountdown] = useState(0);
@@ -39,6 +42,9 @@ export function BindEmailModal() {
         if (!open) {
             setEmail("");
             setCode("");
+            setEmailError(null);
+            setCodeError(null);
+            setFormError(null);
             setCountdown(0);
         }
     }, [open]);
@@ -56,17 +62,17 @@ export function BindEmailModal() {
 
     const handleSendCode = async () => {
         const errorText = validateEmail();
-        if (errorText) {
-            message.warning(errorText);
-            return;
-        }
+        setEmailError(errorText);
+        setFormError(null);
+        if (errorText) return;
         setSendingCode(true);
         try {
             await sendBindEmailCode(normalizedEmail);
             setCountdown(60);
+            setFormError(null);
             message.success("验证码已发送至邮箱，请注意查收");
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "发送验证码失败，请稍后重试");
+            setFormError(error instanceof Error ? error.message : "发送验证码失败，请稍后重试");
         } finally {
             setSendingCode(false);
         }
@@ -74,21 +80,18 @@ export function BindEmailModal() {
 
     const handleSubmit = async () => {
         const errorText = validateEmail();
-        if (errorText) {
-            message.warning(errorText);
-            return;
-        }
-        if (!code.trim()) {
-            message.warning("请输入邮箱验证码");
-            return;
-        }
+        const missingCode = code.trim() ? null : "请输入邮箱验证码";
+        setEmailError(errorText);
+        setCodeError(missingCode);
+        setFormError(null);
+        if (errorText || missingCode) return;
         setSubmitting(true);
         try {
             const updated = await bindCurrentUserEmail({ email: normalizedEmail, code: code.trim() });
             setUser(updated);
             message.success("邮箱绑定成功");
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "邮箱绑定失败，请检查验证码后重试");
+            setFormError(error instanceof Error ? error.message : "邮箱绑定失败，请检查验证码后重试");
         } finally {
             setSubmitting(false);
         }
@@ -112,7 +115,7 @@ export function BindEmailModal() {
             footer={null}
             centered
             width={440}
-            zIndex={1200}
+            zIndex={2100}
         >
             <div className="space-y-4 py-1">
                 <div className="flex items-start gap-3">
@@ -137,11 +140,19 @@ export function BindEmailModal() {
                             size="large"
                             type="email"
                             value={email}
+                            status={emailError ? "error" : undefined}
                             placeholder="请输入可正常收信的邮箱"
                             autoComplete="email"
-                            onChange={(event) => setEmail(event.target.value)}
+                            autoFocus
+                            className="text-[var(--studio-ink)]!"
+                            onChange={(event) => {
+                                setEmail(event.target.value);
+                                setEmailError(null);
+                                setFormError(null);
+                            }}
                             onPressEnter={() => void handleSubmit()}
                         />
+                        {emailError ? <p className="mt-1 text-xs leading-5 text-[var(--studio-danger)]">{emailError}</p> : null}
                     </div>
 
                     <div>
@@ -154,8 +165,14 @@ export function BindEmailModal() {
                                 size="large"
                                 maxLength={10}
                                 value={code}
+                                status={codeError ? "error" : undefined}
                                 placeholder="请输入验证码"
-                                onChange={(event) => setCode(event.target.value)}
+                                className="min-w-0 flex-1 text-[var(--studio-ink)]!"
+                                onChange={(event) => {
+                                    setCode(event.target.value);
+                                    setCodeError(null);
+                                    setFormError(null);
+                                }}
                                 onPressEnter={() => void handleSubmit()}
                             />
                             <Button
@@ -168,8 +185,11 @@ export function BindEmailModal() {
                                 {countdown > 0 ? `${countdown}s` : "获取验证码"}
                             </Button>
                         </div>
+                        {codeError ? <p className="mt-1 text-xs leading-5 text-[var(--studio-danger)]">{codeError}</p> : null}
                     </div>
                 </div>
+
+                {formError ? <p className="text-xs leading-5 text-[var(--studio-danger)]">{formError}</p> : null}
 
                 <div className="space-y-2 pt-1">
                     <Button type="primary" size="large" block loading={submitting} onClick={() => void handleSubmit()}>

@@ -56,8 +56,10 @@ export function ProductTour() {
     // 首屏 HTML 必须是不带引导的，挂载后再判定，避免 hydration 抖动。
     useEffect(() => setMounted(true), []);
 
+    const emailBindingRequired = Boolean(user?.emailBindingRequired);
     const globalEligible =
         mounted &&
+        !emailBindingRequired &&
         shouldStartOnboarding({
             user: user ? { welcomeRead: user.welcomeRead, onboardingVersion: user.onboardingVersion } : null,
             isTeam: brand.isTeam,
@@ -67,6 +69,7 @@ export function ProductTour() {
 
     const creationEligible =
         mounted &&
+        !emailBindingRequired &&
         shouldStartCreationTour({
             user: user
                 ? {
@@ -96,6 +99,11 @@ export function ProductTour() {
         );
         return () => window.clearTimeout(timer);
     }, [globalEligible, creationEligible, tour, pathname, start]);
+
+    useEffect(() => {
+        if (!emailBindingRequired || !tour) return;
+        stop();
+    }, [emailBindingRequired, tour, stop]);
 
     // 锚点未就绪时 Tour 会退化成居中展示，所以先等齐再开演。
     useEffect(() => {
