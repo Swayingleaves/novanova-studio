@@ -50,6 +50,7 @@ export type NodeActions = {
     onDelete: (node: CanvasNode) => void;
     onKeepToolbar?: (nodeId: string) => void;
     onHideToolbar?: () => void;
+    onMediaDimensions?: (nodeId: string, source: string, width: number, height: number) => void;
     onResize?: (nodeId: string, width: number, height: number, position?: CanvasPoint) => void;
     onBackgroundTitleChange?: (node: CanvasBackgroundNode, title: string) => void;
     onBackgroundColorChange?: (node: CanvasBackgroundNode, color: string) => void;

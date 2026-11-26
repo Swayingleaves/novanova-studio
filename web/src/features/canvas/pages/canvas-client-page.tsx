@@ -5224,6 +5224,22 @@ function CanvasWorkspacePage() {
             onDelete: (n) => confirmDeleteNodes(new Set([n.id])),
             onKeepToolbar: keepNodeToolbar,
             onHideToolbar: hideNodeToolbar,
+            onMediaDimensions: (nodeId, source, naturalWidth, naturalHeight) => {
+                if (naturalWidth <= 0 || naturalHeight <= 0) return;
+                setNodes((nodes) => {
+                    const node = nodes.find((item) => item.id === nodeId);
+                    if (!node || !(isVideoNode(node) || isImageNode(node)) || node.content.source !== source) return nodes;
+                    const { frame } = node;
+                    const scale = Math.max(frame.width, frame.height) / Math.max(naturalWidth, naturalHeight);
+                    const width = naturalWidth * scale;
+                    const height = naturalHeight * scale;
+                    const resize = !frame.freeResize && (Math.abs(frame.width - width) > 1 || Math.abs(frame.height - height) > 1);
+                    if (!resize && frame.naturalWidth === naturalWidth && frame.naturalHeight === naturalHeight) return nodes;
+                    // 保留当前长边与左上角位置，自由缩放的图片仅更新原始分辨率。
+                    const updated = updateCanvasNodeFrame(node, { naturalWidth, naturalHeight, ...(resize ? { width, height } : {}) });
+                    return nodes.map((item) => item.id === nodeId ? updated : item);
+                });
+            },
             onResize: (nodeId, width, height, position) => {
                 handleNodeResize(nodeId, width, height, position);
             },

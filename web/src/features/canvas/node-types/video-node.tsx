@@ -64,6 +64,7 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
                     <CanvasVideoPlayer
                         key={displaySource}
                         source={displaySource}
+                        onDimensions={(video) => actions.onMediaDimensions?.(data.id, data.content.source, video.videoWidth, video.videoHeight)}
                         onMediaError={() => { if (data.content.storageKey) media.onError(); else setFailedSource(data.content.source); }}
                         onPreview={() => actions.onViewVideo(data)}
                         onCapture={onCaptureVideoFrame ? (video) => onCaptureVideoFrame(data, video) : undefined}
@@ -82,6 +83,7 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
 
 type CanvasVideoPlayerProps = {
     source: string;
+    onDimensions: (video: HTMLVideoElement) => void;
     onMediaError: () => void;
     onPreview: () => void;
     onCapture?: (video: HTMLVideoElement) => Promise<void>;
@@ -89,7 +91,7 @@ type CanvasVideoPlayerProps = {
 
 const CONTROL_BUTTON = "grid size-7 shrink-0 place-items-center rounded-md hover:bg-[var(--canvas-video-control-hover)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] disabled:opacity-40";
 
-function CanvasVideoPlayer({ source, onMediaError, onPreview, onCapture }: CanvasVideoPlayerProps) {
+function CanvasVideoPlayer({ source, onDimensions, onMediaError, onPreview, onCapture }: CanvasVideoPlayerProps) {
     const translate = useTranslation();
     const theme = useCanvasTheme();
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -131,7 +133,7 @@ function CanvasVideoPlayer({ source, onMediaError, onPreview, onCapture }: Canva
     const timeLabel = `${formatAudioTime(currentTime)} / ${formatAudioTime(duration)}`;
 
     return (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[inherit]">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[inherit]">
             <video
                 ref={videoRef}
                 src={source}
@@ -140,6 +142,7 @@ function CanvasVideoPlayer({ source, onMediaError, onPreview, onCapture }: Canva
                 muted={muted}
                 playsInline
                 preload="metadata"
+                onLoadedMetadata={({ currentTarget }) => onDimensions(currentTarget)}
                 onDurationChange={syncDuration}
                 onLoadedData={syncFrame}
                 onTimeUpdate={syncFrame}
@@ -160,7 +163,7 @@ function CanvasVideoPlayer({ source, onMediaError, onPreview, onCapture }: Canva
             <div
                 data-canvas-video-controls
                 data-canvas-no-zoom
-                className="nodrag nopan nowheel flex h-8 shrink-0 items-center gap-1 px-1.5"
+                className="nodrag nopan nowheel absolute inset-x-0 bottom-0 flex h-8 shrink-0 items-center gap-1 px-1.5"
                 style={{ background: theme.node.panel, color: theme.node.text, "--canvas-video-control-hover": `color-mix(in srgb, ${theme.node.text} 10%, transparent)` } as CSSProperties}
                 onPointerDown={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}

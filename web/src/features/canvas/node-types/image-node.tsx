@@ -234,7 +234,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                             <NodeMediaUnavailable kind="image" />
                         ) : hasContent ? (
                             <div className="relative h-full w-full">
-                                <img src={displaySource} alt={data.title || ""} className="h-full w-full object-contain" draggable={false} onError={() => { if (data.content.storageKey) media.onError(); else setFailedSource(data.content.source); }} />
+                                <img src={displaySource} alt={data.title || ""} className="h-full w-full object-contain" draggable={false} onLoad={({ currentTarget }) => actions.onMediaDimensions?.(data.id, data.content.source, currentTarget.naturalWidth, currentTarget.naturalHeight)} onError={() => { if (data.content.storageKey) media.onError(); else setFailedSource(data.content.source); }} />
                                 <WatermarkBadge />
                             </div>
                         ) : (
