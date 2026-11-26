@@ -1,13 +1,20 @@
 package com.novanovastudio.service;
 
-import com.novanovastudio.common.SystemMessage;
-
+import com.novanovastudio.ai.AiHttpClient;
+import com.novanovastudio.ai.GeneratedBinary;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.common.SystemMessage;
 import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.entity.GenerationStyleRecords;
 import com.novanovastudio.repository.GenerationStyleRepository;
 import com.novanovastudio.storage.MediaAccessService;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.util.Base64;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -39,11 +46,17 @@ public class GenerationStyleService {
     /** 最大分页数量。 */
     private static final int MAX_PAGE_SIZE = 100;
 
+    /** 浏览器生成的风格缩略图体积上限。 */
+    private static final int MAX_THUMBNAIL_BYTES = 256 * 1024;
+
     /** 风格仓储。 */
     private final GenerationStyleRepository repository;
 
     /** 私有存储桶读地址签发。 */
     private final MediaAccessService mediaAccessService;
+
+    /** 已配置存储桶的媒体读取。 */
+    private final AiHttpClient mediaClient;
 
     /**
      * 查询用户侧启用风格。
@@ -81,6 +94,8 @@ public class GenerationStyleService {
     public Mono<Void> createStyle(GenerationStyleDtos.CreateStyleRequest request) {
         GenerationStyleRecords.StyleRecord record = buildRecord(
                 request.generationType(), request.name(), request.stylePrompt(), request.coverUrl(), request.category(), request.status(), request.sortOrder());
+        if (record.getCoverUrl() == null) throw invalid(SystemMessage.of("business.styleCoverIsRequired"));
+        applyThumbnail(record, request.coverThumbnail());
         return repository.createStyle(record)
                 .doOnSuccess(id -> log.info("创建生成风格成功: id={}, type={}", id, record.getGenerationType()))
                 .then();
@@ -99,9 +114,133 @@ public class GenerationStyleService {
         GenerationStyleRecords.StyleRecord record = buildRecord(
                 request.generationType(), request.name(), request.stylePrompt(), request.coverUrl(), request.category(), request.status(), request.sortOrder());
         record.setId(request.id());
+        if (record.getCoverUrl() != null) applyThumbnail(record, request.coverThumbnail());
         return repository.updateStyle(record)
                 .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.styleNotFound"))))
                 .doOnSuccess(ignored -> log.info("更新生成风格成功: id={}", request.id()));
+    }
+
+    /**
+     * 读取已配置存储桶中的旧封面以供管理员压缩。第三方外链由浏览器直接读取。
+     * @param id 风格标识
+     * @param revision 压缩前的封面版本
+     * @return 图片字节，外部链接返回空
+     */
+    public Mono<GeneratedBinary> readCoverForCompression(long id, String revision) {
+        return currentCover(id, revision)
+                .flatMap(mediaAccessService::signOwnedPreviewUrl)
+                .flatMap(url -> mediaClient.downloadRemoteBinary(url, "application/octet-stream", Duration.ofSeconds(30)))
+                .doOnError(error -> log.error("读取待压缩风格封面失败，风格标识={}", id, error));
+    }
+
+    /**
+     * 仅在封面版本匹配时替换原封面和缩略图。
+     * @param request 封面替换请求
+     * @return 操作完成信号
+     */
+    public Mono<Void> replaceCover(GenerationStyleDtos.ReplaceCoverRequest request) {
+        if (request.id() == null || request.id() <= 0) {
+            return Mono.error(invalid(SystemMessage.of("business.styleIDIsRequired")));
+        }
+        GenerationStyleRecords.StyleRecord record = new GenerationStyleRecords.StyleRecord();
+        record.setId(request.id());
+        record.setCoverUrl(required(request.coverUrl(), SystemMessage.of("business.styleCoverIsRequired")));
+        applyThumbnail(record, required(request.coverThumbnail(), SystemMessage.of("business.invalidStyleThumbnail")));
+        return currentCover(request.id(), request.coverRevision())
+                .flatMap(previousCoverUrl -> repository.replaceCover(record, previousCoverUrl))
+                .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(coverChanged()))
+                .doOnSuccess(ignored -> log.info("压缩并更新风格封面成功，风格标识={}", request.id()));
+    }
+
+    /**
+     * 在打开查看弹窗时签发可用的原图地址。
+     * @param id 风格标识
+     * @param userOnly 是否只读已启用风格
+     * @return 原图访问地址
+     */
+    public Mono<String> readCoverPreview(long id, boolean userOnly) {
+        return repository.findCoverUrl(id, userOnly)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.styleNotFound"))))
+                .flatMap(url -> mediaAccessService.signUrl(url, MediaAccessService.Purpose.PREVIEW));
+    }
+
+    /**
+     * 读取指定缓存版本的风格缩略图。
+     * @param id 风格标识
+     * @param version 缩略图版本
+     * @param userOnly 是否仅允许读取启用风格
+     * @return WebP 缩略图字节，不存在时返回空
+     */
+    public Mono<byte[]> readThumbnail(long id, String version, boolean userOnly) {
+        return repository.findThumbnail(id, version, userOnly);
+    }
+
+    /**
+     * 校验当前封面仍是开始压缩时的版本。
+     * @param id 风格标识
+     * @param revision 开始压缩时的版本
+     * @return 当前封面地址
+     */
+    private Mono<String> currentCover(long id, String revision) {
+        return repository.findCoverUrl(id, false)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.styleNotFound"))))
+                .filter(url -> coverRevision(url).equals(revision))
+                .switchIfEmpty(Mono.error(coverChanged()));
+    }
+
+    /**
+     * 校验新封面的 WebP 缩略图并设置内容版本。
+     * @param record 待保存的风格
+     * @param encoded Base64 缩略图
+     * @throws BusinessException 内容不是 WebP 或超过大小限制时抛出
+     */
+    private void applyThumbnail(GenerationStyleRecords.StyleRecord record, String encoded) {
+        if (encoded == null || encoded.length() > ((MAX_THUMBNAIL_BYTES + 2) / 3) * 4) {
+            throw invalid(SystemMessage.of("business.invalidStyleThumbnail"));
+        }
+        byte[] bytes;
+        try {
+            bytes = Base64.getDecoder().decode(encoded);
+        } catch (IllegalArgumentException exception) {
+            throw invalid(SystemMessage.of("business.invalidStyleThumbnail"));
+        }
+        if (bytes.length < 12 || bytes.length > MAX_THUMBNAIL_BYTES
+                || !"RIFF".equals(new String(bytes, 0, 4, StandardCharsets.US_ASCII))
+                || !"WEBP".equals(new String(bytes, 8, 4, StandardCharsets.US_ASCII))) {
+            throw invalid(SystemMessage.of("business.invalidStyleThumbnail"));
+        }
+        record.setCoverThumbnail(bytes);
+        record.setThumbnailVersion(digest(bytes));
+    }
+
+    /**
+     * 用封面地址生成并发更新版本。
+     * @param coverUrl 封面原始地址
+     * @return 十六进制摘要
+     */
+    private String coverRevision(String coverUrl) {
+        return digest(Objects.toString(coverUrl, "").getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * 计算内容摘要，内容改变时使缓存键变化。
+     * @param bytes 待计算数据
+     * @return SHA-256 十六进制摘要
+     */
+    private String digest(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("当前 Java 运行环境缺少 SHA-256", exception);
+        }
+    }
+
+    /**
+     * 构造封面并发更新错误。
+     * @return 提示用户刷新列表的业务异常
+     */
+    private BusinessException coverChanged() {
+        return invalid(SystemMessage.of("business.styleCoverChanged"));
     }
 
     /**
@@ -254,7 +393,7 @@ public class GenerationStyleService {
         record.setGenerationType(normalizeGenerationType(generationType));
         record.setName(required(name, SystemMessage.of("business.styleNameIsRequired")));
         record.setStylePrompt(required(stylePrompt, SystemMessage.of("business.stylePromptIsRequired")));
-        record.setCoverUrl(required(coverUrl, SystemMessage.of("business.styleCoverIsRequired")));
+        record.setCoverUrl(coverUrl == null ? null : required(coverUrl, SystemMessage.of("business.styleCoverIsRequired")));
         record.setCategory(required(category, SystemMessage.of("business.styleCategoryIsRequired")));
         record.setStatus(normalizeStatus(status));
         if (sortOrder != null && sortOrder < 0) {
@@ -281,14 +420,14 @@ public class GenerationStyleService {
     /** 风格记录转用户选项，封面按预览用途现签。 */
     private Mono<GenerationStyleDtos.StyleOption> toOption(GenerationStyleRecords.StyleRecord record) {
         return mediaAccessService.signUrl(record.getCoverUrl() == null ? "" : record.getCoverUrl(), MediaAccessService.Purpose.PREVIEW)
-                .map(url -> new GenerationStyleDtos.StyleOption(record.getId(), record.getName(), record.getGenerationType(), url, record.getCategory()));
+                .map(url -> new GenerationStyleDtos.StyleOption(record.getId(), record.getName(), record.getGenerationType(), url, record.getCategory(), record.getThumbnailVersion()));
     }
 
     /** 风格记录转管理端条目，封面按预览用途现签。 */
     private Mono<GenerationStyleDtos.StyleItem> toItem(GenerationStyleRecords.StyleRecord record) {
         return mediaAccessService.signUrl(record.getCoverUrl() == null ? "" : record.getCoverUrl(), MediaAccessService.Purpose.PREVIEW)
                 .map(url -> new GenerationStyleDtos.StyleItem(record.getId(), record.getGenerationType(), record.getName(), record.getStylePrompt(), url, record.getCategory(),
-                        record.getStatus(), record.getSortOrder(), formatTime(record.getCreatedAt()), formatTime(record.getUpdatedAt())));
+                        record.getStatus(), record.getSortOrder(), formatTime(record.getCreatedAt()), formatTime(record.getUpdatedAt()), record.getThumbnailVersion(), coverRevision(record.getCoverUrl())));
     }
 
     /** 风格记录转快照。 */

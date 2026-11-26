@@ -209,11 +209,14 @@ export type GenerationStyleOption = {
     id: number;
     name: string;
     generationType: GenerationStyleType;
+    thumbnailVersion?: string;
     coverUrl: string;
     category: string;
 };
 
 export type ServerGenerationStyle = GenerationStyleSnapshot & {
+    thumbnailVersion?: string;
+    coverRevision: string;
     coverUrl: string;
     category: string;
     status: number;
@@ -1352,18 +1355,51 @@ export type ServerGenerationStyleInput = {
     generationType: GenerationStyleType;
     name: string;
     stylePrompt: string;
-    coverUrl: string;
+    coverUrl?: string;
+    coverThumbnail?: string;
     category: string;
     status?: number;
     sortOrder?: number;
 };
 
-export function createAdminGenerationStyle(input: Omit<ServerGenerationStyleInput, "id">) {
+export function createAdminGenerationStyle(input: Omit<ServerGenerationStyleInput, "id"> & { coverUrl: string }) {
     return serverPost("/admin/style/createStyle", input);
 }
 
 export function updateAdminGenerationStyle(input: ServerGenerationStyleInput & { id: number }) {
     return serverPost("/admin/style/updateStyle", input);
+}
+
+export function replaceAdminGenerationStyleCover(input: { id: number; coverRevision: string; coverUrl: string; coverThumbnail: string }) {
+    return serverPost("/admin/style/replaceCover", input);
+}
+
+export async function readAdminGenerationStyleCover(style: Pick<ServerGenerationStyle, "id" | "coverRevision">) {
+    const query = new URLSearchParams({ styleId: String(style.id), coverRevision: style.coverRevision });
+    const response = await requestServer(`/admin/style/readCoverForCompression?${query}`, { method: "GET" });
+    if (response.status === 204) return null;
+    if (response.ok) return response.blob();
+    const error = (await response.json().catch(() => null)) as ApiResponse<unknown> | null;
+    throw new Error(error?.msg || translate("administration.failedToCompressStyleCover"));
+}
+
+export function getGenerationStyleCoverPreview(styleId: number, admin: boolean, signal: AbortSignal) {
+    return serverGet<string>(`${admin ? "/admin" : ""}/style/getCoverPreview?styleId=${styleId}`, { signal });
+}
+
+const pendingStyleThumbnails = new Map<string, Promise<Blob | null>>();
+
+export function getGenerationStyleThumbnail(styleId: number, version: string, admin: boolean) {
+    const query = new URLSearchParams({ styleId: String(styleId), version });
+    const path = `${admin ? "/admin" : ""}/style/getCoverThumbnail?${query}`;
+    const key = JSON.stringify([path, useTeamStore.getState().team?.id, getAuthToken()]);
+    const pending = pendingStyleThumbnails.get(key);
+    if (pending) return pending;
+    const request = requestServer(path, { method: "GET", cache: "default" })
+        .then((response) => response.ok ? response.blob() : null)
+        .finally(() => pendingStyleThumbnails.delete(key));
+    pendingStyleThumbnails.set(key, request);
+    return request;
 }
 
 export function updateAdminGenerationStyleStatus(id: number, status: number) {
@@ -2166,7 +2202,7 @@ async function requestServer(path: string, init: RequestInit, options: ServerReq
     const response = await fetch(`${serverBaseUrl()}${path}`, {
         ...init,
         headers,
-        cache: "no-store",
+        cache: init.cache ?? "no-store",
         credentials: "include",
     });
     if (response.status === 401 && options.auth !== false && !init.signal?.aborted) {

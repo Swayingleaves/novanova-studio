@@ -38,6 +38,8 @@ import {
     updateAdminPromptStatus,
     deleteAdminPrompts,
     listAdminGenerationStyles,
+    readAdminGenerationStyleCover,
+    replaceAdminGenerationStyleCover,
     createAdminGenerationStyle,
     updateAdminGenerationStyle,
     updateAdminGenerationStyleStatus,
@@ -97,7 +99,8 @@ import { StoryBiblePricingManagement } from "./components/story-bible-pricing-ma
 import { ComicDramaFinalPromptPricingManagement } from "./components/comic-drama-final-prompt-pricing-management";
 import { EpisodeBodiesPricingManagement } from "./components/episode-bodies-pricing-management";
 import { ScriptAiActionPricingManagement } from "./components/script-ai-action-pricing-management";
-import { GenerationStyleCover } from "@/features/generation/components/generation-style-picker";
+import { GenerationStyleCover, GenerationStylePreviewModal } from "@/features/generation/components/generation-style-picker";
+import { readExternalGenerationStyleCover, uploadGenerationStyleCover } from "@/features/generation/lib/generation-style-cover-upload";
 import { uploadImage } from "@/features/storage/services/image-storage";
 import { createCreditDirectionOptions, createCreditSourceOptions, CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactionIcon, creditTransactionTypeLabel, formatCreditChange, formatCredits, formatCreditTime, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
 import { TaskRecordPanel } from "@/app/(user)/credits/components/task-record-panel";
@@ -2132,9 +2135,14 @@ function GenerationStyleManagement() {
     const [generationType, setGenerationType] = useState<"all" | "image" | "video">("all");
     const [status, setStatus] = useState<number | undefined>();
     const [loading, setLoading] = useState(false);
+    const [refreshVersion, setRefreshVersion] = useState(0);
     const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
     const [editOpen, setEditOpen] = useState(false);
     const [editingStyle, setEditingStyle] = useState<ServerGenerationStyle | null>(null);
+    const [previewStyle, setPreviewStyle] = useState<ServerGenerationStyle | null>(null);
+    const [compressingStyles, setCompressingStyles] = useState<ReadonlySet<number>>(() => new Set());
+    const [preparedCover, setPreparedCover] = useState<Awaited<ReturnType<typeof uploadGenerationStyleCover>> | null>(null);
+    const [savingStyle, setSavingStyle] = useState(false);
     const [coverUploading, setCoverUploading] = useState(false);
     const coverInputRef = useRef<HTMLInputElement>(null);
     const coverUrl = Form.useWatch("coverUrl", form) || "";
@@ -2165,15 +2173,17 @@ function GenerationStyleManagement() {
 
     useEffect(() => {
         void loadStyles(page);
-    }, [loadStyles, page]);
+    }, [loadStyles, page, refreshVersion]);
 
     const openCreate = () => {
+        setPreparedCover(null);
         setEditingStyle(null);
         form.setFieldsValue({ generationType: "image", name: "", stylePrompt: "", coverUrl: "", category: "", sortOrder: 1000, status: 1 });
         setEditOpen(true);
     };
 
     const openEdit = (style: ServerGenerationStyle) => {
+        setPreparedCover(null);
         setEditingStyle(style);
         form.setFieldsValue({
             generationType: style.generationType,
@@ -2188,13 +2198,22 @@ function GenerationStyleManagement() {
     };
 
     const saveStyle = async () => {
+        if (coverUploading || savingStyle) return;
+        setSavingStyle(true);
         try {
             const values = await form.validateFields();
+            const enteredCoverUrl = values.coverUrl.trim();
+            const updatedCover = editingStyle && enteredCoverUrl === editingStyle.coverUrl
+                ? null
+                : preparedCover?.coverUrl === enteredCoverUrl
+                  ? preparedCover
+                  : await uploadGenerationStyleCover(await readExternalGenerationStyleCover(enteredCoverUrl));
             const input = {
                 generationType: values.generationType,
                 name: values.name.trim(),
                 stylePrompt: values.stylePrompt.trim(),
-                coverUrl: values.coverUrl.trim(),
+                coverUrl: updatedCover?.coverUrl,
+                coverThumbnail: updatedCover?.coverThumbnail,
                 category: values.category.trim(),
                 sortOrder: values.sortOrder ?? 1000,
                 status: values.status ?? 1,
@@ -2203,7 +2222,8 @@ function GenerationStyleManagement() {
                 await updateAdminGenerationStyle({ id: editingStyle.id, ...input });
                 message.success(translate("administration.styleUpdated"));
             } else {
-                await createAdminGenerationStyle(input);
+                if (!updatedCover) return;
+                await createAdminGenerationStyle({ ...input, coverUrl: updatedCover.coverUrl });
                 message.success(translate("administration.styleCreated"));
             }
             setEditOpen(false);
@@ -2211,6 +2231,29 @@ function GenerationStyleManagement() {
             if (!editingStyle) setPage(1);
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
+        } finally {
+            setSavingStyle(false);
+        }
+    };
+
+    const compressAndUpdateCover = async (style: ServerGenerationStyle) => {
+        if (compressingStyles.has(style.id)) return;
+        setCompressingStyles((current) => new Set(current).add(style.id));
+        try {
+            const storedCover = await readAdminGenerationStyleCover(style);
+            const source = storedCover ?? await readExternalGenerationStyleCover(style.coverUrl);
+            const { coverUrl, coverThumbnail } = await uploadGenerationStyleCover(source);
+            await replaceAdminGenerationStyleCover({ id: style.id, coverRevision: style.coverRevision, coverUrl, coverThumbnail });
+            message.success(translate("administration.styleCoverCompressed"));
+            setRefreshVersion((current) => current + 1);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("administration.failedToCompressStyleCover"));
+        } finally {
+            setCompressingStyles((current) => {
+                const remaining = new Set(current);
+                remaining.delete(style.id);
+                return remaining;
+            });
         }
     };
 
@@ -2263,8 +2306,9 @@ function GenerationStyleManagement() {
         }
         setCoverUploading(true);
         try {
-            const uploaded = await uploadImage(file);
-            form.setFieldValue("coverUrl", uploaded.url);
+            const cover = await uploadGenerationStyleCover(file);
+            setPreparedCover(cover);
+            form.setFieldValue("coverUrl", cover.coverUrl);
             message.success(translate("administration.coverUploaded"));
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("administration.failedToUploadCover"));
@@ -2339,7 +2383,7 @@ function GenerationStyleManagement() {
                                     className={`group relative overflow-hidden rounded-md border bg-[var(--studio-surface)] transition ${selected ? "border-[var(--studio-action)] ring-1 ring-[var(--studio-action)]" : "border-[var(--studio-line)] hover:border-[var(--studio-line-strong)]"}`}
                                 >
                                     <div className="relative aspect-[3/4] overflow-hidden bg-[var(--studio-surface-raised)]">
-                                        <GenerationStyleCover key={style.coverUrl} style={style} className="size-full transition duration-200 group-hover:scale-[1.02] motion-reduce:transform-none" />
+                                        <GenerationStyleCover style={style} thumbnail="admin" className="size-full transition duration-200 group-hover:scale-[1.02] motion-reduce:transform-none" />
                                         <span className="absolute left-2 top-2">
                                             <Checkbox
                                                 checked={selected}
@@ -2362,7 +2406,13 @@ function GenerationStyleManagement() {
                                             <span className="shrink-0 text-[11px] text-[var(--studio-muted)]">#{style.sortOrder}</span>
                                         </div>
                                         <p className="mt-1 truncate text-xs text-[var(--studio-muted)]">{style.category || translate("administration.uncategorized")}</p>
-                                        <div className="mt-2 flex items-center justify-end gap-1">
+                                        <div className="mt-2 flex flex-wrap items-center justify-end gap-1">
+                                            <Button type="text" size="small" disabled={!style.coverUrl} onClick={() => setPreviewStyle(style)}>
+                                                {translate("administration.viewStyleCover")}
+                                            </Button>
+                                            <Button type="text" size="small" disabled={!style.coverUrl} loading={compressingStyles.has(style.id)} onClick={() => void compressAndUpdateCover(style)}>
+                                                {translate("administration.compressAndUpdateStyleCover")}
+                                            </Button>
                                             <Tooltip title={translate("administration.edit")}>
                                                 <Button type="text" size="small" shape="circle" icon={<Edit className="size-3.5" />} onClick={() => openEdit(style)} aria-label={translate("administration.editStyle", { value0: style.name })} />
                                             </Tooltip>
@@ -2382,7 +2432,11 @@ function GenerationStyleManagement() {
             ) : (
                 <Empty description={translate("administration.noStyles")} className="border border-dashed border-[var(--studio-line)] py-12" />
             )}
-            <Modal title={editingStyle ? translate("administration.editStyle_1fa17d") : translate("administration.addStyle")} open={editOpen} onOk={saveStyle} onCancel={() => setEditOpen(false)} okText={translate("administration.save")} cancelText={translate("administration.cancel")} confirmLoading={coverUploading}>
+            <Modal title={editingStyle ? translate("administration.editStyle_1fa17d") : translate("administration.addStyle")} open={editOpen} onOk={saveStyle} onCancel={() => setEditOpen(false)} okText={translate("administration.save")} cancelText={translate("administration.cancel")}
+                confirmLoading={coverUploading || savingStyle} closable={!coverUploading && !savingStyle}
+                keyboard={!coverUploading && !savingStyle} mask={{ closable: !coverUploading && !savingStyle }}
+                cancelButtonProps={{ disabled: coverUploading || savingStyle }}
+            >
                 <Form form={form} layout="vertical">
                     <Form.Item name="name" label={translate("administration.styleName")} rules={[{ required: true, message: translate("administration.enterStyleName") }]}>
                         <Input placeholder={translate("administration.eGCinematic")} />
@@ -2395,7 +2449,11 @@ function GenerationStyleManagement() {
                     </Form.Item>
                     <div className="mb-4 flex items-start gap-3">
                         <div className="h-28 w-[84px] shrink-0 overflow-hidden rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface-raised)]">
-                            <GenerationStyleCover key={coverUrl} style={{ name: coverName, coverUrl }} className="size-full" />
+                            {editingStyle && coverUrl === editingStyle.coverUrl ? (
+                                <GenerationStyleCover style={editingStyle} thumbnail="admin" className="size-full" />
+                            ) : (
+                                <GenerationStyleCover style={{ name: coverName, coverUrl: preparedCover?.coverUrl === coverUrl ? preparedCover.previewUrl : "" }} className="size-full" />
+                            )}
                         </div>
                         <div className="min-w-0">
                             <input
@@ -2408,9 +2466,9 @@ function GenerationStyleManagement() {
                                     event.target.value = "";
                                 }}
                             />
-                            <Button icon={<Upload className="size-3.5" />} loading={coverUploading} onClick={() => coverInputRef.current?.click()}>
+                            <Button icon={<Upload className="size-3.5" />} disabled={savingStyle} loading={coverUploading} onClick={() => coverInputRef.current?.click()}>
                                 {translate("administration.uploadCover")}</Button>
-                            <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("administration.thePublicStorageURLWillBeSaved")}</p>
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("administration.styleCoverUploadDescription")}</p>
                         </div>
                     </div>
                     <Form.Item name="stylePrompt" label={translate("administration.stylePrompt")} rules={[{ required: true, message: translate("administration.enterStylePrompt") }]}>
@@ -2439,6 +2497,7 @@ function GenerationStyleManagement() {
                     </div>
                 </Form>
             </Modal>
+            <GenerationStylePreviewModal style={previewStyle} admin onClose={() => setPreviewStyle(null)} />
         </div>
     );
 }

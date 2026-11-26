@@ -25,7 +25,7 @@ test("图片和视频页面通过共享 CreationComposer 复用风格库", () =>
 test("已选风格标签复用风格封面缩略图", () => {
     const picker = source("features/generation/components/generation-style-picker.tsx");
 
-    assert.match(picker, /<GenerationStyleCover style=\{style\} className="size-5 shrink-0 overflow-hidden rounded-sm"/);
+    assert.match(picker, /<GenerationStyleCover style=\{style\} thumbnail="user" className="size-5 shrink-0 overflow-hidden rounded-sm"/);
 });
 
 test("工具栏不再提供技能入口，已选技能仍以标签展示", () => {

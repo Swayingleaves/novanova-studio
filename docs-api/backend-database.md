@@ -425,7 +425,9 @@ flowchart TB
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `cover_url` | `TEXT` | 风格封面的公开访问地址；旧记录默认空字符串，用户侧使用中性默认封面展示。 |
+| `cover_url` | `TEXT` | 完整风格封面的对象存储地址，点击查看时按需签发临时访问地址。 |
+| `cover_thumbnail` | `BYTEA` | 单独保存后台生成的 WebP 缩略图，最大 256 KiB。 |
+| `thumbnail_version` | `VARCHAR(64)` | 缩略图内容的 SHA-256 摘要，用于浏览器缓存。 |
 | `category` | `VARCHAR(100)` | 运营维护的风格分类；旧记录默认空字符串，用户侧不生成分类筛选标签。 |
 
 ```sql

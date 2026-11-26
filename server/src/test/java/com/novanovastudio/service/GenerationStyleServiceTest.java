@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 
+import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.entity.GenerationStyleRecords;
@@ -30,9 +31,16 @@ import reactor.core.publisher.Mono;
 @ExtendWith(MockitoExtension.class)
 class GenerationStyleServiceTest {
 
+    /** 用于验证封面保存的 WebP 样本。 */
+    private static final String THUMBNAIL = "UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQ/Y/+BwAA";
+
     /** 风格仓储。 */
     @Mock
     private GenerationStyleRepository repository;
+
+    /** 已配置对象存储的下载客户端。 */
+    @Mock
+    private AiHttpClient mediaClient;
 
     /** 风格服务。 */
     private GenerationStyleService service;
@@ -40,7 +48,7 @@ class GenerationStyleServiceTest {
     /** 初始化服务。 */
     @BeforeEach
     void setUp() {
-        service = new GenerationStyleService(repository, com.novanovastudio.MediaAccessTestSupport.echo());
+        service = new GenerationStyleService(repository, com.novanovastudio.MediaAccessTestSupport.echo(), mediaClient);
     }
 
     /** 普通生成应解析用户选择的启用风格。 */
@@ -110,9 +118,9 @@ class GenerationStyleServiceTest {
     @Test
     void shouldRejectInvalidManagementValues() {
         Assertions.assertThrows(BusinessException.class,
-                () -> service.createStyle(new GenerationStyleDtos.CreateStyleRequest("canvas", "名称", "提示词", "https://example.com/cover.png", "人像", 1, 1)).block());
+                () -> service.createStyle(new GenerationStyleDtos.CreateStyleRequest("canvas", "名称", "提示词", "https://example.com/cover.png", "人像", 1, 1, null)).block());
         Assertions.assertThrows(BusinessException.class,
-                () -> service.createStyle(new GenerationStyleDtos.CreateStyleRequest("image", "名称", "提示词", "", "", 1, 1)).block());
+                () -> service.createStyle(new GenerationStyleDtos.CreateStyleRequest("image", "名称", "提示词", "", "", 1, 1, null)).block());
         Assertions.assertThrows(BusinessException.class,
                 () -> service.updateStyleStatus(new GenerationStyleDtos.UpdateStyleStatusRequest(1L, 2)).block());
         verifyNoInteractions(repository);
@@ -124,8 +132,8 @@ class GenerationStyleServiceTest {
         when(repository.createStyle(any())).thenReturn(Mono.just(11L));
         when(repository.updateStyle(any())).thenReturn(Mono.just(1L));
 
-        service.createStyle(new GenerationStyleDtos.CreateStyleRequest("image", "电影感", "cinematic", "https://example.com/cinematic.png", "电影", 1, 8)).block();
-        service.updateStyle(new GenerationStyleDtos.UpdateStyleRequest(11L, "video", "胶片", "film", "https://example.com/film.png", "叙事", 0, 9)).block();
+        service.createStyle(new GenerationStyleDtos.CreateStyleRequest("image", "电影感", "cinematic", "https://example.com/cinematic.png", "电影", 1, 8, THUMBNAIL)).block();
+        service.updateStyle(new GenerationStyleDtos.UpdateStyleRequest(11L, "video", "胶片", "film", "https://example.com/film.png", "叙事", 0, 9, THUMBNAIL)).block();
 
         ArgumentCaptor<GenerationStyleRecords.StyleRecord> captor = ArgumentCaptor.forClass(GenerationStyleRecords.StyleRecord.class);
         verify(repository).createStyle(captor.capture());
@@ -137,6 +145,43 @@ class GenerationStyleServiceTest {
         Assertions.assertEquals(11L, updated.getId());
         Assertions.assertEquals("https://example.com/film.png", updated.getCoverUrl());
         Assertions.assertEquals("叙事", updated.getCategory());
+    }
+
+    /** 压缩更新必须同时保存新封面和带版本的缩略图。 */
+    @Test
+    void shouldReplaceCoverAndGenerateThumbnailVersion() {
+        String oldCover = "https://example.com/cinematic.png";
+        String newCover = "https://example.com/compressed.jpg";
+        String revision = "b69d8564852fcc2f2234cadc35119cb240a682deac4e1dc2b5aa90c452c3a578";
+        when(repository.findCoverUrl(11L, false)).thenReturn(Mono.just(oldCover));
+        when(repository.replaceCover(any(), eq(oldCover))).thenReturn(Mono.just(1L));
+
+        service.replaceCover(new GenerationStyleDtos.ReplaceCoverRequest(11L, revision, newCover, THUMBNAIL)).block();
+
+        ArgumentCaptor<GenerationStyleRecords.StyleRecord> captor = ArgumentCaptor.forClass(GenerationStyleRecords.StyleRecord.class);
+        verify(repository).replaceCover(captor.capture(), eq(oldCover));
+        GenerationStyleRecords.StyleRecord record = captor.getValue();
+        Assertions.assertEquals(newCover, record.getCoverUrl());
+        Assertions.assertArrayEquals(java.util.Base64.getDecoder().decode(THUMBNAIL), record.getCoverThumbnail());
+        Assertions.assertEquals(64, record.getThumbnailVersion().length());
+    }
+
+    /** 更新已变化的封面必须失败，并且不能覆盖较新的记录。 */
+    @Test
+    void shouldRejectReplacingChangedCover() {
+        when(repository.findCoverUrl(11L, false)).thenReturn(Mono.just("https://example.com/newer.jpg"));
+
+        Assertions.assertThrows(BusinessException.class, () -> service.replaceCover(new GenerationStyleDtos.ReplaceCoverRequest(
+                11L, "old-version", "https://example.com/compressed.jpg", THUMBNAIL)).block());
+        verify(repository, org.mockito.Mockito.never()).replaceCover(any(), any());
+    }
+
+    /** 无效缩略图不可写入风格库。 */
+    @Test
+    void shouldRejectInvalidThumbnail() {
+        Assertions.assertThrows(BusinessException.class, () -> service.createStyle(new GenerationStyleDtos.CreateStyleRequest(
+                "image", "水彩", "watercolor", "https://example.com/watercolor.png", "绘画", 1, 1, "invalid")).block());
+        verifyNoInteractions(repository);
     }
 
     /** 用户列表应包含封面和分类，风格解析不依赖这两个视觉字段。 */

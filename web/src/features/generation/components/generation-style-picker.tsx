@@ -2,11 +2,11 @@
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button, Input, Modal, Popover, Skeleton, Tooltip } from "antd";
 import { Check, ImageOff, Palette, Search, X } from "lucide-react";
 
-import { listGenerationStyles, type GenerationStyleOption, type GenerationStyleType } from "@/services/api/server";
+import { getGenerationStyleCoverPreview, getGenerationStyleThumbnail, listGenerationStyles, type GenerationStyleOption, type GenerationStyleType } from "@/services/api/server";
 import { ALL_GENERATION_STYLE_CATEGORY, collectGenerationStyleCategories, filterGenerationStyles, isGenerationStyleSelected, MAX_GENERATION_STYLE_SELECTION_COUNT, usesGenerationStyleDefaultCover } from "@/features/generation/lib/generation-style-library";
 
 export type GenerationStyleSelection = GenerationStyleOption;
@@ -71,7 +71,7 @@ export function GenerationStyleChips({ styles, onRemove, className = "" }: { sty
         <div className={`flex flex-wrap gap-2 ${className}`}>
             {styles.map((style) => (
                 <span key={style.id} className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface-raised)] px-2 py-1 text-xs text-[var(--studio-text)]">
-                    <GenerationStyleCover style={style} className="size-5 shrink-0 overflow-hidden rounded-sm" />
+                    <GenerationStyleCover style={style} thumbnail="user" className="size-5 shrink-0 overflow-hidden rounded-sm" />
                     <span className="max-w-40 truncate">{style.name}</span>
                     {onRemove ? (
                         <button
@@ -244,7 +244,7 @@ export function GenerationStyleMenu({
                                     className={`relative w-full overflow-hidden rounded-md border text-left transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--studio-action)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--studio-surface)] ${isSelected ? "border-[var(--studio-action)] bg-[var(--studio-primary-soft)]" : index === highlightedIndex ? "border-[var(--studio-line-strong)] bg-[var(--studio-surface-hover)]" : "border-[var(--studio-line)] bg-[var(--studio-surface)] hover:border-[var(--studio-line-strong)] hover:bg-[var(--studio-surface-hover)]"}`}
                                     onClick={() => selectStyle(style)}
                                 >
-                                    <GenerationStyleCover style={style} className="aspect-[3/4] w-full" />
+                                    <GenerationStyleCover style={style} thumbnail="user" className="aspect-[3/4] w-full" />
                                     <span className="absolute inset-x-0 bottom-0 h-16 bg-[linear-gradient(to_top,var(--studio-surface),transparent)]" aria-hidden="true" />
                                     <span className="absolute inset-x-0 bottom-0 p-2">
                                         <span className="block min-w-0 truncate text-xs font-medium text-[var(--studio-ink)] transition duration-200 group-hover:translate-x-2 group-hover:opacity-0 group-focus-within:translate-x-2 group-focus-within:opacity-0">{style.name}</span>
@@ -289,7 +289,7 @@ export function GenerationStyleMenu({
                             size="small"
                             data-tour={dataTour}
                             className={`creation-composer-action ${iconOnly ? "creation-composer-action-icon" : ""}`}
-                            icon={selected[0] ? <GenerationStyleCover style={selected[0]} className="size-4 shrink-0 overflow-hidden rounded-[4px]" fallbackIcon={<Palette className="size-3.5" />} /> : <Palette className="size-3.5" />}
+                            icon={selected[0] ? <GenerationStyleCover style={selected[0]} thumbnail="user" className="size-4 shrink-0 overflow-hidden rounded-[4px]" fallbackIcon={<Palette className="size-3.5" />} /> : <Palette className="size-3.5" />}
                             disabled={disabled}
                             aria-expanded={open}
                             aria-haspopup="dialog"
@@ -300,26 +300,61 @@ export function GenerationStyleMenu({
                     </Tooltip>
                 </span>
             </Popover>
-            <StylePreviewModal style={previewStyle} onClose={() => setPreviewStyle(null)} />
+            <GenerationStylePreviewModal style={previewStyle} onClose={() => setPreviewStyle(null)} />
         </>
     );
 }
 
-/** 风格封面，空地址和加载失败时使用默认图标或调用方指定的默认内容。 */
-export function GenerationStyleCover({ style, className = "", fallbackIcon }: { style: Pick<GenerationStyleSelection, "coverUrl" | "name">; className?: string; fallbackIcon?: ReactNode }) {
+/** 风格卡片按需读取缩略图，原图在查看时加载。 */
+export function GenerationStyleCover({
+    style, className = "", fallbackIcon, thumbnail,
+}: {
+    style: Pick<GenerationStyleSelection, "coverUrl" | "name"> & Partial<Pick<GenerationStyleSelection, "id" | "thumbnailVersion">>;
+    className?: string;
+    fallbackIcon?: ReactNode;
+    thumbnail?: "user" | "admin";
+}) {
     const translate = useTranslation();
-    const [failed, setFailed] = useState(false);
-    useEffect(() => setFailed(false), [style.coverUrl]);
-    const useDefaultCover = failed || usesGenerationStyleDefaultCover(style);
-    if (useDefaultCover) {
+    const placeholder = useRef<HTMLSpanElement>(null);
+    const [loadedThumbnail, setLoadedThumbnail] = useState<{ key: string; url: string }>();
+    const [failedSource, setFailedSource] = useState("");
+    const { id, thumbnailVersion } = style;
+    const thumbnailKey = `${thumbnail}:${id}:${thumbnailVersion}`;
+    const previewSource = usesGenerationStyleDefaultCover(style) ? "" : style.coverUrl;
+    const source = thumbnail ? (loadedThumbnail?.key === thumbnailKey ? loadedThumbnail.url : "") : previewSource;
+
+    useEffect(() => {
+        if (!thumbnail || !id || !thumbnailVersion || !placeholder.current) return;
+        let active = true;
+        let objectUrl = "";
+        const observer = new IntersectionObserver((entries) => {
+            if (!entries.some((entry) => entry.isIntersecting)) return;
+            observer.disconnect();
+            void getGenerationStyleThumbnail(id, thumbnailVersion, thumbnail === "admin")
+                .then((blob) => {
+                    if (!active || !blob?.size) return;
+                    objectUrl = URL.createObjectURL(blob);
+                    setLoadedThumbnail({ key: thumbnailKey, url: objectUrl });
+                })
+                .catch((error) => console.error("加载风格缩略图失败", error));
+        });
+        observer.observe(placeholder.current);
+        return () => {
+            active = false;
+            observer.disconnect();
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+        };
+    }, [id, thumbnail, thumbnailKey, thumbnailVersion]);
+
+    if (!source || failedSource === source) {
         return (
-            <span className={`grid place-items-center bg-[var(--studio-surface-raised)] text-[var(--studio-muted)] ${className}`}>
+            <span ref={placeholder} className={`grid place-items-center bg-[var(--studio-surface-raised)] text-[var(--studio-muted)] ${className}`}>
                 {fallbackIcon ?? <ImageOff className="size-5" />}
                 <span className="sr-only">{style.name}{translate("generation.defaultCover")}</span>
             </span>
         );
     }
-    return <img src={style.coverUrl} alt="" width={3} height={4} loading="lazy" decoding="async" className={`block object-cover ${className}`} onError={() => setFailed(true)} />;
+    return <img src={source} alt="" width={3} height={4} loading="lazy" decoding="async" className={`block object-cover ${className}`} onError={() => setFailedSource(source)} />;
 }
 
 function StylePreviewStack({ style, onPreview }: { style: GenerationStyleSelection; onPreview: (style: GenerationStyleSelection) => void }) {
@@ -339,17 +374,40 @@ function StylePreviewStack({ style, onPreview }: { style: GenerationStyleSelecti
                         onPreview(style);
                     }}
                 >
-                    <GenerationStyleCover style={style} className="size-full" />
+                    <GenerationStyleCover style={style} thumbnail="user" className="size-full" />
                 </button>
             ))}
         </span>
     );
 }
 
-function StylePreviewModal({ style, onClose }: { style: GenerationStyleSelection | null; onClose: () => void }) {
+/** 打开查看弹窗后才获取封面原图，避免列表中的签名过期。 */
+export function GenerationStylePreviewModal({
+    style, onClose, admin = false,
+}: {
+    style: Pick<GenerationStyleSelection, "id" | "name"> | null;
+    onClose: () => void;
+    admin?: boolean;
+}) {
+    const styleId = style?.id;
+    const [preview, setPreview] = useState<{ id: number; url: string }>();
+    useEffect(() => {
+        setPreview(undefined);
+        if (!styleId) return;
+        const controller = new AbortController();
+        const showPreview = (url: string) => {
+            if (!controller.signal.aborted) setPreview({ id: styleId, url });
+        };
+        void getGenerationStyleCoverPreview(styleId, admin, controller.signal)
+            .then(showPreview, () => showPreview(""));
+        return () => controller.abort();
+    }, [admin, styleId]);
+
     return (
         <Modal title={style?.name} open={Boolean(style)} footer={null} centered destroyOnHidden focusable={{ focusTriggerAfterClose: false }} zIndex={1200} onCancel={onClose} styles={{ body: { display: "grid", minHeight: 320, placeItems: "center", padding: 16 } }}>
-            {style ? <GenerationStyleCover style={style} className="max-h-[70vh] h-auto w-auto max-w-full rounded-md object-contain" /> : null}
+            {style && preview?.id === style.id ? (
+                <GenerationStyleCover style={{ name: style.name, coverUrl: preview.url }} className="max-h-[70vh] h-auto w-auto max-w-full rounded-md object-contain" />
+            ) : style ? <Skeleton.Image active /> : null}
         </Modal>
     );
 }

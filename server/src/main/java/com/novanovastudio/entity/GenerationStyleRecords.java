@@ -39,6 +39,10 @@ public final class GenerationStyleRecords {
         private String stylePrompt;
         /** 风格封面地址。 */
         private String coverUrl;
+        /** 封面缩略图数据，只在写入时使用。 */
+        private byte[] coverThumbnail;
+        /** 缩略图的内容版本，用于浏览器缓存。 */
+        private String thumbnailVersion;
         /** 风格分类。 */
         private String category;
         /** 启用状态。 */

@@ -288,7 +288,7 @@ export function CreationComposer({
                             ) : null}
                             {activeStyles.map((style) => (
                                 <div key={`style-${style.id}`} className="creation-composer-chip">
-                                    <GenerationStyleCover style={style} className="size-5 shrink-0 overflow-hidden rounded-sm" />
+                                    <GenerationStyleCover style={style} thumbnail="user" className="size-5 shrink-0 overflow-hidden rounded-sm" />
                                     <span className="min-w-0 max-w-32 truncate text-xs font-medium text-[var(--studio-muted)]">{style.name}</span>
                                     <button type="button" className="creation-composer-chip-remove" onClick={() => onStyleRemove?.(style.id)} aria-label={translate("generation.removeStyle", { value0: style.name })}>
                                         <X className="size-3.5" />

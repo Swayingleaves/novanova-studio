@@ -197,6 +197,19 @@ public class MediaAccessService {
     }
 
     /**
+     * 仅为已配置的对象存储地址签发链接，避免服务端通过历史外链发起请求。
+     *
+     * @param url 风格封面等业务记录已保存的地址
+     * @return 签名地址，外部链接返回空
+     */
+    public Mono<String> signOwnedPreviewUrl(String url) {
+        if (!isHttpUrl(url)) return Mono.empty();
+        return configs().flatMap(list -> Mono.justOrEmpty(match(stripQuery(url), list)))
+                .filter(target -> StringUtils.hasText(target.key()))
+                .flatMap(target -> signedUrl(target.config(), target.key(), null, lastSegment(target.key()), Purpose.PREVIEW, false));
+    }
+
+    /**
      * 为地址列表重新签名，非本系统对象存储地址原样返回。
      *
      * @param urls Collection&lt;String&gt; 原始地址

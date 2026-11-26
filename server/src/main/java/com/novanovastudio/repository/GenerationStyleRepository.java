@@ -38,7 +38,7 @@ public class GenerationStyleRepository {
         int pageSize = Math.max(1, request.pageSize());
         int offset = (Math.max(1, request.page()) - 1) * pageSize;
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                SELECT id, generation_type, name, style_prompt, cover_url, category, status, sort_order, created_at, updated_at, deleted_at
+                SELECT id, generation_type, name, style_prompt, cover_url, thumbnail_version, category, status, sort_order, created_at, updated_at, deleted_at
                 FROM generation_styles
                 %s
                 ORDER BY sort_order ASC, id ASC
@@ -75,7 +75,7 @@ public class GenerationStyleRepository {
             return Flux.empty();
         }
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                SELECT id, generation_type, name, style_prompt, cover_url, category, status, sort_order, created_at, updated_at, deleted_at
+                SELECT id, generation_type, name, style_prompt, cover_url, thumbnail_version, category, status, sort_order, created_at, updated_at, deleted_at
                 FROM generation_styles
                 WHERE deleted_at IS NULL AND status = 1 AND generation_type = :generationType
                   AND id IN (%s)
@@ -91,9 +91,9 @@ public class GenerationStyleRepository {
      * @return 新风格ID
      */
     public Mono<Long> createStyle(GenerationStyleRecords.StyleRecord record) {
-        return databaseClient.sql("""
-                INSERT INTO generation_styles(generation_type, name, style_prompt, cover_url, category, status, sort_order)
-                VALUES (:generationType, :name, :stylePrompt, :coverUrl, :category, :status, :sortOrder)
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
+                INSERT INTO generation_styles(generation_type, name, style_prompt, cover_url, cover_thumbnail, thumbnail_version, category, status, sort_order)
+                VALUES (:generationType, :name, :stylePrompt, :coverUrl, :coverThumbnail, :thumbnailVersion, :category, :status, :sortOrder)
                 RETURNING id
                 """)
                 .bind("generationType", record.getGenerationType())
@@ -102,8 +102,8 @@ public class GenerationStyleRepository {
                 .bind("coverUrl", record.getCoverUrl())
                 .bind("category", record.getCategory())
                 .bind("status", record.getStatus())
-                .bind("sortOrder", record.getSortOrder())
-                .map((row, metadata) -> row.get("id", Long.class))
+                .bind("sortOrder", record.getSortOrder());
+        return bindThumbnail(spec, record).map((row, metadata) -> row.get("id", Long.class))
                 .one();
     }
 
@@ -114,12 +114,14 @@ public class GenerationStyleRepository {
      * @return 更新行数
      */
     public Mono<Long> updateStyle(GenerationStyleRecords.StyleRecord record) {
-        return databaseClient.sql("""
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
                 UPDATE generation_styles
                 SET generation_type = :generationType,
                     name = :name,
                     style_prompt = :stylePrompt,
-                    cover_url = :coverUrl,
+                    cover_url = COALESCE(:coverUrl, cover_url),
+                    cover_thumbnail = CASE WHEN :coverUrl IS NULL THEN cover_thumbnail ELSE :coverThumbnail END,
+                    thumbnail_version = CASE WHEN :coverUrl IS NULL THEN thumbnail_version ELSE :thumbnailVersion END,
                     category = :category,
                     status = :status,
                     sort_order = :sortOrder,
@@ -130,12 +132,75 @@ public class GenerationStyleRepository {
                 .bind("generationType", record.getGenerationType())
                 .bind("name", record.getName())
                 .bind("stylePrompt", record.getStylePrompt())
-                .bind("coverUrl", record.getCoverUrl())
                 .bind("category", record.getCategory())
                 .bind("status", record.getStatus())
-                .bind("sortOrder", record.getSortOrder())
-                .fetch()
+                .bind("sortOrder", record.getSortOrder());
+        spec = record.getCoverUrl() == null ? spec.bindNull("coverUrl", String.class) : spec.bind("coverUrl", record.getCoverUrl());
+        return bindThumbnail(spec, record).fetch()
                 .rowsUpdated();
+    }
+
+    /**
+     * 读取当前作用域内的未删除风格封面地址。
+     * @param id 风格标识
+     * @param userOnly 是否只读已启用风格
+     * @return 封面地址
+     */
+    public Mono<String> findCoverUrl(long id, boolean userOnly) {
+        return databaseClient.sql("""
+                SELECT cover_url FROM generation_styles
+                WHERE id = :id AND deleted_at IS NULL AND (NOT :userOnly OR status = 1)
+                """)
+                .bind("id", id).bind("userOnly", userOnly)
+                .map((row, metadata) -> row.get("cover_url", String.class)).one();
+    }
+
+    /**
+     * 按风格主键和原封面地址更新图片，保留其他字段。
+     * @param record 新封面和缩略图
+     * @param previousCoverUrl 更新前的封面地址
+     * @return 更新行数
+     */
+    public Mono<Long> replaceCover(GenerationStyleRecords.StyleRecord record, String previousCoverUrl) {
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
+                UPDATE generation_styles
+                SET cover_url = :coverUrl, cover_thumbnail = :coverThumbnail, thumbnail_version = :thumbnailVersion,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id AND deleted_at IS NULL AND cover_url = :previousCoverUrl
+                """)
+                .bind("id", record.getId())
+                .bind("coverUrl", record.getCoverUrl())
+                .bind("previousCoverUrl", previousCoverUrl);
+        return bindThumbnail(spec, record).fetch().rowsUpdated();
+    }
+
+    /**
+     * 按版本加载缩略图。列表查询无需返回图片字节。
+     * @param id 风格标识
+     * @param version 缩略图版本
+     * @param userOnly 是否仅允许读取启用风格
+     * @return 缩略图字节
+     */
+    public Mono<byte[]> findThumbnail(long id, String version, boolean userOnly) {
+        return databaseClient.sql("""
+                SELECT cover_thumbnail FROM generation_styles
+                WHERE id = :id AND deleted_at IS NULL AND thumbnail_version = :version
+                  AND (NOT :userOnly OR status = 1)
+                """)
+                .bind("id", id).bind("version", version).bind("userOnly", userOnly)
+                .map((row, metadata) -> row.get("cover_thumbnail", byte[].class)).one();
+    }
+
+    /**
+     * 绑定可空的缩略图及其版本。
+     * @param spec SQL执行规格
+     * @param record 风格记录
+     * @return 已绑定的执行规格
+     */
+    private DatabaseClient.GenericExecuteSpec bindThumbnail(DatabaseClient.GenericExecuteSpec spec, GenerationStyleRecords.StyleRecord record) {
+        return record.getCoverThumbnail() == null
+                ? spec.bindNull("coverThumbnail", byte[].class).bindNull("thumbnailVersion", String.class)
+                : spec.bind("coverThumbnail", record.getCoverThumbnail()).bind("thumbnailVersion", record.getThumbnailVersion());
     }
 
     /**
@@ -233,6 +298,7 @@ public class GenerationStyleRepository {
         record.setName(row.get("name", String.class));
         record.setStylePrompt(row.get("style_prompt", String.class));
         record.setCoverUrl(row.get("cover_url", String.class));
+        record.setThumbnailVersion(row.get("thumbnail_version", String.class));
         record.setCategory(row.get("category", String.class));
         record.setStatus(row.get("status", Integer.class));
         record.setSortOrder(row.get("sort_order", Integer.class));
