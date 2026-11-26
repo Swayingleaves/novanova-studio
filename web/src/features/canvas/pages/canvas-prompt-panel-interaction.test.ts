@@ -33,14 +33,14 @@ test("节点提示词回显时隐藏引用标签反引号", () => {
 
 test("节点提示词输入@时打开画布资产引用面板", () => {
     assert.ok(promptPanelSource.includes("onMentionInput"), "提示编辑器未监听@引用输入");
-    assert.ok(promptPanelSource.includes("beforeCursor.match(/(^|\\s)@([^\\s@]*)$/)"), "@引用输入未解析搜索关键词");
+    assert.ok(promptPanelSource.includes("beforeCursor.match(/@([^\\s@]*)$/)"), "@引用输入未解析搜索关键词");
     assert.ok(promptPanelSource.includes("<MentionAssetMenu"), "@引用面板未渲染");
     assert.ok(promptPanelSource.includes("replaceTextRange(range.start, range.end, label)"), "资产选择未替换@查询并插入引用标签");
 });
 
 test("@引用面板定位在光标右上侧", () => {
     assert.ok(promptPanelSource.includes("caretRect"), "提示编辑器未暴露@光标位置");
-    assert.ok(promptPanelSource.includes("transform: \"translateY(calc(-100% - 0.5rem))\""), "@引用面板未定位到光标上方");
+    assert.ok(promptPanelSource.includes("translateY(calc(-100% - 0.5rem))"), "@引用面板未定位到光标上方");
     assert.ok(!promptPanelSource.includes("top-[8.75rem]"), "@引用面板仍使用固定的节点位置");
     assert.ok(promptPanelSource.includes('aria-label={translate("canvas.searchCanvasAssets")}'), "@引用面板缺少可输入的搜索框");
     assert.ok(promptPanelSource.includes("onQueryChange={(value) =>"), "@引用面板搜索关键词未同步");
@@ -176,9 +176,19 @@ test("节点提示词编辑器完整保留用户原有的换行和排版", () =>
     assert.ok(promptPanelSource.includes("insertPlainTextAtSelection"), "提示词编辑器粘贴或换行时未按纯文本保留原有排版");
 });
 
+test("提示词弹窗内输入@时在弹窗中打开画布资产引用", () => {
+    assert.ok(promptPanelSource.includes("onPromptModalOpenChange"), "弹窗开关未同步到引用菜单");
+    assert.ok(promptPanelSource.includes("editorModalOpen"), "引用菜单未区分弹窗和节点面板");
+    assert.ok(promptPanelSource.includes("modalEditorHostRef"), "弹窗内未挂载可定位@光标的编辑器");
+    assert.ok(promptPanelSource.includes("readMentionAnchor"), "弹窗@引用未按光标定位");
+    assert.ok(promptPanelSource.includes("cloneElement(mentionMenu"), "弹窗未渲染@引用面板");
+    assert.ok(promptPanelSource.includes("keyboard={!mentionMenuOpen}"), "引用面板打开时按 Esc 会先关掉弹窗");
+    assert.ok(!promptPanelSource.includes("<textarea"), "提示词弹窗仍使用无法识别@引用的纯文本框");
+});
+
 test("节点提示词输入框放大图标改为弹窗查看并编辑提示词", () => {
     assert.ok(promptPanelSource.includes('title="弹窗查看提示词"'), "输入框工具栏缺少弹窗查看提示词按钮");
-    assert.ok(promptPanelSource.includes("setPromptModalOpen(true)"), "点击放大图标未打开提示词弹窗");
+    assert.ok(promptPanelSource.includes("setModalOpen(true)"), "点击放大图标未打开提示词弹窗");
     assert.ok(promptPanelSource.includes("open={promptModalOpen}"), "未渲染提示词弹窗");
     assert.ok(promptPanelSource.includes('aria-label="弹窗缩小字体"') && promptPanelSource.includes('aria-label="弹窗放大字体"'), "提示词弹窗缺少放大和缩小字体按钮");
     assert.ok(promptPanelSource.includes("mask={{ closable: true }}"), "提示词弹窗未使用新版 mask.closable 属性");

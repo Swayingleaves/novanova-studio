@@ -7,7 +7,7 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { cloneElement, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { ArrowUp, BookOpenText, ChevronDown, Copy, FileText, Image as ImageIcon, Info, LoaderCircle, Maximize2, Plus, Search, Sparkles, Square, AudioLines, Video, X } from "lucide-react";
 import { App, Button, Modal, Tooltip } from "antd";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
@@ -104,6 +104,7 @@ export function CanvasNodePromptPanel({
     const [mentionRange, setMentionRange] = useState<{ start: number; end: number } | null>(null);
     const [mentionHighlightedIndex, setMentionHighlightedIndex] = useState(0);
     const [mentionPosition, setMentionPosition] = useState<{ left: number; top: number } | null>(null);
+    const [editorModalOpen, setEditorModalOpen] = useState(false);
     const [pendingMentionReference, setPendingMentionReference] = useState<CanvasResourceReference | null>(null);
     const promptEditorRef = useRef<PromptEditorHandle>(null);
     const promptPanelRef = useRef<HTMLDivElement>(null);
@@ -274,13 +275,17 @@ export function CanvasNodePromptPanel({
         closeStyleMenu();
     };
 
-    const closeMentionMenu = () => {
+    const closeMentionMenu = useCallback(() => {
         setMentionMenuOpen(false);
         setMentionQuery("");
         setMentionRange(null);
         setMentionHighlightedIndex(0);
         setMentionPosition(null);
-    };
+    }, []);
+    const handleEditorModalOpenChange = useCallback((open: boolean) => {
+        setEditorModalOpen(open);
+        if (!open) closeMentionMenu();
+    }, [closeMentionMenu]);
 
     const chooseMention = (reference: CanvasResourceReference) => {
         if (!mentionRange) return;
@@ -404,6 +409,27 @@ export function CanvasNodePromptPanel({
             videoReferenceObjectStorages: videoStorages.filter((file) => file.url !== url),
         });
     };
+
+    const mentionMenu = mentionMenuOpen ? (
+        <MentionAssetMenu
+            query={mentionQuery}
+            candidates={filteredMentionCandidates}
+            highlightedIndex={mentionHighlightedIndex}
+            theme={theme}
+            onSelect={chooseMention}
+            onHighlight={setMentionHighlightedIndex}
+            onQueryChange={(value) => {
+                setMentionQuery(value);
+                setMentionHighlightedIndex(0);
+            }}
+            onConfirm={() => {
+                const reference = filteredMentionCandidates[mentionHighlightedIndex];
+                if (reference) chooseMention(reference);
+            }}
+            onClose={closeMentionMenu}
+            position={mentionPosition}
+        />
+    ) : null;
 
     return (
         <div
@@ -568,28 +594,12 @@ export function CanvasNodePromptPanel({
                     }
                     return false;
                 }}
+                mentionMenu={editorModalOpen ? mentionMenu : null}
+                mentionMenuOpen={mentionMenuOpen}
+                onPromptModalOpenChange={handleEditorModalOpenChange}
             />
 
-            {mentionMenuOpen ? (
-                <MentionAssetMenu
-                    query={mentionQuery}
-                    candidates={filteredMentionCandidates}
-                    highlightedIndex={mentionHighlightedIndex}
-                    theme={theme}
-                    onSelect={chooseMention}
-                    onHighlight={setMentionHighlightedIndex}
-                    onQueryChange={(value) => {
-                        setMentionQuery(value);
-                        setMentionHighlightedIndex(0);
-                    }}
-                    onConfirm={() => {
-                        const reference = filteredMentionCandidates[mentionHighlightedIndex];
-                        if (reference) chooseMention(reference);
-                    }}
-                    onClose={closeMentionMenu}
-                    position={mentionPosition}
-                />
-            ) : null}
+            {editorModalOpen ? null : mentionMenu}
 
             {mode === "image" && isImageNode(node) && node.generation.settingGraph ? <SettingGraphSelector selected={node.generation.settingGraph} onSelect={(skill) => onConfigChange(node.id, { settingGraph: toSettingGraphSnapshot(skill) })} /> : null}
 
@@ -884,6 +894,7 @@ function MentionAssetMenu({
     onConfirm,
     onClose,
     position,
+    placement = "above",
 }: {
     query: string;
     candidates: CanvasResourceReference[];
@@ -895,6 +906,7 @@ function MentionAssetMenu({
     onConfirm: () => void;
     onClose: () => void;
     position: { left: number; top: number } | null;
+    placement?: "above" | "below";
 }) {
     const translate = useTranslation();
     const referenced = candidates.filter((reference) => reference.active);
@@ -912,8 +924,9 @@ function MentionAssetMenu({
 
     return (
         <div
+            data-canvas-mention-menu
             className="absolute z-[110] w-[min(24rem,calc(100% - 1.5rem))] overflow-hidden rounded-xl border p-2 shadow-2xl"
-            style={{ left: position?.left ?? 12, top: position?.top ?? 48, transform: "translateY(calc(-100% - 0.5rem))", background: theme.node.panel, borderColor: theme.node.stroke }}
+            style={{ left: position?.left ?? 12, top: position?.top ?? 48, transform: placement === "below" ? "translateY(0.5rem)" : "translateY(calc(-100% - 0.5rem))", background: theme.node.panel, borderColor: theme.node.stroke }}
             role="listbox"
             aria-label={translate("canvas.referenceCanvasAsset")}
         >
@@ -1148,17 +1161,22 @@ type PromptEditorProps = {
     onPasteText?: (value: string) => boolean;
     onStyleInput?: (value: string, cursor: number) => void;
     onStyleMenuKeyDown?: (event: React.KeyboardEvent) => boolean;
+    mentionMenu?: React.ReactElement<{ position: { left: number; top: number } | null; placement?: "above" | "below" }> | null;
+    mentionMenuOpen?: boolean;
+    onPromptModalOpenChange?: (open: boolean) => void;
 };
 
 export type PromptEditorHandle = { insertAtCursor: (text: string) => void; replaceTextRange: (start: number, end: number, text: string) => void; focus: () => void };
 
 const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function PromptEditor(
-    { prompt, requiredLabels, references, placeholder, theme, onChange, onBlur, onMentionInput, onMentionMenuKeyDown, onPasteText, onStyleInput, onStyleMenuKeyDown },
+    { prompt, requiredLabels, references, placeholder, theme, onChange, onBlur, onMentionInput, onMentionMenuKeyDown, onPasteText, onStyleInput, onStyleMenuKeyDown, mentionMenu = null, mentionMenuOpen = false, onPromptModalOpenChange },
     ref,
 ) {
     const translate = useTranslation();
     const copyText = useCopyText();
     const editorRef = useRef<HTMLDivElement>(null);
+    const modalEditorHostRef = useRef<HTMLDivElement>(null);
+    const promptModalOpenRef = useRef(false);
     const isComposingRef = useRef(false);
     const pendingRef = useRef<string | null>(null);
     const suppressInputRef = useRef(false);
@@ -1192,6 +1210,19 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
         },
         [requiredLabels, refByLabel],
     );
+    const promptValueRef = useRef(prompt);
+    promptValueRef.current = prompt;
+    const buildHTMLRef = useRef(buildHTML);
+    buildHTMLRef.current = buildHTML;
+    const bindEditor = useCallback((node: HTMLDivElement | null) => {
+        if (!node) return;
+        editorRef.current = node;
+        const value = promptValueRef.current;
+        suppressInputRef.current = true;
+        node.innerHTML = buildHTMLRef.current(value);
+        pendingRef.current = value;
+        suppressInputRef.current = false;
+    }, []);
 
     // 挂载时设置初始内容
     useEffect(() => {
@@ -1349,20 +1380,30 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
         return new DOMRect(editorRect.left, editorRect.top, 0, 0);
     }, []);
 
+    const [modalMentionAnchor, setModalMentionAnchor] = useState<{ left: number; top: number; placement: "above" | "below" } | null>(null);
+
     const handleInput = useCallback(() => {
         if (suppressInputRef.current) return;
         const text = extractText();
         pendingRef.current = text;
         onChange(text);
         const cursor = getTextOffset() ?? text.length;
-        onStyleInput?.(text, cursor);
-        onMentionInput?.(text, cursor, getCaretRect());
+        if (!promptModalOpenRef.current) onStyleInput?.(text, cursor);
+        const caretRect = getCaretRect();
+        if (promptModalOpenRef.current) {
+            const host = modalEditorHostRef.current?.getBoundingClientRect();
+            if (caretRect && host) setModalMentionAnchor(readMentionAnchor(caretRect, host));
+        }
+        onMentionInput?.(text, cursor, caretRect);
     }, [extractText, getCaretRect, getTextOffset, onChange, onMentionInput, onStyleInput]);
 
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent) => {
-            if (onMentionMenuKeyDown?.(event)) return;
-            if (onStyleMenuKeyDown?.(event)) return;
+            if (onMentionMenuKeyDown?.(event)) {
+                event.stopPropagation();
+                return;
+            }
+            if (!promptModalOpenRef.current && onStyleMenuKeyDown?.(event)) return;
         },
         [onMentionMenuKeyDown, onStyleMenuKeyDown],
     );
@@ -1573,6 +1614,7 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
     const isEmpty = !prompt;
     const [editorHeight, setEditorHeight] = useState(128);
     const [promptModalOpen, setPromptModalOpen] = useState(false);
+    promptModalOpenRef.current = promptModalOpen;
     const [fontSize, setFontSize] = useState(() => {
         if (typeof window === "undefined") return 14;
         const stored = Number(window.localStorage.getItem("novanova:canvas_prompt_font_size"));
@@ -1609,6 +1651,35 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
     }, [editorHeight]);
 
     const lineHeight = Math.round(fontSize * 1.5);
+    const setModalOpen = (open: boolean) => {
+        promptModalOpenRef.current = open;
+        setPromptModalOpen(open);
+        onPromptModalOpenChange?.(open);
+    };
+    const editorNode = (
+        <div
+            ref={bindEditor}
+            contentEditable
+            suppressContentEditableWarning
+            aria-label="提示词内容"
+            className={promptModalOpen
+                ? "prompt-editor thin-scrollbar block h-[65vh] w-full cursor-text resize-none select-text rounded-xl border px-3.5 py-3.5 outline-none transition focus:border-[#2f80ff] focus:ring-2 focus:ring-[#2f80ff]/25"
+                : "prompt-editor thin-scrollbar absolute inset-0 cursor-text resize-none select-text rounded-xl border px-3 py-2 pr-24 outline-none transition focus:border-[#2f80ff] focus:ring-2 focus:ring-[#2f80ff]/25"}
+            style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text, fontSize, lineHeight: `${lineHeight}px`, whiteSpace: "pre-wrap", overflowWrap: "break-word", overflowY: "auto" }}
+            onInput={handleInput}
+            onBeforeInput={handleBeforeInput}
+            onKeyDown={handleKeyDown}
+            onBlur={handleBlur}
+            onClick={handleEditorClick}
+            onCopy={handleCopy}
+            onPaste={handlePaste}
+            onMouseDown={handleEditorMouseDown}
+            onMouseMove={handleEditorMouseMove}
+            onMouseUp={handleEditorMouseUp}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
+        />
+    );
 
     return (
         <div
@@ -1630,25 +1701,7 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
                 </div>
             ) : null}
             <style>{".ref-chip-close{opacity:.45}.prompt-ref-chip:hover .ref-chip-close{opacity:1}.ref-chip-close:hover{background:rgba(0,0,0,.12)}"}</style>
-            <div
-                ref={editorRef}
-                contentEditable
-                suppressContentEditableWarning
-                className="prompt-editor thin-scrollbar absolute inset-0 cursor-text resize-none select-text rounded-xl border px-3 py-2 pr-24 outline-none transition focus:border-[#2f80ff] focus:ring-2 focus:ring-[#2f80ff]/25"
-                style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text, fontSize, lineHeight: `${lineHeight}px`, whiteSpace: "pre-wrap", overflowWrap: "break-word", overflowY: "auto" }}
-                onInput={handleInput}
-                onBeforeInput={handleBeforeInput}
-                onKeyDown={handleKeyDown}
-                onBlur={handleBlur}
-                onClick={handleEditorClick}
-                onCopy={handleCopy}
-                onPaste={handlePaste}
-                onMouseDown={handleEditorMouseDown}
-                onMouseMove={handleEditorMouseMove}
-                onMouseUp={handleEditorMouseUp}
-                onCompositionStart={handleCompositionStart}
-                onCompositionEnd={handleCompositionEnd}
-            />
+            {promptModalOpen ? null : editorNode}
             <div
                 className="absolute right-2 top-2 z-20 inline-flex items-center gap-0.5 rounded-md p-0.5"
                 style={{ background: theme.node.panel }}
@@ -1687,7 +1740,7 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
                         aria-label="弹窗查看提示词"
                         className="inline-flex size-6 items-center justify-center rounded opacity-70 transition hover:opacity-100"
                         style={{ color: theme.node.muted }}
-                        onClick={() => setPromptModalOpen(true)}
+                        onClick={() => setModalOpen(true)}
                     >
                         <Maximize2 className="size-3.5" aria-hidden="true" />
                     </button>
@@ -1747,43 +1800,46 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
                 open={promptModalOpen}
                 centered
                 width="min(860px, 92vw)"
+                keyboard={!mentionMenuOpen}
                 mask={{ closable: true }}
                 destroyOnHidden
-                onCancel={() => setPromptModalOpen(false)}
+                afterOpenChange={(open) => {
+                    if (!open) return;
+                    const editor = editorRef.current;
+                    if (!editor || document.activeElement === editor) return;
+                    editor.focus();
+                    placeCaretAtEnd(editor);
+                }}
+                onCancel={() => setModalOpen(false)}
                 footer={
                     <div className="flex items-center justify-between gap-2">
                         <Button icon={<Copy className="size-3.5" />} disabled={!prompt} onClick={() => copyText(prompt)}>
                             复制提示词
                         </Button>
-                        <Button type="primary" onClick={() => setPromptModalOpen(false)}>
+                        <Button type="primary" onClick={() => setModalOpen(false)}>
                             完成
                         </Button>
                     </div>
                 }
             >
-                <textarea
-                    value={prompt}
-                    placeholder={placeholder}
-                    aria-label="提示词内容"
-                    className="thin-scrollbar block h-[65vh] w-full resize-none rounded-xl border p-3.5 outline-none transition focus:border-[#2f80ff] focus:ring-2 focus:ring-[#2f80ff]/25"
-                    style={{
-                        background: theme.node.fill,
-                        borderColor: theme.node.stroke,
-                        color: theme.node.text,
-                        fontSize,
-                        lineHeight: `${lineHeight}px`,
-                        whiteSpace: "pre-wrap",
-                        overflowWrap: "break-word",
-                    }}
-                    onChange={(event) => onChange(event.target.value)}
-                    onKeyDown={(event) => event.stopPropagation()}
+                <div
+                    ref={modalEditorHostRef}
+                    className="relative"
                     onWheel={(event) => {
                         event.stopPropagation();
                         if (!event.ctrlKey && !event.metaKey) return;
                         event.preventDefault();
                         updateFontSize(event.deltaY < 0 ? 2 : -2);
                     }}
-                />
+                >
+                    {isEmpty ? (
+                        <div className="pointer-events-none absolute inset-0 z-10 px-3.5 py-3.5 opacity-45" style={{ color: theme.node.text, fontSize, lineHeight: `${lineHeight}px` }}>
+                            {placeholder}
+                        </div>
+                    ) : null}
+                    {promptModalOpen ? editorNode : null}
+                    {mentionMenu ? cloneElement(mentionMenu, { position: modalMentionAnchor ? { left: modalMentionAnchor.left, top: modalMentionAnchor.top } : null, placement: modalMentionAnchor?.placement || "above" }) : null}
+                </div>
             </Modal>
         </div>
     );
@@ -1808,6 +1864,17 @@ function escapeHTML(value: string) {
 
 function escapeAttr(value: string) {
     return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** 按弹窗编辑区的可视范围，把 @ 引用菜单放到光标上方或下方。 */
+function readMentionAnchor(caret: DOMRect, host: DOMRect): { left: number; top: number; placement: "above" | "below" } {
+    const top = caret.top - host.top;
+    const menuWidth = Math.min(384, Math.max(160, host.width - 24));
+    const left = Math.max(8, Math.min(caret.right - host.left + 6, Math.max(8, host.width - menuWidth - 8)));
+    const spaceAbove = top;
+    const spaceBelow = host.height - top - caret.height;
+    const placement = spaceBelow > spaceAbove ? "below" : "above";
+    return { left, top: placement === "below" ? top + Math.max(caret.height, 20) + 8 : top - 6, placement };
 }
 
 function placeCaretAtEnd(element: HTMLElement) {
