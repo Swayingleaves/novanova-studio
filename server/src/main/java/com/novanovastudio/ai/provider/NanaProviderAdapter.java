@@ -70,8 +70,6 @@ public class NanaProviderAdapter implements AiProviderAdapter {
     private static final String MINIMAX_CREATE_PATH = "/videos";
     /** MiniMax 视频查询任务路径前缀。 */
     private static final String MINIMAX_QUERY_PATH = "/autodl/v1/video_generation/";
-    /** 视频任务最大轮询次数。 */
-    private static final int MAXIMUM_POLLING_ATTEMPTS = 240;
     /** 最大参考图片数量。 */
     private static final int MAXIMUM_REFERENCE_IMAGE_COUNT = 9;
     /** 最大参考视频数量。 */
@@ -487,7 +485,8 @@ public class NanaProviderAdapter implements AiProviderAdapter {
     private Mono<JSONObject> pollVideoTask(AiTaskExecutionContext context, AiTaskDtos.AiChannelConfig channel, String path,
                                            Function<JSONObject, VideoTaskState> reader, String timeoutMessage) {
         Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
-        return Flux.range(0, MAXIMUM_POLLING_ATTEMPTS)
+        int maxAttempts = AiTaskPollingSupport.maxPollingAttempts(properties, AiTaskTypes.VIDEO);
+        return Flux.range(0, maxAttempts)
                 .concatMap(attempt -> Mono.delay(pollingInterval)
                         .then(context.isCancelRequested())
                         .flatMap(cancelled -> {

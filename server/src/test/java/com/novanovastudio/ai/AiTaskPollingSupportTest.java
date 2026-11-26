@@ -61,4 +61,24 @@ class AiTaskPollingSupportTest {
 
         Assertions.assertEquals(6, AiTaskPollingSupport.pollingIntervalSeconds(properties));
     }
+
+    /**
+     * 验证最大轮询次数按任务类型对应的平台超时配置和轮询间隔向上取整计算。
+     */
+    @Test
+    void shouldCalculateMaxPollingAttemptsFromTimeoutSettings() {
+        NovanovaProperties properties = new NovanovaProperties();
+        properties.getAi().getTask().setPollingIntervalSeconds(10);
+        properties.replaceTimeoutSettings(new NovanovaProperties.RuntimeTimeouts(
+                60, 600, 600, 600, 305, 900, 1800, 120_000));
+
+        Assertions.assertEquals(Duration.ofSeconds(900),
+                AiTaskPollingSupport.taskWaitTimeout(properties, AiTaskTypes.VIDEO));
+        Assertions.assertEquals(90,
+                AiTaskPollingSupport.maxPollingAttempts(properties, AiTaskTypes.VIDEO));
+        Assertions.assertEquals(Duration.ofSeconds(305),
+                AiTaskPollingSupport.taskWaitTimeout(properties, AiTaskTypes.IMAGE));
+        Assertions.assertEquals(31,
+                AiTaskPollingSupport.maxPollingAttempts(properties, AiTaskTypes.IMAGE));
+    }
 }

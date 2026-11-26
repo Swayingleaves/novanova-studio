@@ -57,9 +57,6 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
     /** 最大参考视频数量。 */
     private static final int MAXIMUM_REFERENCE_VIDEO_COUNT = 3;
 
-    /** 视频任务最大轮询次数。 */
-    private static final int MAXIMUM_POLLING_ATTEMPTS = 120;
-
     /** 处理中任务状态。 */
     private static final Set<String> PROCESSING_STATUSES = Set.of("queued", "running");
 
@@ -195,7 +192,8 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
     private Mono<JSONObject> pollMiniMaxVideoTask(AiTaskExecutionContext context, String providerTaskId) {
         String taskPath = VIDEO_QUERY_PATH + providerTaskId;
         Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
-        return Flux.range(0, MAXIMUM_POLLING_ATTEMPTS)
+        int maxAttempts = AiTaskPollingSupport.maxPollingAttempts(properties, AiTaskTypes.VIDEO);
+        return Flux.range(0, maxAttempts)
                 .concatMap(attempt -> Mono.delay(pollingInterval)
                         .then(context.isCancelRequested())
                         .flatMap(cancelRequested -> Boolean.TRUE.equals(cancelRequested)

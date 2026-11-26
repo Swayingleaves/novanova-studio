@@ -67,9 +67,6 @@ import reactor.util.retry.Retry;
 @Slf4j
 public class CustomProviderAdapter implements AiProviderAdapter {
 
-    /** 查询轮询最大次数，配合默认轮询间隔约10分钟总超时 */
-    private static final int MAX_POLLING_ATTEMPTS = 120;
-
     /** AI构造请求体返回空内容或非法JSON时的最大重试次数 */
     private static final int BODY_BUILD_MAX_RETRIES = 2;
 
@@ -283,7 +280,8 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         // 进度只增不减，渠道偶尔回退或重启恢复时不让前端百分比倒退。
         int initialProgress = context.task().getProgress() == null ? 20 : Math.max(20, Math.min(95, context.task().getProgress()));
         AtomicInteger lastProgress = new AtomicInteger(initialProgress);
-        Mono<String> polling = Flux.range(0, MAX_POLLING_ATTEMPTS)
+        int maxAttempts = AiTaskPollingSupport.maxPollingAttempts(properties, taskKind);
+        Mono<String> polling = Flux.range(0, maxAttempts)
                 .concatMap(attempt -> Mono.delay(interval)
                         .then(context.isCancelRequested())
                         .<JSONObject>flatMap(cancelRequested -> {

@@ -271,7 +271,8 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
      */
     private Mono<JSONObject> pollVideoTask(AiTaskExecutionContext context, String providerTaskId) {
         Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
-        return Flux.range(0, 120)
+        int maxAttempts = AiTaskPollingSupport.maxPollingAttempts(properties, AiTaskTypes.VIDEO);
+        return Flux.range(0, maxAttempts)
                 .concatMap(attempt -> Mono.delay(pollingInterval)
                         .then(context.isCancelRequested())
                         .flatMap(cancelRequested -> {

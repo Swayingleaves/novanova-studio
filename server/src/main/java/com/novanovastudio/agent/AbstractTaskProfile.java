@@ -508,10 +508,9 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
             AtomicReference<TaskProgressSnapshot> previousSnapshot = new AtomicReference<>(
                     new TaskProgressSnapshot(initialTask.status(), initialProgress));
             Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
-            // 视频生成常超5分钟（自定义模型异步轮询最长约10分钟），按任务类型读取可配置的等待超时
-            Duration timeout = Duration.ofSeconds(AiTaskTypes.VIDEO.equals(taskType())
-                    ? properties.timeoutSettings().videoTaskWaitTimeoutSeconds()
-                    : properties.timeoutSettings().taskWaitTimeoutSeconds());
+            // 统一按平台配置的等待超时控制等待上限，并预留两个轮询周期缓冲，避免前台先于后台供应商超时退出。
+            Duration timeout = AiTaskPollingSupport.taskWaitTimeout(properties, taskType())
+                    .plus(pollingInterval.multipliedBy(2));
             Flux<AiTaskDtos.AiGenerationTaskResponse> polled = Flux.interval(Duration.ZERO, pollingInterval)
                     .take(timeout)
                     .concatMap(i -> aiTaskService.getTaskForUser(userId, taskId));
@@ -533,10 +532,15 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
             })
             .takeUntil(task -> isTerminal(task.status()))
             .last()
-            .flatMap(task -> saveTerminalRound(userId, sessionId, callId, originalPrompt,
-                    generationPrompt, model, parameters, references, videoReferences, audioReferences,
-                    createdAt, task).thenReturn(task))
-            .map(task -> buildResult(taskId, task))
+            .flatMap(task -> {
+                // 仅终态任务写入终态轮次；若等待超时但后台任务仍未结束，保留 pending 轮次供前端继续恢复。
+                if (!isTerminal(task.status())) {
+                    return Mono.just(timeoutResult(taskId));
+                }
+                return saveTerminalRound(userId, sessionId, callId, originalPrompt,
+                        generationPrompt, model, parameters, references, videoReferences, audioReferences,
+                        createdAt, task).thenReturn(buildResult(taskId, task));
+            })
             .defaultIfEmpty(timeoutResult(taskId))
             .contextWrite(ctx);
         });

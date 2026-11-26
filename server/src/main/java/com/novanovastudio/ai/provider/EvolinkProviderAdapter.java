@@ -51,8 +51,6 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
     private static final String IMAGE_GENERATION_PATH = "/images/generations";
     /** Evolink任务查询接口前缀。 */
     private static final String TASK_PATH_PREFIX = "/tasks/";
-    /** 最大轮询次数。 */
-    private static final int MAXIMUM_POLLING_ATTEMPTS = 120;
     /** 单张图片转存超时，慢速CDN下载超过该时长就退化为登记远程地址。 */
     private static final Duration IMAGE_TRANSFER_TIMEOUT = Duration.ofSeconds(150);
     /** 登记远程图片地址超时。 */
@@ -179,7 +177,8 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
      */
     private Mono<JSONObject> pollTask(AiTaskExecutionContext context, String providerTaskId) {
         Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
-        return Flux.range(0, MAXIMUM_POLLING_ATTEMPTS)
+        int maxAttempts = AiTaskPollingSupport.maxPollingAttempts(properties, AiTaskTypes.VIDEO);
+        return Flux.range(0, maxAttempts)
                 .concatMap(attempt -> Mono.delay(pollingInterval).then(context.isCancelRequested()).flatMap(cancelled -> {
                     if (Boolean.TRUE.equals(cancelled)) return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCanceled")));
                     return aiHttpClient.sendJsonRequest(context.channel(), "GET", TASK_PATH_PREFIX + providerTaskId, null)

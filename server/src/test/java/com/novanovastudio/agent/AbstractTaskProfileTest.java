@@ -447,6 +447,45 @@ class AbstractTaskProfileTest {
     }
 
     /**
+     * 等待超时但后台任务仍处于非终态时，应保留 pending 轮次，不得误写为“生成结果缺少媒体”失败。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldKeepPendingRoundWhenWaitTimesOutWhileTaskStillRunning() {
+        properties.getAi().getTask().setPollingIntervalSeconds(1);
+        properties.replaceTimeoutSettings(new NovanovaProperties.RuntimeTimeouts(
+                60, 600, 600, 600, 1, 1, 1800, 120_000));
+        when(persistenceService.saveOrUpdateGenerationRound(anyLong(), anyString(), anyString(), anyString(), any(JSONObject.class)))
+                .thenAnswer(invocation -> Mono.defer(() -> {
+                    JSONObject round = invocation.getArgument(4);
+                    savedRounds.add(JSON.parseObject(JSON.toJSONString(round)));
+                    return Mono.empty();
+                }));
+        AiTaskDtos.AiGenerationTaskResponse created = response("pending", 0, new JSONObject());
+        when(aiTaskService.createTaskForUser(anyLong(), any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class)))
+                .thenAnswer(invocation -> {
+                    Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue = invocation.getArgument(2);
+                    return beforeEnqueue.apply(created).thenReturn(created);
+                });
+        when(aiTaskService.getTaskForUser(7L, "task-1"))
+                .thenReturn(Mono.just(response("running", 30, new JSONObject())));
+
+        ToolResult result = profile.executeTool(7L, "generate_image",
+                        Map.of("prompt", "超时测试", "model", "model-1"),
+                        "超时测试", List.of(), eventEmitter, "session-1", "call-1")
+                .block(Duration.ofSeconds(10));
+
+        Assertions.assertNotNull(result);
+        Assertions.assertFalse(result.ok());
+        Assertions.assertEquals("生成任务等待超时", result.message());
+        Assertions.assertFalse(savedRounds.isEmpty());
+        JSONObject lastResult = savedRounds.getLast().getJSONArray("results").getJSONObject(0);
+        Assertions.assertEquals("pending", lastResult.getString("status"));
+        Assertions.assertEquals(30, lastResult.getIntValue("progress"));
+        Assertions.assertNull(lastResult.getString("error"));
+    }
+
+    /**
      * 构建带查询顺序记录的任务响应 Mono。
      *
      * @param status String 服务端任务状态

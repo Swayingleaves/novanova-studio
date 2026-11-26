@@ -46,6 +46,39 @@ public final class AiTaskPollingSupport {
     }
 
     /**
+     * 按任务类型获取平台配置的等待超时时长。
+     *
+     * @param properties NovanovaProperties 服务配置
+     * @param taskType String 任务类型
+     * @return Duration 任务等待超时时长
+     */
+    public static Duration taskWaitTimeout(NovanovaProperties properties, String taskType) {
+        if (properties == null || properties.timeoutSettings() == null) {
+            throw new IllegalStateException("异步AI任务超时配置不能为空");
+        }
+        int timeoutSeconds = AiTaskTypes.VIDEO.equals(taskType)
+                ? properties.timeoutSettings().videoTaskWaitTimeoutSeconds()
+                : properties.timeoutSettings().taskWaitTimeoutSeconds();
+        if (timeoutSeconds < 1) {
+            throw new IllegalStateException("异步AI任务等待超时必须大于0秒");
+        }
+        return Duration.ofSeconds(timeoutSeconds);
+    }
+
+    /**
+     * 根据平台任务等待超时和统一轮询间隔计算最大轮询次数，保证供应商轮询与等待超时一致。
+     *
+     * @param properties NovanovaProperties 服务配置
+     * @param taskType String 任务类型
+     * @return int 最大轮询次数
+     */
+    public static int maxPollingAttempts(NovanovaProperties properties, String taskType) {
+        long timeoutSeconds = taskWaitTimeout(properties, taskType).toSeconds();
+        int intervalSeconds = pollingIntervalSeconds(properties);
+        return (int) Math.max(1L, (timeoutSeconds + intervalSeconds - 1) / intervalSeconds);
+    }
+
+    /**
      * 读取渠道响应中的进度字段，兼容数字、小数和带百分号的字符串，读取不到时返回兜底进度。
      *
      * @param response JSONObject 渠道查询响应

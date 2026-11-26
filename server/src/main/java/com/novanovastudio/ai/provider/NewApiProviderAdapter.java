@@ -52,8 +52,6 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
 
     /** 视频创建接口路径。 */
     private static final String VIDEO_GENERATION_PATH = "/video/generations";
-    /** 视频任务最大轮询次数。 */
-    private static final int MAXIMUM_POLLING_ATTEMPTS = 120;
     /** 最大参考图片数量。 */
     private static final int MAXIMUM_REFERENCE_IMAGE_COUNT = 9;
     /** 最大参考视频数量。 */
@@ -243,7 +241,8 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
     private Mono<JSONObject> pollVideoTask(AiTaskExecutionContext context, String providerTaskId) {
         String taskPath = VIDEO_GENERATION_PATH + "/" + providerTaskId;
         Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
-        return Flux.range(0, MAXIMUM_POLLING_ATTEMPTS)
+        int maxAttempts = AiTaskPollingSupport.maxPollingAttempts(properties, AiTaskTypes.VIDEO);
+        return Flux.range(0, maxAttempts)
                 .concatMap(attempt -> Mono.delay(pollingInterval)
                         .then(context.isCancelRequested())
                         .flatMap(cancelled -> {
