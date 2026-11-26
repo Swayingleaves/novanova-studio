@@ -3319,7 +3319,7 @@ function CanvasWorkspacePage() {
         [addAsset, message],
     );
 
-    const captureVideoFrame = useCallback(async (node: CanvasVideoNode, video: HTMLVideoElement) => {
+    const captureVideoFrame = useCallback(async (node: CanvasVideoNode, video: HTMLVideoElement | "first" | "last") => {
         const signal = mediaUploadScopeRef.current?.controller.signal;
         if (!signal || signal.aborted) return;
         const { source, storageKey } = node.content;
@@ -3328,7 +3328,7 @@ function CanvasWorkspacePage() {
             return current && isVideoNode(current) && current.content.source === source && current.content.storageKey === storageKey ? current : null;
         };
         try {
-            const videoUrl = video.currentSrc;
+            const videoUrl = typeof video === "string" ? source : video.currentSrc;
             const frame = await captureCanvasVideoFrame(video, async () => {
                 const stored = storageKey ? await getMediaBlob(storageKey) : null;
                 if (stored) return stored;
@@ -3343,7 +3343,7 @@ function CanvasWorkspacePage() {
             const size = fitNodeSize(image.width, image.height);
             const anchor = { x: current.frame.position.x + current.frame.width + CONNECTED_NODE_GAP, y: current.frame.position.y };
             const position = findNonOverlappingCanvasNodePosition(nodesRef.current, anchor, size.width, size.height);
-            const child = updateCanvasNodeFrame({ ...createCanvasNode("image", position, imageAttributes(image)), title: translate("canvas.capturedVideoFrame") }, { position, ...size });
+            const child = updateCanvasNodeFrame({ ...createCanvasNode("image", position, imageAttributes(image)), title: translate(video === "first" ? "canvas.firstFrame" : video === "last" ? "canvas.lastFrame" : "canvas.capturedVideoFrame") }, { position, ...size });
             setNodes((previous) => [...previous, child]);
             setConnections((previous) => [...previous, createRightToLeftConnection(current.id, child.id)]);
             setSelectedNodeIds(new Set([child.id]));
@@ -5645,6 +5645,7 @@ function CanvasWorkspacePage() {
                 ) : null}
 
                 <CanvasNodeHoverToolbar
+                    onCaptureFrame={captureVideoFrame}
                     onShare={canShare ? openCanvasShare : undefined}
                     node={isNodeDragging || nodeImageSettingsOpen || selectedSourceNodes.length >= 2 ? null : toolbarNode}
                     viewport={viewport}

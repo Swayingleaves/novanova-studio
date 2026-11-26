@@ -5,12 +5,12 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Clapperboard, CloudUpload, Copy, Download, FolderPlus, ImagePlus, Info, LoaderCircle, Minus, Plus, RefreshCw, Scissors, Share2, Trash2, Upload, Video } from "lucide-react";
+import { SkipBack, SkipForward, Clapperboard, CloudUpload, Copy, Download, FolderPlus, ImagePlus, Info, LoaderCircle, Minus, Plus, RefreshCw, Scissors, Share2, Trash2, Upload, Video } from "lucide-react";
 
 import { formatAudioTime } from "@/features/storage/utils/audio-waveform";
 import { formatBytes, getDataUrlByteSize } from "@/features/generation/lib/image-utils";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
-import type { CanvasNode, CanvasNodeKind, CanvasViewTransform } from "../types";
+import type { CanvasNode, CanvasNodeKind, CanvasVideoNode, CanvasViewTransform } from "../types";
 import { isAudioNode, isDirectorDeskNode, isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
 import { buildImageToolbarTools } from "./canvas-image-toolbar-tools";
 import { useCanvasTheme } from "./canvas-theme-provider";
@@ -27,6 +27,7 @@ type ToolbarAction = {
     active?: boolean;
     danger?: boolean;
     disabled?: boolean;
+    loadingLabel?: string;
 };
 
 type ToolbarActionFactoryContext = {
@@ -50,6 +51,7 @@ type ToolbarActionFactoryContext = {
 };
 
 type CanvasNodeHoverToolbarProps = {
+    onCaptureFrame: (node: CanvasVideoNode, frame: "first" | "last") => Promise<void>;
     onShare?: (node: CanvasNode) => void;
     node: CanvasNode | null;
     viewport: CanvasViewTransform;
@@ -79,6 +81,21 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
     const copyText = useCopyText();
     const theme = useCanvasTheme();
     const uploading = useCanvasUiStore((state) => Boolean(props.node && state.uploadingNodeIds.has(props.node.id)));
+
+    const [pendingCaptures, setPendingCaptures] = useState<ReadonlySet<string>>(() => new Set());
+
+    const captureFrame = async (node: CanvasVideoNode, frame: "first" | "last", captureKey: string) => {
+        setPendingCaptures((current) => new Set(current).add(captureKey));
+        try {
+            await props.onCaptureFrame(node, frame);
+        } finally {
+            setPendingCaptures((current) => {
+                const remaining = new Set(current);
+                remaining.delete(captureKey);
+                return remaining;
+            });
+        }
+    };
 
     if (!props.node) return null;
 
@@ -135,6 +152,18 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
         onClick: tool.onClick,
     }));
     const allActions: ToolbarAction[] = hasImage ? [...baseActions, ...imageActions] : baseActions;
+    if (isVideoNode(node) && hasVideo) {
+        for (const frame of ["first", "last"] as const) {
+            const label = translate(frame === "first" ? "canvas.captureFirstFrame" : "canvas.captureLastFrame");
+            const captureKey = `${node.id}:${frame}`;
+            allActions.push({
+                id: frame, title: label, label,
+                icon: frame === "first" ? <SkipBack className="size-4" /> : <SkipForward className="size-4" />,
+                loadingLabel: pendingCaptures.has(captureKey) ? translate("canvas.capturingVideoFrame") : undefined,
+                onClick: () => void captureFrame(node, frame, captureKey),
+            });
+        }
+    }
     if ((hasImage || hasVideo) && props.onShare) allActions.push({ id: "share", title: "分享作品", label: "分享", icon: <Share2 className="size-4" />, onClick: () => props.onShare?.(node) });
 
     const left = props.viewport.x + (node.frame.position.x + node.frame.width / 2) * props.viewport.k;
@@ -411,7 +440,7 @@ function readNodeTypeLabel(type: CanvasNodeKind) {
     return translate("canvas.video");
 }
 
-function ToolbarActionButton({ title, label, icon, onClick, showLabel, active = false, danger = false, disabled = false }: ToolbarAction & { showLabel: boolean }) {
+function ToolbarActionButton({ title, label, icon, onClick, showLabel, active = false, danger = false, disabled = false, loadingLabel }: ToolbarAction & { showLabel: boolean }) {
     const theme = useCanvasTheme();
     const hasText = showLabel && Boolean(label);
     return (
@@ -419,8 +448,9 @@ function ToolbarActionButton({ title, label, icon, onClick, showLabel, active = 
             <span className="inline-flex shrink-0">
                 <button
                     type="button"
-                    disabled={disabled}
-                    className={`relative flex h-12 min-w-[78px] shrink-0 items-center justify-center whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-40 ${danger ? "text-[#ef4444]" : ""}`}
+                    disabled={disabled || Boolean(loadingLabel)}
+                    aria-busy={loadingLabel ? true : undefined}
+                    className={`relative flex h-12 min-w-[78px] shrink-0 items-center justify-center whitespace-nowrap ${loadingLabel ? "cursor-wait" : "disabled:cursor-not-allowed disabled:opacity-40"} ${danger ? "text-[#ef4444]" : ""}`}
                     onClick={onClick}
                     aria-label={title}
                 >
@@ -428,14 +458,19 @@ function ToolbarActionButton({ title, label, icon, onClick, showLabel, active = 
                         className={`flex h-9 items-center rounded-lg transition ${hasText ? "gap-1.5 px-1.5" : "justify-center px-2"}`}
                         style={active ? { background: theme.toolbar.activeBg, color: theme.toolbar.activeText } : undefined}
                         onMouseEnter={(event) => {
-                            if (!active && !disabled) event.currentTarget.style.background = theme.toolbar.itemHover;
+                            if (!active && !disabled && !loadingLabel) event.currentTarget.style.background = theme.toolbar.itemHover;
                         }}
                         onMouseLeave={(event) => {
                             if (!active) event.currentTarget.style.background = "";
                         }}
                     >
-                        {icon}
-                        {hasText ? <span className="truncate">{label}</span> : null}
+                        {loadingLabel ? <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" /> : icon}
+                        {hasText ? (
+                            <span className="relative truncate">
+                                <span className={loadingLabel ? "invisible" : undefined}>{label}</span>
+                                {loadingLabel ? <span className="absolute inset-0 text-center">{loadingLabel}</span> : null}
+                            </span>
+                        ) : null}
                     </span>
                 </button>
             </span>

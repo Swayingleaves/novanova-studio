@@ -1,10 +1,11 @@
 /** 截取节点正在显示的画面；跨域画面优先通过媒体下载重新读取。 */
 export async function captureCanvasVideoFrame(
-    video: HTMLVideoElement,
+    video: HTMLVideoElement | "first" | "last",
     readVideo: () => Promise<Blob | null>,
     signal: AbortSignal,
 ): Promise<Blob> {
     signal.throwIfAborted();
+    if (typeof video === "string") return captureStoredFrame(video, readVideo, signal);
     video.pause();
     if (video.seeking) await waitForFrame(video, "seeked", signal);
     if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) await waitForFrame(video, "loadeddata", signal);
@@ -16,6 +17,11 @@ export async function captureCanvasVideoFrame(
         if (!(error instanceof DOMException) || error.name !== "SecurityError") throw error;
     }
 
+    return captureStoredFrame(time, readVideo, signal);
+}
+
+/** 使用独立播放器定位画面，保留画布播放器的播放进度。 */
+async function captureStoredFrame(time: number | "first" | "last", readVideo: () => Promise<Blob | null>, signal: AbortSignal): Promise<Blob> {
     signal.throwIfAborted();
     const blob = await readVideo();
     signal.throwIfAborted();
@@ -28,7 +34,9 @@ export async function captureCanvasVideoFrame(
         copy.src = source;
         await loaded;
         // 播放到结尾时取最后可解码的画面，而不是跳到时长界外。
-        const position = Number.isFinite(copy.duration) ? Math.min(time, Math.max(0, copy.duration - 0.001)) : time;
+        if (time === "last" && !Number.isFinite(copy.duration)) throw new Error("无法读取视频时长");
+        const end = Math.max(0, copy.duration - 0.000001);
+        const position = time === "first" ? 0 : time === "last" ? end : Number.isFinite(end) ? Math.min(time, end) : time;
         if (position !== copy.currentTime) {
             copy.currentTime = position;
             if (copy.seeking) await waitForFrame(copy, "seeked", signal);
