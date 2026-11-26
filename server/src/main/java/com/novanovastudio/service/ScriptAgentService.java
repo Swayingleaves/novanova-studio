@@ -473,7 +473,17 @@ public class ScriptAgentService {
                     return agent.call(requestBody, resultType, RuntimeContext.builder()
                                     .sessionId("script:" + operationId).userId(String.valueOf(userId)).build())
                             .timeout(Duration.ofSeconds(properties.timeoutSettings().scriptAgentTimeoutSeconds()))
-                            .map(message -> message.getStructuredData(resultType))
+                            .map(message -> {
+                                if (!message.hasStructuredData()) {
+                                    String responseText = message.getTextContent();
+                                    log.error("剧本Agent未提交结构化结果：操作标识={}，模型={}，结果类型={}，正文字符数={}",
+                                            operationId, model.modelValue(), resultType.getSimpleName(),
+                                            responseText == null ? 0 : responseText.length());
+                                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
+                                            "剧本Agent未返回结构化结果，请重试");
+                                }
+                                return message.getStructuredData(resultType);
+                            })
                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
                                     "剧本Agent未返回结构化结果")))
                             .doFinally(signal -> agent.close());

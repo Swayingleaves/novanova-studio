@@ -129,7 +129,8 @@ public class AgentScopeAgentFactory {
      */
     public ReActAgent scriptAgent(Model model) {
         return build("script-agent", promptService.get(PromptTemplateType.AGENT_SCRIPT), model,
-                "只能返回当前请求对应的剧本结构化结果，不得调用工具、解释或输出额外文本。", false);
+                "若当前请求提供 generate_response 工具，必须通过该工具提交剧本结构化结果，并将结果对象放入 response 参数。"
+                        + "未提供该工具时，按请求指定的原生结构化输出模式提交。不得调用其他工具、输出解释或额外文本。", false);
     }
 
     /**

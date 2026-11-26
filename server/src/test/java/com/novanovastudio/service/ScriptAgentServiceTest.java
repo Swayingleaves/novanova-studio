@@ -20,6 +20,7 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.ScriptDtos;
 import com.novanovastudio.dto.NovelAdaptationDtos;
+import com.novanovastudio.dto.WholeBookAdaptationDtos;
 import com.novanovastudio.repository.NovelAdaptationRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import io.agentscope.core.ReActAgent;
@@ -335,6 +336,25 @@ class ScriptAgentServiceTest {
         assertTrue(error.getMessage().contains("无效的正文人物引用"));
     }
 
+    /** 模型只输出正文时，提示重新生成并保留失败状态。 */
+    @Test
+    void shouldReportMissingStructuredMaterialResult() {
+        AgentScopeModelFactory.TextModelSelection model = new AgentScopeModelFactory.TextModelSelection(
+                null, "model-config", "text-model", "测试模型", "openai", java.math.BigDecimal.ZERO, 0L);
+        ReActAgent agent = mock(ReActAgent.class);
+        Msg message = mock(Msg.class);
+        when(modelFactory.resolveTextModel("text-model")).thenReturn(Mono.just(model));
+        when(agentFactory.scriptAgent(null)).thenReturn(agent);
+        when(agent.call(anyString(), eq(WholeBookAdaptationDtos.Material.class), any(RuntimeContext.class))).thenReturn(Mono.just(message));
+        when(message.getTextContent()).thenReturn("素材摘要正文");
+
+        BusinessException failure = assertThrows(BusinessException.class, () -> service.callWholeBookUnit(
+                8L, "job-a:material:1", "text-model", Map.of("requestType", "material"),
+                WholeBookAdaptationDtos.Material.class).block());
+
+        assertEquals("剧本Agent未返回结构化结果，请重试", failure.getMessage());
+    }
+
     /**
      * 验证整集、单场与正文块生成在模型输入中使用短序号，并在结构校验前还原正式引用。
      *
@@ -365,6 +385,7 @@ class ScriptAgentServiceTest {
         // 使用实际调用入口验证转换接线，模型由测试替身返回固定结构，不访问外部服务。
         when(agentFactory.scriptAgent(null)).thenReturn(agent);
         when(agent.call(anyString(), eq(resultType), any(RuntimeContext.class))).thenReturn(Mono.just(message));
+        when(message.hasStructuredData()).thenReturn(true);
         when(message.getStructuredData(any())).thenReturn(structured);
         Map<String, Object> context = Map.of("project", snapshot.project());
         if (adaptation) {
