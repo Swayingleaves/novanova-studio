@@ -247,7 +247,7 @@ export function CloudFiles() {
                         {previewFile.category === "image" ? (
                             <img src={access.data.url} alt={previewFile.fileName} className="max-h-[60vh] w-full rounded-lg object-contain" referrerPolicy="no-referrer" onError={() => setPreviewFailed(true)} />
                         ) : previewFile.category === "video" ? (
-                            <video key={access.data.url} src={access.data.url} controls preload="metadata" className="max-h-[60vh] w-full rounded-lg" onError={() => setPreviewFailed(true)} />
+                            <video key={access.data.url} src={access.data.url} controls playsInline preload="none" className="max-h-[60vh] w-full rounded-lg" onError={() => setPreviewFailed(true)} />
                         ) : (
                             <audio key={access.data.url} src={access.data.url} controls preload="metadata" className="w-full" onError={() => setPreviewFailed(true)} />
                         )}

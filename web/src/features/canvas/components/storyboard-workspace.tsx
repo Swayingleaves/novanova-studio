@@ -14,6 +14,7 @@ import type { ColumnsType } from "antd/es/table";
 import { Eye, FolderOpen, ImagePlus, Link2, Maximize2, Plus, RefreshCw, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { nanoid } from "nanoid";
 
+import { AssetCover } from "@/features/assets/components/asset-cover";
 import { useAssetStore, type ImageAsset } from "@/features/assets/stores/use-asset-store";
 import { ImageSettingsPanel } from "@/features/generation/components/image-settings-panel";
 import { ModelPicker } from "@/features/settings/components/model-picker";
@@ -696,7 +697,9 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                             {imageAssets.map((asset) => (
                                 <button key={asset.id} type="button" className="overflow-hidden rounded-md border text-left transition hover:-translate-y-0.5" style={{ borderColor: "var(--studio-line)" }} onClick={() => selectAssetImage(asset)}>
-                                    <img src={readImageAssetSource(asset)} alt={asset.title} className="aspect-[4/3] w-full object-cover" />
+                                    <AssetCover asset={{ ...asset, coverUrl: readImageAssetSource(asset) }} className="aspect-[4/3] w-full object-cover">
+                                        <span className="studio-empty block aspect-[4/3]" />
+                                    </AssetCover>
                                     <span className="block truncate px-3 py-2 text-sm">{asset.title}</span>
                                 </button>
                             ))}

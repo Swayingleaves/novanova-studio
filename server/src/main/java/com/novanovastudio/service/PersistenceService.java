@@ -1581,17 +1581,44 @@ public class PersistenceService {
                                         String objectMimeType = "audio".equals(kind) ? probeResult.mimeType() : storedMimeType;
                                         String objectKey = buildObjectKey(objectStorageConfig, kind, storedFileName, objectMimeType);
                                         Integer actualDuration = probeResult.durationMs();
-                                        return putObject(objectStorageConfig, objectKey, storedBytes, objectMimeType,
+                                        return Mono.usingWhen(
+                                                captureVideoCover(objectStorageConfig, kind, storedBytes, storedFileName),
+                                                coverObjectKey -> putObject(objectStorageConfig, objectKey, storedBytes, objectMimeType,
                                                         StorageFileService.describe(storedFileName, kind, objectMimeType, "upload"))
-                                                .flatMap(publicUrl -> {
-                                                    Integer storedDuration = actualDuration < 0 ? null : actualDuration;
-                                                    PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, kind, null, publicUrl, objectKey, objectStorageConfig, objectMimeType, (long) storedBytes.length, storedWidth, storedHeight, storedDuration, input.metadata());
-                                                    return saveUploadedMedia(record);
-                                                });
+                                                        .flatMap(publicUrl -> {
+                                                            Integer storedDuration = actualDuration < 0 ? null : actualDuration;
+                                                            JSONObject metadata = uploadMediaMetadata(input.metadata(), kind, coverObjectKey);
+                                                            PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, kind, null, publicUrl, objectKey, objectStorageConfig, objectMimeType, (long) storedBytes.length, storedWidth, storedHeight, storedDuration, metadata);
+                                                            return saveUploadedMedia(record);
+                                                        }),
+                                                coverObjectKey -> Mono.empty(),
+                                                (coverObjectKey, error) -> discardVideoCover(objectStorageConfig.id(), coverObjectKey),
+                                                coverObjectKey -> discardVideoCover(objectStorageConfig.id(), coverObjectKey));
                                     });
                                 });
                             });
                         }));
+    }
+
+    /**
+     * 把服务端提取的视频封面关联到上传媒体，保留调用方提供的其他元数据。
+     *
+     * @param source 上传请求中的元数据
+     * @param kind 已规范化的媒体类型
+     * @param coverObjectKey 服务端生成的封面对象键
+     * @return 写入媒体记录的元数据
+     */
+    private JSONObject uploadMediaMetadata(JSONObject source, String kind, String coverObjectKey) {
+        if (!"video".equals(kind)) {
+            return source;
+        }
+        JSONObject metadata = source == null ? new JSONObject() : new JSONObject(source);
+        // 封面对象键由服务端分配，不能直接使用客户端提交的值。
+        metadata.remove("coverObjectKey");
+        if (StringUtils.hasText(coverObjectKey)) {
+            metadata.put("coverObjectKey", coverObjectKey);
+        }
+        return metadata;
     }
 
     /**

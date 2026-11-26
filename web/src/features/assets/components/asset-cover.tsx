@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Play } from "lucide-react";
 
+import { loadImageListThumbnail, loadRemoteListThumbnail } from "@/features/generation/lib/image-list-thumbnail";
+import { loadVideoListCover, type VideoCoverSource } from "@/features/generation/lib/video-list-cover";
 import { WatermarkBadge } from "@/features/watermark/components/watermark-badge";
+import { getAssetCoverRequest } from "../lib/asset-cover-request";
 import type { Asset } from "../stores/use-asset-store";
 
 type AssetCoverProps = {
@@ -11,29 +15,73 @@ type AssetCoverProps = {
     children: ReactNode;
 };
 
-/** 资产封面：图片取自身图，视频显示首帧并叠加播放标记，其余情况展示调用方兜底内容。 */
+/** 资产列表与选择器复用已缓存的小图，进入视口后才查询封面。 */
 export function AssetCover({ asset, className, children }: AssetCoverProps) {
-    const [failed, setFailed] = useState(false);
-    useEffect(() => setFailed(false), [asset.id, asset.updatedAt]);
-    const image = asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "");
-    if (image) return (
-        <span className="relative block size-full">
-            <img src={image} alt={asset.title} className={className} />
-            <WatermarkBadge />
-        </span>
+    const container = useRef<HTMLDivElement>(null);
+    const [visible, setVisible] = useState(false);
+    const [failedSource, setFailedSource] = useState<string>();
+    const source = useAssetCoverSource(asset, visible);
+
+    useEffect(() => {
+        if (visible || !container.current) return;
+        const observer = new IntersectionObserver((entries) => {
+            if (!entries.some((entry) => entry.isIntersecting)) return;
+            observer.disconnect();
+            setVisible(true);
+        });
+        observer.observe(container.current);
+        return () => observer.disconnect();
+    }, [visible]);
+
+    const showCover = source && source !== failedSource;
+    return (
+        <div className="relative" ref={container}>
+            {showCover ? (
+                <>
+                    <img src={source} alt={asset.title} className={className} loading="lazy" decoding="async" onError={() => setFailedSource(source)} />
+                    <WatermarkBadge />
+                </>
+            ) : children}
+            {asset.kind === "video" ? (
+                <span className={`pointer-events-none absolute ${showCover ? "inset-0 grid place-items-center" : "right-2 top-2"}`} aria-hidden="true">
+                    <span className="grid size-10 place-items-center rounded-full bg-black/50 text-white">
+                        <Play className="size-5 fill-current" />
+                    </span>
+                </span>
+            ) : null}
+        </div>
     );
-    if (asset.kind === "video" && asset.data.url && !failed) {
-        return (
-            <span className="relative block">
-                <video src={videoFirstFrameSrc(asset.data.url)} aria-label={asset.title} muted playsInline preload="metadata" className={className} onError={() => setFailed(true)} />
-                <span className="pointer-events-none absolute inset-0 grid place-items-center text-2xl text-white/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.6)]">▶</span>
-            </span>
-        );
-    }
-    return <>{children}</>;
 }
 
-/** 追加媒体片段定位到 0.1 秒，避免部分视频首帧是黑场。 */
-function videoFirstFrameSrc(url: string) {
-    return `${url.split("#")[0]}#t=0.1`;
+/** 与播放器分享同一份封面缓存，组件卸载后释放临时地址。 */
+export function useAssetCoverSource(asset: Asset | null, enabled: boolean) {
+    const request = getAssetCoverRequest(asset);
+    const kind = request?.kind;
+    const key = request?.key;
+    const url = request?.url;
+    const identity = kind && key ? `${kind}:${key}` : "";
+    const [cover, setCover] = useState<{ identity: string; source: string }>();
+
+    useEffect(() => {
+        if (!enabled || !kind || !key) return;
+        let active = true;
+        let objectUrl = "";
+        const loadCover = async (): Promise<VideoCoverSource | null> => {
+            if (kind === "video") return loadVideoListCover(key);
+            const blob = kind === "imageUrl" ? await loadRemoteListThumbnail(key, url || "") : await loadImageListThumbnail(key);
+            return blob ? { blob } : null;
+        };
+        void loadCover().then((result) => {
+            if (!active || !result) return;
+            if (result.blob) objectUrl = URL.createObjectURL(result.blob);
+            const source = objectUrl || result.url;
+            if (source) setCover({ identity, source });
+        }).catch((error) => console.error("加载资产封面失败", error));
+        return () => {
+            active = false;
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+        };
+    }, [enabled, identity, key, kind, url]);
+
+    return enabled && cover?.identity === identity ? cover.source : undefined;
 }
