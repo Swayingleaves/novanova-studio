@@ -466,12 +466,24 @@ public final class ScriptDtos {
             Integer episodeDurationSeconds) {
     }
 
+    /** 剧本对话助手生成的待确认写入提案（经用户确认后写入对应板块，已有内容时需二次确认覆盖）。 */
+    public record AgentProposedWrite(
+            String id,
+            String targetSection,
+            String title,
+            String summary,
+            boolean hasExistingContent,
+            List<String> overwrittenFields,
+            JSONObject payload) {
+    }
+
     /** 剧本对话助手单轮响应。 */
     public record AgentChatResponse(
             String sessionId,
             String messageId,
             String reply,
-            List<AgentActionRecommendation> recommendations) {
+            List<AgentActionRecommendation> recommendations,
+            List<AgentProposedWrite> proposedWrites) {
     }
 
     /** 剧本对话助手历史会话响应。 */

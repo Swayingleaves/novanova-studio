@@ -417,12 +417,24 @@ export type ScriptAgentActionRecommendation = {
     episodeDurationSeconds?: number | null;
 };
 
+/** 剧本对话式编剧助手生成的待确认写入提案（支持概览、大纲、人物、世界观）。 */
+export type ScriptAgentProposedWrite = {
+    id: string;
+    targetSection: "overview" | "outline" | "characters" | "world" | string;
+    title: string;
+    summary: string;
+    hasExistingContent: boolean;
+    overwrittenFields: string[];
+    payload: Record<string, unknown>;
+};
+
 /** 剧本对话式编剧助手单轮回复。 */
 export type ScriptAgentChatResponse = {
     sessionId: string;
     messageId: string;
     reply: string;
     recommendations: ScriptAgentActionRecommendation[];
+    proposedWrites?: ScriptAgentProposedWrite[];
 };
 
 /** 剧本对话式编剧助手会话历史响应。 */

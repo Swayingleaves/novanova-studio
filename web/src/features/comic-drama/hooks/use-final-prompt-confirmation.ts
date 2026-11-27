@@ -34,14 +34,15 @@ export function useFinalPromptConfirmation(projectId: string | undefined) {
             afterClose: () => {
                 if (confirmation.current === current) confirmation.current = null;
             },
-            onOk: async () => {
+            onOk: () => {
                 if (started || confirmation.current !== current) return;
                 if (useComicDramaStore.getState().workspace?.projectId !== projectId) {
                     message.warning(translate("comicDrama.finalPromptProjectChanged"));
                     return;
                 }
                 started = true;
-                await onConfirm();
+                // 不等待整个批量合成完成，确认后立即关闭弹窗，由工作台内联状态反馈进度。
+                void onConfirm();
             },
         });
         current.destroy = dialog.destroy;

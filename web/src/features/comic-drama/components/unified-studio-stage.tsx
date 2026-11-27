@@ -277,7 +277,9 @@ export function UnifiedStudioStage({
             message.warning("请先选择拆镜头使用的文本模型");
             return;
         }
+        setSplitModalOpen(false);
         setSplitting(true);
+        message.loading({ content: "正在拆分本集镜头，请稍候…", key: "comic-drama-split", duration: 0 });
         try {
             await generateShotDraft({
                 episodeId: episodeId !== "all" ? episodeId : workspace.scriptProject.episodes[0]?.id,
@@ -287,11 +289,10 @@ export function UnifiedStudioStage({
                 shotDuration: splitDuration,
                 model: splitModel,
             });
-            message.success("镜头拆分草稿已生成，请审阅并确认生效");
-            setSplitModalOpen(false);
+            message.success({ content: "镜头拆分草稿已生成，请审阅并确认生效", key: "comic-drama-split" });
             setDraftReviewOpen(true);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "AI 拆镜头失败");
+            message.error({ content: error instanceof Error ? error.message : "AI 拆镜头失败", key: "comic-drama-split" });
         } finally {
             setSplitting(false);
         }

@@ -1,13 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Spin } from "antd";
-import { ArrowUp, AtSign, CheckCircle2, Plus, Sparkles, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { App, Button, Popover, Spin, Tooltip } from "antd";
+import { AtSign, Clapperboard, MessageSquarePlus, Sparkles, X } from "lucide-react";
 
 import { useTranslation } from "@/features/locale/use-translation";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { chatComicDramaAgent, getComicDramaAgentHistory, resetComicDramaAgentSession } from "@/services/api/comic-drama";
+import {
+    NanaApprovalCard,
+    NanaChatBubble,
+    NanaComposerShell,
+    NanaHeaderStatus,
+    NanaTaskTimeline,
+    NanaThinkingRow,
+} from "@/shared/components/nana-agent-ui";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type {
     ComicDramaAgentActionSuggestion,
@@ -50,7 +58,7 @@ type ComicDramaAgentPanelProps = {
     onExecuteSuggestion: (suggestion: ComicDramaAgentActionSuggestion) => void;
 };
 
-/** 漫剧工作台右侧 AI 制片助手对话面板。 */
+/** 漫剧工作台右侧 Nana助手对话面板（与画布 Nana助手保持一致的视觉、任务卡片与弹簧对话动效）。 */
 export function ComicDramaAgentPanel({
     episodeId,
     episodeShots,
@@ -71,9 +79,10 @@ export function ComicDramaAgentPanel({
     const [messages, setMessages] = useState<ComicDramaAgentHistoryMessage[]>([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
     const [sending, setSending] = useState(false);
+    const [animatingMsgId, setAnimatingMsgId] = useState<string | null>(null);
     const [draft, setDraft] = useState("");
     const [model, setModel] = useState("");
-    const [showModelPicker, setShowModelPicker] = useState(false);
+    const [quickMenuOpen, setQuickMenuOpen] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
 
     const projectId = workspace?.projectId;
@@ -88,6 +97,7 @@ export function ComicDramaAgentPanel({
         if (!projectId) return;
         let cancelled = false;
         setLoadingHistory(true);
+        setAnimatingMsgId(null);
         getComicDramaAgentHistory(projectId)
             .then((res) => {
                 if (!cancelled) setMessages(res.messages || []);
@@ -103,12 +113,16 @@ export function ComicDramaAgentPanel({
         };
     }, [projectId]);
 
-    useEffect(() => {
+    const scrollToBottom = useCallback(() => {
         const container = scrollRef.current;
         if (container) {
             container.scrollTop = container.scrollHeight;
         }
-    }, [messages, sending]);
+    }, []);
+
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages, sending, scrollToBottom]);
 
     const selectedShot = useMemo(
         () => episodeShots.find((shot) => shot.id === selectedShotId) || null,
@@ -137,11 +151,21 @@ export function ComicDramaAgentPanel({
         return items.slice(0, 3);
     }, [episodeShots.length, selectedShot]);
 
+    // 估算当前漫剧会话与本集分镜上下文的占用百分比（与画布 Nana助手口径一致：按 32k 窗口折算）。
+    const contextUsagePercent = useMemo(() => {
+        const recentHistoryChars = messages.slice(-12).reduce((sum, item) => sum + Math.min(item.text.length, 800), 0);
+        const shotContextChars = episodeShots.length * 220 + mentionedShotIds.length * 160;
+        const totalChars = recentHistoryChars + shotContextChars;
+        if (totalChars === 0) return 0;
+        return Math.min(99, Math.max(1, Math.round((totalChars / 2 / 32000) * 100)));
+    }, [episodeShots.length, mentionedShotIds.length, messages]);
+
     const handleSend = async (overrideText?: string) => {
         if (!projectId || sending) return;
         const text = (typeof overrideText === "string" ? overrideText : draft).trim();
         if (!text) return;
         if (typeof overrideText !== "string") setDraft("");
+        setQuickMenuOpen(false);
 
         const optimisticUser: ComicDramaAgentHistoryMessage = {
             id: `local_u_${Date.now()}`,
@@ -166,6 +190,7 @@ export function ComicDramaAgentPanel({
                 appliedEdits: response.appliedEdits,
                 suggestions: response.suggestions,
             });
+            setAnimatingMsgId(response.messageId);
             setMessages((prev) => [
                 ...prev,
                 {
@@ -192,6 +217,7 @@ export function ComicDramaAgentPanel({
         try {
             await resetComicDramaAgentSession(projectId);
             setMessages([]);
+            setAnimatingMsgId(null);
             onClearMentions();
             message.success(`已开启新的${assistantName}对话`);
         } catch (error) {
@@ -200,221 +226,237 @@ export function ComicDramaAgentPanel({
     };
 
     return (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--studio-surface)]">
-            {/* 上下文感知条 */}
-            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--studio-line)] px-3.5 py-2 text-xs text-[var(--studio-muted)]">
-                <div className="min-w-0 truncate">
-                    <span>上下文：</span>
-                    <strong className="font-medium text-[var(--studio-ink)]">{episodeTitle}</strong>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--studio-panel-solid)]">
+            {/* 精简状态栏（与画布 Nana助手标题栏风格一致） */}
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--studio-line)] px-3.5 py-2 text-xs">
+                <div className="flex min-w-0 items-center gap-1.5 text-[var(--studio-muted)]">
+                    <span className="grid size-5 shrink-0 place-items-center rounded-md bg-[color-mix(in_srgb,var(--studio-ink)_8%,transparent)] text-[var(--studio-muted)]">
+                        <Clapperboard className="size-3" />
+                    </span>
+                    <span className="truncate font-medium text-[var(--studio-ink)]">{episodeTitle}</span>
                     {selectedShot ? (
-                        <span className="ml-1.5 text-[var(--studio-ink)]">· #{selectedShot.shotNumber}</span>
+                        <span className="shrink-0 text-[var(--studio-muted)]">· #{selectedShot.shotNumber}</span>
                     ) : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                    <button
-                        type="button"
-                        onClick={() => setShowModelPicker((prev) => !prev)}
-                        className="cursor-pointer rounded px-1.5 py-0.5 text-xs! text-[var(--studio-muted)]! hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]!"
-                        title="切换对话模型"
-                    >
-                        模型
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => void handleReset()}
-                        className="inline-flex size-6 cursor-pointer items-center justify-center rounded text-[var(--studio-muted)]! hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]!"
-                        title="新建对话"
-                        aria-label="新建对话"
-                    >
-                        <Plus className="size-3.5" />
-                    </button>
+                    <NanaHeaderStatus active={sending} />
+                    <Tooltip title={translate("canvas.newConversation")}>
+                        <button
+                            type="button"
+                            onClick={() => void handleReset()}
+                            disabled={sending}
+                            className="grid size-7 cursor-pointer place-items-center rounded-lg text-[var(--studio-muted)]! opacity-70 transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]! hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
+                            aria-label={translate("canvas.newConversation")}
+                        >
+                            <MessageSquarePlus className="size-4" />
+                        </button>
+                    </Tooltip>
                 </div>
             </div>
-
-            {showModelPicker ? (
-                <div className="shrink-0 border-b border-[var(--studio-line)] bg-[var(--studio-surface-raised)] px-3.5 py-2">
-                    <label className="mb-1 block text-xs text-[var(--studio-muted)]">{assistantName}文本模型</label>
-                    <ModelPicker config={config} capability="text" value={model} onChange={setModel} fullWidth />
-                </div>
-            ) : null}
 
             {/* 对话消息流 */}
-            <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3.5">
-                {loadingHistory ? (
-                    <div className="flex items-center justify-center py-10">
-                        <Spin size="small" />
-                    </div>
-                ) : messages.length === 0 ? (
-                    <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-page)] p-3.5 text-xs leading-5 text-[var(--studio-muted)]">
-                        <div className="mb-1 flex items-center gap-1.5 font-semibold text-[var(--studio-ink)]">
-                            <Sparkles className="size-3.5 text-[var(--studio-action)]" />
-                            <span>{assistantName}已就绪</span>
+            <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                <div className="flex flex-col gap-3">
+                    {loadingHistory ? (
+                        <div className="flex items-center justify-center py-12">
+                            <Spin size="small" />
                         </div>
-                        <p>
-                            你可以直接让我改某个镜头的画面、景别、对白或最终视频提示词（改完立即生效）；涉及拆镜头、补资产图、批量生视频或一键出集时，我会给出动作卡片并在确认预算后执行。
-                        </p>
-                    </div>
-                ) : (
-                    messages.map((item) => {
-                        if (item.role === "user") {
-                            return (
-                                <div key={item.id} className="flex justify-end">
-                                    <div className="max-w-[88%] whitespace-pre-wrap break-words rounded-lg border border-[var(--studio-line-strong)] bg-[var(--studio-surface-raised)] px-3 py-2 text-xs leading-5 text-[var(--studio-ink)]">
-                                        {item.text}
-                                    </div>
-                                </div>
-                            );
-                        }
-                        const meta = parseMeta(item.meta);
-                        const edits = meta.appliedEdits || [];
-                        const suggestions = meta.suggestions || [];
-                        return (
-                            <div key={item.id} className="space-y-1.5">
-                                <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--studio-ink)]">
-                                    <span
-                                        className="flex size-5 items-center justify-center rounded text-[11px] font-semibold"
-                                        style={{ background: "var(--studio-action)", color: "var(--studio-action-foreground)" }}
+                    ) : messages.length === 0 && !sending ? (
+                        <div className="space-y-4 py-6">
+                            <div className="text-center">
+                                <div className="text-sm font-medium text-[var(--studio-ink)]">{assistantName}已就绪</div>
+                                <p className="mt-1.5 text-xs leading-5 text-[var(--studio-muted)]">
+                                    可以直接让我修改镜头画面、景别、对白或最终视频提示词（改完立即生效）；涉及拆镜头、补资产图、批量生视频或一键出集时，我会输出确认任务卡片。
+                                </p>
+                            </div>
+                            <div className="space-y-1.5">
+                                {quickPrompts.map((prompt) => (
+                                    <button
+                                        key={prompt}
+                                        type="button"
+                                        disabled={sending}
+                                        onClick={() => void handleSend(prompt)}
+                                        className="block w-full cursor-pointer rounded-xl border border-[var(--studio-line)] bg-[color-mix(in_srgb,var(--studio-ink)_3%,var(--studio-panel-solid))] px-3 py-2 text-left text-xs! leading-5 text-[var(--studio-text)]! transition-colors hover:border-[var(--studio-primary-line)] hover:text-[var(--studio-ink)]! disabled:opacity-50"
                                     >
-                                        AI
-                                    </span>
-                                    <span>{assistantName}</span>
-                                </div>
-                                <div className="space-y-2.5 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-page)] p-3 text-xs leading-5 text-[var(--studio-text)]">
-                                    <div className="whitespace-pre-wrap break-words">{item.text}</div>
+                                        {prompt}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    ) : (
+                        messages.map((item) => {
+                            if (item.role === "user") {
+                                return <NanaChatBubble key={item.id} role="user" text={item.text} />;
+                            }
+                            const meta = parseMeta(item.meta);
+                            const edits = meta.appliedEdits || [];
+                            const suggestions = meta.suggestions || [];
+                            return (
+                                <div key={item.id} className="space-y-2">
+                                    {edits.length > 0 ? (
+                                        <NanaThinkingRow
+                                            title="执行步骤"
+                                            preview={`已修订 ${edits.length} 个镜头`}
+                                            steps={edits.map((edit) => ({
+                                                id: `${edit.shotId}-${edit.shotNumber}`,
+                                                label: `更新镜头 #${edit.shotNumber}：${edit.updatedFields.join("、")}`,
+                                                status: "done",
+                                            }))}
+                                        />
+                                    ) : null}
+
+                                    <NanaChatBubble
+                                        role="assistant"
+                                        text={item.text}
+                                        animated={item.id === animatingMsgId}
+                                        onHeightChange={scrollToBottom}
+                                    />
 
                                     {edits.length > 0 ? (
-                                        <div className="space-y-1 rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface)] p-2">
-                                            <div className="text-[11px] font-semibold text-[var(--studio-success)]">已直接生效的修改</div>
-                                            {edits.map((edit) => (
-                                                <div key={`${edit.shotId}-${edit.shotNumber}`} className="flex items-center gap-1.5 text-xs text-[var(--studio-ink)]">
-                                                    <CheckCircle2 className="size-3.5 shrink-0 text-[var(--studio-success)]" />
-                                                    <span>
-                                                        镜头 #{edit.shotNumber}：{edit.updatedFields.join("、")}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
+                                        <NanaTaskTimeline
+                                            title={`已自动生效 ${edits.length} 项镜头修订`}
+                                            status="done"
+                                            summary="已落库"
+                                            defaultExpanded={item.id === animatingMsgId}
+                                            items={edits.map((edit) => ({
+                                                id: `${edit.shotId}-${edit.shotNumber}`,
+                                                name: `镜头 #${edit.shotNumber}`,
+                                                meta: edit.updatedFields.join("、"),
+                                                status: "done",
+                                                statusText: "已生效",
+                                            }))}
+                                        />
                                     ) : null}
 
-                                    {suggestions.length > 0 ? (
-                                        <div className="space-y-1.5 border-t border-[var(--studio-line)] pt-2">
-                                            {suggestions.map((suggestion, index) => (
-                                                <div
-                                                    key={`${suggestion.actionType}-${index}`}
-                                                    className="flex items-center justify-between gap-2 rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface)] px-2.5 py-2"
+                                    {suggestions.map((suggestion, index) => (
+                                        <NanaApprovalCard
+                                            key={`${suggestion.actionType}-${index}`}
+                                            title={`待确认操作 · ${suggestion.label}`}
+                                            description={suggestion.description}
+                                            actions={
+                                                <Button
+                                                    size="small"
+                                                    type={suggestion.actionType === "oneClickEpisode" ? "primary" : "default"}
+                                                    onClick={() => onExecuteSuggestion(suggestion)}
                                                 >
-                                                    <div className="min-w-0">
-                                                        <div className="truncate text-xs font-medium text-[var(--studio-ink)]">{suggestion.label}</div>
-                                                        {suggestion.description ? (
-                                                            <div className="truncate text-[11px] text-[var(--studio-muted)]">{suggestion.description}</div>
-                                                        ) : null}
-                                                    </div>
-                                                    <Button
-                                                        size="small"
-                                                        type={suggestion.actionType === "oneClickEpisode" ? "primary" : "default"}
-                                                        onClick={() => onExecuteSuggestion(suggestion)}
-                                                    >
-                                                        去确认
-                                                    </Button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : null}
+                                                    批准并确认预算
+                                                </Button>
+                                            }
+                                        />
+                                    ))}
                                 </div>
-                            </div>
-                        );
-                    })
-                )}
+                            );
+                        })
+                    )}
 
-                {sending ? (
-                    <div className="flex items-center gap-2 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-page)] px-3 py-2 text-xs text-[var(--studio-muted)]">
-                        <Spin size="small" />
-                        <span>{assistantName}正在分析当前分集并生成修改...</span>
-                    </div>
-                ) : null}
+                    {sending ? (
+                        <NanaThinkingRow
+                            active
+                            showBubble
+                            preview={`分析 ${episodeTitle}${selectedShot ? ` · 镜头 #${selectedShot.shotNumber}` : ""} 上下文…`}
+                            thinkingLabel={translate("chat.thinking")}
+                        />
+                    ) : null}
+                </div>
             </div>
 
-            {/* 快捷指令 + 输入区 */}
-            <div className="shrink-0 border-t border-[var(--studio-line)] bg-[var(--studio-rail)] p-3">
-                <div className="mb-2 flex flex-wrap gap-1.5">
-                    {quickPrompts.map((prompt) => (
-                        <button
-                            key={prompt}
-                            type="button"
-                            disabled={sending}
-                            onClick={() => void handleSend(prompt)}
-                            className="max-w-full cursor-pointer truncate rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface)] px-2 py-1 text-xs! text-[var(--studio-muted)]! transition-colors hover:border-[var(--studio-line-strong)] hover:text-[var(--studio-ink)]! disabled:opacity-50"
-                            title={prompt}
-                        >
-                            {prompt}
-                        </button>
-                    ))}
-                </div>
-
-                <div className="rounded-lg border border-[var(--studio-line-strong)] bg-[var(--studio-surface)] p-2 focus-within:border-[var(--studio-action)]">
-                    {mentionedShotIds.length > 0 ? (
-                        <div className="mb-1.5 flex flex-wrap items-center gap-1">
-                            {mentionedShotIds.map((shotId) => {
-                                const shot = episodeShots.find((item) => item.id === shotId);
-                                if (!shot) return null;
-                                return (
-                                    <span
-                                        key={shotId}
-                                        className="inline-flex items-center gap-1 rounded border border-[var(--studio-line-strong)] bg-[var(--studio-surface-raised)] px-1.5 py-0.5 text-xs font-medium text-[var(--studio-ink)]"
+            {/* 底部圆角输入卡片（与画布 AgentChatComposer 结构一致） */}
+            <NanaComposerShell
+                value={draft}
+                disabled={sending}
+                sending={sending}
+                canSubmit={Boolean(draft.trim())}
+                placeholder={`告诉${assistantName}如何修改镜头、重写提示词或规划本集出片…（Enter 发送）`}
+                onChange={setDraft}
+                onSubmit={() => void handleSend()}
+                topBar={
+                    <>
+                        <span className="inline-flex max-w-[180px] items-center gap-1 rounded-md border border-[var(--studio-line)] bg-[color-mix(in_srgb,var(--studio-ink)_6%,transparent)] px-2 py-0.5 text-[11px] text-[var(--studio-ink)]">
+                            <Clapperboard className="size-3 shrink-0 opacity-70" />
+                            <span className="truncate">{episodeTitle}</span>
+                        </span>
+                        {mentionedShotIds.map((shotId) => {
+                            const shot = episodeShots.find((item) => item.id === shotId);
+                            if (!shot) return null;
+                            return (
+                                <span
+                                    key={shotId}
+                                    className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px]"
+                                    style={{
+                                        background: "color-mix(in srgb, #f59e0b 16%, transparent)",
+                                        color: "#f59e0b",
+                                    }}
+                                >
+                                    <span>@#{shot.shotNumber}</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => onRemoveMention(shotId)}
+                                        className="cursor-pointer opacity-75 hover:opacity-100"
+                                        aria-label={`移除引用镜头 #${shot.shotNumber}`}
                                     >
-                                        <span>@#{shot.shotNumber}</span>
-                                        <button
-                                            type="button"
-                                            onClick={() => onRemoveMention(shotId)}
-                                            className="cursor-pointer text-[var(--studio-muted)]! hover:text-[var(--studio-ink)]!"
-                                            aria-label={`移除引用镜头 #${shot.shotNumber}`}
-                                        >
-                                            <X className="size-3" />
-                                        </button>
-                                    </span>
-                                );
-                            })}
-                        </div>
-                    ) : null}
-
-                    <textarea
-                        rows={2}
-                        value={draft}
-                        onChange={(event) => setDraft(event.target.value)}
-                        onKeyDown={(event) => {
-                            if (event.key === "Enter" && !event.shiftKey) {
-                                event.preventDefault();
-                                void handleSend();
-                            }
-                        }}
-                        placeholder={`告诉${assistantName}如何修改镜头、重写提示词或规划本集出片…（Enter 发送）`}
-                        className="w-full resize-none bg-transparent text-xs leading-5 text-[var(--studio-ink)] outline-none placeholder:text-[var(--studio-faint)]"
-                    />
-
-                    <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-[var(--studio-line)] pt-1.5">
+                                        <X className="size-3" />
+                                    </button>
+                                </span>
+                            );
+                        })}
+                    </>
+                }
+                leftControls={
+                    <>
                         <button
                             type="button"
                             onClick={onAttachCurrentShot}
                             disabled={!selectedShot}
-                            className="inline-flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs! text-[var(--studio-muted)]! hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]! disabled:cursor-not-allowed disabled:opacity-40"
+                            className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-full px-2 text-xs! text-[var(--studio-muted)]! opacity-85 transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]! hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-35"
                         >
                             <AtSign className="size-3.5" />
                             <span>引用当前镜</span>
                         </button>
 
-                        <button
-                            type="button"
-                            disabled={sending || !draft.trim()}
-                            onClick={() => void handleSend()}
-                            style={{ background: "var(--studio-action)", color: "var(--studio-action-foreground)" }}
-                            className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md px-3 text-xs! font-semibold text-[var(--studio-action-foreground)]! transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
+                        <Popover
+                            open={quickMenuOpen}
+                            onOpenChange={setQuickMenuOpen}
+                            trigger="click"
+                            placement="topLeft"
+                            content={
+                                <div className="w-72 space-y-1">
+                                    <div className="mb-1 text-[11px] font-semibold text-[var(--studio-muted)]">快捷指令</div>
+                                    {quickPrompts.map((prompt) => (
+                                        <button
+                                            key={prompt}
+                                            type="button"
+                                            onClick={() => void handleSend(prompt)}
+                                            className="block w-full cursor-pointer rounded-md px-2.5 py-1.5 text-left text-xs! leading-5 text-[var(--studio-ink)]! transition-colors hover:bg-[var(--studio-surface-hover)]"
+                                        >
+                                            {prompt}
+                                        </button>
+                                    ))}
+                                </div>
+                            }
                         >
-                            <span>发送</span>
-                            <ArrowUp className="size-3.5" />
-                        </button>
-                    </div>
-                </div>
-            </div>
+                            <button
+                                type="button"
+                                className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-full px-2 text-xs! text-[var(--studio-muted)]! opacity-85 transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]! hover:opacity-100"
+                            >
+                                <Sparkles className="size-3.5" />
+                                <span>快捷指令</span>
+                            </button>
+                        </Popover>
+                    </>
+                }
+                contextUsagePercent={contextUsagePercent}
+                rightControls={
+                    <ModelPicker
+                        config={config}
+                        value={model}
+                        onChange={setModel}
+                        capability="text"
+                        showChannel={false}
+                        className="h-7 max-w-[156px]"
+                        placeholder={translate("canvas.selectTextModel")}
+                    />
+                }
+            />
         </div>
     );
 }

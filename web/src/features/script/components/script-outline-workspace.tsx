@@ -107,7 +107,7 @@ export function ScriptOutlineWorkspace({ onOpenAiGeneration }: { onOpenAiGenerat
             </div>
             <div className={styles.actions}>
                 {/* 宽屏下右侧常驻「AI剧本助手」，这个入口只在窄屏（面板隐藏时）保留 */}
-                <Button className="xl:hidden" size="small" icon={<RotateCcw className="size-3.5" />} onClick={onOpenAiGeneration}>{translate("script.regenerate")}</Button>
+                <Button className="xl:hidden!" size="small" icon={<RotateCcw className="size-3.5" />} onClick={onOpenAiGeneration}>{translate("script.regenerate")}</Button>
                 <Button size="small" icon={editing ? <BookOpenText className="size-3.5" /> : <Pencil className="size-3.5" />} onClick={() => setEditing((current) => !current)}>
                     {editing ? translate("script.backToReading") : translate("script.edit")}
                 </Button>

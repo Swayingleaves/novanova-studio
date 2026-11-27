@@ -118,7 +118,7 @@ export function CharactersEditor() {
                     <Button danger disabled={!selectedCount || deleting} loading={deleting} icon={<Trash2 className="size-4" />}>{selectedCount ? translate("script.deleteCount", { value0: selectedCount }) : translate("script.delete")}</Button>
                 </Popconfirm>
                 {/* 宽屏下右侧常驻「AI剧本助手」，这个入口只在窄屏（面板隐藏时）保留 */}
-                <Button className="xl:hidden" icon={<Sparkles className="size-4" />} onClick={() => setAssistantOpen(true)}>{translate("script.generateCharactersWithAi")}</Button>
+                <Button className="xl:hidden!" icon={<Sparkles className="size-4" />} onClick={() => setAssistantOpen(true)}>{translate("script.generateCharactersWithAi")}</Button>
                 <Button type="primary" icon={<Plus className="size-4" />} onClick={addCharacter}>{translate("script.addCharacter")}</Button>
             </div>
         </header>

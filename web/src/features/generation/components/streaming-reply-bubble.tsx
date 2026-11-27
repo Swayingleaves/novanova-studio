@@ -39,6 +39,8 @@ type StreamingReplyBubbleProps = {
     animated?: boolean;
     /** 气泡高度增长时的回调，便于外层保持滚动贴底。 */
     onHeightChange?: () => void;
+    /** 弹簧展开与词片显影全部落定后的回调，便于外层切换为静态 Markdown 渲染。 */
+    onSettled?: () => void;
     /** 可选：自定义气泡背景色（供画布主题透传）。 */
     bubbleBackground?: string;
     /** 可选：自定义正文颜色（供画布主题透传）。 */
@@ -113,6 +115,7 @@ export function StreamingReplyBubble({
     loading = false,
     animated = false,
     onHeightChange,
+    onSettled,
     bubbleBackground,
     bubbleTextColor,
     bubbleBorderColor,
@@ -137,10 +140,60 @@ export function StreamingReplyBubble({
             >
                 {text ? (
                     <div
-                        className="prose prose-sm max-w-none break-words text-sm leading-6 text-[var(--studio-ink)] dark:prose-invert [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5"
+                        className="min-w-0 max-w-none break-words text-left text-sm leading-6 text-[var(--studio-ink)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
                         style={bubbleTextColor ? { color: bubbleTextColor } : undefined}
                     >
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdownText}</ReactMarkdown>
+                        <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                                a: ({ href, children }) => (
+                                    <a href={href} target="_blank" rel="noreferrer" className="text-[var(--studio-primary)] underline underline-offset-2">
+                                        {children}
+                                    </a>
+                                ),
+                                blockquote: ({ children }) => (
+                                    <blockquote className="my-2 border-l-3 border-[var(--studio-line-strong)] py-0.5 pl-3 text-[var(--studio-muted)]">
+                                        {children}
+                                    </blockquote>
+                                ),
+                                code: ({ className, children, ...props }) => {
+                                    const isInline = !className;
+                                    if (isInline) {
+                                        return (
+                                            <code className="rounded bg-[var(--studio-surface-soft)] px-1 py-0.5 text-[12px]" {...props}>
+                                                {children}
+                                            </code>
+                                        );
+                                    }
+                                    return (
+                                        <pre className="my-2 overflow-x-auto rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3 text-[12px] leading-5">
+                                            <code className={className} {...props}>
+                                                {children}
+                                            </code>
+                                        </pre>
+                                    );
+                                },
+                                h1: ({ children }) => <h1 className="mb-2 mt-2 text-base font-semibold">{children}</h1>,
+                                h2: ({ children }) => <h2 className="mb-1.5 mt-2 text-[15px] font-semibold">{children}</h2>,
+                                h3: ({ children }) => <h3 className="mb-1 mt-1.5 text-sm font-semibold">{children}</h3>,
+                                hr: () => <hr className="my-2.5 border-[var(--studio-line)]" />,
+                                li: ({ children }) => <li className="my-0.5 pl-0.5">{children}</li>,
+                                ol: ({ children }) => <ol className="my-1.5 list-decimal pl-5">{children}</ol>,
+                                p: ({ children }) => <p className="my-1.5 leading-6">{children}</p>,
+                                pre: ({ children }) => <>{children}</>,
+                                strong: ({ children }) => <strong className="font-semibold text-[var(--studio-ink)]">{children}</strong>,
+                                table: ({ children }) => (
+                                    <div className="my-2 overflow-x-auto">
+                                        <table className="w-full border-collapse text-left text-xs">{children}</table>
+                                    </div>
+                                ),
+                                td: ({ children }) => <td className="border border-[var(--studio-line)] px-2 py-1.5 align-top">{children}</td>,
+                                th: ({ children }) => <th className="border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] px-2 py-1.5 align-top font-medium">{children}</th>,
+                                ul: ({ children }) => <ul className="my-1.5 list-disc pl-5">{children}</ul>,
+                            }}
+                        >
+                            {markdownText}
+                        </ReactMarkdown>
                     </div>
                 ) : (
                     <span className="streaming-reply-think-shine font-medium">{thinkingLabel}</span>
@@ -156,6 +209,7 @@ export function StreamingReplyBubble({
             thinkingLabel={thinkingLabel}
             loading={loading}
             onHeightChange={onHeightChange}
+            onSettled={onSettled}
             surfaceStyle={surfaceStyle}
         />
     );
@@ -167,9 +221,11 @@ function AnimatedStreamingReplyBubble({
     thinkingLabel,
     loading,
     onHeightChange,
+    onSettled,
     surfaceStyle,
 }: Required<Pick<StreamingReplyBubbleProps, "text" | "thinking" | "thinkingLabel" | "loading">> & {
     onHeightChange?: () => void;
+    onSettled?: () => void;
     surfaceStyle?: React.CSSProperties;
 }) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -180,6 +236,8 @@ function AnimatedStreamingReplyBubble({
     const tokenElMapRef = useRef<Map<number, HTMLSpanElement>>(new Map());
     const onHeightChangeRef = useRef(onHeightChange);
     onHeightChangeRef.current = onHeightChange;
+    const onSettledRef = useRef(onSettled);
+    onSettledRef.current = onSettled;
 
     const reducedMotionRef = useRef(
         typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
@@ -366,6 +424,9 @@ function AnimatedStreamingReplyBubble({
             } else {
                 rafIdRef.current = null;
                 onHeightChangeRef.current?.();
+                if (currentTokens.length > 0 && !thinking) {
+                    onSettledRef.current?.();
+                }
             }
         };
         rafIdRef.current = requestAnimationFrame(tick);

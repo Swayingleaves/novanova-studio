@@ -3,9 +3,23 @@
 import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { App, Alert, Button, Collapse, Input, InputNumber, Modal, Popover, Spin, Tag } from "antd";
-import { ArrowUp, Check, ChevronDown, ChevronUp, FileCheck2, Plus, SlidersHorizontal, Sparkles, Trash2, Wand2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { nanoid } from "nanoid";
+import { App, Alert, Button, Collapse, Input, InputNumber, Modal, Popover, Spin, Tag, Tooltip } from "antd";
+import {
+    ArrowUp,
+    BookOpenText,
+    Check,
+    ChevronDown,
+    ChevronUp,
+    FileCheck2,
+    MessageSquarePlus,
+    SlidersHorizontal,
+    Sparkles,
+    Trash2,
+    Wand2,
+    X,
+} from "lucide-react";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-configuration-guard";
@@ -19,15 +33,31 @@ import {
     getScriptAgentHistory,
     resetScriptAgentSession,
 } from "@/services/api/script";
+import {
+    NanaApprovalCard,
+    NanaChatBubble,
+    NanaComposerShell,
+    NanaHeaderStatus,
+    NanaTaskTimeline,
+    NanaThinkingRow,
+} from "@/shared/components/nana-agent-ui";
 import { isScriptAiDraftStale } from "../lib/script-episode-editing";
 import { SCRIPT_AI_ACTIONS } from "../lib/script-ai-actions";
 import { useScriptStore } from "../stores/use-script-store";
 import type {
+    OutlineSection,
     ScriptAgentActionRecommendation,
     ScriptAgentHistoryMessage,
+    ScriptAgentProposedWrite,
     ScriptAiActionPricing,
     ScriptAiDraft,
+    ScriptCharacter,
+    ScriptLocation,
+    ScriptOverview,
+    ScriptProjectDetail,
     ScriptWorkspaceSection,
+    WorldItem,
+    WorldSetting,
 } from "../types";
 
 /** 动作清单由 `script-ai-actions.ts` 统一维护，后台定价表用的是同一份。 */
@@ -38,7 +68,7 @@ const getActions = (translate = translateMessage) => SCRIPT_AI_ACTIONS.map((item
 /** 内容生成类动作编码集合（其余均为正文优化类动作）。 */
 const GENERATION_ACTION_SET = new Set(["storyDirections", "outline", "characters", "world", "episodePlan", "episodeDraft"]);
 
-/** 各工作区板块的中文显示名，用于上下文感知条。 */
+/** 各工作区板块的中文显示名，用于上下文胶囊。 */
 const SECTION_LABELS: Record<string, string> = {
     overview: "故事概览",
     outline: "故事大纲",
@@ -77,11 +107,235 @@ type CardAiTarget = { targetType: "episode" | "scene"; targetId: string; label: 
 
 type ParsedMessageMeta = {
     recommendations?: ScriptAgentActionRecommendation[];
+    proposedWrites?: ScriptAgentProposedWrite[];
     draftId?: string;
     actionType?: string;
     actionLabel?: string;
     targetLabel?: string;
 };
+
+/** 故事概览字段中文名，用于写入提案预览与覆盖冲突提示。 */
+const OVERVIEW_FIELD_LABELS: Record<string, string> = {
+    title: "项目名称",
+    genre: "题材",
+    logline: "一句话创意",
+    synopsis: "故事梗概",
+    targetEpisodeCount: "目标集数",
+    targetDurationSeconds: "目标总时长(秒)",
+    narrativeStyle: "叙事风格",
+    theme: "故事主题",
+    mainPlot: "主线剧情",
+    mainConflict: "主要冲突",
+    endingDirection: "结局方向",
+};
+
+/** 检测写入提案的内容是否已经与当前剧本完全一致（防止刷新页面后再次误判为“覆盖已有内容”）。 */
+function isProposedWriteAlreadyApplied(write: ScriptAgentProposedWrite, project: ScriptProjectDetail): boolean {
+    const payload = write.payload || {};
+    if (write.targetSection === "overview") {
+        const patch = (payload.overview || {}) as Record<string, unknown>;
+        const entries = Object.entries(patch).filter(([, v]) => v !== undefined && v !== null && v !== "");
+        if (!entries.length) return false;
+        return entries.every(([key, val]) => {
+            const curVal = project.overview[key as keyof ScriptOverview];
+            if (typeof val === "number") return curVal === val;
+            return String(curVal ?? "").trim() === String(val).trim();
+        });
+    }
+    if (write.targetSection === "outline") {
+        const incoming = Array.isArray(payload.outlineSections) ? (payload.outlineSections as Array<Record<string, unknown>>) : [];
+        if (!incoming.length || project.outlineSections.length !== incoming.length) return false;
+        return incoming.every((sec, index) => {
+            const cur = project.outlineSections[index];
+            return Boolean(cur)
+                && cur.title.trim() === String(sec.title || "").trim()
+                && (cur.content || "").trim() === String(sec.content || "").trim();
+        });
+    }
+    if (write.targetSection === "characters") {
+        const incoming = Array.isArray(payload.characters) ? (payload.characters as Array<Record<string, unknown>>) : [];
+        if (!incoming.length) return false;
+        return incoming.every((raw) => {
+            const name = String(raw.name || "").trim();
+            const cur = project.characters.find((c) => c.name.trim() === name);
+            if (!cur) return false;
+            return (!raw.identity || cur.identity.trim() === String(raw.identity).trim())
+                && (!raw.personality || cur.personality.trim() === String(raw.personality).trim())
+                && (!raw.goal || cur.goal.trim() === String(raw.goal).trim());
+        });
+    }
+    if (write.targetSection === "world") {
+        const setting = (payload.worldSetting || {}) as Record<string, unknown>;
+        for (const [key, val] of Object.entries(setting)) {
+            if (typeof val === "string" && val.trim()) {
+                const curVal = project.worldSetting?.[key as keyof WorldSetting];
+                if (String(curVal ?? "").trim() !== val.trim()) return false;
+            }
+        }
+        const incomingItems = Array.isArray(payload.worldItems) ? (payload.worldItems as Array<Record<string, unknown>>) : [];
+        for (const raw of incomingItems) {
+            const cur = project.worldItems.find((w) => w.name.trim() === String(raw.name || "").trim());
+            if (!cur || (raw.description && cur.description.trim() !== String(raw.description).trim())) return false;
+        }
+        const incomingLocs = Array.isArray(payload.locations) ? (payload.locations as Array<Record<string, unknown>>) : [];
+        for (const raw of incomingLocs) {
+            const cur = project.locations.find((l) => l.name.trim() === String(raw.name || "").trim());
+            if (!cur) return false;
+        }
+        return Object.keys(setting).length > 0 || incomingItems.length > 0 || incomingLocs.length > 0;
+    }
+    return false;
+}
+
+/** 将推荐动作映射到所属板块，用于过滤与本轮写入提案重复的推荐卡片。 */
+function recommendationSection(actionType: string): string {
+    return actionType === "storyDirections" ? "overview" : actionType;
+}
+
+/** 判断推荐的整块生成动作是否已在当前剧本中完成（已应用草稿或已有完整内容）。 */
+function isRecommendationAlreadyCompleted(
+    rec: ScriptAgentActionRecommendation,
+    project: ScriptProjectDetail,
+    drafts: ScriptAiDraft[],
+): boolean {
+    if (drafts.some((d) => d.status === "applied" && d.actionType === rec.actionType && (!rec.targetId || d.targetId === rec.targetId))) {
+        return true;
+    }
+    switch (rec.actionType) {
+        case "outline":
+            return project.outlineSections.length > 0 && project.outlineSections.every((s) => Boolean(s.content?.trim()));
+        case "characters":
+            return project.characters.length > 0;
+        case "world":
+            return Boolean(
+                project.worldSetting?.era?.trim()
+                || project.worldSetting?.region?.trim()
+                || project.worldSetting?.socialBackground?.trim()
+                || project.worldSetting?.overallTone?.trim()
+                || project.worldItems.length > 0
+                || project.locations.length > 0,
+            );
+        case "episodePlan":
+            return project.episodes.length > 0;
+        case "episodeDraft": {
+            const ep = rec.targetId ? project.episodes.find((item) => item.id === rec.targetId) : undefined;
+            return Boolean(ep && ep.completionStatus !== "planning");
+        }
+        default:
+            return false;
+    }
+}
+
+function readAppliedWriteIds(projectId: string): string[] {
+    if (typeof window === "undefined" || !projectId) return [];
+    try {
+        const raw = window.localStorage.getItem(`novanova:script-applied-writes:${projectId}`);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+    } catch {
+        return [];
+    }
+}
+
+function persistAppliedWriteIds(projectId: string, ids: string[]) {
+    if (typeof window === "undefined" || !projectId) return;
+    try {
+        window.localStorage.setItem(`novanova:script-applied-writes:${projectId}`, JSON.stringify(ids.slice(-50)));
+    } catch {
+        // 忽略存储异常
+    }
+}
+
+/** 实时检测待确认写入提案是否会覆盖当前剧本中已有内容。 */
+function detectProposedWriteConflicts(write: ScriptAgentProposedWrite, project: ScriptProjectDetail): string[] {
+    const conflicts: string[] = [];
+    const payload = write.payload || {};
+    if (write.targetSection === "overview") {
+        const patch = (payload.overview || {}) as Record<string, unknown>;
+        const cur = project.overview;
+        for (const [key, val] of Object.entries(patch)) {
+            if (val === undefined || val === null || val === "") continue;
+            if (key === "targetEpisodeCount" && typeof val === "number") {
+                if (cur.targetEpisodeCount > 1 && cur.targetEpisodeCount !== val) conflicts.push(OVERVIEW_FIELD_LABELS[key]);
+                continue;
+            }
+            if (key === "targetDurationSeconds" && typeof val === "number") {
+                if (cur.targetDurationSeconds > 0 && cur.targetDurationSeconds !== val) conflicts.push(OVERVIEW_FIELD_LABELS[key]);
+                continue;
+            }
+            const curVal = cur[key as keyof ScriptOverview];
+            if (typeof curVal === "string" && curVal.trim() && curVal.trim() !== String(val).trim()) {
+                conflicts.push(OVERVIEW_FIELD_LABELS[key] || key);
+            }
+        }
+    } else if (write.targetSection === "outline") {
+        for (const sec of project.outlineSections || []) {
+            if (sec.content?.trim()) conflicts.push(sec.title || "大纲结构段");
+        }
+    } else if (write.targetSection === "characters") {
+        const incoming = Array.isArray(payload.characters) ? (payload.characters as Array<Record<string, unknown>>) : [];
+        const existingNames = new Set((project.characters || []).map((c) => c.name.trim()).filter(Boolean));
+        for (const ch of incoming) {
+            const name = String(ch.name || "").trim();
+            if (name && existingNames.has(name)) conflicts.push(`人物：${name}`);
+        }
+    } else if (write.targetSection === "world") {
+        const setting = (payload.worldSetting || {}) as Record<string, unknown>;
+        const settingLabels: Record<string, string> = { era: "时代背景", region: "地域空间", socialBackground: "社会背景", overallTone: "整体基调" };
+        for (const [key, val] of Object.entries(setting)) {
+            const curVal = project.worldSetting?.[key as keyof WorldSetting];
+            if (typeof val === "string" && val.trim() && typeof curVal === "string" && curVal.trim() && curVal.trim() !== val.trim()) {
+                conflicts.push(settingLabels[key] || key);
+            }
+        }
+        const existingItems = new Set((project.worldItems || []).map((w) => w.name.trim()).filter(Boolean));
+        for (const item of (Array.isArray(payload.worldItems) ? payload.worldItems : []) as Array<Record<string, unknown>>) {
+            const name = String(item.name || "").trim();
+            if (name && existingItems.has(name)) conflicts.push(`世界观条目：${name}`);
+        }
+        const existingLocs = new Set((project.locations || []).map((l) => l.name.trim()).filter(Boolean));
+        for (const loc of (Array.isArray(payload.locations) ? payload.locations : []) as Array<Record<string, unknown>>) {
+            const name = String(loc.name || "").trim();
+            if (name && existingLocs.has(name)) conflicts.push(`场景地点：${name}`);
+        }
+    }
+    return conflicts;
+}
+
+/** 将待确认写入提案整理为人类易读的字段预览行。 */
+function formatProposedWritePreviewLines(write: ScriptAgentProposedWrite): string[] {
+    const lines: string[] = [];
+    const payload = write.payload || {};
+    if (write.targetSection === "overview" && payload.overview && typeof payload.overview === "object") {
+        for (const [key, val] of Object.entries(payload.overview as Record<string, unknown>)) {
+            if (val === undefined || val === null || val === "") continue;
+            const text = String(val).trim();
+            lines.push(`${OVERVIEW_FIELD_LABELS[key] || key}：${text.length > 64 ? `${text.slice(0, 64)}…` : text}`);
+        }
+    } else if (write.targetSection === "outline" && Array.isArray(payload.outlineSections)) {
+        for (const item of (payload.outlineSections as Array<Record<string, unknown>>).slice(0, 6)) {
+            lines.push(`大纲段：${String(item.title || "未命名")}`);
+        }
+    } else if (write.targetSection === "characters" && Array.isArray(payload.characters)) {
+        for (const item of (payload.characters as Array<Record<string, unknown>>).slice(0, 6)) {
+            const role = item.roleType ? `（${String(item.roleType)}）` : "";
+            lines.push(`人物：${String(item.name || "未命名")}${role}`);
+        }
+    } else if (write.targetSection === "world") {
+        if (payload.worldSetting && typeof payload.worldSetting === "object") {
+            const ws = payload.worldSetting as Record<string, unknown>;
+            if (ws.era) lines.push(`时代：${String(ws.era)}`);
+            if (ws.overallTone) lines.push(`基调：${String(ws.overallTone).slice(0, 60)}`);
+        }
+        if (Array.isArray(payload.worldItems) && payload.worldItems.length) {
+            lines.push(`世界观条目：${(payload.worldItems as Array<Record<string, unknown>>).map((i) => String(i.name || "")).filter(Boolean).join("、")}`);
+        }
+        if (Array.isArray(payload.locations) && payload.locations.length) {
+            lines.push(`场景地点：${(payload.locations as Array<Record<string, unknown>>).map((l) => String(l.name || "")).filter(Boolean).join("、")}`);
+        }
+    }
+    return lines;
+}
 
 function parseMessageMeta(raw?: string | null): ParsedMessageMeta {
     if (!raw) return {};
@@ -185,7 +439,7 @@ function DraftDiffSummary({ sourceData, draftData }: { sourceData: Record<string
     </div>;
 }
 
-/** 剧本工作台对话式 AI 剧本助手（保留全部 20 项动作与审核草稿流程，可用于右侧栏或卡片弹窗）。 */
+/** 剧本工作台右侧 Nana助手对话面板（与画布 Nana助手保持一致的视觉、任务卡片与弹簧对话动效，完整保留全部 20 项动作与审核草稿流程）。 */
 export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { section: ScriptWorkspaceSection; selectedEpisodeId: string; cardTarget?: CardAiTarget }) {
     const translate = useTranslation();
     const assistantName = translate("script.aiScriptAssistant");
@@ -198,9 +452,15 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
     const saveStatus = useScriptStore((state) => state.saveStatus);
     const replaceDrafts = useScriptStore((state) => state.replaceDrafts);
     const reloadProject = useScriptStore((state) => state.reloadProject);
+    const updateOverview = useScriptStore((state) => state.updateOverview);
+    const updateOutline = useScriptStore((state) => state.updateOutline);
+    const updateCharacters = useScriptStore((state) => state.updateCharacters);
+    const updateWorld = useScriptStore((state) => state.updateWorld);
+    const saveAll = useScriptStore((state) => state.saveAll);
 
     const [model, setModel] = useState("");
-    const [showModelPicker, setShowModelPicker] = useState(false);
+    const [applyingWriteId, setApplyingWriteId] = useState("");
+    const [appliedWriteIds, setAppliedWriteIds] = useState<string[]>([]);
     const [showDraftsTray, setShowDraftsTray] = useState(false);
     const [actionsPopoverOpen, setActionsPopoverOpen] = useState(false);
 
@@ -217,6 +477,8 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
     const [loadingHistory, setLoadingHistory] = useState(false);
     const [sendingChat, setSendingChat] = useState(false);
     const [runningDraft, setRunningDraft] = useState(false);
+    const [runningActionLabel, setRunningActionLabel] = useState("");
+    const [animatingMsgId, setAnimatingMsgId] = useState<string | null>(null);
     const [discardingId, setDiscardingId] = useState("");
 
     const [preview, setPreview] = useState<ScriptAiDraft | null>(null);
@@ -246,17 +508,17 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
     const generationOptions = useMemo(() => options.filter((item) => GENERATION_ACTION_SET.has(item.value)), [options]);
     const optimizationOptions = useMemo(() => options.filter((item) => !GENERATION_ACTION_SET.has(item.value)), [options]);
 
-    /** 输入框上方直接露出的高频快捷芯片（其余全部收纳在「全部动作」弹层里）。 */
+    /** 输入框底部直接露出的高频快捷芯片（其余全部收纳在「全部动作」弹层里）。 */
     const quickActionOptions = useMemo(() => {
-        if (options.length <= 4) return options;
+        if (options.length <= 3) return options;
         const optimizing = cardTargetType === "scene" || (!cardTargetType && aiTargetType === "scene");
         const preferredKeys = optimizing
-            ? ["polish", "dialogue", "conflict", "suspense"]
-            : ["episodeDraft", "episodePlan", "polish", "dialogue"];
+            ? ["polish", "dialogue", "conflict"]
+            : ["episodeDraft", "episodePlan", "polish"];
         const picked = preferredKeys
             .map((key) => options.find((item) => item.value === key))
             .filter((item): item is { value: string; label: string; sections: string[] } => Boolean(item));
-        return picked.length ? picked : options.slice(0, 4);
+        return picked.length ? picked : options.slice(0, 3);
     }, [aiTargetType, cardTargetType, options]);
 
     const pricingCurrent = pricing?.model === model;
@@ -297,11 +559,11 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
         return () => { cancelled = true; };
     }, [model]);
 
-    // 加载项目绑定的对话式编剧助手历史会话。
     useEffect(() => {
         if (!projectId) return;
         let cancelled = false;
         setLoadingHistory(true);
+        setAnimatingMsgId(null);
         getScriptAgentHistory(projectId)
             .then((res) => { if (!cancelled) setMessages(res.messages || []); })
             .catch(() => { if (!cancelled) setMessages([]); })
@@ -309,7 +571,6 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
         return () => { cancelled = true; };
     }, [projectId]);
 
-    // 切换板块或卡片上下文时，若已选动作不在当前上下文可用集合里则自动切回自由对话模式。
     useEffect(() => {
         if (cardTargetType === "scene") {
             setSelectedAction("polish");
@@ -348,14 +609,20 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
         setDraftJson("");
         setInputText("");
         setRunningDraft(false);
+        setRunningActionLabel("");
         setSendingChat(false);
         setDiscardingId("");
+        setAppliedWriteIds(projectId ? readAppliedWriteIds(projectId) : []);
     }, [projectId]);
 
-    useEffect(() => {
+    const scrollToBottom = useCallback(() => {
         const container = scrollRef.current;
         if (container) container.scrollTop = container.scrollHeight;
-    }, [messages, sendingChat, runningDraft]);
+    }, []);
+
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages, sendingChat, runningDraft, scrollToBottom]);
 
     if (!project) return null;
 
@@ -369,7 +636,6 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
     const isOverviewEmpty = !project.overview.logline?.trim() && !project.overview.synopsis?.trim();
     const isOutlineEmpty = !project.outlineSections?.length || project.outlineSections.some((item) => !item.content?.trim());
 
-    /** 计算指定动作的前置依赖阻塞提示，复用于主动模式与 Agent 推荐卡片。 */
     const getBlockedReason = (actionType: string) => {
         if (actionType === "storyDirections" && isOverviewEmpty) {
             return translate("script.addALoglineOrSynopsisToTheStoryOverviewBefore");
@@ -406,7 +672,6 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
         return { targetType: "episode", targetId: selectedEpisodeId || undefined, label: contextLabel };
     };
 
-    /** 按当前板块提供 2-3 条开场对话引导。 */
     const starterPrompts = (() => {
         if (cardTarget) {
             return [
@@ -444,7 +709,6 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
         ];
     })();
 
-    /** 发送自由对话给剧本编剧助手 Agent。 */
     const handleSendChat = async (overrideText?: string) => {
         if (!project || sendingChat || runningDraft) return;
         const text = (typeof overrideText === "string" ? overrideText : inputText).trim();
@@ -472,7 +736,12 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
                 message: text,
                 model: model || config.textModel || undefined,
             });
-            const meta = JSON.stringify({ kind: "scriptAgent", recommendations: response.recommendations });
+            const meta = JSON.stringify({
+                kind: "scriptAgent",
+                recommendations: response.recommendations,
+                proposedWrites: response.proposedWrites || [],
+            });
+            setAnimatingMsgId(response.messageId);
             setMessages((prev) => [
                 ...prev,
                 {
@@ -490,7 +759,6 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
         }
     };
 
-    /** 执行正式扣费 AI 动作生成审核草稿（完整保留前置校验、未保存拦截、定价确认、草稿落库与对话流内联卡片）。 */
     const executeAction = (params: {
         actionType: string;
         actionInstruction: string;
@@ -524,6 +792,88 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
             ? (durationSeconds ?? episodeDurationSeconds)
             : undefined;
 
+        const runGenerateDraft = async () => {
+            if (!["saved", "idle"].includes(useScriptStore.getState().saveStatus)) {
+                message.warning(translate("script.theScriptHasNewUnsavedChangesSaveBeforeConfirmingAgain"));
+                return;
+            }
+            const latestProject = useScriptStore.getState().project;
+            if (!latestProject || latestProject.id !== project.id) {
+                message.warning(translate("script.theScriptProjectHasChangedStartTheAiActionAgain"));
+                return;
+            }
+            if (clearComposerAfterStart) {
+                setInputText("");
+            }
+            const cleanInstruction = actionInstruction.trim();
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: `local_act_u_${Date.now()}`,
+                    role: "user",
+                    text: cleanInstruction ? `【${actionLabel}】${cleanInstruction}` : `【${actionLabel}】按当前上下文生成审核草稿`,
+                    createdAt: new Date().toISOString(),
+                },
+            ]);
+            const generation = ++requestGeneration.current;
+            setRunningDraft(true);
+            setRunningActionLabel(actionLabel);
+            try {
+                const currentProjectId = latestProject.id;
+                const draft = await generateScriptDraft({
+                    projectId: currentProjectId,
+                    expectedRevision: latestProject.revision,
+                    actionType,
+                    targetType: target.targetType,
+                    targetId: target.targetId,
+                    instruction: cleanInstruction,
+                    model,
+                    episodeDurationSeconds: effectiveDuration,
+                });
+                if (generation !== requestGeneration.current || useScriptStore.getState().project?.id !== currentProjectId) return;
+                replaceDrafts([draft, ...useScriptStore.getState().drafts]);
+                const msgId = `local_act_a_${draft.id}`;
+                setAnimatingMsgId(msgId);
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        id: msgId,
+                        role: "assistant",
+                        text: `已为「${target.label || contextLabel}」生成「${actionLabel}」审核草稿，请点击下方卡片预览差异并确认应用。`,
+                        meta: JSON.stringify({
+                            draftId: draft.id,
+                            actionType,
+                            actionLabel,
+                            targetLabel: target.label || contextLabel,
+                        }),
+                        createdAt: new Date().toISOString(),
+                    },
+                ]);
+                message.success(translate("script.aiDraftGeneratedReviewItBeforeApplying"));
+            } catch (error) {
+                if (generation === requestGeneration.current && useScriptStore.getState().project?.id === latestProject.id) {
+                    const errMsg = error instanceof Error ? error.message : translate("script.aiActionFailed");
+                    message.error(errMsg);
+                    const errId = `local_act_err_${Date.now()}`;
+                    setAnimatingMsgId(errId);
+                    setMessages((prev) => [
+                        ...prev,
+                        {
+                            id: errId,
+                            role: "assistant",
+                            text: `「${actionLabel}」草稿生成失败：${errMsg}`,
+                            createdAt: new Date().toISOString(),
+                        },
+                    ]);
+                }
+            } finally {
+                if (generation === requestGeneration.current) {
+                    setRunningDraft(false);
+                    setRunningActionLabel("");
+                }
+            }
+        };
+
         modal.confirm({
             title: `${translate("script.generateAnAiDraft")} · ${actionLabel}`,
             content: <div className="space-y-2 text-sm">
@@ -534,79 +884,9 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
             </div>,
             okText: translate("script.confirm"),
             cancelText: translate("script.cancel"),
-            onOk: async () => {
-                if (!["saved", "idle"].includes(useScriptStore.getState().saveStatus)) {
-                    message.warning(translate("script.theScriptHasNewUnsavedChangesSaveBeforeConfirmingAgain"));
-                    return;
-                }
-                const latestProject = useScriptStore.getState().project;
-                if (!latestProject || latestProject.id !== project.id) {
-                    message.warning(translate("script.theScriptProjectHasChangedStartTheAiActionAgain"));
-                    return;
-                }
-                if (clearComposerAfterStart) {
-                    setInputText("");
-                }
-                const cleanInstruction = actionInstruction.trim();
-                setMessages((prev) => [
-                    ...prev,
-                    {
-                        id: `local_act_u_${Date.now()}`,
-                        role: "user",
-                        text: cleanInstruction ? `【${actionLabel}】${cleanInstruction}` : `【${actionLabel}】按当前上下文生成审核草稿`,
-                        createdAt: new Date().toISOString(),
-                    },
-                ]);
-                const generation = ++requestGeneration.current;
-                setRunningDraft(true);
-                try {
-                    const currentProjectId = latestProject.id;
-                    const draft = await generateScriptDraft({
-                        projectId: currentProjectId,
-                        expectedRevision: latestProject.revision,
-                        actionType,
-                        targetType: target.targetType,
-                        targetId: target.targetId,
-                        instruction: cleanInstruction,
-                        model,
-                        episodeDurationSeconds: effectiveDuration,
-                    });
-                    if (generation !== requestGeneration.current || useScriptStore.getState().project?.id !== currentProjectId) return;
-                    replaceDrafts([draft, ...useScriptStore.getState().drafts]);
-                    setMessages((prev) => [
-                        ...prev,
-                        {
-                            id: `local_act_a_${draft.id}`,
-                            role: "assistant",
-                            text: `已为「${target.label || contextLabel}」生成「${actionLabel}」审核草稿，请预览差异确认后再应用到正式剧本。`,
-                            meta: JSON.stringify({
-                                draftId: draft.id,
-                                actionType,
-                                actionLabel,
-                                targetLabel: target.label || contextLabel,
-                            }),
-                            createdAt: new Date().toISOString(),
-                        },
-                    ]);
-                    setPreview(draft);
-                    message.success(translate("script.aiDraftGeneratedReviewItBeforeApplying"));
-                } catch (error) {
-                    if (generation === requestGeneration.current && useScriptStore.getState().project?.id === latestProject.id) {
-                        const errMsg = error instanceof Error ? error.message : translate("script.aiActionFailed");
-                        message.error(errMsg);
-                        setMessages((prev) => [
-                            ...prev,
-                            {
-                                id: `local_act_err_${Date.now()}`,
-                                role: "assistant",
-                                text: `「${actionLabel}」草稿生成失败：${errMsg}`,
-                                createdAt: new Date().toISOString(),
-                            },
-                        ]);
-                    }
-                } finally {
-                    if (generation === requestGeneration.current) setRunningDraft(false);
-                }
+            onOk: () => {
+                // 不返回 Promise：点击确认后立即关闭弹窗，执行进度与结果卡片直接在对话流内呈现。
+                void runGenerateDraft();
             },
         });
     };
@@ -629,10 +909,179 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
         try {
             await resetScriptAgentSession(project.id);
             setMessages([]);
+            setAnimatingMsgId(null);
             message.success(`已开启新的${assistantName}对话`);
         } catch (error) {
             message.error(error instanceof Error ? error.message : "重置会话失败");
         }
+    };
+
+    /** 执行待确认写入提案并立即保存：若已有内容冲突，先弹出二次覆盖确认框。 */
+    const commitProposedWrite = async (write: ScriptAgentProposedWrite) => {
+        const latestProject = useScriptStore.getState().project;
+        if (!latestProject || latestProject.id !== project.id) {
+            message.warning(translate("script.theScriptProjectHasChangedSelectTheAiDraftAgain"));
+            return;
+        }
+        setApplyingWriteId(write.id);
+        try {
+            const payload = write.payload || {};
+            if (write.targetSection === "overview" && payload.overview && typeof payload.overview === "object") {
+                const patch = payload.overview as Partial<ScriptOverview>;
+                updateOverview({
+                    ...latestProject.overview,
+                    ...(patch.title ? { title: patch.title } : {}),
+                    ...(patch.genre !== undefined ? { genre: patch.genre } : {}),
+                    ...(patch.logline !== undefined ? { logline: patch.logline } : {}),
+                    ...(patch.synopsis !== undefined ? { synopsis: patch.synopsis } : {}),
+                    ...(typeof patch.targetEpisodeCount === "number" ? { targetEpisodeCount: patch.targetEpisodeCount } : {}),
+                    ...(typeof patch.targetDurationSeconds === "number" ? { targetDurationSeconds: patch.targetDurationSeconds } : {}),
+                    ...(patch.narrativeStyle !== undefined ? { narrativeStyle: patch.narrativeStyle } : {}),
+                    ...(patch.theme !== undefined ? { theme: patch.theme } : {}),
+                    ...(patch.mainPlot !== undefined ? { mainPlot: patch.mainPlot } : {}),
+                    ...(patch.mainConflict !== undefined ? { mainConflict: patch.mainConflict } : {}),
+                    ...(patch.endingDirection !== undefined ? { endingDirection: patch.endingDirection } : {}),
+                });
+            } else if (write.targetSection === "outline" && Array.isArray(payload.outlineSections)) {
+                const nextSections: OutlineSection[] = (payload.outlineSections as Array<Record<string, unknown>>).map((sec, index) => ({
+                    id: latestProject.outlineSections[index]?.id || nanoid(),
+                    sectionType: (sec.sectionType as OutlineSection["sectionType"]) || "act",
+                    title: String(sec.title || `第${index + 1}幕`),
+                    content: String(sec.content || ""),
+                    sortOrder: index,
+                }));
+                updateOutline(nextSections, latestProject.storyEvents);
+            } else if (write.targetSection === "characters" && Array.isArray(payload.characters)) {
+                const merged: ScriptCharacter[] = [...latestProject.characters];
+                for (const raw of payload.characters as Array<Record<string, unknown>>) {
+                    const name = String(raw.name || "").trim();
+                    if (!name) continue;
+                    const existingIndex = merged.findIndex((c) => c.name.trim() === name);
+                    const base: ScriptCharacter = existingIndex >= 0 ? merged[existingIndex] : {
+                        id: nanoid(), name, identity: "", age: "", occupation: "", roleType: "", personality: "",
+                        valuesDescription: "", goal: "", desire: "", fear: "", motivation: "",
+                        appearanceDescription: "", habits: "", speechStyle: "", backgroundStory: "",
+                        characterArc: "", sortOrder: merged.length,
+                    };
+                    const updated: ScriptCharacter = {
+                        ...base,
+                        name,
+                        roleType: String(raw.roleType || base.roleType),
+                        identity: String(raw.identity || base.identity),
+                        age: String(raw.age || base.age),
+                        occupation: String(raw.occupation || base.occupation),
+                        personality: String(raw.personality || base.personality),
+                        goal: String(raw.goal || base.goal),
+                        desire: String(raw.desire || base.desire),
+                        fear: String(raw.fear || base.fear),
+                        motivation: String(raw.motivation || base.motivation),
+                        appearanceDescription: String(raw.appearanceDescription || base.appearanceDescription),
+                        speechStyle: String(raw.speechStyle || base.speechStyle),
+                        backgroundStory: String(raw.backgroundStory || base.backgroundStory),
+                        characterArc: String(raw.characterArc || base.characterArc),
+                    };
+                    if (existingIndex >= 0) merged[existingIndex] = updated;
+                    else merged.push(updated);
+                }
+                updateCharacters(merged.map((c, sortOrder) => ({ ...c, sortOrder })), latestProject.characterRelations);
+            } else if (write.targetSection === "world") {
+                const settingPatch = (payload.worldSetting || {}) as Partial<WorldSetting>;
+                const nextSetting: WorldSetting = {
+                    ...latestProject.worldSetting,
+                    ...(settingPatch.era ? { era: settingPatch.era } : {}),
+                    ...(settingPatch.region ? { region: settingPatch.region } : {}),
+                    ...(settingPatch.socialBackground ? { socialBackground: settingPatch.socialBackground } : {}),
+                    ...(settingPatch.overallTone ? { overallTone: settingPatch.overallTone } : {}),
+                };
+                const mergedItems: WorldItem[] = [...latestProject.worldItems];
+                if (Array.isArray(payload.worldItems)) {
+                    for (const raw of payload.worldItems as Array<Record<string, unknown>>) {
+                        const name = String(raw.name || "").trim();
+                        if (!name) continue;
+                        const idx = mergedItems.findIndex((w) => w.name.trim() === name);
+                        const nextItem: WorldItem = {
+                            id: idx >= 0 ? mergedItems[idx].id : nanoid(),
+                            itemType: (raw.itemType as WorldItem["itemType"]) || (idx >= 0 ? mergedItems[idx].itemType : "rule"),
+                            name,
+                            description: String(raw.description || (idx >= 0 ? mergedItems[idx].description : "")),
+                            sortOrder: idx >= 0 ? idx : mergedItems.length,
+                        };
+                        if (idx >= 0) mergedItems[idx] = nextItem;
+                        else mergedItems.push(nextItem);
+                    }
+                }
+                const mergedLocations: ScriptLocation[] = [...latestProject.locations];
+                if (Array.isArray(payload.locations)) {
+                    for (const raw of payload.locations as Array<Record<string, unknown>>) {
+                        const name = String(raw.name || "").trim();
+                        if (!name) continue;
+                        const idx = mergedLocations.findIndex((l) => l.name.trim() === name);
+                        const base: ScriptLocation = idx >= 0 ? mergedLocations[idx] : {
+                            id: nanoid(), name, spacePurpose: "", narrativeRole: "", defaultTime: "",
+                            weather: "", atmosphere: "", keyObjects: "", mainEvents: "", sortOrder: mergedLocations.length,
+                        };
+                        const nextLoc: ScriptLocation = {
+                            ...base,
+                            name,
+                            spacePurpose: String(raw.spacePurpose || base.spacePurpose),
+                            narrativeRole: String(raw.narrativeRole || base.narrativeRole),
+                            defaultTime: String(raw.defaultTime || base.defaultTime),
+                            weather: String(raw.weather || base.weather),
+                            atmosphere: String(raw.atmosphere || base.atmosphere),
+                            keyObjects: String(raw.keyObjects || base.keyObjects),
+                        };
+                        if (idx >= 0) mergedLocations[idx] = nextLoc;
+                        else mergedLocations.push(nextLoc);
+                    }
+                }
+                updateWorld(
+                    nextSetting,
+                    mergedItems.map((w, sortOrder) => ({ ...w, sortOrder })),
+                    mergedLocations.map((l, sortOrder) => ({ ...l, sortOrder })),
+                );
+            }
+            const saved = await saveAll();
+            if (!saved) {
+                message.error("写入后自动保存失败，请检查顶部保存状态或手动点击保存");
+                return;
+            }
+            setAppliedWriteIds((prev) => {
+                const next = prev.includes(write.id) ? prev : [...prev, write.id];
+                persistAppliedWriteIds(project.id, next);
+                return next;
+            });
+            message.success(`已确认${write.title}并保存`);
+        } finally {
+            setApplyingWriteId("");
+        }
+    };
+
+    const handleConfirmProposedWrite = (write: ScriptAgentProposedWrite) => {
+        const latestProject = useScriptStore.getState().project;
+        if (!latestProject) return;
+        const conflicts = detectProposedWriteConflicts(write, latestProject);
+        if (conflicts.length > 0) {
+            modal.confirm({
+                title: `确认覆盖「${SECTION_LABELS[write.targetSection] || write.targetSection}」已有内容？`,
+                content: (
+                    <div className="space-y-2 text-sm">
+                        <p>以下内容当前已存在，确认后将被替换为 {assistantName} 提供的新内容：</p>
+                        <p className="rounded-md bg-[var(--studio-surface-soft)] px-2.5 py-2 text-xs text-[var(--studio-ink)]">
+                            {conflicts.join("、")}
+                        </p>
+                    </div>
+                ),
+                okText: "确认覆盖并保存",
+                okButtonProps: { danger: true },
+                cancelText: translate("script.cancel"),
+                onOk: () => {
+                    // 立即关闭确认弹窗，在对话卡片内展示保存状态。
+                    void commitProposedWrite(write);
+                },
+            });
+            return;
+        }
+        void commitProposedWrite(write);
     };
 
     const applyDraft = async () => {
@@ -691,6 +1140,25 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
     };
 
     const showDurationBudget = selectedAction === "episodePlan" || selectedAction === "episodeDraft";
+    const isBusy = sendingChat || runningDraft;
+    const canSubmitComposer = selectedAction
+        ? !selectedActionBlockedReason && pricingCurrent && !isBusy
+        : Boolean(inputText.trim()) && !isBusy;
+
+    // 估算当前会话与剧本上下文的 Token 占用百分比（与画布 Nana助手口径一致：按 32k 窗口折算）。
+    const contextUsagePercent = (() => {
+        const recentHistoryChars = messages.slice(-12).reduce((sum, item) => sum + Math.min(item.text.length, 800), 0);
+        const overviewChars =
+            (project.overview.logline?.length || 0)
+            + Math.min(project.overview.synopsis?.length || 0, 1200)
+            + Math.min(project.overview.mainPlot?.length || 0, 1000)
+            + Math.min(project.overview.mainConflict?.length || 0, 600);
+        const outlineChars = (project.outlineSections || []).reduce((sum, sec) => sum + Math.min(sec.content?.length || 0, 450), 0);
+        const structureChars = Math.min(project.characters.length, 20) * 120 + project.episodes.length * 140;
+        const totalChars = recentHistoryChars + overviewChars + outlineChars + structureChars;
+        if (totalChars === 0) return 0;
+        return Math.min(99, Math.max(1, Math.round((totalChars / 2 / 32000) * 100)));
+    })();
 
     const renderActionMenuContent = () => (
         <div className="w-72 space-y-3">
@@ -762,63 +1230,44 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
 
     return (
         <aside className={`${cardTarget ? "h-[70vh]" : "h-full"} flex min-h-0 flex-col overflow-hidden bg-[var(--studio-panel-solid)]`}>
-            {/* 顶部精简栏：标题、待审草稿抽屉、模型切换、新建对话 */}
-            <div className="shrink-0 border-b border-[var(--studio-line)] px-3.5 py-2.5">
-                <div className="flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                        <Sparkles className="size-4 shrink-0 text-[var(--studio-primary)]" />
-                        <h2 className="truncate text-sm font-semibold text-[var(--studio-ink)]">{translate("script.aiScriptAssistant")}</h2>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                        <button
-                            type="button"
-                            onClick={() => setShowDraftsTray((prev) => !prev)}
-                            className={`inline-flex cursor-pointer items-center gap-1 rounded-md border px-2 py-0.5 text-xs! transition-colors ${
-                                visibleDrafts.length > 0
-                                    ? "border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] text-[var(--studio-primary)]!"
-                                    : "border-[var(--studio-line)] text-[var(--studio-muted)]! hover:bg-[var(--studio-surface-hover)]"
-                            }`}
-                            title="查看待确认草稿"
-                        >
-                            <FileCheck2 className="size-3.5" />
-                            <span>待审 {visibleDrafts.length}</span>
-                            {showDraftsTray ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setShowModelPicker((prev) => !prev)}
-                            className="cursor-pointer rounded px-1.5 py-0.5 text-xs! text-[var(--studio-muted)]! hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]!"
-                            title={model ? `当前模型：${modelOptionLabel(config, model)}` : "切换对话与生成模型"}
-                        >
-                            模型
-                        </button>
+            {/* 顶部标题栏（与画布 Nana助手标题栏样式对齐） */}
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--studio-line)] px-3.5 py-2.5 text-sm font-medium">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[color-mix(in_srgb,var(--studio-ink)_8%,transparent)] text-[var(--studio-muted)]">
+                        <BookOpenText className="size-3.5" />
+                    </span>
+                    <span className="truncate text-[13px] font-medium text-[var(--studio-ink)]">{assistantName}</span>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-1">
+                    <NanaHeaderStatus active={isBusy} />
+                    <button
+                        type="button"
+                        onClick={() => setShowDraftsTray((prev) => !prev)}
+                        className={`inline-flex h-7 cursor-pointer items-center gap-1 rounded-lg border px-2 text-xs! transition-colors ${
+                            visibleDrafts.length > 0
+                                ? "border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] text-[var(--studio-primary)]!"
+                                : "border-[var(--studio-line)] text-[var(--studio-muted)]! hover:bg-[var(--studio-surface-hover)]"
+                        }`}
+                        title="查看待确认草稿"
+                    >
+                        <FileCheck2 className="size-3.5" />
+                        <span>待审 {visibleDrafts.length}</span>
+                        {showDraftsTray ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                    </button>
+                    <Tooltip title={translate("canvas.newConversation")}>
                         <button
                             type="button"
                             onClick={() => void handleResetSession()}
-                            disabled={sendingChat || runningDraft}
-                            className="inline-flex size-6 cursor-pointer items-center justify-center rounded text-[var(--studio-muted)]! hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]! disabled:opacity-40"
-                            title="新建对话"
-                            aria-label="新建对话"
+                            disabled={isBusy}
+                            className="grid size-7 cursor-pointer place-items-center rounded-lg text-[var(--studio-muted)]! opacity-70 transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]! hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
+                            aria-label={translate("canvas.newConversation")}
                         >
-                            <Plus className="size-3.5" />
+                            <MessageSquarePlus className="size-4" />
                         </button>
-                    </div>
-                </div>
-                <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-[var(--studio-muted)]">
-                    <span className="truncate">
-                        上下文：<strong className="font-medium text-[var(--studio-ink)]">{contextLabel}</strong>
-                    </span>
-                    <span className="shrink-0 text-[var(--studio-faint)]">草稿确认后落库</span>
+                    </Tooltip>
                 </div>
             </div>
-
-            {/* 可展开的模型选择抽屉 */}
-            {showModelPicker ? (
-                <div className="shrink-0 border-b border-[var(--studio-line)] bg-[var(--studio-surface-soft)] px-3.5 py-2.5">
-                    <label className="mb-1 block text-xs font-medium text-[var(--studio-muted)]">{translate("script.model_98fd0c")}</label>
-                    <ModelPicker config={config} value={model} onChange={setModel} capability="text" fullWidth />
-                </div>
-            ) : null}
 
             {/* 可展开的待确认草稿托盘（同时承接小说改编产出的待确认草稿） */}
             {showDraftsTray ? (
@@ -837,7 +1286,7 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
                         <p className="text-xs text-[var(--studio-faint)]">{translate("script.noPendingDrafts")}</p>
                     ) : (
                         visibleDrafts.map((draft) => (
-                            <div key={draft.id} className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-2.5">
+                            <div key={draft.id} className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-2.5">
                                 <div className="flex items-center justify-between gap-2">
                                     <button
                                         type="button"
@@ -871,114 +1320,132 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
                 </div>
             ) : null}
 
-            {/* 中间可滚动对话消息流 */}
-            <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3.5">
-                {loadingHistory ? (
-                    <div className="flex items-center justify-center py-10">
-                        <Spin size="small" />
-                    </div>
-                ) : messages.length === 0 ? (
-                    <div className="space-y-3">
-                        <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3.5 text-xs leading-5 text-[var(--studio-muted)]">
-                            <div className="mb-1 flex items-center gap-1.5 font-semibold text-[var(--studio-ink)]">
-                                <Sparkles className="size-3.5 text-[var(--studio-primary)]" />
-                                <span>{assistantName}已就绪</span>
+            {/* 中间可滚动对话消息流（与画布 Nana助手一致的排版、任务时间线与弹簧动效） */}
+            <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                <div className="flex flex-col gap-3">
+                    {loadingHistory ? (
+                        <div className="flex items-center justify-center py-12">
+                            <Spin size="small" />
+                        </div>
+                    ) : messages.length === 0 && !isBusy ? (
+                        <div className="space-y-4 py-6">
+                            <div className="text-center">
+                                <div className="text-sm font-medium text-[var(--studio-ink)]">{assistantName}已就绪</div>
+                                <p className="mt-1.5 text-xs leading-5 text-[var(--studio-muted)]">
+                                    可以直接与我讨论剧情走向、人物动机、场次冲突与对白节奏；也可在下方选择快捷动作或「全部动作」生成审核草稿，所有正式内容都由你确认后写入。
+                                </p>
                             </div>
-                            <p>
-                                你可以直接与我讨论剧情走向、人物动机、场次冲突与对白节奏；也可以点击下方快捷动作或「全部动作」直接生成审核草稿，所有正式内容都由你预览确认后才会写入。
-                            </p>
-                        </div>
-                        <div className="space-y-1.5">
-                            <div className="text-[11px] font-medium text-[var(--studio-faint)]">试试这样聊</div>
-                            {starterPrompts.map((prompt) => (
-                                <button
-                                    key={prompt}
-                                    type="button"
-                                    disabled={sendingChat || runningDraft}
-                                    onClick={() => void handleSendChat(prompt)}
-                                    className="block w-full cursor-pointer rounded-lg border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] px-3 py-2 text-left text-xs! leading-5 text-[var(--studio-text)]! transition-colors hover:border-[var(--studio-primary-line)] hover:bg-[var(--studio-surface-soft)] disabled:opacity-50"
-                                >
-                                    {prompt}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                ) : (
-                    messages.map((item) => {
-                        if (item.role === "user") {
-                            return (
-                                <div key={item.id} className="flex justify-end">
-                                    <div className="max-w-[88%] whitespace-pre-wrap break-words rounded-lg border border-[var(--studio-line-strong)] bg-[var(--studio-surface-raised)] px-3 py-2 text-xs leading-5 text-[var(--studio-ink)]">
-                                        {item.text}
-                                    </div>
-                                </div>
-                            );
-                        }
-                        const meta = parseMessageMeta(item.meta);
-                        const recommendations = meta.recommendations || [];
-                        const linkedDraft = meta.draftId ? drafts.find((d) => d.id === meta.draftId && d.status === "pending") : undefined;
-
-                        return (
-                            <div key={item.id} className="space-y-1.5">
-                                <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--studio-ink)]">
-                                    <span
-                                        className="flex size-5 items-center justify-center rounded text-[11px] font-semibold"
-                                        style={{ background: "var(--studio-action)", color: "var(--studio-action-foreground)" }}
+                            <div className="space-y-1.5">
+                                {starterPrompts.map((prompt) => (
+                                    <button
+                                        key={prompt}
+                                        type="button"
+                                        disabled={isBusy}
+                                        onClick={() => void handleSendChat(prompt)}
+                                        className="block w-full cursor-pointer rounded-xl border border-[var(--studio-line)] bg-[color-mix(in_srgb,var(--studio-ink)_3%,var(--studio-panel-solid))] px-3 py-2 text-left text-xs! leading-5 text-[var(--studio-text)]! transition-colors hover:border-[var(--studio-primary-line)] hover:text-[var(--studio-ink)]! disabled:opacity-50"
                                     >
-                                        AI
-                                    </span>
-                                    <span>{assistantName}</span>
-                                </div>
-                                <div className="space-y-2.5 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3 text-xs leading-5 text-[var(--studio-text)]">
-                                    <div className="whitespace-pre-wrap break-words">{item.text}</div>
+                                        {prompt}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    ) : (
+                        messages.map((item) => {
+                            if (item.role === "user") {
+                                return <NanaChatBubble key={item.id} role="user" text={item.text} />;
+                            }
+                            const meta = parseMessageMeta(item.meta);
+                            const proposedWrites = meta.proposedWrites || [];
+                            const proposedSections = new Set(proposedWrites.map((w) => w.targetSection));
+                            const recommendations = (meta.recommendations || []).filter(
+                                (rec) => !proposedSections.has(recommendationSection(rec.actionType)),
+                            );
+                            const linkedDraft = meta.draftId ? drafts.find((d) => d.id === meta.draftId && d.status === "pending") : undefined;
+                            const draftStale = linkedDraft ? isScriptAiDraftStale(linkedDraft, project.revision) : false;
 
-                                    {/* 推荐的可执行草稿动作卡片 */}
-                                    {recommendations.length > 0 ? (
-                                        <div className="space-y-2 border-t border-[var(--studio-line)] pt-2.5">
-                                            {recommendations.map((rec, index) => {
-                                                const cost = getActionCreditCost(rec.actionType);
-                                                const recBlocked = getBlockedReason(rec.actionType);
-                                                return (
-                                                    <div
-                                                        key={`${rec.actionType}-${index}`}
-                                                        className="space-y-2 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-2.5"
+                            return (
+                                <div key={item.id} className="space-y-2">
+                                    {meta.draftId ? (
+                                        <NanaThinkingRow
+                                            title="执行步骤"
+                                            preview={`${meta.actionLabel || "生成审核草稿"} · ${meta.targetLabel || contextLabel}`}
+                                            steps={[{
+                                                id: meta.draftId,
+                                                label: `生成「${meta.actionLabel || "AI 草稿"}」（${meta.targetLabel || contextLabel}）`,
+                                                status: "done",
+                                            }]}
+                                        />
+                                    ) : null}
+
+                                    <NanaChatBubble
+                                        role="assistant"
+                                        text={item.text}
+                                        animated={item.id === animatingMsgId}
+                                        onHeightChange={scrollToBottom}
+                                    />
+
+                                    {/* 待用户确认的结构化写入卡片（已有内容时提示确认覆盖；已写入内容刷新后保持已写入态） */}
+                                    {proposedWrites.map((write) => {
+                                        const applied = appliedWriteIds.includes(write.id) || isProposedWriteAlreadyApplied(write, project);
+                                        const liveConflicts = applied ? [] : detectProposedWriteConflicts(write, project);
+                                        const previewLines = formatProposedWritePreviewLines(write);
+                                        return (
+                                            <NanaApprovalCard
+                                                key={write.id}
+                                                variant={applied ? "done" : "pending"}
+                                                title={write.title}
+                                                tag={SECTION_LABELS[write.targetSection] || write.targetSection}
+                                                badge={applied ? "已写入" : liveConflicts.length > 0 ? "将覆盖已有内容" : "待确认写入"}
+                                                description={
+                                                    previewLines.length
+                                                        ? `${write.summary}\n${previewLines.slice(0, 6).map((line) => `• ${line}`).join("\n")}`
+                                                        : write.summary
+                                                }
+                                                warning={
+                                                    !applied && liveConflicts.length > 0
+                                                        ? `检测到已有内容，确认时将二次提醒覆盖：${liveConflicts.slice(0, 5).join("、")}${liveConflicts.length > 5 ? " 等" : ""}`
+                                                        : undefined
+                                                }
+                                                actions={
+                                                    <Button
+                                                        size="small"
+                                                        type={applied ? "default" : "primary"}
+                                                        danger={!applied && liveConflicts.length > 0}
+                                                        disabled={applied || Boolean(applyingWriteId)}
+                                                        loading={applyingWriteId === write.id}
+                                                        icon={applied ? <Check className="size-3.5" /> : undefined}
+                                                        onClick={() => handleConfirmProposedWrite(write)}
                                                     >
-                                                        <div className="flex items-start justify-between gap-2">
-                                                            <div className="min-w-0">
-                                                                <div className="flex flex-wrap items-center gap-1.5">
-                                                                    <Wand2 className="size-3.5 shrink-0 text-[var(--studio-primary)]" />
-                                                                    <span className="font-medium text-[var(--studio-ink)]">{rec.label}</span>
-                                                                    {rec.targetLabel ? (
-                                                                        <span className="rounded bg-[var(--studio-surface-soft)] px-1.5 py-0.5 text-[10px] text-[var(--studio-muted)]">
-                                                                            {rec.targetLabel}
-                                                                        </span>
-                                                                    ) : null}
-                                                                </div>
-                                                                {rec.description ? (
-                                                                    <p className="mt-1 text-[11px] leading-4 text-[var(--studio-muted)]">{rec.description}</p>
-                                                                ) : null}
-                                                            </div>
-                                                            <span className="shrink-0 text-[11px] font-medium text-[var(--studio-muted)]">
-                                                                {cost === undefined ? "未定价" : `${cost} 积分`}
-                                                            </span>
-                                                        </div>
-                                                        {recBlocked ? (
-                                                            <p className="text-[11px] text-amber-600">{recBlocked}</p>
-                                                        ) : null}
-                                                        <div className="flex items-center justify-end gap-1.5">
+                                                        {applied ? "已写入并保存" : liveConflicts.length > 0 ? "确认覆盖写入" : "确认写入"}
+                                                    </Button>
+                                                }
+                                            />
+                                        );
+                                    })}
+
+                                    {/* 推荐动作卡片（自动感知是否已有待审草稿或对应板块已生成完成） */}
+                                    {recommendations.map((rec, index) => {
+                                        const cost = getActionCreditCost(rec.actionType);
+                                        const recBlocked = getBlockedReason(rec.actionType);
+                                        const pendingMatch = drafts.find(
+                                            (d) => d.status === "pending" && d.actionType === rec.actionType && (!rec.targetId || d.targetId === rec.targetId),
+                                        );
+                                        const completed = !pendingMatch && isRecommendationAlreadyCompleted(rec, project, drafts);
+                                        const costLabel = cost === undefined ? "未定价" : `${cost} 积分`;
+                                        return (
+                                            <NanaApprovalCard
+                                                key={`${rec.actionType}-${index}`}
+                                                variant={completed ? "done" : "pending"}
+                                                title={rec.label}
+                                                tag={rec.targetLabel}
+                                                badge={pendingMatch ? "已有待审草稿" : completed ? "已生成" : costLabel}
+                                                description={rec.description}
+                                                warning={completed ? undefined : recBlocked || undefined}
+                                                actions={
+                                                    pendingMatch ? (
+                                                        <>
                                                             <Button
                                                                 size="small"
-                                                                onClick={() => {
-                                                                    setSelectedAction(rec.actionType);
-                                                                    if (rec.instruction) setInputText(rec.instruction);
-                                                                    if (rec.episodeDurationSeconds) setEpisodeDurationSeconds(rec.episodeDurationSeconds);
-                                                                }}
-                                                            >
-                                                                填到输入框
-                                                            </Button>
-                                                            <Button
-                                                                size="small"
-                                                                type="primary"
                                                                 disabled={Boolean(recBlocked) || !pricingCurrent || runningDraft}
                                                                 onClick={() => executeAction({
                                                                     actionType: rec.actionType,
@@ -991,209 +1458,226 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
                                                                     } : undefined,
                                                                 })}
                                                             >
-                                                                生成草稿
+                                                                重新生成
                                                             </Button>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    ) : null}
+                                                            <Button size="small" type="primary" onClick={() => setPreview(pendingMatch)}>
+                                                                {translate("script.previewChanges")}
+                                                            </Button>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Button
+                                                                size="small"
+                                                                onClick={() => {
+                                                                    setSelectedAction(rec.actionType);
+                                                                    if (rec.instruction) setInputText(rec.instruction);
+                                                                    if (rec.episodeDurationSeconds) setEpisodeDurationSeconds(rec.episodeDurationSeconds);
+                                                                }}
+                                                            >
+                                                                填到输入框
+                                                            </Button>
+                                                            <Button
+                                                                size="small"
+                                                                type={completed ? "default" : "primary"}
+                                                                disabled={Boolean(recBlocked) || !pricingCurrent || runningDraft}
+                                                                onClick={() => executeAction({
+                                                                    actionType: rec.actionType,
+                                                                    actionInstruction: rec.instruction || "",
+                                                                    durationSeconds: rec.episodeDurationSeconds ?? undefined,
+                                                                    overrideTarget: rec.targetId ? {
+                                                                        targetType: rec.targetType,
+                                                                        targetId: rec.targetId,
+                                                                        targetLabel: rec.targetLabel,
+                                                                    } : undefined,
+                                                                })}
+                                                            >
+                                                                {completed ? `重新生成${cost !== undefined ? ` (${cost}积分)` : ""}` : "生成草稿"}
+                                                            </Button>
+                                                        </>
+                                                    )
+                                                }
+                                            />
+                                        );
+                                    })}
 
-                                    {/* 对话流内联的已生成草稿审核卡片 */}
+                                    {/* 对话流内联的已生成草稿任务时间线卡片 */}
                                     {meta.draftId ? (
-                                        <div className="border-t border-[var(--studio-line)] pt-2">
-                                            {linkedDraft ? (
-                                                <div className="rounded-md border border-[var(--studio-primary-line)] bg-[var(--studio-panel-solid)] p-2.5">
-                                                    <div className="flex items-center justify-between gap-2">
-                                                        <span className="truncate font-medium text-[var(--studio-ink)]">
-                                                            {draftTitle(linkedDraft, project.episodes, translate)}
-                                                        </span>
-                                                        {isScriptAiDraftStale(linkedDraft, project.revision)
-                                                            ? <Tag color="orange" className="mr-0">{translate("script.outdated")}</Tag>
-                                                            : <Tag color="blue" className="mr-0">{translate("script.pendingApproval")}</Tag>}
-                                                    </div>
-                                                    <div className="mt-2 flex items-center gap-1.5">
-                                                        <Button size="small" type="primary" onClick={() => setPreview(linkedDraft)}>
-                                                            {translate("script.previewChanges")}
-                                                        </Button>
-                                                        <Button
-                                                            size="small"
-                                                            danger
-                                                            icon={<Trash2 className="size-3.5" />}
-                                                            loading={discardingId === linkedDraft.id}
-                                                            disabled={Boolean(discardingId) && discardingId !== linkedDraft.id}
-                                                            onClick={() => void discard(linkedDraft)}
-                                                        >
-                                                            {translate("script.discard")}
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <span className="text-[11px] text-[var(--studio-faint)]">该草稿已应用或已丢弃</span>
-                                            )}
-                                        </div>
+                                        <NanaTaskTimeline
+                                            title={linkedDraft ? draftTitle(linkedDraft, project.episodes, translate) : `${meta.actionLabel || "审核草稿"} · 已处理`}
+                                            status={linkedDraft ? (draftStale ? "warning" : "done") : "done"}
+                                            summary={linkedDraft ? (draftStale ? translate("script.outdated") : translate("script.pendingApproval")) : "已归档"}
+                                            defaultExpanded={Boolean(linkedDraft)}
+                                            items={[{
+                                                id: meta.draftId,
+                                                name: meta.targetLabel || contextLabel,
+                                                meta: linkedDraft ? "等待预览确认后写入正式剧本" : "该草稿已应用或已丢弃",
+                                                status: linkedDraft ? (draftStale ? "warning" : "done") : "done",
+                                                statusText: linkedDraft ? (draftStale ? "已过期" : "待确认") : "已完成",
+                                            }]}
+                                            footer={linkedDraft ? (
+                                                <>
+                                                    <Button
+                                                        size="small"
+                                                        danger
+                                                        icon={<Trash2 className="size-3.5" />}
+                                                        loading={discardingId === linkedDraft.id}
+                                                        disabled={Boolean(discardingId) && discardingId !== linkedDraft.id}
+                                                        onClick={() => void discard(linkedDraft)}
+                                                    >
+                                                        {translate("script.discard")}
+                                                    </Button>
+                                                    <Button size="small" type="primary" onClick={() => setPreview(linkedDraft)}>
+                                                        {translate("script.previewChanges")}
+                                                    </Button>
+                                                </>
+                                            ) : undefined}
+                                        />
                                     ) : null}
                                 </div>
-                            </div>
-                        );
-                    })
-                )}
+                            );
+                        })
+                    )}
 
-                {sendingChat || runningDraft ? (
-                    <div className="flex items-center gap-2 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] px-3 py-2 text-xs text-[var(--studio-muted)]">
-                        <Spin size="small" />
-                        <span>{runningDraft ? translate("script.aiIsProcessingPleaseWait") : `${assistantName}正在思考中…`}</span>
-                    </div>
-                ) : null}
+                    {isBusy ? (
+                        <NanaThinkingRow
+                            active
+                            showBubble
+                            title={runningDraft ? "正在生成草稿" : "正在思考"}
+                            preview={runningDraft ? `执行「${runningActionLabel || selectedActionLabel}」· ${contextLabel}` : `阅读「${contextLabel}」上下文…`}
+                            thinkingLabel={runningDraft ? "生成草稿中" : translate("chat.thinking")}
+                        />
+                    ) : null}
+                </div>
             </div>
 
-            {/* 底部融合输入区：高频快捷动作芯片 + 全部动作 Popover + 动作模式条 + 对话输入框 */}
-            <div className="shrink-0 space-y-2 border-t border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-3">
-                {/* 高频快捷动作与「全部动作」入口 */}
-                {options.length > 0 ? (
-                    <div className="flex flex-wrap items-center gap-1.5">
-                        {quickActionOptions.map((item) => {
-                            const active = selectedAction === item.value;
-                            return (
+            {/* 底部圆角输入卡片（与画布 AgentChatComposer 保持一致） */}
+            <NanaComposerShell
+                value={inputText}
+                disabled={isBusy}
+                sending={isBusy}
+                canSubmit={canSubmitComposer}
+                submitIcon={selectedAction ? <Sparkles className="size-3.5" /> : <ArrowUp className="size-4" />}
+                submitLabel={selectedAction ? "生成草稿" : translate("canvas.send")}
+                placeholder={
+                    selectedAction
+                        ? `补充对「${selectedActionLabel}」的风格、篇幅或保留设定要求，留空也可直接生成…（Enter 执行）`
+                        : `和${assistantName}聊聊剧情、人物、节奏或对白…（Enter 发送）`
+                }
+                onChange={setInputText}
+                onSubmit={handleComposerSubmit}
+                topBar={
+                    <>
+                        <span className="inline-flex max-w-[160px] items-center gap-1 rounded-md border border-[var(--studio-line)] bg-[color-mix(in_srgb,var(--studio-ink)_6%,transparent)] px-2 py-0.5 text-[11px] text-[var(--studio-ink)]">
+                            <BookOpenText className="size-3 shrink-0 opacity-70" />
+                            <span className="truncate">{contextLabel}</span>
+                        </span>
+                        {selectedAction ? (
+                            <span
+                                className="inline-flex max-w-[230px] items-center gap-1 rounded-md px-2 py-0.5 text-[11px]"
+                                style={{
+                                    background: "color-mix(in srgb, #f59e0b 16%, transparent)",
+                                    color: "#f59e0b",
+                                }}
+                            >
+                                <Wand2 className="size-3 shrink-0" />
+                                <span className="truncate">
+                                    {selectedActionLabel} · {selectedActionCreditCost === undefined ? "未定价" : `${selectedActionCreditCost} 积分`}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedAction("")}
+                                    className="cursor-pointer opacity-75 hover:opacity-100"
+                                    title="退出动作模式，切回自由对话"
+                                    aria-label="退出动作模式"
+                                >
+                                    <X className="size-3" />
+                                </button>
+                            </span>
+                        ) : (
+                            quickActionOptions.slice(0, 2).map((item) => (
                                 <button
                                     key={item.value}
                                     type="button"
-                                    onClick={() => setSelectedAction(active ? "" : item.value)}
-                                    className={`cursor-pointer rounded-full border px-2.5 py-0.5 text-[11px]! transition-colors ${
-                                        active
-                                            ? "border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] font-medium text-[var(--studio-primary)]!"
-                                            : "border-[var(--studio-line)] bg-[var(--studio-surface-soft)] text-[var(--studio-muted)]! hover:border-[var(--studio-line-strong)] hover:text-[var(--studio-ink)]!"
-                                    }`}
+                                    onClick={() => setSelectedAction(item.value)}
+                                    className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-[var(--studio-line)] px-2 py-0.5 text-[11px]! text-[var(--studio-muted)]! transition-colors hover:border-[var(--studio-primary-line)] hover:text-[var(--studio-ink)]!"
                                 >
-                                    {item.label}
+                                    <Wand2 className="size-3 shrink-0 opacity-70" />
+                                    <span className="truncate">{item.label}</span>
                                 </button>
-                            );
-                        })}
-                        {options.length > quickActionOptions.length ? (
-                            <Popover
-                                trigger="click"
-                                placement="topRight"
-                                open={actionsPopoverOpen}
-                                onOpenChange={setActionsPopoverOpen}
-                                content={renderActionMenuContent()}
-                            >
-                                <button
-                                    type="button"
-                                    className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] px-2.5 py-0.5 text-[11px]! text-[var(--studio-ink)]! hover:border-[var(--studio-primary-line)]"
-                                >
-                                    <SlidersHorizontal className="size-3" />
-                                    <span>全部动作 ({options.length})</span>
-                                </button>
-                            </Popover>
-                        ) : null}
-                    </div>
-                ) : null}
-
-                {/* 选中正式动作时的模式芯片、时长预算与前置提醒 */}
-                {selectedAction ? (
-                    <div className="space-y-1.5 rounded-lg border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)]/40 p-2">
-                        <div className="flex items-center justify-between gap-2 text-xs">
-                            <div className="flex min-w-0 items-center gap-1.5">
-                                <Wand2 className="size-3.5 shrink-0 text-[var(--studio-primary)]" />
-                                <span className="truncate font-medium text-[var(--studio-ink)]">{selectedActionLabel}</span>
-                                <span className="shrink-0 text-[11px] text-[var(--studio-muted)]">
-                                    · {selectedActionCreditCost === undefined ? translate("script.notConfigured") : translate("script.countCredits", { value0: selectedActionCreditCost })}
-                                </span>
-                            </div>
+                            ))
+                        )}
+                    </>
+                }
+                extraBar={
+                    selectedAction && (showDurationBudget || selectedActionBlockedReason) ? (
+                        <div className="space-y-1.5">
+                            {showDurationBudget ? (
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="text-[11px] text-[var(--studio-muted)]">单集时长</span>
+                                    <InputNumber
+                                        size="small"
+                                        className="w-24!"
+                                        min={30}
+                                        max={600}
+                                        step={15}
+                                        suffix={translate("script.secondsUnit")}
+                                        value={episodeDurationSeconds}
+                                        onChange={(value) => value && setEpisodeDurationSeconds(value)}
+                                    />
+                                    {([60, 120, 180] as const).map((preset) => (
+                                        <Button
+                                            key={preset}
+                                            size="small"
+                                            type={episodeDurationSeconds === preset ? "primary" : "default"}
+                                            onClick={() => setEpisodeDurationSeconds(preset)}
+                                        >
+                                            {preset === 60 ? translate("script.episodeDurationPreset1Min") : preset === 120 ? translate("script.episodeDurationPreset2Min") : translate("script.episodeDurationPreset3Min")}
+                                        </Button>
+                                    ))}
+                                </div>
+                            ) : null}
+                            {selectedActionBlockedReason ? (
+                                <Alert type="warning" showIcon title={selectedActionBlockedReason} className="text-xs" />
+                            ) : null}
+                        </div>
+                    ) : undefined
+                }
+                leftControls={
+                    options.length > 0 ? (
+                        <Popover
+                            trigger="click"
+                            placement="topLeft"
+                            open={actionsPopoverOpen}
+                            onOpenChange={setActionsPopoverOpen}
+                            content={renderActionMenuContent()}
+                        >
                             <button
                                 type="button"
-                                onClick={() => setSelectedAction("")}
-                                className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--studio-muted)]! hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]!"
-                                title="退出动作模式，切回自由对话"
-                                aria-label="退出动作模式"
+                                className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-full px-2 text-xs! transition-opacity hover:opacity-100 opacity-85"
+                                style={{
+                                    color: selectedAction ? "var(--studio-ink)" : "var(--studio-muted)",
+                                    background: selectedAction ? "color-mix(in srgb, var(--studio-ink) 10%, transparent)" : "transparent",
+                                }}
                             >
-                                <X className="size-3.5" />
+                                <SlidersHorizontal className="size-3.5" />
+                                <span>动作 ({options.length})</span>
                             </button>
-                        </div>
-
-                        {showDurationBudget ? (
-                            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                                <span className="text-[11px] text-[var(--studio-muted)]">单集时长</span>
-                                <InputNumber
-                                    size="small"
-                                    className="w-24!"
-                                    min={30}
-                                    max={600}
-                                    step={15}
-                                    suffix={translate("script.secondsUnit")}
-                                    value={episodeDurationSeconds}
-                                    onChange={(value) => value && setEpisodeDurationSeconds(value)}
-                                />
-                                {([60, 120, 180] as const).map((preset) => (
-                                    <Button
-                                        key={preset}
-                                        size="small"
-                                        type={episodeDurationSeconds === preset ? "primary" : "default"}
-                                        onClick={() => setEpisodeDurationSeconds(preset)}
-                                    >
-                                        {preset === 60 ? translate("script.episodeDurationPreset1Min") : preset === 120 ? translate("script.episodeDurationPreset2Min") : translate("script.episodeDurationPreset3Min")}
-                                    </Button>
-                                ))}
-                            </div>
-                        ) : null}
-
-                        {selectedActionBlockedReason ? (
-                            <Alert type="warning" showIcon title={selectedActionBlockedReason} className="text-xs" />
-                        ) : null}
-                    </div>
-                ) : null}
-
-                {/* 统一对话/指令输入框 */}
-                <div className="rounded-lg border border-[var(--studio-line-strong)] bg-[var(--studio-surface-soft)] p-2 focus-within:border-[var(--studio-primary-line)]">
-                    <textarea
-                        rows={2}
-                        value={inputText}
-                        disabled={sendingChat || runningDraft}
-                        onChange={(event) => setInputText(event.target.value)}
-                        onKeyDown={(event) => {
-                            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                                event.preventDefault();
-                                handleComposerSubmit();
-                            }
-                        }}
-                        placeholder={
-                            selectedAction
-                                ? `补充对「${selectedActionLabel}」的风格、篇幅或保留设定要求，留空也可直接生成…（Enter 执行）`
-                                : `和${assistantName}聊聊剧情、人物、节奏或对白…（Enter 发送，Shift+Enter 换行）`
-                        }
-                        className="w-full resize-none bg-transparent text-xs leading-5 text-[var(--studio-ink)] outline-none placeholder:text-[var(--studio-faint)]"
+                        </Popover>
+                    ) : undefined
+                }
+                contextUsagePercent={contextUsagePercent}
+                rightControls={
+                    <ModelPicker
+                        config={config}
+                        value={model}
+                        onChange={setModel}
+                        capability="text"
+                        showChannel={false}
+                        className="h-7 max-w-[168px]"
+                        placeholder={translate("canvas.selectTextModel")}
                     />
-                    <div className="mt-1.5 flex items-center justify-between gap-2">
-                        <span className="truncate text-[11px] text-[var(--studio-faint)]">
-                            {selectedAction ? `动作草稿模式 · 目标：${contextLabel}` : "自由对话模式 · 支持推荐动作一键执行"}
-                        </span>
-                        {selectedAction ? (
-                            <Button
-                                size="small"
-                                type="primary"
-                                loading={runningDraft}
-                                disabled={Boolean(selectedActionBlockedReason) || !pricingCurrent || sendingChat}
-                                icon={<Sparkles className="size-3.5" />}
-                                onClick={handleComposerSubmit}
-                            >
-                                生成草稿
-                            </Button>
-                        ) : (
-                            <Button
-                                size="small"
-                                type="primary"
-                                loading={sendingChat}
-                                disabled={!inputText.trim() || runningDraft}
-                                icon={<ArrowUp className="size-3.5" />}
-                                onClick={handleComposerSubmit}
-                            >
-                                发送
-                            </Button>
-                        )}
-                    </div>
-                </div>
-            </div>
+                }
+            />
 
             {/* 草稿差异预览与应用弹窗 */}
             <Modal

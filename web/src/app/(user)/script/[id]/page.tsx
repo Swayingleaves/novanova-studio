@@ -299,8 +299,8 @@ export default function ScriptWorkspacePage() {
                 <Button type="text" aria-label={translate("script.backToProjectLibrary")} icon={<ArrowLeft className="size-4" />} onClick={leaveProjectList} />
                 <div className="min-w-0 flex-1"><h1 className="truncate text-base font-semibold text-[var(--studio-ink)]">{project.overview.title}</h1><div className="mt-1 flex items-center gap-2 text-xs text-[var(--studio-faint)]"><span>{getSaveLabels(translate)[saveStatus]}</span><span>{translate("script.revisionCount_95045f", { value0: project.revision })}</span><span>{project.completionRate}%</span></div></div>
                 <Progress type="circle" size={34} percent={project.completionRate} strokeWidth={10} format={(percent) => `${percent}`} strokeColor="var(--studio-primary)" />
-                <Button className="lg:hidden" icon={<ListTree className="size-4" />} onClick={() => setDirectoryOpen(true)}>{translate("script.contents_41e524")}</Button>
-                {AI_PANEL_SECTIONS.includes(section) ? <Button className="xl:hidden" icon={<Bot className="size-4" />} onClick={() => setAssistantOpen(true)}>AI</Button> : null}
+                <Button className="lg:hidden!" icon={<ListTree className="size-4" />} onClick={() => setDirectoryOpen(true)}>{translate("script.contents_41e524")}</Button>
+                {AI_PANEL_SECTIONS.includes(section) ? <Button className="xl:hidden!" icon={<Bot className="size-4" />} onClick={() => setAssistantOpen(true)}>AI</Button> : null}
                 <Button type="primary" icon={<Save className="size-4" />} disabled={!hasUnsaved || saveStatus === "saving"} loading={saveStatus === "saving"} onClick={() => void saveAll().then((success) => { if (!success) message.error(translate("script.saveFailedCheckTheNetworkOrVersionConflict")); })}>{translate("script.save")}</Button>
                 <Button type="primary" ghost loading={entering} icon={<Sparkles className="size-4" />} onClick={() => void openProduction()}>{translate("script.openComicDrama")}</Button>
             </header>
@@ -343,7 +343,7 @@ export default function ScriptWorkspacePage() {
             </div>
 
             <Drawer title={translate("script.scriptContents")} placement="left" size={300} open={directoryOpen} onClose={() => setDirectoryOpen(false)}><Directory section={section} selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} expandedEpisodeIds={expandedEpisodeIds} onToggleEpisode={toggleEpisodeExpansion} onSelectSection={selectSection} onSelectEpisode={(episodeId) => { selectEpisode(episodeId); setSection("episodes"); setDirectoryOpen(false); }} onSelectScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSection("episodes"); setDirectoryOpen(false); }} onCreatedScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSceneEditRequestId(sceneId); setSection("episodes"); setDirectoryOpen(false); }} /></Drawer>
-            <Drawer title={translate("script.aiScriptAssistant")} placement="right" size="min(400px, 100vw)" open={assistantOpen} onClose={() => setAssistantOpen(false)} styles={{ body: { padding: 0, height: "100%" } }}><ScriptAiPanel section={section} selectedEpisodeId={selectedEpisodeId} /></Drawer>
+            <Drawer title={translate("script.aiScriptAssistant")} placement="right" size={380} rootClassName="xl:hidden!" open={assistantOpen} onClose={() => setAssistantOpen(false)} styles={{ body: { padding: 0, display: "flex", flexDirection: "column", overflow: "hidden" } }}><ScriptAiPanel section={section} selectedEpisodeId={selectedEpisodeId} /></Drawer>
         </main>
     );
 }

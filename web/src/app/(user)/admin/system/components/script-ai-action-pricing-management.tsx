@@ -60,7 +60,7 @@ export function ScriptAiActionPricingManagement() {
         <div className="space-y-4">
             <Alert type="info" showIcon
                 title="一个动作一次模型调用，这里配置的是「该动作每次调用」的积分；留空表示未定价。"
-                description="未定价的动作无法在「AI 剧本助手」中发起，不会回落到文本模型自身的积分。同一模型下所有动作共用一个修订号，保存时整组生效。" />
+                description="未定价的动作无法在「Nana助手」中发起，不会回落到文本模型自身的积分。同一模型下所有动作共用一个修订号，保存时整组生效。" />
             <Space wrap>
                 <Select className="w-72" loading={query.isLoading} value={modelConfigId || undefined} onChange={setModelConfigId}
                     options={models.map((item) => ({ value: item.modelConfigId, label: <span>{item.displayName} {item.actions.some((action) => action.credits !== null) ? <Tag color="green">已定价</Tag> : <Tag>未定价</Tag>}</span> }))} />
