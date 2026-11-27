@@ -19,6 +19,7 @@ interface SplitDialogProps {
     loading: boolean;
     onClose: () => void;
     onConfirm: (params: CanvasImageSplitParams) => void;
+    onImageError?: () => void;
 }
 
 interface SourceImageShape {
@@ -43,7 +44,7 @@ const GRID_LOWER_BOUND = 1;
 const GRID_UPPER_BOUND = 12;
 const INITIAL_GRID: CanvasImageSplitParams = { rows: 2, columns: 2 };
 
-export function CanvasNodeSplitDialog({ dataUrl, open, loading, onClose, onConfirm }: SplitDialogProps) {
+export function CanvasNodeSplitDialog({ dataUrl, open, loading, onClose, onConfirm, onImageError }: SplitDialogProps) {
     const [grid, setGrid] = useState<CanvasImageSplitParams>(INITIAL_GRID);
     const [sourceShape, setSourceShape] = useState<SourceImageShape | null>(null);
     const metrics = buildSplitMetrics(sourceShape, grid);
@@ -77,7 +78,7 @@ export function CanvasNodeSplitDialog({ dataUrl, open, loading, onClose, onConfi
             <div className="space-y-5">
                 <SplitDialogHeading sliceCount={metrics.sliceCount} />
                 <div className="grid gap-6 md:grid-cols-[minmax(260px,1fr)_280px]">
-                    <SplitPreviewCard dataUrl={dataUrl} grid={grid} sourceLabel={metrics.sourceLabel} />
+                    <SplitPreviewCard dataUrl={dataUrl} grid={grid} sourceLabel={metrics.sourceLabel} onImageError={onImageError} />
                     <SplitControlPanel
                         grid={grid}
                         sliceCount={metrics.sliceCount}
@@ -103,13 +104,13 @@ function SplitDialogHeading({ sliceCount }: { sliceCount: number }) {
     );
 }
 
-function SplitPreviewCard({ dataUrl, grid, sourceLabel }: { dataUrl: string; grid: CanvasImageSplitParams; sourceLabel: string }) {
+function SplitPreviewCard({ dataUrl, grid, sourceLabel, onImageError }: { dataUrl: string; grid: CanvasImageSplitParams; sourceLabel: string; onImageError?: () => void }) {
     const translate = useTranslation();
     return (
         <div className="rounded-xl border p-4">
             <div className="grid min-h-[300px] place-items-center rounded-lg bg-black/5">
                 <div className="relative inline-block max-w-full overflow-hidden rounded-lg bg-black shadow-xl">
-                    <img src={dataUrl} alt="" className="block max-h-[340px] max-w-full object-contain opacity-95" draggable={false} />
+                    <img src={dataUrl} alt="" className="block max-h-[340px] max-w-full object-contain opacity-95" draggable={false} onError={onImageError} />
                     <GridOverlay rows={grid.rows} columns={grid.columns} />
                 </div>
             </div>
@@ -166,8 +167,8 @@ function SplitMetricRow({ label, value, className }: { label: string; value: str
 function DimensionField({ caption, value, disabled, onValueChange }: GridDimensionInputProps & { disabled: boolean }) {
     return (
         <label className="block space-y-2">
-            <span className="font-medium opacity-75">{caption}</span>
-            <InputNumber className="w-full" min={GRID_LOWER_BOUND} max={GRID_UPPER_BOUND} precision={0} value={value} disabled={disabled} onChange={onValueChange} />
+            <span className="block font-medium opacity-75">{caption}</span>
+            <InputNumber className="w-full!" min={GRID_LOWER_BOUND} max={GRID_UPPER_BOUND} precision={0} value={value} disabled={disabled} onChange={onValueChange} />
         </label>
     );
 }

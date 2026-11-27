@@ -25,6 +25,7 @@ interface CropDialogProps {
     loading: boolean;
     onClose: () => void;
     onConfirm: (crop: CanvasImageCropRect) => void;
+    onImageError?: () => void;
 }
 
 interface SourceShape {
@@ -42,7 +43,7 @@ const EDGE_ANCHORS: EdgeAnchor[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 const MIN_EDGE = 0.06;
 const INITIAL_RECT: CanvasImageCropRect = { x: 0.12, y: 0.12, width: 0.76, height: 0.76 };
 
-export function CanvasNodeCropDialog({ dataUrl, open, loading, onClose, onConfirm }: CropDialogProps) {
+export function CanvasNodeCropDialog({ dataUrl, open, loading, onClose, onConfirm, onImageError }: CropDialogProps) {
     const translate = useTranslation();
     const stageRef = useRef<HTMLDivElement>(null);
     const [rect, setRect] = useState<CanvasImageCropRect>(INITIAL_RECT);
@@ -89,7 +90,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, loading, onClose, onConfir
             <div className="space-y-4">
                 <div className={`flex justify-center ${loading ? "pointer-events-none opacity-70" : ""}`}>
                     <div ref={stageRef} className="relative inline-block max-w-full overflow-hidden rounded-lg bg-black select-none">
-                        <img src={dataUrl} alt="" className="block max-h-[62vh] max-w-full opacity-90" draggable={false} />
+                        <img src={dataUrl} alt="" className="block max-h-[62vh] max-w-full opacity-90" draggable={false} onError={onImageError} />
                         <DimOverlay rect={rect} />
                         <div className="absolute cursor-move border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,.3),0_0_28px_rgba(0,0,0,.28)]" style={rectToCss(rect)} onPointerDown={(event) => beginDrag("translate", event)}>
                             <div className="pointer-events-none absolute inset-x-0 top-1/3 border-t border-white/50" />

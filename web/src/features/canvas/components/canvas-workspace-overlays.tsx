@@ -6,6 +6,7 @@ import type { ChangeEvent, RefObject } from "react";
 import { Empty, Modal } from "antd";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
+import { useMediaUrl } from "@/shared/hooks/use-media-url";
 import { isAudioNode, isImageNode, isVideoNode } from "../domain/canvas-node";
 import type { CanvasNode, CanvasNodeKind, CanvasPoint, ContextMenuState } from "../types";
 import type { CanvasNavigationStoryboardAsset } from "./canvas-navigation-panel";
@@ -58,10 +59,31 @@ type CanvasWorkspaceOverlaysProps = {
 
 export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
     const translate = useTranslation();
-    const cropSource = readImageSource(props.cropNode);
-    const splitSource = readImageSource(props.splitNode);
-    const previewSource = readMediaSource(props.previewNode);
-    const previewIsVideo = Boolean(props.previewNode && isVideoNode(props.previewNode));
+    const cropImageNode = props.cropNode && isImageNode(props.cropNode) ? props.cropNode : null;
+    const splitImageNode = props.splitNode && isImageNode(props.splitNode) ? props.splitNode : null;
+    const previewMediaNode = props.previewNode && (isImageNode(props.previewNode) || isVideoNode(props.previewNode)) ? props.previewNode : null;
+    const previewIsVideo = Boolean(previewMediaNode && isVideoNode(previewMediaNode));
+    const cropMedia = useMediaUrl({
+        storageKey: cropImageNode?.content.storageKey,
+        url: cropImageNode?.content.source,
+        objectStorage: cropImageNode?.content.objectStorage,
+        kind: "image",
+    });
+    const splitMedia = useMediaUrl({
+        storageKey: splitImageNode?.content.storageKey,
+        url: splitImageNode?.content.source,
+        objectStorage: splitImageNode?.content.objectStorage,
+        kind: "image",
+    });
+    const previewMedia = useMediaUrl({
+        storageKey: previewMediaNode?.content.storageKey,
+        url: previewMediaNode?.content.source,
+        objectStorage: previewMediaNode?.content.objectStorage,
+        kind: previewIsVideo ? "media" : "image",
+    });
+    const cropSource = cropMedia.url || cropImageNode?.content.source || "";
+    const splitSource = splitMedia.url || splitImageNode?.content.source || "";
+    const previewSource = previewMedia.url || previewMediaNode?.content.source || "";
     const audioTrimNode = props.audioTrimNode && isAudioNode(props.audioTrimNode) ? props.audioTrimNode : null;
 
     const deleteContextTarget = () => {
@@ -115,10 +137,10 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
             <CanvasNodeInfoModal node={props.infoNode} open={Boolean(props.infoNode)} onClose={props.onCloseInfo} />
 
             {cropSource && props.cropNode ? (
-                <CanvasNodeCropDialog dataUrl={cropSource} open loading={props.cropLoading} onClose={props.onCloseCrop} onConfirm={(crop) => props.onCrop(props.cropNode!, crop)} />
+                <CanvasNodeCropDialog dataUrl={cropSource} open loading={props.cropLoading} onClose={props.onCloseCrop} onConfirm={(crop) => props.onCrop(props.cropNode!, crop)} onImageError={cropImageNode?.content.storageKey ? cropMedia.onError : undefined} />
             ) : null}
             {splitSource && props.splitNode ? (
-                <CanvasNodeSplitDialog dataUrl={splitSource} open loading={props.splitLoading} onClose={props.onCloseSplit} onConfirm={(params) => props.onSplit(props.splitNode!, params)} />
+                <CanvasNodeSplitDialog dataUrl={splitSource} open loading={props.splitLoading} onClose={props.onCloseSplit} onConfirm={(params) => props.onSplit(props.splitNode!, params)} onImageError={splitImageNode?.content.storageKey ? splitMedia.onError : undefined} />
             ) : null}
             <CanvasNodeAudioTrimDialog node={audioTrimNode} open={Boolean(audioTrimNode)} onClose={props.onCloseAudioTrim} onConfirm={(startMs, endMs) => audioTrimNode && props.onAudioTrim(audioTrimNode, startMs, endMs)} />
 
@@ -131,8 +153,8 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
                 destroyOnHidden
                 onCancel={props.onClosePreview}
             >
-                {previewSource && previewIsVideo ? <video src={previewSource} className="block max-h-[80vh] w-full max-w-full object-contain" autoPlay controls playsInline /> : null}
-                {previewSource && !previewIsVideo ? <img src={previewSource} alt={props.previewNode?.title || translate("canvas.image")} className="max-h-[80vh] max-w-full object-contain" /> : null}
+                {previewSource && previewIsVideo ? <video src={previewSource} className="block max-h-[80vh] w-full max-w-full object-contain" autoPlay controls playsInline onError={previewMediaNode?.content.storageKey ? previewMedia.onError : undefined} /> : null}
+                {previewSource && !previewIsVideo ? <img src={previewSource} alt={props.previewNode?.title || translate("canvas.image")} className="max-h-[80vh] max-w-full object-contain" onError={previewMediaNode?.content.storageKey ? previewMedia.onError : undefined} /> : null}
             </Modal>
 
             <Modal
@@ -163,12 +185,4 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
             </Modal>
         </>
     );
-}
-
-function readImageSource(node: CanvasNode | null): string {
-    return node && isImageNode(node) ? node.content.source : "";
-}
-
-function readMediaSource(node: CanvasNode | null): string {
-    return node && (isImageNode(node) || isVideoNode(node)) ? node.content.source : "";
 }
