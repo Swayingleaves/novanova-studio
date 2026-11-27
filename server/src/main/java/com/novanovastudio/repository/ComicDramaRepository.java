@@ -1628,6 +1628,134 @@ public class ComicDramaRepository {
                 row.get("updated_at", OffsetDateTime.class));
     }
 
+    /**
+     * 查询漫剧项目绑定的AI制片助手会话标识。
+     *
+     * @param userId 当前用户ID
+     * @param projectId 项目ID
+     * @return 会话标识，未绑定时为空
+     */
+    public Mono<String> getAgentSessionId(Long userId, String projectId) {
+        return databaseClient.sql("""
+                SELECT agent_session_id FROM comic_drama_projects
+                WHERE script_project_id=:projectId AND user_id=:userId
+                """).bind("projectId", projectId).bind("userId", userId)
+                .map((row, metadata) -> text(row.get("agent_session_id", String.class))).one()
+                .filter(StringUtils::hasText);
+    }
+
+    /**
+     * 更新漫剧项目绑定的AI制片助手会话标识。
+     *
+     * @param userId 当前用户ID
+     * @param projectId 项目ID
+     * @param sessionId 会话标识，允许为空表示重置会话
+     * @return 受影响行数
+     */
+    public Mono<Long> updateAgentSessionId(Long userId, String projectId, String sessionId) {
+        return bindNullable(databaseClient.sql("""
+                UPDATE comic_drama_projects SET agent_session_id=:sessionId, updated_at=NOW()
+                WHERE script_project_id=:projectId AND user_id=:userId
+                """).bind("projectId", projectId).bind("userId", userId), "sessionId", sessionId, String.class)
+                .fetch().rowsUpdated();
+    }
+
+    /**
+     * 插入或更新单集一键出集流水线状态。
+     *
+     * @param userId 发起用户ID
+     * @param pipeline 流水线记录
+     * @return 受影响行数
+     */
+    public Mono<Long> saveEpisodePipeline(Long userId, ComicDramaDtos.EpisodePipeline pipeline) {
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
+                INSERT INTO comic_drama_episode_pipelines(
+                    id, script_project_id, user_id, episode_id, execution_mode, current_step, status,
+                    config_json, progress_json, error_message, created_at, updated_at)
+                VALUES (
+                    :id, :projectId, :userId, :episodeId, :executionMode, :currentStep, :status,
+                    CAST(:configJson AS jsonb), CAST(:progressJson AS jsonb), :errorMessage, NOW(), NOW())
+                ON CONFLICT (id) DO UPDATE SET
+                    execution_mode=EXCLUDED.execution_mode,
+                    current_step=EXCLUDED.current_step,
+                    status=EXCLUDED.status,
+                    config_json=EXCLUDED.config_json,
+                    progress_json=EXCLUDED.progress_json,
+                    error_message=EXCLUDED.error_message,
+                    updated_at=NOW()
+                """).bind("id", pipeline.id())
+                .bind("projectId", pipeline.projectId())
+                .bind("userId", userId)
+                .bind("executionMode", text(pipeline.executionMode()))
+                .bind("currentStep", text(pipeline.currentStep()))
+                .bind("status", text(pipeline.status()))
+                .bind("configJson", json(pipeline.config()))
+                .bind("progressJson", json(pipeline.progress()))
+                .bind("errorMessage", text(pipeline.errorMessage()));
+        spec = bindNullable(spec, "episodeId", pipeline.episodeId(), String.class);
+        return spec.fetch().rowsUpdated();
+    }
+
+    /**
+     * 按主键查询单集一键出集流水线记录。
+     *
+     * @param userId 用户ID
+     * @param projectId 项目ID
+     * @param pipelineId 流水线ID
+     * @return 流水线记录
+     */
+    public Mono<ComicDramaDtos.EpisodePipeline> getEpisodePipeline(Long userId, String projectId, String pipelineId) {
+        return databaseClient.sql("""
+                SELECT * FROM comic_drama_episode_pipelines
+                WHERE id=:pipelineId AND script_project_id=:projectId AND user_id=:userId
+                """).bind("pipelineId", pipelineId).bind("projectId", projectId).bind("userId", userId)
+                .map((row, metadata) -> mapEpisodePipeline(row)).one();
+    }
+
+    /**
+     * 查询项目或指定分集最近一次一键出集流水线记录。
+     *
+     * @param userId 用户ID
+     * @param projectId 项目ID
+     * @param episodeId 分集ID，可为空
+     * @return 最近一次流水线记录
+     */
+    public Mono<ComicDramaDtos.EpisodePipeline> getLatestEpisodePipeline(Long userId, String projectId, String episodeId) {
+        String sql = StringUtils.hasText(episodeId)
+                ? """
+                  SELECT * FROM comic_drama_episode_pipelines
+                  WHERE script_project_id=:projectId AND user_id=:userId AND episode_id=:episodeId
+                  ORDER BY updated_at DESC, created_at DESC LIMIT 1
+                  """
+                : """
+                  SELECT * FROM comic_drama_episode_pipelines
+                  WHERE script_project_id=:projectId AND user_id=:userId
+                  ORDER BY updated_at DESC, created_at DESC LIMIT 1
+                  """;
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(sql)
+                .bind("projectId", projectId).bind("userId", userId);
+        if (StringUtils.hasText(episodeId)) {
+            spec = spec.bind("episodeId", episodeId.trim());
+        }
+        return spec.map((row, metadata) -> mapEpisodePipeline(row)).one();
+    }
+
+    /** 映射单集流水线记录。 */
+    private ComicDramaDtos.EpisodePipeline mapEpisodePipeline(Row row) {
+        return new ComicDramaDtos.EpisodePipeline(
+                row.get("id", String.class),
+                row.get("script_project_id", String.class),
+                row.get("episode_id", String.class),
+                row.get("execution_mode", String.class),
+                row.get("current_step", String.class),
+                row.get("status", String.class),
+                object(row, "config_json"),
+                object(row, "progress_json"),
+                text(row.get("error_message", String.class)),
+                row.get("created_at", OffsetDateTime.class),
+                row.get("updated_at", OffsetDateTime.class));
+    }
+
     /** 将可空参数安全绑定到数据库语句。 */
     private <T> DatabaseClient.GenericExecuteSpec bindNullable(DatabaseClient.GenericExecuteSpec spec, String name,
                                                                 T value, Class<T> type) {

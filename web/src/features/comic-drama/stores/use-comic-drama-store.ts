@@ -62,6 +62,8 @@ type ComicDramaState = {
     refreshing: boolean;
     activeStage: ComicDramaStage;
     pendingStage: ComicDramaStage | null;
+    /** 顶栏按需抽屉：资产库 / 设置(含准备度与声音) / 媒体中心 / 待更新 / 画布联动。 */
+    activeDrawer: "assets" | "settings" | "media" | "updates" | "canvas" | null;
     selectedShotId: string | null;
     selectedAssetId: string | null;
     /** 其他阶段请求在资产库定位的资产版本，资产库定位后清空。 */
@@ -80,6 +82,7 @@ type ComicDramaState = {
     reloadWorkspace: () => Promise<void>;
     setActiveStage: (stage: ComicDramaStage) => void;
     clearPendingStage: () => void;
+    setActiveDrawer: (drawer: "assets" | "settings" | "media" | "updates" | "canvas" | null) => void;
     setSelectedShotId: (id: string | null) => void;
     setSelectedAssetId: (id: string | null) => void;
     /** 跳转到资产库并定位到指定资产版本所属的资产卡片。 */
@@ -187,6 +190,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
     refreshing: false,
     activeStage: "readiness",
     pendingStage: null,
+    activeDrawer: null,
     selectedShotId: null,
     selectedAssetId: null,
     focusAssetVersionId: null,
@@ -248,16 +252,17 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
         ? { pendingStage: activeStage }
         : { activeStage, pendingStage: null }),
     clearPendingStage: () => set({ pendingStage: null }),
+    setActiveDrawer: (activeDrawer) => set({ activeDrawer }),
     setSelectedShotId: (selectedShotId) => set({ selectedShotId }),
     setSelectedAssetId: (selectedAssetId) => set({ selectedAssetId }),
-    focusAssetVersion: (focusAssetVersionId) => set({ focusAssetVersionId, ...(focusAssetVersionId ? { activeStage: "assets", pendingStage: null } : {}) }),
+    focusAssetVersion: (focusAssetVersionId) => set({ focusAssetVersionId, ...(focusAssetVersionId ? { activeDrawer: "assets" } : {}) }),
     setSelectedEpisodeId: (selectedEpisodeId) => set({ selectedEpisodeId }),
     setSelectedSceneId: (selectedSceneId) => set({ selectedSceneId }),
 
     requestShotGeneration: (shotId, mediaType) => set({
         selectedShotId: shotId,
         pendingGeneration: { shotId, mediaType },
-        activeStage: "media",
+        activeDrawer: "media",
     }),
 
     clearPendingGeneration: () => set({ pendingGeneration: null }),
@@ -610,6 +615,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
         refreshing: false,
         activeStage: "readiness",
         pendingStage: null,
+        activeDrawer: null,
         selectedShotId: null,
         selectedAssetId: null,
         focusAssetVersionId: null,

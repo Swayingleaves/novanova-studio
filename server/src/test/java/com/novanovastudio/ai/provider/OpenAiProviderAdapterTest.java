@@ -55,6 +55,44 @@ class OpenAiProviderAdapterTest {
     }
 
     /**
+     * 文本任务携带参考图片时，应以 OpenAI 多模态 image_url 数组发送给文本模型识图。
+     */
+    @Test
+    void shouldSendVisionImageUrlPartsForTextTaskWithReferences() {
+        AiHttpClient aiHttpClient = mock(AiHttpClient.class);
+        AiMediaSupport mediaSupport = mock(AiMediaSupport.class);
+        OpenAiProviderAdapter adapter = new OpenAiProviderAdapter(aiHttpClient, mediaSupport, new NovanovaProperties());
+        AiTaskDtos.AiTaskMediaReference imageRef = new AiTaskDtos.AiTaskMediaReference("img-1", "图1", "image/png", "image:1", "https://example.com/cat.png");
+        when(mediaSupport.resolveReferenceUrl(1L, imageRef)).thenReturn(Mono.just("https://example.com/cat.png"));
+
+        List<JSONObject> payloads = new ArrayList<>();
+        when(aiHttpClient.sendJsonRequest(any(AiTaskDtos.AiChannelConfig.class), eq("POST"), eq("/chat/completions"), any()))
+                .thenAnswer(invocation -> {
+                    payloads.add(JSON.parseObject(JSON.toJSONString(invocation.getArgument(3))));
+                    return Mono.just(JSON.parseObject("{\"choices\":[{\"message\":{\"content\":\"一只橘猫在窗台晒太阳\"}}]}"));
+                });
+
+        AiGenerationTask task = new AiGenerationTask();
+        task.setTaskType(AiTaskTypes.TEXT);
+        task.setUserId(1L);
+        AiTaskExecutionContext context = new AiTaskExecutionContext(task,
+                new AiTaskDtos.AiChannelConfig("channel-1", "OpenAI", "https://api.example.com", "test-key", "openai", List.of("gpt-4o")),
+                "gpt-4o", false, "",
+                new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.TEXT, "反推这张图的提示词", "gpt-4o", Map.of(), List.of(imageRef), List.of(), "canvas"),
+                () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty());
+
+        JSONObject result = adapter.execute(context).block();
+
+        Assertions.assertNotNull(result);
+        Assertions.assertEquals("一只橘猫在窗台晒太阳", result.getString("content"));
+        var content = payloads.get(0).getJSONArray("messages").getJSONObject(0).getJSONArray("content");
+        Assertions.assertEquals(2, content.size());
+        Assertions.assertEquals("text", content.getJSONObject(0).getString("type"));
+        Assertions.assertEquals("image_url", content.getJSONObject(1).getString("type"));
+        Assertions.assertEquals("https://example.com/cat.png", content.getJSONObject(1).getJSONObject("image_url").getString("url"));
+    }
+
+    /**
      * 图片比例必须结合清晰度转换为像素尺寸，已有像素尺寸保持不变。
      */
     @Test

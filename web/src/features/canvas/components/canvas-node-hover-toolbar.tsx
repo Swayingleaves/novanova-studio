@@ -5,7 +5,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { SkipBack, SkipForward, Clapperboard, CloudUpload, Copy, Download, FolderPlus, ImagePlus, Info, LoaderCircle, Minus, Plus, RefreshCw, Scissors, Share2, Trash2, Upload, Video } from "lucide-react";
+import { SkipBack, SkipForward, Clapperboard, CloudUpload, Copy, Download, FolderPlus, Info, LoaderCircle, Minus, Plus, RefreshCw, Scissors, Trash2, Upload, Video } from "lucide-react";
 
 import { formatAudioTime } from "@/features/storage/utils/audio-waveform";
 import { formatBytes, getDataUrlByteSize } from "@/features/generation/lib/image-utils";
@@ -40,7 +40,6 @@ type ToolbarActionFactoryContext = {
     onDelete: (node: CanvasNode) => void;
     onRetry: (node: CanvasNode) => void;
     onSaveAsset: (node: CanvasNode) => void;
-    onChooseAsset: (node: CanvasNode) => void;
     onUploadObjectStorage: (node: CanvasNode) => void;
     onDownload: (node: CanvasNode) => void;
     onDecreaseFont: (node: CanvasNode) => void;
@@ -52,7 +51,6 @@ type ToolbarActionFactoryContext = {
 
 type CanvasNodeHoverToolbarProps = {
     onCaptureFrame: (node: CanvasVideoNode, frame: "first" | "last") => Promise<void>;
-    onShare?: (node: CanvasNode) => void;
     node: CanvasNode | null;
     viewport: CanvasViewTransform;
     onKeep: (nodeId: string) => void;
@@ -64,10 +62,10 @@ type CanvasNodeHoverToolbarProps = {
     onUploadObjectStorage: (node: CanvasNode) => void;
     onDownload: (node: CanvasNode) => void;
     onSaveAsset: (node: CanvasNode) => void;
-    onChooseAsset: (node: CanvasNode) => void;
     onCrop: (node: CanvasNode) => void;
     onSplit: (node: CanvasNode) => void;
     onViewImage: (node: CanvasNode) => void;
+    onReversePrompt: (node: CanvasNode) => void;
     onRetry: (node: CanvasNode) => void;
     onToggleFreeResize: (node: CanvasNode) => void;
     onDelete: (node: CanvasNode) => void;
@@ -123,6 +121,7 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
         onSplit: props.onSplit,
         onViewImage: props.onViewImage,
         onCopyPrompt: copyImagePrompt,
+        onReversePrompt: props.onReversePrompt,
     });
     const baseActions = buildBaseToolbarActions({
         node,
@@ -134,7 +133,6 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
         onDelete: props.onDelete,
         onRetry: props.onRetry,
         onSaveAsset: props.onSaveAsset,
-        onChooseAsset: props.onChooseAsset,
         onUploadObjectStorage: props.onUploadObjectStorage,
         onDownload: props.onDownload,
         onDecreaseFont: props.onDecreaseFont,
@@ -164,7 +162,6 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
             });
         }
     }
-    if ((hasImage || hasVideo) && props.onShare) allActions.push({ id: "share", title: "分享作品", label: "分享", icon: <Share2 className="size-4" />, onClick: () => props.onShare?.(node) });
 
     const left = props.viewport.x + (node.frame.position.x + node.frame.width / 2) * props.viewport.k;
     // 工具栏上移，为节点外侧左上角的浮动名称预留独立间距，避免两者重叠。
@@ -341,15 +338,6 @@ function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarA
             label: translate("canvas.saveAsset"),
             icon: <FolderPlus className="size-4" />,
             onClick: () => context.onSaveAsset(context.node),
-        });
-    }
-    if (isImageNode(context.node)) {
-        actions.push({
-            id: "chooseAsset",
-            title: translate("canvas.chooseCanvasAssetImageToReplaceThisNode"),
-            label: translate("canvas.canvasAsset"),
-            icon: <ImagePlus className="size-4" />,
-            onClick: () => context.onChooseAsset(context.node),
         });
     }
     if (context.hasImage || context.hasVideo) {

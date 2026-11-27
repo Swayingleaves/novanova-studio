@@ -178,6 +178,39 @@ public class ScriptRepository {
     }
 
     /**
+     * 查询剧本项目绑定的对话式编剧助手会话标识。
+     *
+     * @param userId 当前用户标识
+     * @param projectId 剧本项目标识
+     * @return 会话标识，未绑定时返回空
+     */
+    public Mono<String> getAgentSessionId(Long userId, String projectId) {
+        return databaseClient.sql("""
+                SELECT agent_session_id FROM script_projects
+                WHERE id = :projectId AND user_id = :userId AND status = 1
+                """).bind("projectId", projectId).bind("userId", userId)
+                .map((row, metadata) -> text(row.get("agent_session_id", String.class)))
+                .one()
+                .filter(id -> !id.isEmpty());
+    }
+
+    /**
+     * 更新剧本项目绑定的对话式编剧助手会话标识（不推进项目修订号）。
+     *
+     * @param userId 当前用户标识
+     * @param projectId 剧本项目标识
+     * @param sessionId 会话标识
+     * @return 更新完成信号
+     */
+    public Mono<Void> updateAgentSessionId(Long userId, String projectId, String sessionId) {
+        return databaseClient.sql("""
+                UPDATE script_projects SET agent_session_id = :sessionId, updated_at = CURRENT_TIMESTAMP
+                WHERE id = :projectId AND user_id = :userId AND status = 1
+                """).bind("sessionId", text(sessionId)).bind("projectId", projectId).bind("userId", userId)
+                .fetch().rowsUpdated().then();
+    }
+
+    /**
      * 按当前修订号软删除当前用户的单个项目。
      *
      * @param userId 当前用户标识

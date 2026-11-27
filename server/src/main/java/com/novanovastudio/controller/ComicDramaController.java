@@ -5,6 +5,8 @@ import com.novanovastudio.dto.ComicDramaDtos;
 import com.novanovastudio.dto.ComicDramaFinalPromptPricingDtos;
 import com.novanovastudio.service.ComicDramaFinalPromptPricingService;
 import com.novanovastudio.dto.VideoCompositionDtos;
+import com.novanovastudio.service.ComicDramaAgentService;
+import com.novanovastudio.service.ComicDramaPipelineService;
 import com.novanovastudio.service.ComicDramaService;
 import com.novanovastudio.service.VideoCompositionTaskService;
 import com.novanovastudio.service.PersistenceService;
@@ -57,6 +59,12 @@ public class ComicDramaController {
 
     /** 媒体流服务。 */
     private final PersistenceService persistenceService;
+
+    /** 漫剧制片助手Agent服务。 */
+    private final ComicDramaAgentService agentService;
+
+    /** 漫剧单集一键出集流水线服务。 */
+    private final ComicDramaPipelineService pipelineService;
 
     /**
      * 查询所选模型每镜头积分与价格修订号。
@@ -426,6 +434,59 @@ public class ComicDramaController {
     public Mono<ApiResponse<ComicDramaDtos.CanvasBinding>> bindCanvas(
             @Valid @RequestBody ComicDramaDtos.BindCanvasRequest request, ServerHttpRequest httpRequest) {
         return execute("绑定漫剧画布节点", httpRequest, request, service.bindCanvas(request));
+    }
+
+    /** 查询项目制片助手历史会话。 */
+    @PostMapping("/agent/getHistory")
+    public Mono<ApiResponse<ComicDramaDtos.AgentHistoryResponse>> getAgentHistory(
+            @Valid @RequestBody ComicDramaDtos.ProjectIdRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧制片助手历史", httpRequest, request, agentService.getHistory(request.projectId()));
+    }
+
+    /** 发送漫剧制片助手对话消息，镜头与提示词修改直接生效，扣费动作返回确认建议。 */
+    @PostMapping("/agent/chat")
+    public Mono<ApiResponse<ComicDramaDtos.AgentChatResponse>> agentChat(
+            @Valid @RequestBody ComicDramaDtos.AgentChatRequest request, ServerHttpRequest httpRequest) {
+        return execute("漫剧制片助手对话", httpRequest, request, agentService.chat(request));
+    }
+
+    /** 重置当前项目的制片助手会话。 */
+    @PostMapping("/agent/resetSession")
+    public Mono<ApiResponse<ComicDramaDtos.AgentHistoryResponse>> resetAgentSession(
+            @Valid @RequestBody ComicDramaDtos.ProjectIdRequest request, ServerHttpRequest httpRequest) {
+        return execute("重置漫剧制片助手会话", httpRequest, request, agentService.resetSession(request.projectId()));
+    }
+
+    /** 查询指定分集最近一次一键出集流水线状态。 */
+    @PostMapping("/pipeline/getLatest")
+    public Mono<ApiResponse<ComicDramaDtos.EpisodePipeline>> getLatestEpisodePipeline(
+            @Valid @RequestBody ComicDramaDtos.GetEpisodePipelineRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询单集一键出集状态", httpRequest, request,
+                pipelineService.getLatestPipeline(request.projectId(), request.episodeId())
+                        .defaultIfEmpty(new ComicDramaDtos.EpisodePipeline(
+                                "", request.projectId(), request.episodeId(), "review", "idle", "idle",
+                                new com.alibaba.fastjson2.JSONObject(), new com.alibaba.fastjson2.JSONObject(), "", null, null)));
+    }
+
+    /** 启动单集一键出集流水线。 */
+    @PostMapping("/pipeline/start")
+    public Mono<ApiResponse<ComicDramaDtos.EpisodePipeline>> startEpisodePipeline(
+            @Valid @RequestBody ComicDramaDtos.StartEpisodePipelineRequest request, ServerHttpRequest httpRequest) {
+        return execute("启动单集一键出集", httpRequest, request, pipelineService.startPipeline(request));
+    }
+
+    /** 在关键节点停顿确认后继续执行一键出集流水线。 */
+    @PostMapping("/pipeline/resume")
+    public Mono<ApiResponse<ComicDramaDtos.EpisodePipeline>> resumeEpisodePipeline(
+            @Valid @RequestBody ComicDramaDtos.EpisodePipelineActionRequest request, ServerHttpRequest httpRequest) {
+        return execute("继续单集一键出集", httpRequest, request, pipelineService.resumePipeline(request));
+    }
+
+    /** 取消当前正在运行或暂停的一键出集流水线。 */
+    @PostMapping("/pipeline/cancel")
+    public Mono<ApiResponse<ComicDramaDtos.EpisodePipeline>> cancelEpisodePipeline(
+            @Valid @RequestBody ComicDramaDtos.EpisodePipelineActionRequest request, ServerHttpRequest httpRequest) {
+        return execute("取消单集一键出集", httpRequest, request, pipelineService.cancelPipeline(request));
     }
 
     /**

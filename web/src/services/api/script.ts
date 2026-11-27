@@ -17,6 +17,8 @@ import type {
     NovelAdaptationSettings,
     OutlineSection,
     ProductionReadiness,
+    ScriptAgentChatResponse,
+    ScriptAgentHistoryResponse,
     ScriptAiDraft,
     ScriptAiActionModelPricing,
     ScriptAiActionPricing,
@@ -389,4 +391,29 @@ export function getScriptAiActionPricing() {
 
 export function saveScriptAiActionPricing(modelConfigId: string, expectedRevision: number, actions: Array<{ actionType: string; credits: CreditAmount }>) {
     return serverPost<ScriptAiActionModelPricing>("/admin/scriptAiAction/savePricing", { modelConfigId, expectedRevision, actions });
+}
+
+// ---- 对话式 AI 剧本助手 ----
+
+const AGENT_PATH = `${SCRIPT_PATH}/agent`;
+
+export function getScriptAgentHistory(projectId: string) {
+    return serverPost<ScriptAgentHistoryResponse>(`${AGENT_PATH}/getHistory`, { projectId });
+}
+
+export function chatScriptAgent(input: {
+    projectId: string;
+    section?: string;
+    selectedEpisodeId?: string;
+    targetType?: string;
+    targetId?: string;
+    targetLabel?: string;
+    message: string;
+    model?: string;
+}) {
+    return serverPost<ScriptAgentChatResponse>(`${AGENT_PATH}/chat`, input);
+}
+
+export function resetScriptAgentSession(projectId: string) {
+    return serverPost<ScriptAgentHistoryResponse>(`${AGENT_PATH}/resetSession`, { projectId });
 }

@@ -434,4 +434,68 @@ public final class ComicDramaDtos {
                                     @NotBlank @Size(max = 64) String entityId,
                                     @NotBlank @Size(max = 128) String nodeId) {
     }
+
+    /** 漫剧制片助手对话请求。 */
+    public record AgentChatRequest(@NotBlank @Size(max = 64) String projectId,
+                                   @Size(max = 64) String episodeId,
+                                   @Size(max = 64) String selectedShotId,
+                                   List<@NotBlank @Size(max = 64) String> mentionedShotIds,
+                                   @NotBlank @Size(max = 8000) String message,
+                                   @Size(max = 256) String model) {
+    }
+
+    /** 制片助手已立即生效的镜头修改摘要。 */
+    public record AgentAppliedEdit(String shotId, int shotNumber, List<String> updatedFields) {
+    }
+
+    /** 制片助手提出的待确认动作建议（涉及扣费或长流程时由前端展示预算并确认）。 */
+    public record AgentActionSuggestion(String actionType, String label, String description, List<String> shotIds) {
+    }
+
+    /** 漫剧制片助手单轮对话响应。 */
+    public record AgentChatResponse(String sessionId, String messageId, String reply,
+                                    List<AgentAppliedEdit> appliedEdits,
+                                    List<AgentActionSuggestion> suggestions,
+                                    boolean workspaceChanged) {
+    }
+
+    /** 漫剧制片助手历史会话响应。 */
+    public record AgentHistoryResponse(String sessionId, List<com.novanovastudio.agent.dto.AgentSessionHistoryMessage> messages) {
+    }
+
+    /** 单集一键出集流水线记录。 */
+    public record EpisodePipeline(String id, String projectId, String episodeId, String executionMode,
+                                  String currentStep, String status, JSONObject config, JSONObject progress,
+                                  String errorMessage, OffsetDateTime createdAt, OffsetDateTime updatedAt) {
+    }
+
+    /** 启动单集一键出集流水线请求。 */
+    public record StartEpisodePipelineRequest(@NotBlank @Size(max = 64) String projectId,
+                                              @Size(max = 64) String episodeId,
+                                              @NotBlank @Pattern(regexp = "review|auto") String executionMode,
+                                              boolean includeSplit,
+                                              boolean includeAssets,
+                                              boolean includePrompts,
+                                              boolean includeVideos,
+                                              boolean includeExport,
+                                              @Size(max = 256) String textModel,
+                                              @Size(max = 256) String imageModel,
+                                              @Size(max = 256) String videoModel,
+                                              @Pattern(regexp = "short|medium|long") String shotDuration,
+                                              @Size(max = 120) String rhythm,
+                                              @Size(max = 32) String videoSize,
+                                              @Size(max = 32) String videoResolution,
+                                              Long expectedPricingRevision,
+                                              @AssertTrue(message = "启动一键出集流水线前必须明确确认预算") boolean confirmed) {
+    }
+
+    /** 查询指定分集最新一键出集流水线请求。 */
+    public record GetEpisodePipelineRequest(@NotBlank @Size(max = 64) String projectId,
+                                            @Size(max = 64) String episodeId) {
+    }
+
+    /** 继续或取消单集一键出集流水线请求。 */
+    public record EpisodePipelineActionRequest(@NotBlank @Size(max = 64) String projectId,
+                                               @NotBlank @Size(max = 64) String pipelineId) {
+    }
 }

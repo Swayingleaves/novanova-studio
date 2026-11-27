@@ -36,4 +36,8 @@ public record AgentSession(
     public static final String PROFILE_IMAGE_PAGE = "imagePage";
     /** 视频创作页会话 */
     public static final String PROFILE_VIDEO_PAGE = "videoPage";
+    /** 漫剧工作台制片助手会话 */
+    public static final String PROFILE_COMIC_DRAMA = "comicDrama";
+    /** 剧本工作台AI编剧助手会话 */
+    public static final String PROFILE_SCRIPT = "script";
 }

@@ -2,6 +2,8 @@ import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { serverGet, serverPost, type ServerAiTask } from "./server";
 import type { VideoCompositionTask } from "./video-composition";
 import type {
+    ComicDramaAgentChatResponse,
+    ComicDramaAgentHistoryResponse,
     ComicDramaAsset,
     ComicDramaAssetInput,
     ComicDramaAssetVersion,
@@ -9,6 +11,7 @@ import type {
     ComicDramaBatchTask,
     ComicDramaCanvasBinding,
     ComicDramaChangeImpact,
+    ComicDramaEpisodePipeline,
     ComicDramaMediaResult,
     ComicDramaMutationResult,
     ComicDramaProjectList,
@@ -233,6 +236,69 @@ export function listComicDramaCanvasBindings(projectId: string) {
 
 export function bindComicDramaCanvas(input: { projectId: string; expectedRevision: number; canvasProjectId: string; entityType: string; entityId: string; nodeId: string }) {
     return serverPost<ComicDramaCanvasBinding>(`${COMIC_DRAMA_PATH}/bindCanvas`, input);
+}
+
+/** 查询漫剧工作台制片助手历史对话。 */
+export function getComicDramaAgentHistory(projectId: string) {
+    return serverPost<ComicDramaAgentHistoryResponse>(`${COMIC_DRAMA_PATH}/agent/getHistory`, { projectId });
+}
+
+/** 发送漫剧制片助手消息（改镜头/提示词直接落库生效，扣费动作返回建议卡片）。 */
+export function chatComicDramaAgent(input: {
+    projectId: string;
+    episodeId?: string;
+    selectedShotId?: string;
+    mentionedShotIds?: string[];
+    message: string;
+    model?: string;
+}) {
+    return serverPost<ComicDramaAgentChatResponse>(`${COMIC_DRAMA_PATH}/agent/chat`, input);
+}
+
+/** 重置当前项目的制片助手会话。 */
+export function resetComicDramaAgentSession(projectId: string) {
+    return serverPost<ComicDramaAgentHistoryResponse>(`${COMIC_DRAMA_PATH}/agent/resetSession`, { projectId });
+}
+
+/** 查询指定分集最近一次一键出集流水线状态。 */
+export function getLatestComicDramaPipeline(projectId: string, episodeId?: string) {
+    return serverPost<ComicDramaEpisodePipeline>(`${COMIC_DRAMA_PATH}/pipeline/getLatest`, {
+        projectId,
+        episodeId: episodeId && episodeId !== "all" ? episodeId : null,
+    });
+}
+
+/** 启动单集一键出集流水线。 */
+export function startComicDramaPipeline(input: {
+    projectId: string;
+    episodeId?: string | null;
+    executionMode: "review" | "auto";
+    includeSplit: boolean;
+    includeAssets: boolean;
+    includePrompts: boolean;
+    includeVideos: boolean;
+    includeExport: boolean;
+    textModel?: string;
+    imageModel?: string;
+    videoModel?: string;
+    shotDuration?: ComicDramaShotDurationLevel;
+    rhythm?: string;
+    videoSize?: string;
+    videoResolution?: string;
+    expectedPricingRevision?: number;
+    confirmed: true;
+}) {
+    return serverPost<ComicDramaEpisodePipeline>(`${COMIC_DRAMA_PATH}/pipeline/start`, input);
+}
+
+/** 在关键节点停顿确认后继续执行一键出集流水线。 */
+export function resumeComicDramaPipeline(projectId: string, pipelineId: string) {
+    return serverPost<ComicDramaEpisodePipeline>(`${COMIC_DRAMA_PATH}/pipeline/resume`, { projectId, pipelineId });
+}
+
+/** 取消正在运行或等待确认的一键出集流水线。 */
+export function cancelComicDramaPipeline(projectId: string, pipelineId: string) {
+    return serverPost<ComicDramaEpisodePipeline>(`${COMIC_DRAMA_PATH}/pipeline/cancel`, { projectId, pipelineId });
 }
 
 /** 读取漫剧媒体结果里的首个媒体地址：图片任务结果为 { items: [{ url }] }，视频任务结果为 { item: { url } }。 */

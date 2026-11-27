@@ -1,90 +1,71 @@
 "use client";
 
-import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "@/shared/lib/team-navigation";
-import { Alert, App, Badge, Button, Modal, Progress, Spin, Tag } from "antd";
+import { Alert, App, Badge, Button, Drawer, Dropdown, Modal, Progress, Select, Spin, Tabs } from "antd";
 import {
     ArrowLeft,
     CheckCircle2,
-    Clapperboard,
+    Download,
     ExternalLink,
     Film,
     History,
-    Layers,
-    LayoutGrid,
-    Link2,
-    MessageSquare,
-    Mic,
+    MoreHorizontal,
     Palette,
     RefreshCw,
     SendToBack,
     Settings,
+    Sparkles,
+    Square,
     Volume2,
 } from "lucide-react";
 
+import {
+    cancelComicDramaPipeline,
+    getLatestComicDramaPipeline,
+    readComicDramaMediaUrl,
+    resumeComicDramaPipeline,
+} from "@/services/api/comic-drama";
+import { downloadComicDramaExportVideo } from "@/services/api/server";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
-import type { ComicDramaStage } from "../types";
-import { BatchGenerationModal } from "./batch-generation-modal";
+import { useVideoExportSettingsStore } from "../stores/use-video-export-settings-store";
+import type { ComicDramaEpisodePipeline } from "../types";
+import { EpisodeOneClickModal } from "./episode-one-click-modal";
 import { StageAssets } from "./stage-assets";
 import { StageCanvas } from "./stage-canvas";
 import { StageMedia } from "./stage-media";
 import { StageReadiness } from "./stage-readiness";
 import { StageSettings } from "./stage-settings";
-import { StageShots } from "./stage-shots";
 import { StageSound } from "./stage-sound";
-import { StageStoryboard } from "./stage-storyboard";
 import { StageUpdates } from "./stage-updates";
-
-const getStageNavItems = (translate = translateMessage): Array<{
-    key: ComicDramaStage;
-    label: string;
-    icon: typeof Clapperboard;
-    badgeKey?: "pendingUpdateCount";
-    /** 有值的项在菜单里显示步骤序号，用于指示推荐操作顺序。 */
-    order?: number;
-}> => ([
-    { key: "readiness", label: translate("comicDrama.productionReadiness"), icon: CheckCircle2, order: 1 },
-    { key: "settings", label: translate("comicDrama.productionSettings"), icon: Settings, order: 2 },
-    { key: "shots", label: translate("comicDrama.shotList"), icon: Clapperboard, order: 3 },
-    { key: "storyboard", label: translate("comicDrama.visualStoryboard"), icon: LayoutGrid, order: 4 },
-    { key: "assets", label: translate("comicDrama.visualAssets"), icon: Palette },
-    { key: "sound", label: translate("comicDrama.soundAndDialogue"), icon: Volume2 },
-    { key: "canvas", label: translate("comicDrama.canvasIntegration"), icon: SendToBack },
-    { key: "updates", label: translate("comicDrama.pendingUpdates_7c9d22"), icon: History, badgeKey: "pendingUpdateCount" },
-]);
-
-const getProjectTypeLabels = (translate = translateMessage): Record<string, string> => ({
-    comicDrama: translate("comicDrama.comicDrama"),
-    liveActionShort: translate("comicDrama.liveActionShortDrama"),
-    animation: translate("comicDrama.animation"),
-    advertisement: translate("comicDrama.advertisingStory"),
-    musicVideo: translate("comicDrama.musicVideo"),
-    storyShort: translate("comicDrama.shortFilm"),
-});
+import { UnifiedStudioStage } from "./unified-studio-stage";
 
 type ComicDramaWorkspaceProps = {
     projectId: string;
     scriptProjectId?: string;
 };
 
-/** 漫剧生产工作台主容器。 */
-export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWorkspaceProps) {
+/** 漫剧一体化生产工作台主容器：顶部全局分集与流水线状态 + 合并分镜与 Agent 主区 + 轻量按需抽屉。 */
+export function ComicDramaWorkspace({ projectId }: ComicDramaWorkspaceProps) {
     const translate = useTranslation();
     const router = useRouter();
     const { message } = App.useApp();
+
     const workspace = useComicDramaStore((state) => state.workspace);
     const loading = useComicDramaStore((state) => state.loading);
     const error = useComicDramaStore((state) => state.error);
-    const refreshing = useComicDramaStore((state) => state.refreshing);
     const activeStage = useComicDramaStore((state) => state.activeStage);
+    const activeDrawer = useComicDramaStore((state) => state.activeDrawer);
+    const setActiveDrawer = useComicDramaStore((state) => state.setActiveDrawer);
+    const selectedEpisodeId = useComicDramaStore((state) => state.selectedEpisodeId);
+    const setSelectedEpisodeId = useComicDramaStore((state) => state.setSelectedEpisodeId);
     const loadWorkspace = useComicDramaStore((state) => state.loadWorkspace);
     const reloadWorkspace = useComicDramaStore((state) => state.reloadWorkspace);
-    const setActiveStage = useComicDramaStore((state) => state.setActiveStage);
     const pendingStage = useComicDramaStore((state) => state.pendingStage);
     const clearPendingStage = useComicDramaStore((state) => state.clearPendingStage);
+    const setActiveStage = useComicDramaStore((state) => state.setActiveStage);
     const pendingTimelineTexts = useComicDramaStore((state) => state.pendingTimelineTexts);
     const pendingTimelineVoices = useComicDramaStore((state) => state.pendingTimelineVoices);
     const savePendingTimelineChanges = useComicDramaStore((state) => state.savePendingTimelineChanges);
@@ -92,9 +73,13 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
     const timelineSaving = useComicDramaStore((state) => state.timelineSaving);
     const timelineSaveError = useComicDramaStore((state) => state.timelineSaveError);
 
-    // Global modals
-    const [batchModalOpen, setBatchModalOpen] = useState(false);
+    const [oneClickOpen, setOneClickOpen] = useState(false);
+    const [pipeline, setPipeline] = useState<ComicDramaEpisodePipeline | null>(null);
+    const [pipelineActionLoading, setPipelineActionLoading] = useState(false);
+    const [downloadingExport, setDownloadingExport] = useState(false);
+    const [shotFilterRequest, setShotFilterRequest] = useState<"all" | "missingVideo" | "failed" | undefined>(undefined);
     const [routeLeaveAction, setRouteLeaveAction] = useState<(() => void) | null>(null);
+
     const hasPendingTimelineChanges = Object.keys(pendingTimelineTexts).length > 0 || Object.keys(pendingTimelineVoices).length > 0;
     const leavePromptOpen = Boolean(pendingStage || routeLeaveAction);
 
@@ -159,8 +144,84 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
     useEffect(() => {
         if (projectId) {
             void loadWorkspace(projectId);
+            void useVideoExportSettingsStore.getState().refresh();
         }
     }, [projectId, loadWorkspace]);
+
+    const effectiveEpisodeId = selectedEpisodeId || workspace?.scriptProject.episodes[0]?.id || "all";
+
+    // 加载指定分集的一键出集流水线状态
+    useEffect(() => {
+        if (!workspace?.projectId) return;
+        let cancelled = false;
+        getLatestComicDramaPipeline(workspace.projectId, effectiveEpisodeId)
+            .then((res) => {
+                if (!cancelled) setPipeline(res && res.id ? res : null);
+            })
+            .catch(() => {
+                if (!cancelled) setPipeline(null);
+            });
+        return () => { cancelled = true; };
+    }, [workspace?.projectId, effectiveEpisodeId]);
+
+    // 流水线运行中时自动轮询状态并同步工作区镜头/媒体
+    useEffect(() => {
+        if (!workspace?.projectId || !pipeline || pipeline.status !== "running") return;
+        const timer = window.setInterval(() => {
+            void getLatestComicDramaPipeline(workspace.projectId, effectiveEpisodeId)
+                .then((res) => {
+                    if (res && res.id) {
+                        setPipeline(res);
+                        if (res.status !== "running") {
+                            void reloadWorkspace();
+                        }
+                    }
+                })
+                .catch(() => undefined);
+            void reloadWorkspace();
+        }, 3000);
+        return () => window.clearInterval(timer);
+    }, [workspace?.projectId, effectiveEpisodeId, pipeline, reloadWorkspace]);
+
+    const episodeShots = useMemo(() => {
+        const all = workspace?.shots || [];
+        return all
+            .filter((shot) => !effectiveEpisodeId || effectiveEpisodeId === "all" || shot.sourceEpisodeId === effectiveEpisodeId)
+            .sort((a, b) => a.sortOrder - b.sortOrder);
+    }, [workspace?.shots, effectiveEpisodeId]);
+
+    // 当前分集的 5 步完成度统计
+    const episodeStats = useMemo(() => {
+        const media = workspace?.media || [];
+        const readyAssetIds = new Set(
+            media
+                .filter((m) => m.targetType === "assetVersion" && m.mediaType === "image" && (m.status === "completed" || m.status === "needsUpdate") && readComicDramaMediaUrl(m.resultData))
+                .map((m) => m.targetId),
+        );
+        const usedAssetVersionIds = Array.from(new Set(episodeShots.flatMap((s) => s.assetVersionIds)));
+        const readyUsedAssets = usedAssetVersionIds.filter((id) => readyAssetIds.has(id)).length;
+
+        const adoptedPromptIds = new Set(
+            (workspace?.promptVersions || []).filter((p) => p.status === "adopted").map((p) => p.shotId),
+        );
+        const promptReadyCount = episodeShots.filter((s) => adoptedPromptIds.has(s.id)).length;
+
+        const completedVideoShotIds = new Set(
+            media
+                .filter((m) => m.targetType === "shot" && m.mediaType === "video" && (m.status === "completed" || m.status === "needsUpdate") && readComicDramaMediaUrl(m.resultData))
+                .map((m) => m.targetId),
+        );
+        const videoReadyCount = episodeShots.filter((s) => completedVideoShotIds.has(s.id)).length;
+        const exported = pipeline?.status === "completed" && Boolean(pipeline.progress?.exportTaskId);
+        return {
+            shotCount: episodeShots.length,
+            usedAssetCount: usedAssetVersionIds.length,
+            readyUsedAssets,
+            promptReadyCount,
+            videoReadyCount,
+            exported,
+        };
+    }, [workspace, episodeShots, pipeline]);
 
     if (loading && !workspace) {
         return (
@@ -178,10 +239,7 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
                     showIcon
                     title={translate("comicDrama.couldNotOpenTheComicDramaWorkspace")}
                     description={error}
-                    action={
-                        <Button type="primary" onClick={() => void loadWorkspace(projectId)}>
-                            {translate("comicDrama.retry")}</Button>
-                    }
+                    action={<Button type="primary" onClick={() => void loadWorkspace(projectId)}>{translate("comicDrama.retry")}</Button>}
                 />
             </main>
         );
@@ -191,174 +249,343 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
 
     const progress = workspace.productionProgress;
     const projectTitle = workspace.scriptProject?.overview?.title || translate("comicDrama.untitledProject");
-    const projectType = getProjectTypeLabels(translate)[workspace.settings.projectType] || translate("comicDrama.comicDrama");
+    const episodes = workspace.scriptProject?.episodes || [];
+    const pipelineProgressPercent = Number(pipeline?.progress?.percent || 0);
+    const pipelineMessage = String(pipeline?.progress?.message || "");
+    const exportTaskId = typeof pipeline?.progress?.exportTaskId === "string" ? pipeline.progress.exportTaskId : "";
 
-    const renderStageContent = () => {
-        switch (activeStage) {
-            case "readiness":
-                return <StageReadiness />;
-            case "settings":
-                return <StageSettings />;
-            case "assets":
-                return <StageAssets />;
-            case "shots":
-                return <StageShots />;
-            case "storyboard":
-                return <StageStoryboard pauseAutoSave={leavePromptOpen} />;
-            case "media":
-                return <StageMedia />;
-            case "sound":
-                return <StageSound />;
-            case "canvas":
-                return <StageCanvas />;
-            case "updates":
-                return <StageUpdates />;
-            default:
-                return <StageShots />;
+    const handleResumePipeline = async () => {
+        if (!pipeline) return;
+        setPipelineActionLoading(true);
+        try {
+            const resumed = await resumeComicDramaPipeline(workspace.projectId, pipeline.id);
+            setPipeline(resumed);
+            message.success("已继续生成提示词、镜头视频与成片");
+        } catch (err) {
+            message.error(err instanceof Error ? err.message : "继续流水线失败");
+        } finally {
+            setPipelineActionLoading(false);
         }
     };
 
-    const navigationList = (
-        <nav className="flex flex-col gap-1 p-3">
-            {getStageNavItems(translate).map((item) => {
-                const Icon = item.icon;
-                const isActive = activeStage === item.key;
-                const badgeCount = item.badgeKey ? progress[item.badgeKey] : 0;
+    const handleCancelPipeline = async () => {
+        if (!pipeline) return;
+        setPipelineActionLoading(true);
+        try {
+            const canceled = await cancelComicDramaPipeline(workspace.projectId, pipeline.id);
+            setPipeline(canceled);
+            message.info("已停止当前一键出集流水线");
+        } catch (err) {
+            message.error(err instanceof Error ? err.message : "停止流水线失败");
+        } finally {
+            setPipelineActionLoading(false);
+        }
+    };
 
-                return (
-                    <button
-                        key={item.key}
-                        type="button"
-                        // 激活态与左侧主导航同源（globals.css 的 .sidebar-rail-item-active 用同一组变量）。
-                        // 用内联样式而非任意值工具类：不受 utilities 层、样式表缓存与优先级影响，图标/文字靠 currentColor 一起继承。
-                        style={isActive ? { background: "var(--studio-action)", color: "var(--studio-action-foreground)" } : undefined}
-                        className={`flex items-center justify-between rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all ${
-                            isActive
-                                ? "font-semibold shadow-sm"
-                                : "text-[var(--studio-ink)] hover:bg-[var(--studio-line)] hover:text-[var(--studio-ink)]"
-                        }`}
-                        onClick={() => setActiveStage(item.key)}
-                    >
-                        <div className="flex items-center gap-2.5">
-                            {typeof item.order === "number" && (
-                                <span className="w-3.5 shrink-0 text-right text-xs font-semibold tabular-nums text-current opacity-60">{item.order}.</span>
-                            )}
-                            <Icon className="size-4 shrink-0 text-current" />
-                            <span className="text-current">{item.label}</span>
-                        </div>
+    const handleDownloadPipelineExport = async () => {
+        if (!exportTaskId || downloadingExport) return;
+        setDownloadingExport(true);
+        try {
+            const blob = await downloadComicDramaExportVideo(exportTaskId);
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `${projectTitle}-成片.mp4`;
+            link.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            message.error(err instanceof Error ? err.message : "下载成片失败");
+        } finally {
+            setDownloadingExport(false);
+        }
+    };
 
-                        {badgeCount > 0 && (
-                            <Badge
-                                count={badgeCount}
-                                overflowCount={99}
-                                className={isActive ? "[&_.ant-badge-count]:!border-none [&_.ant-badge-count]:!bg-black/20 [&_.ant-badge-count]:!text-[var(--studio-action-foreground)]" : ""}
-                            />
-                        )}
-                    </button>
-                );
-            })}
-        </nav>
-    );
+    const allEpisodeReady = episodeStats.shotCount > 0
+        && episodeStats.readyUsedAssets === episodeStats.usedAssetCount
+        && episodeStats.promptReadyCount === episodeStats.shotCount
+        && episodeStats.videoReadyCount === episodeStats.shotCount;
+
+    const pipelineSteps = [
+        { key: "split", idx: 1, label: "拆镜头", value: `${episodeStats.shotCount}`, done: episodeStats.shotCount > 0, onClick: () => setOneClickOpen(true) },
+        { key: "assets", idx: 2, label: "资产图", value: `${episodeStats.readyUsedAssets}/${episodeStats.usedAssetCount}`, done: episodeStats.shotCount > 0 && episodeStats.readyUsedAssets === episodeStats.usedAssetCount, onClick: () => setActiveDrawer("assets") },
+        { key: "prompts", idx: 3, label: "提示词", value: `${episodeStats.promptReadyCount}/${episodeStats.shotCount}`, done: episodeStats.shotCount > 0 && episodeStats.promptReadyCount === episodeStats.shotCount, onClick: () => setOneClickOpen(true) },
+        { key: "videos", idx: 4, label: "视频", value: `${episodeStats.videoReadyCount}/${episodeStats.shotCount}`, done: episodeStats.shotCount > 0 && episodeStats.videoReadyCount === episodeStats.shotCount, onClick: () => setShotFilterRequest("missingVideo") },
+        { key: "export", idx: 5, label: "成片", value: episodeStats.exported ? "已出" : "待导", done: episodeStats.exported, onClick: () => setOneClickOpen(true) },
+    ];
+
+    const moreMenuItems = [
+        {
+            key: "media",
+            icon: <Film className="size-3.5" />,
+            label: `媒体生成中心${progress.runningTaskCount > 0 ? ` (${progress.runningTaskCount} 进行中)` : ""}`,
+            onClick: () => setActiveDrawer("media"),
+        },
+        {
+            key: "updates",
+            icon: <History className="size-3.5" />,
+            label: `待更新项${progress.pendingUpdateCount > 0 ? ` (${progress.pendingUpdateCount})` : ""}`,
+            onClick: () => setActiveDrawer("updates"),
+        },
+        {
+            key: "canvas",
+            icon: <SendToBack className="size-3.5" />,
+            label: "无限画布联动",
+            onClick: () => setActiveDrawer("canvas"),
+        },
+        {
+            key: "script",
+            icon: <ExternalLink className="size-3.5" />,
+            label: "前往共享剧本工作台",
+            onClick: () => requestRouteLeave(() => router.push(`/script/${encodeURIComponent(workspace.scriptProjectId)}`)),
+        },
+        {
+            key: "refresh",
+            icon: <RefreshCw className="size-3.5" />,
+            label: "刷新工作区",
+            onClick: () => void reloadWorkspace(),
+        },
+    ];
 
     return (
         <main className="studio-page flex h-full min-h-0 flex-col overflow-hidden">
-            {/* Top Workspace Header */}
-            {/* 右侧预留全局浮动操作区的实测宽度，避免和购买积分、社群那一排重叠 */}
-            <header className="flex flex-wrap items-center gap-3 border-b border-[var(--studio-line)] bg-[var(--studio-panel-solid)] py-2.5 pl-4 pr-[var(--studio-floating-actions-width,20rem)]">
-                <Button
-                    type="text"
-                    aria-label={translate("comicDrama.backToComicDramaLibrary")}
-                    icon={<ArrowLeft className="size-4" />}
+            {/* 顶部统一单集工程栏（预留全局右侧悬浮操作宽度） */}
+            <header className="flex shrink-0 flex-wrap items-center justify-between gap-2.5 border-b border-[var(--studio-line)] bg-[var(--studio-rail)] py-2 pl-3.5 pr-[var(--studio-floating-actions-width,20rem)]">
+                {/* 左：返回 + 项目名 + 全局分集切换 */}
+                <div className="flex min-w-0 items-center gap-2">
+                    <Button
+                        type="text"
+                        size="small"
+                        aria-label="返回漫剧项目库"
+                        icon={<ArrowLeft className="size-4" />}
                         onClick={() => requestRouteLeave(() => router.push("/comic-drama"))}
-                />
-
-                <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                        <h1 className="truncate text-base font-semibold text-[var(--studio-ink)]">{projectTitle}</h1>
-                        <Tag color="purple">{projectType}</Tag>
-                    </div>
-
-                    <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-[var(--studio-muted)]">
-                        <span>{translate("comicDrama.revisionCount_0b0315", { value0: workspace.revision })}</span>
-                        <span>{translate("comicDrama.assetsCountCount_735adc", { value0: progress.readyAssetCount, value1: progress.assetCount })}</span>
-                        <span>{translate("comicDrama.shotsCountCount_67c7ca", { value0: progress.completedShotCount, value1: progress.shotCount })}</span>
-                        {progress.runningTaskCount > 0 && (
-                            <span className="text-[var(--studio-primary)]">{translate("comicDrama.runningTasksCount_7acd87", { value0: progress.runningTaskCount })}</span>
-                        )}
-                        {progress.pendingUpdateCount > 0 && (
-                            <span className="text-amber-500 font-medium">{translate("comicDrama.pendingUpdatesCount_eafaf7", { value0: progress.pendingUpdateCount })}</span>
-                        )}
-                    </div>
+                    />
+                    <h1 className="max-w-[160px] truncate text-sm font-semibold text-[var(--studio-ink)]">{projectTitle}</h1>
+                    <div className="h-4 w-px bg-[var(--studio-line)]" />
+                    <Select
+                        size="small"
+                        className="min-w-[168px]"
+                        value={effectiveEpisodeId}
+                        onChange={(val) => {
+                            setSelectedEpisodeId(val);
+                            setShotFilterRequest("all");
+                        }}
+                        options={[
+                            ...episodes.map((ep) => ({
+                                value: ep.id,
+                                label: `第${ep.episodeNumber}集：${ep.title || "未命名"}`,
+                            })),
+                            { value: "all", label: "全部分集" },
+                        ]}
+                    />
                 </div>
 
-                <div className="flex items-center gap-2">
-                    <Progress
-                        type="circle"
-                        size={32}
-                        percent={workspace.completionRate}
-                        strokeWidth={10}
-                        format={(percent) => `${percent}`}
-                        strokeColor="var(--studio-primary)"
-                    />
+                {/* 中：本集 5 步进度条 */}
+                <div className="hidden items-center gap-1 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface)] px-1.5 py-0.5 2xl:flex">
+                    {pipelineSteps.map((step, index) => (
+                        <div key={step.key} className="flex items-center gap-1">
+                            <button
+                                type="button"
+                                onClick={step.onClick}
+                                className="flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 text-xs! transition-colors hover:bg-[var(--studio-surface-hover)]"
+                            >
+                                <span
+                                    className="flex size-4 items-center justify-center rounded-full text-[11px] font-semibold tabular-nums"
+                                    style={
+                                        step.done
+                                            ? { background: "color-mix(in srgb, var(--studio-success) 16%, var(--studio-surface))", color: "var(--studio-success)" }
+                                            : { background: "var(--studio-surface-raised)", color: "var(--studio-muted)" }
+                                    }
+                                >
+                                    {step.done ? "✓" : step.idx}
+                                </span>
+                                <span className={step.done ? "font-medium text-[var(--studio-ink)]!" : "text-[var(--studio-muted)]!"}>{step.label}</span>
+                                <span className="font-mono text-[11px] text-[var(--studio-faint)] tabular-nums">{step.value}</span>
+                            </button>
+                            {index < pipelineSteps.length - 1 ? <span className="text-[var(--studio-line-strong)]">›</span> : null}
+                        </div>
+                    ))}
+                </div>
 
+                {/* 右：按需抽屉入口 + 唯一主操作「一键出集」 */}
+                <div className="flex shrink-0 items-center gap-1.5">
+                    <Button size="small" icon={<Palette className="size-3.5" />} onClick={() => setActiveDrawer("assets")}>
+                        资产库 ({progress.readyAssetCount}/{progress.assetCount})
+                    </Button>
+                    <Button size="small" icon={<Settings className="size-3.5" />} onClick={() => setActiveDrawer("settings")}>
+                        设置
+                    </Button>
+                    <Badge count={progress.pendingUpdateCount} size="small" offset={[-2, 2]}>
+                        <Dropdown menu={{ items: moreMenuItems }} trigger={["click"]}>
+                            <Button size="small" icon={<MoreHorizontal className="size-4" />} title="更多工具与后台中心" />
+                        </Dropdown>
+                    </Badge>
                     <Button
-                        icon={<RefreshCw className={`size-3.5 ${refreshing ? "animate-spin" : ""}`} />}
-                        onClick={() => void reloadWorkspace()}
-                        title={translate("comicDrama.refreshWorkspace")}
-                    />
-
-                    <Button
-                        icon={<ExternalLink className="size-3.5" />}
-                        onClick={() => requestRouteLeave(() => router.push(`/script/${encodeURIComponent(workspace.scriptProjectId)}`))}
-                    >
-                        {translate("comicDrama.scriptWorkspace")}</Button>
-
-                    <Button
-                        type={activeStage === "media" ? "primary" : "default"}
-                        icon={<Film className="size-3.5" />}
-                        onClick={() => setActiveStage("media")}
-                    >
-                        {translate("comicDrama.mediaGenerationCenter")}</Button>
-
-                    <Button
+                        size="small"
                         type="primary"
-                        icon={<Layers className="size-3.5" />}
-                        onClick={() => setBatchModalOpen(true)}
+                        loading={pipeline?.status === "running"}
+                        icon={<Sparkles className="size-3.5" />}
+                        onClick={() => setOneClickOpen(true)}
                     >
-                        {translate("comicDrama.batchProduction_9d2fe0")}</Button>
+                        {pipeline?.status === "running"
+                            ? "出集中…"
+                            : episodeStats.shotCount === 0
+                                ? "一键出集"
+                                : allEpisodeReady
+                                    ? "一键导出"
+                                    : "一键补齐本集"}
+                    </Button>
                 </div>
             </header>
 
-            {/* Main Stage Grid Workspace */}
-            <div className="grid min-h-0 flex-1 lg:grid-cols-[220px_minmax(0,1fr)]">
-                {/* Desktop Stage Sidebar Navigation */}
-                <aside className="hidden min-h-0 overflow-y-auto border-r border-[var(--studio-line)] bg-[var(--studio-panel-solid)] lg:block">
-                    {navigationList}
-                </aside>
-
-                {/* Central Stage Working Canvas */}
-                <section
-                    className={
-                        activeStage === "storyboard"
-                            ? "flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--studio-bg)] p-0"
-                            : "min-h-0 overflow-y-auto p-4 sm:p-6"
-                    }
-                >
-                    <div className={activeStage === "storyboard" ? "flex h-full w-full min-h-0 flex-col" : "mx-auto max-w-6xl"}>
-                        {renderStageContent()}
+            {/* 剧本准备度轻量提醒条（仅当存在缺失项时出现，不单独占用页面） */}
+            {!workspace.readiness.ready && workspace.readiness.items.some((item) => item.status === "missing") ? (
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--studio-line)] bg-[var(--studio-surface-raised)] px-4 py-1.5 text-xs">
+                    <span className="text-[var(--studio-warning)]">
+                        共享剧本存在未完善的必填项，可能影响自动拆镜头效果。
+                    </span>
+                    <div className="flex items-center gap-2">
+                        <Button size="small" type="link" onClick={() => setActiveDrawer("settings")}>查看明细</Button>
+                        <Button size="small" onClick={() => router.push(`/script/${encodeURIComponent(workspace.scriptProjectId)}`)}>去完善剧本</Button>
                     </div>
-                </section>
-            </div>
+                </div>
+            ) : null}
 
-            {/* Global Modals & Drawers */}
-            <BatchGenerationModal open={batchModalOpen} onClose={() => setBatchModalOpen(false)} />
-            <Modal title={translate("comicDrama.unsavedTimelineChanges")} open={leavePromptOpen} onCancel={cancelLeave} closable={!timelineSaving} mask={{ closable: false }} footer={[
-                <Button key="cancel" onClick={cancelLeave} disabled={timelineSaving}>{translate("comicDrama.continueEditing")}</Button>,
-                <Button key="discard" danger onClick={() => finishLeave(true)} disabled={timelineSaving}>{translate("comicDrama.leaveWithoutSaving")}</Button>,
-                <Button key="save" type="primary" loading={timelineSaving} onClick={() => void saveAndLeave()}>{translate("comicDrama.saveAndLeave")}</Button>,
-            ]}>
+            {/* 单集一键出集流水线状态条 */}
+            {pipeline && pipeline.status !== "idle" && pipeline.status !== "canceled" ? (
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--studio-line)] bg-[var(--studio-surface-raised)] px-4 py-2">
+                    {pipeline.status === "running" ? (
+                        <>
+                            <div className="flex items-center gap-2 text-xs">
+                                <Spin size="small" />
+                                <span className="font-semibold text-[var(--studio-ink)]">一键出集流水线运行中</span>
+                                <span className="text-[var(--studio-muted)]">{pipelineMessage}</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <div className="w-36">
+                                    <Progress percent={pipelineProgressPercent} size="small" showInfo={false} strokeColor="var(--studio-action)" />
+                                </div>
+                                <span className="font-mono text-xs font-semibold text-[var(--studio-ink)] tabular-nums">{pipelineProgressPercent}%</span>
+                                <Button size="small" danger icon={<Square className="size-3" />} loading={pipelineActionLoading} onClick={() => void handleCancelPipeline()}>
+                                    停止
+                                </Button>
+                            </div>
+                        </>
+                    ) : pipeline.status === "paused" ? (
+                        <>
+                            <div className="flex items-center gap-2 text-xs">
+                                <span className="rounded bg-[color-mix(in_srgb,var(--studio-warning)_18%,var(--studio-surface))] px-2 py-0.5 font-medium text-[var(--studio-warning)]">
+                                    等待确认
+                                </span>
+                                <span className="font-medium text-[var(--studio-ink)]">{pipelineMessage || "分镜与资产图已就绪"}</span>
+                                <span className="text-[var(--studio-muted)]">可先用右侧 {translate("comicDrama.nanaAgent")} 微调，确认后再生成视频</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Button size="small" loading={pipelineActionLoading} onClick={() => void handleCancelPipeline()}>
+                                    暂不继续
+                                </Button>
+                                <Button size="small" type="primary" loading={pipelineActionLoading} onClick={() => void handleResumePipeline()}>
+                                    确认无误，继续生成视频与成片
+                                </Button>
+                            </div>
+                        </>
+                    ) : pipeline.status === "completed" ? (
+                        <>
+                            <div className="flex items-center gap-2 text-xs">
+                                <CheckCircle2 className="size-4 text-[var(--studio-success)]" />
+                                <span className="font-medium text-[var(--studio-ink)]">{pipelineMessage || "本集一键出集已完成"}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {exportTaskId ? (
+                                    <Button size="small" type="primary" icon={<Download className="size-3.5" />} loading={downloadingExport} onClick={() => void handleDownloadPipelineExport()}>
+                                        下载本集 MP4
+                                    </Button>
+                                ) : null}
+                                <Button size="small" type="text" onClick={() => setPipeline(null)}>关闭提示</Button>
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <div className="flex items-center gap-2 text-xs text-[var(--studio-danger)]">
+                                <span className="font-semibold">一键出集未完成：</span>
+                                <span>{pipeline.errorMessage || pipelineMessage}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Button size="small" type="primary" onClick={() => setOneClickOpen(true)}>重新补齐</Button>
+                                <Button size="small" type="text" onClick={() => setPipeline(null)}>关闭</Button>
+                            </div>
+                        </>
+                    )}
+                </div>
+            ) : null}
+
+            {/* 一体化主工作区 */}
+            <UnifiedStudioStage
+                episodeId={effectiveEpisodeId}
+                pauseAutoSave={leavePromptOpen}
+                onOpenOneClick={() => setOneClickOpen(true)}
+                externalFilter={shotFilterRequest}
+            />
+
+            {/* 一键出集确认弹窗 */}
+            <EpisodeOneClickModal
+                open={oneClickOpen}
+                episodeId={effectiveEpisodeId}
+                episodeShots={episodeShots}
+                onClose={() => setOneClickOpen(false)}
+                onStarted={(started) => setPipeline(started)}
+            />
+
+            {/* 按需侧滑抽屉：资产库 / 项目设置(含准备度与声音对白) / 媒体生成中心 / 待更新项 / 画布联动 */}
+            <Drawer
+                title={
+                    activeDrawer === "assets"
+                        ? "全剧视觉资产库"
+                        : activeDrawer === "settings"
+                            ? "生产设置、剧本准备与声音对白"
+                            : activeDrawer === "media"
+                                ? "媒体生成中心"
+                                : activeDrawer === "updates"
+                                    ? "上游剧本变更待更新项"
+                                    : activeDrawer === "canvas"
+                                        ? "无限画布联动"
+                                        : ""
+                }
+                open={Boolean(activeDrawer)}
+                onClose={() => setActiveDrawer(null)}
+                size="large"
+                styles={{ wrapper: { width: "min(960px, 92vw)" } }}
+                destroyOnHidden
+            >
+                {activeDrawer === "assets" ? <StageAssets /> : null}
+                {activeDrawer === "settings" ? (
+                    <Tabs
+                        items={[
+                            { key: "settings", label: "生产设置", icon: <Settings className="size-3.5" />, children: <StageSettings /> },
+                            { key: "readiness", label: "剧本准备度", icon: <CheckCircle2 className="size-3.5" />, children: <StageReadiness /> },
+                            { key: "sound", label: "声音对白", icon: <Volume2 className="size-3.5" />, children: <StageSound /> },
+                        ]}
+                    />
+                ) : null}
+                {activeDrawer === "media" ? <StageMedia /> : null}
+                {activeDrawer === "updates" ? <StageUpdates /> : null}
+                {activeDrawer === "canvas" ? <StageCanvas /> : null}
+            </Drawer>
+
+            {/* 时间轴未保存离开拦截弹窗 */}
+            <Modal
+                title={translate("comicDrama.unsavedTimelineChanges")}
+                open={leavePromptOpen}
+                onCancel={cancelLeave}
+                closable={!timelineSaving}
+                mask={{ closable: false }}
+                footer={[
+                    <Button key="cancel" onClick={cancelLeave} disabled={timelineSaving}>{translate("comicDrama.continueEditing")}</Button>,
+                    <Button key="discard" danger onClick={() => finishLeave(true)} disabled={timelineSaving}>{translate("comicDrama.leaveWithoutSaving")}</Button>,
+                    <Button key="save" type="primary" loading={timelineSaving} onClick={() => void saveAndLeave()}>{translate("comicDrama.saveAndLeave")}</Button>,
+                ]}
+            >
                 <p>{translate("comicDrama.textOrAudioTracksContainUnsavedMovesOrTrims")}</p>
-                {timelineSaveError ? <Alert className="mt-3" type="error" showIcon message={timelineSaveError} /> : null}
+                {timelineSaveError ? <Alert className="mt-3" type="error" showIcon title={timelineSaveError} /> : null}
             </Modal>
         </main>
     );

@@ -22,6 +22,7 @@ import { NovelAdaptationPanel } from "@/features/script/components/novel-adaptat
 import { createScriptScene } from "@/features/script/lib/script-episode-editing";
 import { useScriptStore } from "@/features/script/stores/use-script-store";
 import type { ScriptSourceFocus, ScriptWorkspaceSection } from "@/features/script/types";
+import { useResizableRightPanel } from "@/shared/hooks/use-resizable-right-panel";
 import styles from "./script-directory.module.css";
 
 /** 左侧目录的一级分组：剧本创作入口与小说素材入口分开。 */
@@ -85,6 +86,21 @@ export default function ScriptWorkspacePage() {
     const [directoryOpen, setDirectoryOpen] = useState(false);
     const [entering, setEntering] = useState(false);
     const [sourceFocus, setSourceFocus] = useState<ScriptSourceFocus | null>(null);
+    const {
+        width: assistantWidth,
+        isResizing: assistantResizing,
+        minWidth: assistantMinWidth,
+        maxWidth: assistantMaxWidth,
+        startResize: startAssistantResize,
+        resizeWithKeyboard: resizeAssistantWithKeyboard,
+        resetWidth: resetAssistantWidth,
+    } = useResizableRightPanel({
+        defaultWidth: 380,
+        minWidth: 320,
+        maxWidth: 720,
+        minMainWidth: 620,
+        storageKey: "novanova:script-nana-width",
+    });
 
     useEffect(() => {
         const projectId = params.id;
@@ -293,16 +309,41 @@ export default function ScriptWorkspacePage() {
             {saveStatus === "error" ? <Alert banner type="error" title={saveError || translate("script.saveFailedYourEditsRemainOnThisPage")} action={<Button size="small" onClick={retrySave}>{translate("script.retrySave")}</Button>} /> : null}
             {saveStatus === "conflict" ? <Alert banner type="warning" title={translate("script.theCloudVersionWasUpdatedElsewhereYourEditsRemainHere")} action={<Button size="small" onClick={() => modal.confirm({ title: translate("script.reloadCloudVersion"), content: translate("script.unsavedChangesOnThisPageWillBeLostCopyImportant"), okText: translate("script.confirmReload"), cancelText: translate("script.cancel"), onOk: () => reloadProject() })}>{translate("script.reloadCloudVersion_2c8fdf")}</Button>} /> : null}
 
-            <div className={`grid min-h-0 flex-1 lg:grid-cols-[260px_minmax(0,1fr)] ${AI_PANEL_SECTIONS.includes(section) ? "xl:grid-cols-[260px_minmax(0,1fr)_360px]" : ""}`}>
+            <div className={`grid min-h-0 flex-1 lg:grid-cols-[260px_minmax(0,1fr)] ${AI_PANEL_SECTIONS.includes(section) ? "xl:grid-cols-[260px_minmax(0,1fr)_auto]" : ""}`}>
                 <aside className="hidden min-h-0 overflow-y-auto border-r border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-3 lg:block"><Directory section={section} selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} expandedEpisodeIds={expandedEpisodeIds} onToggleEpisode={toggleEpisodeExpansion} onSelectSection={selectSection} onSelectEpisode={(episodeId) => { selectEpisode(episodeId); setSection("episodes"); }} onSelectScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSection("episodes"); }} onCreatedScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSceneEditRequestId(sceneId); setSection("episodes"); }} /></aside>
                 {section === "episodes" ? <ScriptEpisodeReader selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} sceneEditRequestId={sceneEditRequestId} onSceneEditRequestHandled={() => setSceneEditRequestId("")} onSelectEpisode={selectEpisode} onSelectScene={selectScene} onOpenAiGeneration={() => setAssistantOpen(true)} /> : section === "outline" ? <ScriptOutlineWorkspace key={project.id} onOpenAiGeneration={() => setAssistantOpen(true)} /> : section === "source" ? <ScriptSourcePanel focus={sourceFocus} /> : section === "storyBible" ? <StoryBiblePanel onOpenSource={(start, end) => { setSourceFocus({ start, end, key: nanoid() }); setSection("source"); }} /> : section === "adaptation" ? <NovelAdaptationPanel onOpenStoryBible={() => setSection("storyBible")} /> : <>
                     <section className="min-h-0 overflow-y-auto p-4 sm:p-6"><div className="mx-auto max-w-5xl rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-4 sm:p-6"><ScriptSectionEditor section={section} /></div></section>
                 </>}
-                {AI_PANEL_SECTIONS.includes(section) ? <div className="hidden min-h-0 border-l border-[var(--studio-line)] xl:block"><ScriptAiPanel section={section} selectedEpisodeId={selectedEpisodeId} /></div> : null}
+                {AI_PANEL_SECTIONS.includes(section) ? (
+                    <div
+                        className={`relative hidden h-full min-h-0 shrink-0 flex-col border-l border-[var(--studio-line)] xl:flex ${assistantResizing ? "select-none" : "transition-[width] duration-150 ease-out motion-reduce:transition-none"}`}
+                        style={{ width: assistantWidth }}
+                    >
+                        <button
+                            type="button"
+                            className="group absolute inset-y-0 left-0 z-40 w-3 -translate-x-1/2 cursor-col-resize touch-none outline-none"
+                            onPointerDown={startAssistantResize}
+                            onKeyDown={resizeAssistantWithKeyboard}
+                            onDoubleClick={resetAssistantWidth}
+                            role="separator"
+                            aria-orientation="vertical"
+                            aria-label={translate("canvas.resizeCanvasAgent")}
+                            aria-valuemin={assistantMinWidth}
+                            aria-valuemax={Math.round(assistantMaxWidth)}
+                            aria-valuenow={Math.round(assistantWidth)}
+                            title={translate("canvas.dragToResizeDoubleClickToReset")}
+                        >
+                            <span className="absolute left-1/2 top-1/2 h-12 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--studio-muted)] opacity-0 transition-opacity group-hover:opacity-60 group-focus-visible:opacity-80 group-active:opacity-100" />
+                        </button>
+                        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                            <ScriptAiPanel section={section} selectedEpisodeId={selectedEpisodeId} />
+                        </div>
+                    </div>
+                ) : null}
             </div>
 
             <Drawer title={translate("script.scriptContents")} placement="left" size={300} open={directoryOpen} onClose={() => setDirectoryOpen(false)}><Directory section={section} selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} expandedEpisodeIds={expandedEpisodeIds} onToggleEpisode={toggleEpisodeExpansion} onSelectSection={selectSection} onSelectEpisode={(episodeId) => { selectEpisode(episodeId); setSection("episodes"); setDirectoryOpen(false); }} onSelectScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSection("episodes"); setDirectoryOpen(false); }} onCreatedScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSceneEditRequestId(sceneId); setSection("episodes"); setDirectoryOpen(false); }} /></Drawer>
-            <Drawer title={translate("script.aiScriptAssistant")} placement="right" size="min(380px, 100vw)" open={assistantOpen} onClose={() => setAssistantOpen(false)} styles={{ body: { padding: 0 } }}><ScriptAiPanel section={section} selectedEpisodeId={selectedEpisodeId} /></Drawer>
+            <Drawer title={translate("script.aiScriptAssistant")} placement="right" size="min(400px, 100vw)" open={assistantOpen} onClose={() => setAssistantOpen(false)} styles={{ body: { padding: 0, height: "100%" } }}><ScriptAiPanel section={section} selectedEpisodeId={selectedEpisodeId} /></Drawer>
         </main>
     );
 }

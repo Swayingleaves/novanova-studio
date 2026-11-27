@@ -997,5 +997,6 @@
     "confirmOverwriteExistingShotsTitle": "Replace existing shots?",
     "confirmOverwriteExistingShotsContent": "{value0} existing shots in this scope will be replaced with {value1} new shots, and {value2} linked generated media items and prompt records will be removed. Continue?",
     "confirmOverwriteAction": "Replace and apply",
-    "shotDraftReplacedExistingSuccess": "Shot draft applied, replacing {value0} existing shots"
+    "shotDraftReplacedExistingSuccess": "Shot draft applied, replacing {value0} existing shots",
+    "nanaAgent": "Nana Agent"
 }

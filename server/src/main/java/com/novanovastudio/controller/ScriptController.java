@@ -5,6 +5,7 @@ import com.novanovastudio.dto.ScriptAiActionPricingDtos;
 import com.novanovastudio.dto.ScriptDtos;
 import com.novanovastudio.service.ScriptAgentService;
 import com.novanovastudio.service.ScriptAiActionPricingService;
+import com.novanovastudio.service.ScriptChatAgentService;
 import com.novanovastudio.service.ScriptService;
 import jakarta.validation.Valid;
 import java.util.LinkedHashMap;
@@ -51,6 +52,9 @@ public class ScriptController {
 
     /** 剧本AI动作定价服务。 */
     private final ScriptAiActionPricingService aiActionPricingService;
+
+    /** 剧本对话式编剧助手服务。 */
+    private final ScriptChatAgentService scriptChatAgentService;
 
     /**
      * 分页查询当前用户的剧本项目。
@@ -388,6 +392,45 @@ public class ScriptController {
             @Valid @RequestBody ScriptDtos.ProjectRevisionRequest request, ServerHttpRequest httpRequest) {
         return execute("进入漫剧创作", httpRequest, request,
                 scriptService.enterComicDrama(request.projectId(), request.expectedRevision()));
+    }
+
+    /**
+     * 查询剧本项目绑定的编剧助手历史对话。
+     *
+     * @param request 项目标识请求
+     * @param httpRequest 当前HTTP请求
+     * @return 会话标识及历史消息列表
+     */
+    @PostMapping("/agent/getHistory")
+    public Mono<ApiResponse<ScriptDtos.AgentHistoryResponse>> getAgentHistory(
+            @Valid @RequestBody ScriptDtos.ProjectIdRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询剧本助手会话历史", httpRequest, request, scriptChatAgentService.getHistory(request.projectId()));
+    }
+
+    /**
+     * 与剧本编剧助手进行一轮上下文感知对话。
+     *
+     * @param request 对话请求
+     * @param httpRequest 当前HTTP请求
+     * @return 助手回复与推荐动作卡片
+     */
+    @PostMapping("/agent/chat")
+    public Mono<ApiResponse<ScriptDtos.AgentChatResponse>> chatWithAgent(
+            @Valid @RequestBody ScriptDtos.AgentChatRequest request, ServerHttpRequest httpRequest) {
+        return execute("剧本编剧助手对话", httpRequest, request, scriptChatAgentService.chat(request));
+    }
+
+    /**
+     * 重置当前剧本项目的编剧助手对话会话。
+     *
+     * @param request 项目标识请求
+     * @param httpRequest 当前HTTP请求
+     * @return 重置后的空历史响应
+     */
+    @PostMapping("/agent/resetSession")
+    public Mono<ApiResponse<ScriptDtos.AgentHistoryResponse>> resetAgentSession(
+            @Valid @RequestBody ScriptDtos.ProjectIdRequest request, ServerHttpRequest httpRequest) {
+        return execute("重置剧本助手会话", httpRequest, request, scriptChatAgentService.resetSession(request.projectId()));
     }
 
     /**

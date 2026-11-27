@@ -395,3 +395,38 @@ export type ScriptAiActionModelPricing = {
     actions: ScriptAiActionPricing[];
     revision: number;
 };
+
+/** 剧本对话式编剧助手历史消息。 */
+export type ScriptAgentHistoryMessage = {
+    id: string;
+    role: "user" | "assistant" | string;
+    text: string;
+    meta?: string | null;
+    createdAt?: string | null;
+};
+
+/** 剧本对话式编剧助手推荐的可执行草稿动作。 */
+export type ScriptAgentActionRecommendation = {
+    actionType: string;
+    label: string;
+    description: string;
+    instruction: string;
+    targetType: string;
+    targetId: string;
+    targetLabel: string;
+    episodeDurationSeconds?: number | null;
+};
+
+/** 剧本对话式编剧助手单轮回复。 */
+export type ScriptAgentChatResponse = {
+    sessionId: string;
+    messageId: string;
+    reply: string;
+    recommendations: ScriptAgentActionRecommendation[];
+};
+
+/** 剧本对话式编剧助手会话历史响应。 */
+export type ScriptAgentHistoryResponse = {
+    sessionId: string;
+    messages: ScriptAgentHistoryMessage[];
+};

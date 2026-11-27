@@ -51,3 +51,15 @@ export type ComicDramaProjectList = { projects: ComicDramaProjectSummary[]; tota
 export type ComicDramaMutationResult = { projectId: string; revision: number; updatedAt: string };
 /** 共享剧本来源类型。 */
 export type ComicDramaScriptSource = { episodes: EpisodeSummary[]; characters: ScriptCharacter[]; locations: ScriptLocation[]; episodeDetails: Record<string, EpisodeDetail>; scenes: ScriptScene[] };
+/** 制片助手直接生效的镜头改动摘要。 */
+export type ComicDramaAgentAppliedEdit = { shotId: string; shotNumber: number; updatedFields: string[] };
+/** 制片助手提出的待确认动作建议。 */
+export type ComicDramaAgentActionSuggestion = { actionType: "oneClickEpisode" | "splitEpisode" | "generateAssets" | "composePrompts" | "generateVideos" | "exportVideo"; label: string; description: string; shotIds: string[] };
+/** 制片助手单轮对话响应。 */
+export type ComicDramaAgentChatResponse = { sessionId: string; messageId: string; reply: string; appliedEdits: ComicDramaAgentAppliedEdit[]; suggestions: ComicDramaAgentActionSuggestion[]; workspaceChanged: boolean };
+/** 制片助手历史会话消息。 */
+export type ComicDramaAgentHistoryMessage = { id: string; role: "user" | "assistant"; text: string; meta?: string | null; createdAt?: string };
+/** 制片助手历史会话响应。 */
+export type ComicDramaAgentHistoryResponse = { sessionId: string; messages: ComicDramaAgentHistoryMessage[] };
+/** 单集一键出集流水线记录。 */
+export type ComicDramaEpisodePipeline = { id: string; projectId: string; episodeId?: string | null; executionMode: "review" | "auto"; currentStep: string; status: "idle" | "running" | "paused" | "completed" | "failed" | "canceled"; config: Record<string, unknown>; progress: Record<string, unknown>; errorMessage: string; createdAt?: string; updatedAt?: string };

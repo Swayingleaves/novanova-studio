@@ -997,5 +997,6 @@
     "confirmOverwriteExistingShotsTitle": "确认覆盖原有镜头？",
     "confirmOverwriteExistingShotsContent": "当前范围内原有的 {value0} 个镜头将被替换为 {value1} 个新镜头，关联的 {value2} 个已生成媒体与提示词记录将一并清理。此操作不可逆，是否继续？",
     "confirmOverwriteAction": "确认覆盖生效",
-    "shotDraftReplacedExistingSuccess": "镜头草稿已确认生效，已覆盖替换原有 {value0} 个镜头"
+    "shotDraftReplacedExistingSuccess": "镜头草稿已确认生效，已覆盖替换原有 {value0} 个镜头",
+    "nanaAgent": "Nana助手"
 }

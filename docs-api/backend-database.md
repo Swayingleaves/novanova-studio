@@ -816,6 +816,12 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 
 `V38__Add_Storyboard_Text_Font_Family.sql` 为 `comic_drama_timeline_texts` 增加 `font_family`，使用固定字体目录标识；已有文字片段默认 `notoSansSc`，数据库约束限定七款随产品分发的免费字体。文字保存接口与分镜导出快照均保留该字段。
 
+`V117__Add_Comic_Drama_Agent_And_Pipeline.sql`（社区版 `V118__Add_Comic_Drama_Agent_And_Pipeline.sql`）为 `comic_drama_projects` 新增 `agent_session_id`，复用 `agent_session` 保存漫剧工作台 AI 制片助手的多轮会话；同时新增 `comic_drama_episode_pipelines` 表持久化单集一键出集流水线的执行策略（`review` 关键节点停顿 / `auto` 全自动直出）、当前阶段、配置与实时进度，支持刷新页面或重启后恢复查询。
+
+`V118__Add_Script_Agent_Session.sql`（社区版 `V119__Add_Script_Agent_Session.sql`）为 `script_projects` 新增 `agent_session_id`，复用 `agent_session`（`profile='script'`）持久化剧本创作工作台右侧 AI 剧本助手的多轮编剧对话记录。
+
+
+
 
 ## 13、V40 原文导入与人工校对
 

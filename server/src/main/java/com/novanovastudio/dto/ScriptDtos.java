@@ -441,4 +441,42 @@ public final class ScriptDtos {
     /** 漫剧生产准备度。 */
     public record ProductionReadiness(String projectId, boolean ready, List<ReadinessItem> items) {
     }
+
+    /** 剧本对话助手请求。 */
+    public record AgentChatRequest(
+            @NotBlank @Size(max = 64) String projectId,
+            @Size(max = 32) String section,
+            @Size(max = 64) String selectedEpisodeId,
+            @Size(max = 32) String targetType,
+            @Size(max = 64) String targetId,
+            @Size(max = 200) String targetLabel,
+            @NotBlank @Size(max = 8000) String message,
+            @Size(max = 256) String model) {
+    }
+
+    /** 剧本对话助手推荐的可执行草稿动作。 */
+    public record AgentActionRecommendation(
+            String actionType,
+            String label,
+            String description,
+            String instruction,
+            String targetType,
+            String targetId,
+            String targetLabel,
+            Integer episodeDurationSeconds) {
+    }
+
+    /** 剧本对话助手单轮响应。 */
+    public record AgentChatResponse(
+            String sessionId,
+            String messageId,
+            String reply,
+            List<AgentActionRecommendation> recommendations) {
+    }
+
+    /** 剧本对话助手历史会话响应。 */
+    public record AgentHistoryResponse(
+            String sessionId,
+            List<com.novanovastudio.agent.dto.AgentSessionHistoryMessage> messages) {
+    }
 }

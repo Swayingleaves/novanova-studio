@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Grid2x2, Lock, LockOpen, Maximize2, Scissors, Upload } from "lucide-react";
+import { Copy, Grid2x2, Lock, LockOpen, Maximize2, ScanSearch, Scissors, Upload } from "lucide-react";
 
 import { buildCanvasImageToolActions, type CanvasImageNodeActionId } from "../domain/canvas-image-tool-actions";
 import type { CanvasNode } from "../types";
@@ -15,9 +15,10 @@ export type ImageToolHandlers = {
     onSplit: (node: CanvasNode) => void;
     onViewImage: (node: CanvasNode) => void;
     onCopyPrompt: (node: CanvasNode) => void;
+    onReversePrompt: (node: CanvasNode) => void;
 };
 
-const ICONS = { copyPrompt: Copy, replace: Upload, crop: Scissors, split: Grid2x2, view: Maximize2 } as const;
+const ICONS = { copyPrompt: Copy, reversePrompt: ScanSearch, replace: Upload, crop: Scissors, split: Grid2x2, view: Maximize2 } as const;
 
 export function buildImageToolbarTools(node: CanvasNode, handlers: ImageToolHandlers) {
     return buildCanvasImageToolActions({ freeResize: Boolean(node.frame.freeResize) }).map((action) => {
@@ -29,6 +30,7 @@ export function buildImageToolbarTools(node: CanvasNode, handlers: ImageToolHand
 function runImageTool(id: ImageNodeActionToolId, node: CanvasNode, handlers: ImageToolHandlers) {
     const actions: Record<ImageNodeActionToolId, (target: CanvasNode) => void> = {
         copyPrompt: handlers.onCopyPrompt,
+        reversePrompt: handlers.onReversePrompt,
         replace: handlers.onUpload,
         resize: handlers.onToggleFreeResize,
         crop: handlers.onCrop,

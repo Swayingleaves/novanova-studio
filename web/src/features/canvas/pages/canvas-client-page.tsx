@@ -3464,6 +3464,87 @@ function CanvasWorkspacePage() {
         [message, requestFocusNodes],
     );
 
+    const reversePromptFromImageNode = useCallback(
+        async (node: CanvasDomainNode) => {
+            if (!isImageNode(node) || !node.content.source) return;
+            const textModel = canvasEffectiveConfig.textModel || canvasEffectiveConfig.model;
+            if (!isAiConfigReady(canvasEffectiveConfig, textModel)) {
+                showMissingAiConfig("text");
+                return;
+            }
+            const textConfig = getCanvasNodeTemplate("text");
+            const childId = nanoid();
+            const position = findNonOverlappingCanvasNodePosition(
+                nodesRef.current,
+                {
+                    x: node.frame.position.x + node.frame.width + CONNECTED_NODE_GAP,
+                    y: node.frame.position.y + node.frame.height / 2 - textConfig.height / 2,
+                },
+                textConfig.width,
+                textConfig.height,
+            );
+            const childNode = updateCanvasNodeFrame(
+                {
+                    ...createCanvasNode("text", { x: 0, y: 0 }, { content: "", status: NODE_STATUS_LOADING, fontSize: 14 }),
+                    id: childId,
+                    title: "反推提示词",
+                },
+                { position, width: textConfig.width, height: textConfig.height },
+            );
+            setNodes((prev) => [...prev, childNode]);
+            setConnections((prev) => [...prev, createRightToLeftConnection(node.id, childId)]);
+            requestFocusNodes([childId]);
+
+            const imageUrl = node.content.objectStorage?.url || (/^https?:\/\//i.test(node.content.source) ? node.content.source : undefined);
+            const reference = {
+                id: node.id,
+                name: node.title || "image.png",
+                mimeType: node.content.mimeType || "image/png",
+                storageKey: node.content.storageKey,
+                url: imageUrl,
+            };
+            const controller = new AbortController();
+            startGenerationRequest(childId, node.id, node.id, controller);
+            try {
+                const task = await createAiTask({
+                    taskType: "text",
+                    prompt: "请仔细观察这张图片，反推出可直接用于 AI 绘图的中文提示词。准确描述画面主体、外观细节、场景环境、构图视角、艺术风格、光线色彩与氛围质感。只返回提示词正文，不要包含解释、前缀或 Markdown 标题。",
+                    model: textModel,
+                    parameters: {
+                        systemPrompt: "你是专业的 AI 绘画提示词反推专家。根据用户提供的图片，输出一段完整、细腻、可直接用于生图的中文提示词正文，不要输出多余解释。",
+                    },
+                    references: [reference],
+                    generationSource: "canvas",
+                });
+                setNodes((prev) => prev.map((item) => (item.id === childId ? updateCanvasNodeExecution(item, { taskId: task.id }) : item)));
+                let streamed = "";
+                const unsubscribe = subscribeAiTaskDeltas((deltaTaskId, delta) => {
+                    if (deltaTaskId !== task.id || controller.signal.aborted) return;
+                    streamed += delta;
+                    setNodes((prev) => prev.map((item) => (item.id === childId ? replaceCanvasNodeWithText(item, streamed, item.title, "running") : item)));
+                });
+                try {
+                    const completed = await waitAiTask(task.id, { signal: controller.signal });
+                    const content = ((completed.resultData as { content?: string } | null)?.content || streamed).trim();
+                    setNodes((prev) => prev.map((item) => (item.id === childId ? replaceCanvasNodeWithText(item, content, item.title, "succeeded") : item)));
+                } finally {
+                    unsubscribe();
+                }
+            } catch (error) {
+                if (isGenerationCanceled(error)) {
+                    setNodes((prev) => prev.map((item) => (item.id === childId ? updateCanvasNodeExecution(item, { phase: "idle", errorMessage: "" }) : item)));
+                    return;
+                }
+                const errorText = error instanceof Error ? error.message : "反推提示词失败";
+                setNodes((prev) => prev.map((item) => (item.id === childId ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage: errorText }) : item)));
+                message.error(errorText);
+            } finally {
+                finishGenerationRequest(childId, controller);
+            }
+        },
+        [canvasEffectiveConfig, finishGenerationRequest, message, requestFocusNodes, showMissingAiConfig, startGenerationRequest],
+    );
+
     const splitImageNode = useCallback(
         async (node: CanvasDomainNode, params: CanvasImageSplitParams) => {
             if (!isImageNode(node) || !node.content.source) return;
@@ -6163,7 +6244,6 @@ function CanvasWorkspacePage() {
 
                 <CanvasNodeHoverToolbar
                     onCaptureFrame={captureVideoFrame}
-                    onShare={canShare ? openCanvasShare : undefined}
                     node={isNodeDragging || nodeImageSettingsOpen || selectedSourceNodes.length >= 2 ? null : toolbarNode}
                     viewport={viewport}
                     onKeep={keepNodeToolbar}
@@ -6179,14 +6259,11 @@ function CanvasWorkspacePage() {
                     onUploadObjectStorage={(node) => void uploadNodeObjectStorage(node)}
                     onDownload={downloadNodeImage}
                     onSaveAsset={(node) => void saveNodeAsset(node)}
-                    onChooseAsset={(node) => {
-                        setCanvasAssetReplaceNodeId(node.id);
-                        setCanvasAssetPickerOpen(true);
-                    }}
                     onCrop={(node) => setCropNodeId(node.id)}
                     onTrim={(node) => setAudioTrimNodeId(node.id)}
                     onSplit={(node) => setSplitNodeId(node.id)}
                     onViewImage={(node) => setPreviewNodeId(node.id)}
+                    onReversePrompt={(node) => void reversePromptFromImageNode(node)}
                     onRetry={(node) => (isStoryboardNode(node) ? void handleGenerateStoryboard(node) : void handleRetryNode(node))}
                     onGenerateStoryboardVideos={(node) => {
                         if (isStoryboardNode(node)) setStoryboardVideoGenerationNodeId(node.id);
@@ -6380,7 +6457,7 @@ function CanvasWorkspacePage() {
             >
                 <div className="space-y-4">
                     <p className="text-xs leading-5 opacity-70">
-                        仅对当前画布生效：新建节点与画布 Agent 将优先使用这里的默认模型，你仍可随时单独修改单个节点的模型。
+                        仅对当前画布生效：新建节点与 {translate("canvas.canvasAgent")} 将优先使用这里的默认模型，你仍可随时单独修改单个节点的模型。
                     </p>
                     <div>
                         <label className="mb-1.5 block text-sm font-semibold">默认文本模型</label>

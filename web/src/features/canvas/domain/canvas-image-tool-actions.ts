@@ -1,6 +1,6 @@
 
 import { translateMessage as translate } from "@/features/locale/translate";
-export type CanvasImageNodeActionId = "copyPrompt" | "replace" | "resize" | "crop" | "split" | "view";
+export type CanvasImageNodeActionId = "copyPrompt" | "reversePrompt" | "replace" | "resize" | "crop" | "split" | "view";
 
 export type CanvasImageToolAction = {
     id: CanvasImageNodeActionId;
@@ -9,11 +9,12 @@ export type CanvasImageToolAction = {
     active: boolean;
 };
 
-const ACTION_ORDER: CanvasImageNodeActionId[] = ["copyPrompt", "replace", "resize", "crop", "split", "view"];
+const ACTION_ORDER: CanvasImageNodeActionId[] = ["copyPrompt", "reversePrompt", "replace", "resize", "crop", "split", "view"];
 
 export function buildCanvasImageToolActions(context: { freeResize: boolean }): CanvasImageToolAction[] {
     const labels: Record<CanvasImageNodeActionId, Omit<CanvasImageToolAction, "id">> = {
         copyPrompt: { label: translate("canvas.copy"), title: translate("canvas.copyImagePrompt"), active: false },
+        reversePrompt: { label: "反推提示词", title: "识图反推生成这张图的提示词", active: false },
         replace: { label: translate("canvas.replace"), title: translate("canvas.replaceImageContent"), active: false },
         resize: {
             label: context.freeResize ? translate("canvas.freeAspectRatio") : translate("canvas.lockAspectRatio"),

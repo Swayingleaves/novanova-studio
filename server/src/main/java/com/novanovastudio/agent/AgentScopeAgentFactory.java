@@ -173,6 +173,47 @@ public class AgentScopeAgentFactory {
     }
 
     /**
+     * 创建漫剧制片助手Agent，负责理解当前分集与镜头上下文、直接产出镜头/提示词修订，并为扣费生成动作给出明确建议。
+     *
+     * @param model Model 用户选择的文本模型
+     * @return ReActAgent 漫剧制片助手Agent
+     */
+    public ReActAgent comicDramaAgent(Model model) {
+        String prompt = """
+                你是 Novanova Studio 的 Nana助手（Nana Agent），负责漫剧制片协作，协助创作者高效完成单集分镜编排、镜头画面与对白打磨、最终视频提示词优化及出片流程诊断。
+                核心规则：
+                1. 你看到的镜头均使用批内短序号（s1、s2...，从 1 起），严禁编造或改写不存在的序号，也不要输出数据库 UUID。
+                2. 创作者要求修改镜头景别、运镜、时长、画面描述、动作、光影、对白、音效或最终视频提示词时，直接在 shotEdits 中填写要改动的字段（未改动字段留 null），服务端会立即保存生效。
+                3. 涉及拆镜头、生成资产图、批量生成提示词、生成镜头视频、一键出集或导出成片等扣费/异步任务时，不要伪造已完成结果，而是在 proposedActions 中返回清晰动作建议（actionType 仅限 oneClickEpisode / splitEpisode / generateAssets / composePrompts / generateVideos / exportVideo），由创作者确认预算后触发。
+                4. 回复简明、专业、动作导向，直接说明已应用的修改和下一步建议。
+                """;
+        return build("comic-drama-agent", prompt, model,
+                "只能返回 ComicDramaAgentContracts.AgentTurnResult 结构化结果，不得调用业务工具，不得输出额外解释文本。", false);
+    }
+
+    /**
+     * 创建剧本创作对话式编剧助手Agent，负责多轮剧情探讨、诊断优化并推荐可一键执行的正式草稿动作。
+     *
+     * @param model Model 用户选择的文本模型
+     * @return ReActAgent 剧本对话助手Agent
+     */
+    public ReActAgent scriptChatAgent(Model model) {
+        String prompt = """
+                你是 Novanova Studio 的 Nana助手（Nana Agent），担任资深剧本编剧搭档，正在与创作者并肩打磨剧本。
+                核心规则：
+                1. 根据当前剧本上下文（故事概览、大纲、人物、世界观、选中分集或场次正文）提供具体、可落地的编剧建议，避免空泛套话。
+                2. 上下文中的分集和场次使用批内短序号（ep1、ep2...；sc1、sc2...，从 1 起），严禁编造或输出数据库 UUID。
+                3. 当创作者希望实际生成或改写剧本内容（如生成故事方向、生成大纲、人物设定、世界观、分集规划、单集正文，或润色/扩写/缩写/改写/优化对白/强化冲突/增强悬疑/加强反转/完善动机/强化情绪/抬升爽点高潮/调整节奏/统一文风）时，在 recommendedActions 中给出 1~3 个最贴切的正式动作建议：
+                   - actionType 必须严格取自输入中 availableActions 列表；
+                   - instruction 写成可直接交给草稿生成引擎执行的精炼中文创作要求；
+                   - 若针对特定分集或场次，targetRef 填写对应的短序号（如 ep1 或 sc2），否则留空。
+                4. 你不会直接覆盖正式剧本，所有推荐动作都会由创作者确认预算后生成审核草稿。回复应简洁清晰、直击重点。
+                """;
+        return build("script-chat-agent", prompt, model,
+                "只能返回 ScriptChatContracts.AgentTurnResult 结构化结果，不得调用业务工具，不得输出额外解释文本。", false);
+    }
+
+    /**
      * 构建无业务工具权限的ReActAgent。
      *
      * @param name String Agent名称

@@ -263,8 +263,18 @@ function TimelineClipThumbnail({
  */
 const ACTIVE_STYLE = { background: "var(--studio-action)", color: "var(--studio-action-foreground)" };
 
-/** 分镜板组件：支持 3D 翻转卡片工作台与可左右交互擦洗的时间轴轨道。 */
-export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boolean }) {
+/** 分镜板组件：支持多轨精剪、字幕拖拽、音画对齐与成片导出。 */
+export function StageStoryboard({
+    pauseAutoSave = false,
+    externalEpisodeId,
+    onCollapseTimeline,
+}: {
+    pauseAutoSave?: boolean;
+    /** 外部全局分集切换器传入的分集ID，变化时同步内部筛选。 */
+    externalEpisodeId?: string;
+    /** 嵌入一体化工作台时用于收起多轨精剪返回分镜清单。 */
+    onCollapseTimeline?: () => void;
+}) {
     const translate = useTranslation();
     const { message, modal } = App.useApp();
     const pendingImpactTargets = usePendingImpactTargets();
@@ -293,9 +303,15 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
     const pendingStage = useComicDramaStore((state) => state.pendingStage);
 
     // Filters & View Mode
-    const [selectedEpisodeId, setSelectedEpisodeId] = useState<string>("all");
+    const [selectedEpisodeId, setSelectedEpisodeId] = useState<string>(externalEpisodeId || "all");
     const [viewMode, setViewMode] = useState<"timeline" | "grid">("timeline");
     const [flipSide, setFlipSide] = useState<"preview" | "config">("preview");
+
+    useEffect(() => {
+        if (externalEpisodeId) {
+            setSelectedEpisodeId(externalEpisodeId);
+        }
+    }, [externalEpisodeId]);
 
     // Timeline state
     const [pps, setPps] = useState<number>(46);
@@ -1521,6 +1537,11 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                         onClick={() => setGenerationShotIds(filteredShots.map((shot) => shot.id))}
                     >
                         {translate("comicDrama.batchMediaGeneration")}</Button>
+                    {onCollapseTimeline ? (
+                        <Button size="small" onClick={onCollapseTimeline}>
+                            收起多轨精剪
+                        </Button>
+                    ) : null}
                 </div>
             </header>
 
@@ -1544,7 +1565,14 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             {shots.length === 0 || (viewMode === "grid" && filteredShots.length === 0) ? (
                 <div className="flex flex-1 items-center justify-center p-8">
                     <Empty description={translate("comicDrama.thisEpisodeHasNoShotsYetCompleteShotBreakdownFirst")}>
-                        <Button type="primary" icon={<Clapperboard className="size-4" />} onClick={() => setActiveStage("shots")}>
+                        <Button
+                            type="primary"
+                            icon={<Clapperboard className="size-4" />}
+                            onClick={() => {
+                                if (onCollapseTimeline) onCollapseTimeline();
+                                else setActiveStage("shots");
+                            }}
+                        >
                             {translate("comicDrama.goToShotBreakdown")}</Button>
                     </Empty>
                 </div>

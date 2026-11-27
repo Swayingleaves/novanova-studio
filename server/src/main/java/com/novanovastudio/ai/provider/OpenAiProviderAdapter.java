@@ -90,19 +90,31 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
      * @return Mono<JSONObject> 文本结果
      */
     private Mono<JSONObject> executeTextTask(AiTaskExecutionContext context) {
-        Map<String, Object> payload = new java.util.LinkedHashMap<>();
-        payload.put("model", context.model());
-        String systemPrompt = AiTaskParameterReader.stringParameter(context.request().parameters(), "systemPrompt", "");
-        List<Map<String, String>> messages = new ArrayList<>();
-        if (StringUtils.hasText(systemPrompt)) {
-            messages.add(Map.of("role", "system", "content", systemPrompt));
-        }
-        messages.add(Map.of("role", "user", "content", context.request().prompt()));
-        payload.put("messages", messages);
-        applyThinkingConfiguration(payload, context);
-        return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/chat/completions", AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
-                .map(AiJsonUtils::responsePayload)
-                .map(response -> AiJsonUtils.jsonObject(Map.of("content", requireChatCompletionsText(response))));
+        return resolveReferenceUrls(context.task().getUserId(), AiTaskParameterReader.safeReferences(context.request().references()))
+                .flatMap(imageUrls -> {
+                    Map<String, Object> payload = new java.util.LinkedHashMap<>();
+                    payload.put("model", context.model());
+                    String systemPrompt = AiTaskParameterReader.stringParameter(context.request().parameters(), "systemPrompt", "");
+                    List<Map<String, Object>> messages = new ArrayList<>();
+                    if (StringUtils.hasText(systemPrompt)) {
+                        messages.add(Map.of("role", "system", "content", systemPrompt));
+                    }
+                    if (imageUrls.isEmpty()) {
+                        messages.add(Map.of("role", "user", "content", context.request().prompt()));
+                    } else {
+                        List<Map<String, Object>> contentParts = new ArrayList<>();
+                        contentParts.add(Map.of("type", "text", "text", context.request().prompt()));
+                        for (String imageUrl : imageUrls) {
+                            contentParts.add(Map.of("type", "image_url", "image_url", Map.of("url", imageUrl)));
+                        }
+                        messages.add(Map.of("role", "user", "content", contentParts));
+                    }
+                    payload.put("messages", messages);
+                    applyThinkingConfiguration(payload, context);
+                    return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/chat/completions", AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
+                            .map(AiJsonUtils::responsePayload)
+                            .map(response -> AiJsonUtils.jsonObject(Map.of("content", requireChatCompletionsText(response))));
+                });
     }
 
     /**
