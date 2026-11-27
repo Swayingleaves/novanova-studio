@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.dto.DramaDtos;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -75,7 +76,6 @@ public final class DramaArtifacts {
             case "script" -> script(source.getJSONObject("script"), previous);
             case "cast" -> cast(source.getJSONObject("cast"), previous);
             case "shot" -> shot(source.getJSONObject("shot"), previous, cast);
-            case "preview" -> preview(source.getJSONObject("preview"));
             default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "不支持的短剧阶段");
         };
     }
@@ -267,14 +267,18 @@ public final class DramaArtifacts {
             String picture = required(shot, "picture");
             String videoPrompt = text(shot, "videoPrompt");
             JSONObject item = new JSONObject();
+            String title = text(shot, "title");
             item.put("id", reuse(previous, "shots", ref));
             item.put("ref", ref);
             item.put("order", index + 1);
             item.put("durationSeconds", shotDuration(shot, previous, ref));
+            item.put("title", StringUtils.hasText(title) ? title : fallbackShotTitle(picture, text(shot, "size"), index));
             item.put("size", text(shot, "size"));
             item.put("camera", text(shot, "camera"));
             item.put("picture", picture);
             item.put("dialogue", text(shot, "dialogue"));
+            item.put("screenText", text(shot, "screenText"));
+            item.put("rhythm", text(shot, "rhythm"));
             item.put("characterRef", characterRef);
             item.put("locationRef", locationRef);
             item.put("videoPrompt", StringUtils.hasText(videoPrompt) ? videoPrompt : picture);
@@ -283,6 +287,79 @@ public final class DramaArtifacts {
         JSONObject content = new JSONObject();
         content.put("shots", stored);
         return content;
+    }
+
+    /**
+     * 规范化用户手动编辑后的分镜列表：校验短序号、画面与时长，重算顺序并保留既有持久化标识。
+     *
+     * @param patches 前端提交的完整分镜列表
+     * @param previous 当前版本的旧产物
+     * @param cast 已有角色与场景，用于校验引用
+     * @return 可原地落库的分镜产物
+     * @throws BusinessException 分镜为空、序号不合法或必填字段缺失时抛出
+     */
+    public static JSONObject normalizeManualShots(List<DramaDtos.ShotPatch> patches, JSONObject previous, JSONObject cast) {
+        if (patches == null || patches.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "分镜镜头至少要保留一个镜头");
+        }
+        Set<String> characters = refsOf(cast, "characters");
+        Set<String> locations = refsOf(cast, "locations");
+        JSONArray stored = new JSONArray();
+        Set<String> seenRefs = new HashSet<>();
+        for (int index = 0; index < patches.size(); index++) {
+            DramaDtos.ShotPatch patch = patches.get(index);
+            if (patch == null) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "分镜镜头数据不能为空");
+            }
+            String ref = patch.ref() == null ? "" : patch.ref().trim();
+            if (!SHOT.matcher(ref).matches() || !seenRefs.add(ref)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头短序号不合法或重复: " + ref);
+            }
+            String picture = patch.picture() == null ? "" : patch.picture().trim();
+            if (!StringUtils.hasText(picture)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头画面描述不能为空");
+            }
+            int duration = patch.durationSeconds();
+            if (duration < 1 || duration > 60) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头时长需在 1 到 60 秒之间");
+            }
+            String videoPrompt = patch.videoPrompt() == null ? "" : patch.videoPrompt().trim();
+            String id = StringUtils.hasText(patch.id()) ? patch.id().trim() : reuse(previous, "shots", ref);
+            JSONObject item = new JSONObject();
+            item.put("id", id);
+            item.put("ref", ref);
+            item.put("order", index + 1);
+            item.put("durationSeconds", duration);
+            item.put("title", trimOrEmpty(patch.title()));
+            item.put("size", trimOrEmpty(patch.size()));
+            item.put("camera", trimOrEmpty(patch.camera()));
+            item.put("picture", picture);
+            item.put("dialogue", trimOrEmpty(patch.dialogue()));
+            item.put("screenText", trimOrEmpty(patch.screenText()));
+            item.put("rhythm", trimOrEmpty(patch.rhythm()));
+            item.put("characterRef", resolveStoryRef(trimOrEmpty(patch.characterRef()), characters, cast, "characters", "name", CHARACTER));
+            item.put("locationRef", resolveStoryRef(trimOrEmpty(patch.locationRef()), locations, cast, "locations", "name", LOCATION));
+            item.put("videoPrompt", StringUtils.hasText(videoPrompt) ? videoPrompt : picture);
+            stored.add(item);
+        }
+        JSONObject content = new JSONObject();
+        content.put("shots", stored);
+        return content;
+    }
+
+    private static String trimOrEmpty(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    /** 模型偶发漏填镜头小标题时，从画面首句截取精炼标题兜底，确保列表与时间轴有标题可显示。 */
+    private static String fallbackShotTitle(String picture, String size, int index) {
+        String source = picture == null ? "" : picture.trim().replaceAll("\\s+", "");
+        if (StringUtils.hasText(source)) {
+            String firstClause = source.split("[，。！？；：,.!?;:]", 2)[0];
+            String candidate = StringUtils.hasText(firstClause) ? firstClause : source;
+            return candidate.length() <= 10 ? candidate : candidate.substring(0, 10);
+        }
+        return StringUtils.hasText(size) ? size : "镜头" + (index + 1);
     }
 
     private static int shotDuration(JSONObject shot, JSONObject previous, String ref) {
@@ -357,25 +434,6 @@ public final class DramaArtifacts {
             }
         }
         return null;
-    }
-
-    private static JSONObject preview(JSONObject body) {
-        JSONArray checks = array(body, "checklist");
-        if (checks.isEmpty()) {
-            throw invalid("成片预览至少要有一条检查项");
-        }
-        JSONArray stored = new JSONArray();
-        for (int index = 0; index < checks.size(); index++) {
-            JSONObject check = checks.getJSONObject(index);
-            JSONObject item = new JSONObject();
-            item.put("item", required(check, "item"));
-            item.put("passed", check != null && check.getBooleanValue("passed"));
-            stored.add(item);
-        }
-        JSONObject content = new JSONObject();
-        content.put("summary", required(body, "summary"));
-        content.put("checklist", stored);
-        return content;
     }
 
     private static JSONArray array(JSONObject body, String field) {

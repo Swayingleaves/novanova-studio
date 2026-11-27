@@ -1,9 +1,9 @@
-import { Clapperboard, FileText, Play, ScrollText, Users, type LucideIcon } from "lucide-react";
+import { Clapperboard, FileText, ScrollText, Users, type LucideIcon } from "lucide-react";
 import type { DramaStage } from "@/services/api/drama";
 
 /** 每个阶段的阶段名、图标、对话身份，以及卡片下方可点的建议。 */
 export const dramaStageMeta: Record<DramaStage, {
-    label: "drama.stagePlan" | "drama.stageScript" | "drama.stageCast" | "drama.stageShot" | "drama.stagePreview";
+    label: "drama.stagePlan" | "drama.stageScript" | "drama.stageCast" | "drama.stageShot";
     icon: LucideIcon;
     /** 对话里这个阶段由哪个身份应答。 */
     agentKey: string;
@@ -33,11 +33,5 @@ export const dramaStageMeta: Record<DramaStage, {
         icon: Clapperboard,
         agentKey: "drama.agentCinematographer",
         suggestions: ["drama.suggestBoardDuration", "drama.suggestShotVideo", "drama.suggestShotCamera"],
-    },
-    preview: {
-        label: "drama.stagePreview",
-        icon: Play,
-        agentKey: "drama.agentEditor",
-        suggestions: ["drama.suggestPreviewCompose", "drama.suggestPreviewExport", "drama.suggestPreviewCheck"],
     },
 };

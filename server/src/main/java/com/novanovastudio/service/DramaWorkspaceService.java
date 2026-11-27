@@ -142,6 +142,42 @@ public class DramaWorkspaceService {
     }
 
     /**
+     * 手动批量保存分镜表改动：原地更新当前最新 shot 版本的 content_json，保留已关联媒体记录。
+     *
+     * @param request 分镜保存请求
+     * @return 更新后的工作台
+     */
+    public Mono<DramaDtos.WorkspaceResponse> updateShots(DramaDtos.UpdateShotsRequest request) {
+        return scope(user -> dramaRepository.findProject(user.userId(), user.teamId(), request.projectId())
+                .switchIfEmpty(Mono.error(missing()))
+                .flatMap(project -> {
+                    if (project.revision() != request.revision()) {
+                        return Mono.error(conflict());
+                    }
+                    return requireIdle(project).then(dramaRepository.listVersions(project.id(), user.teamId()).collectList()
+                            .flatMap(versions -> {
+                                DramaRepository.VersionRow latestShot = latest(versions, "shot");
+                                if (latestShot == null || !latestShot.id().equals(request.versionId())) {
+                                    return Mono.error(invalid("只能编辑最新的分镜版本"));
+                                }
+                                JSONObject content = DramaArtifacts.normalizeManualShots(
+                                        request.shots(),
+                                        contentOf(latestShot),
+                                        contentOf(latest(versions, "cast")));
+                                return transactionalOperator.transactional(
+                                                dramaRepository.updateVersionContent(project.id(), latestShot.id(), content.toJSONString())
+                                                        .flatMap(this::requireUpdated)
+                                                        .then(Flux.fromIterable(DramaStageRules.downstream("shot"))
+                                                                .concatMap(stage -> dramaRepository.markLatestStale(project.id(), stage))
+                                                                .then())
+                                                        .then(dramaRepository.bumpRevision(user.userId(), user.teamId(), project.id(), project.revision())
+                                                                .flatMap(this::requireUpdated).then()))
+                                        .then(workspace(user, project.id()));
+                            }));
+                }));
+    }
+
+    /**
      * 确认指定版本并排队下一阶段。末阶段确认后项目完成。
      *
      * @param request 确认请求
@@ -398,6 +434,7 @@ public class DramaWorkspaceService {
         return dramaRepository.listVersions(project.id(), user.teamId()).collectList()
                 .flatMap(versions -> dramaMediaService.list(user.userId(), user.teamId(), project.id()).flatMap(media -> {
                     JSONObject cast = contentOf(latest(versions, "cast"));
+                    JSONObject shots = contentOf(latest(versions, "shot"));
                     String castVersion = latest(versions, "cast") == null ? "" : latest(versions, "cast").id();
                     String shotVersion = latest(versions, "shot") == null ? "" : latest(versions, "shot").id();
                     List<DramaMediaCommands.NameTarget> catalog = new ArrayList<>();
@@ -408,7 +445,7 @@ public class DramaWorkspaceService {
                     boolean dropped = false;
                     for (int index = 0; index < pending.size(); index++) {
                         String key = pending.getString(index);
-                        String state = chainState(key, media);
+                        String state = chainState(key, media, shots);
                         if (target == null && "ready".equals(state)) {
                             target = key;
                             continue;
@@ -486,13 +523,20 @@ public class DramaWorkspaceService {
      * @param media 当前项目的全部媒体
      * @return ready 可以提交，wait 等前置，dead 前置已经废了
      */
-    private String chainState(String key, List<DramaDtos.MediaView> media) {
+    private String chainState(String key, List<DramaDtos.MediaView> media, JSONObject shots) {
         if (!chainedTarget(key)) {
             return "ready";
         }
-        List<String> required = DramaMediaTargets.requiredReferences(key);
+        List<String> required = DramaMediaTargets.requiredReferences(key, shots);
         if (required.isEmpty() || ready(media, required)) {
             return "ready";
+        }
+        if (key.startsWith("shot-video:")) {
+            String previous = DramaMediaTargets.previousRef(shots, DramaMediaTargets.ref(key));
+            if (StringUtils.hasText(previous) && blocked(media, List.of("shot-video:" + previous))) {
+                return "dead";
+            }
+            return "wait";
         }
         return blocked(media, required) ? "dead" : "wait";
     }

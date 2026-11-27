@@ -164,6 +164,41 @@ public class DramaRepository {
     }
 
     /**
+     * 仅递增项目修订号并刷新更新时间，用于原地更新分镜等不改项目基础配置的场景。
+     *
+     * @param userId 用户ID
+     * @param teamId 团队空间
+     * @param projectId 项目ID
+     * @param revision 期望修订号
+     * @return 是否更新成功
+     */
+    public Mono<Boolean> bumpRevision(long userId, long teamId, String projectId, int revision) {
+        return databaseClient.sql("""
+                UPDATE drama_project SET revision = revision + 1, updated_at = NOW()
+                WHERE id = :id AND user_id = :userId AND team_id = :teamId AND revision = :revision
+                """)
+                .bind("id", projectId).bind("userId", userId).bind("teamId", teamId).bind("revision", revision)
+                .fetch().rowsUpdated().map(count -> count > 0);
+    }
+
+    /**
+     * 原地更新指定阶段版本的产物 JSON。
+     *
+     * @param projectId 项目ID
+     * @param versionId 版本ID
+     * @param contentJson 新产物 JSON
+     * @return 是否更新成功
+     */
+    public Mono<Boolean> updateVersionContent(String projectId, String versionId, String contentJson) {
+        return databaseClient.sql("""
+                UPDATE drama_stage_version SET content_json = :content::jsonb
+                WHERE id = :id AND project_id = :projectId
+                """)
+                .bind("content", contentJson).bind("id", versionId).bind("projectId", projectId)
+                .fetch().rowsUpdated().map(count -> count > 0);
+    }
+
+    /**
      * 推进或回退制作进度。
      *
      * @param userId 用户ID

@@ -1,6 +1,6 @@
 import { serverGet, serverPost } from "@/services/api/server";
 
-export const dramaStages = ["plan", "script", "cast", "shot", "preview"] as const;
+export const dramaStages = ["plan", "script", "cast", "shot"] as const;
 
 export type DramaStage = (typeof dramaStages)[number];
 
@@ -108,8 +108,30 @@ export function regenerateDramaStage(body: { clientRequestId: string; projectId:
     return serverPost<DramaWorkspace>("/drama/regenerateStage", body);
 }
 
-export function saveDramaCut(body: { projectId: string; taskId: string }) {
-    return serverPost<DramaWorkspace>("/drama/saveCut", body);
+export type DramaShotItem = {
+    id: string;
+    ref: string;
+    order: number;
+    durationSeconds: number;
+    title: string;
+    size: string;
+    camera: string;
+    picture: string;
+    dialogue: string;
+    videoPrompt: string;
+    screenText: string;
+    rhythm: string;
+    characterRef: string;
+    locationRef: string;
+};
+
+export function updateDramaShots(body: {
+    projectId: string;
+    revision: number;
+    versionId: string;
+    shots: Array<Omit<DramaShotItem, "order">>;
+}) {
+    return serverPost<DramaWorkspace>("/drama/updateShots", body);
 }
 
 export function generateDramaMedia(body: {
@@ -119,6 +141,7 @@ export function generateDramaMedia(body: {
     targetKey: string;
     model: string;
     parameters?: Record<string, unknown>;
+    prompt?: string;
 }) {
     return serverPost<DramaWorkspace>("/drama/generateMedia", body);
 }

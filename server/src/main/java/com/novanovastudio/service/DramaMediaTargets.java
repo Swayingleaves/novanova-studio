@@ -72,16 +72,34 @@ public final class DramaMediaTargets {
     }
 
     /**
-     * 必须有成功参考图的目标。
-     * <p>尾帧和镜头视频都必须先有对应镜头的首帧图；尾帧本身对视频可选。</p>
+     * 必须有成功参考图的目标（无分镜上下文的重载）。
      *
      * @param targetKey 生成目标
      * @return 必需的参考图目标，没有时为 {@link List#of()}
      */
     public static List<String> requiredReferences(String targetKey) {
+        return requiredReferences(targetKey, null);
+    }
+
+    /**
+     * 按分镜顺序计算生成目标的前置依赖：
+     * <ul>
+     *     <li>第 1 镜视频无强制首帧依赖（角色+场景即可，若用户手动生成了自定义首帧则自动带上）。</li>
+     *     <li>第 2~N 镜视频依赖上一镜视频完成后自动截取的尾帧（shot-last:上一镜）。</li>
+     * </ul>
+     *
+     * @param targetKey 生成目标
+     * @param shots 最新分镜产物，可为空
+     * @return 必需的前置参考图目标
+     */
+    public static List<String> requiredReferences(String targetKey, JSONObject shots) {
         String kind = kind(targetKey);
-        if ("shot-last".equals(kind) || "shot-video".equals(kind)) {
+        if ("shot-last".equals(kind)) {
             return List.of("shot-first:" + ref(targetKey));
+        }
+        if ("shot-video".equals(kind)) {
+            String previous = previousRef(shots, ref(targetKey));
+            return StringUtils.hasText(previous) ? List.of("shot-last:" + previous) : List.of();
         }
         return List.of();
     }

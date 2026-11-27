@@ -254,7 +254,8 @@ public class DramaAgentService {
                 counts.put("locations", sizeOf(content.getJSONArray("locations")));
             }
             case "shot" -> counts.put("shots", sizeOf(content.getJSONArray("shots")));
-            default -> counts.put("checks", sizeOf(content.getJSONArray("checklist")));
+            default -> {
+            }
         }
         counts.values().removeIf(Objects::isNull);
         return counts;

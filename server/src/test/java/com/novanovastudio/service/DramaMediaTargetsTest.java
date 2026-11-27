@@ -37,10 +37,12 @@ class DramaMediaTargetsTest {
     }
 
     @Test
-    void lastFrameAndVideoRequireFirstFrame() {
-        assertTrue(DramaMediaTargets.requiredReferences("shot-first:sh1").isEmpty());
-        assertEquals(List.of("shot-first:sh1"), DramaMediaTargets.requiredReferences("shot-last:sh1"));
-        assertEquals(List.of("shot-first:sh1"), DramaMediaTargets.requiredReferences("shot-video:sh1"));
+    void firstShotVideoNeedsNoFirstFrameWhileNextShotNeedsPreviousLastFrame() {
+        JSONObject shots = JSON.parseObject("{\"shots\":[{\"ref\":\"sh1\",\"order\":1},{\"ref\":\"sh2\",\"order\":2}]}");
+        assertTrue(DramaMediaTargets.requiredReferences("shot-first:sh1", shots).isEmpty());
+        assertTrue(DramaMediaTargets.requiredReferences("shot-video:sh1", shots).isEmpty());
+        assertEquals(List.of("shot-last:sh1"), DramaMediaTargets.requiredReferences("shot-video:sh2", shots));
+        assertEquals(List.of("shot-first:sh1"), DramaMediaTargets.requiredReferences("shot-last:sh1", shots));
     }
 
     @Test

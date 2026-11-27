@@ -65,8 +65,7 @@ export function stageSummary(translate: ReturnType<typeof useTranslation>, stage
     }
     if (stage === "script") return translate("drama.cardScriptSummary", { scenes: Number(counts?.scenes) || 0 });
     if (stage === "cast") return translate("drama.cardCastSummary", { characters: Number(counts?.characters) || 0, locations: Number(counts?.locations) || 0 });
-    if (stage === "shot") return translate("drama.cardShotSummary", { shots: Number(counts?.shots) || 0 });
-    return translate("drama.cardPreviewSummary", { checks: Number(counts?.checks) || 0 });
+    return translate("drama.cardShotSummary", { shots: Number(counts?.shots) || 0 });
 }
 
 /**
@@ -94,16 +93,10 @@ function archiveRows(stage: DramaStage, version: DramaVersion | undefined): Arra
             ...rows(content.locations).map((place) => ({ label: text(place.name), value: text(place.visual) })),
         ];
     }
-    if (stage === "shot") {
-        return rows(content.shots).map((shot, index) => ({
-            label: text(shot.ref) || `${index + 1}`,
-            value: [text(shot.size), clip(shot.picture || shot.videoPrompt)].filter(Boolean).join(" · "),
-        }));
-    }
-    return [
-        { label: "drama.summary", value: text(content.summary) },
-        ...rows(content.checklist).map((item) => ({ label: item.passed === true ? "drama.passed" : "drama.notPassed", value: text(item.item) })),
-    ];
+    return rows(content.shots).map((shot, index) => ({
+        label: text(shot.ref) || `${index + 1}`,
+        value: [text(shot.size), clip(shot.picture || shot.videoPrompt)].filter(Boolean).join(" · "),
+    }));
 }
 
 export function DramaStageCard({

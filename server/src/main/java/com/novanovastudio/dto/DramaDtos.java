@@ -1,9 +1,11 @@
 package com.novanovastudio.dto;
 
 import com.alibaba.fastjson2.JSONObject;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.util.List;
@@ -47,10 +49,6 @@ public final class DramaDtos {
     public record DeleteProjectRequest(@NotBlank String projectId, @Min(1) int revision) {
     }
 
-    /** @param projectId 项目ID @param taskId 已成功的视频合成任务 */
-    public record SaveCutRequest(@NotBlank String projectId, @NotBlank @Size(max = 64) String taskId) {
-    }
-
     /** @param projectId 项目ID @param revision 修订号 @param versionId 要撤销的版本 */
     public record DiscardVersionRequest(@NotBlank String projectId, @Min(1) int revision, @NotBlank String versionId) {
     }
@@ -58,6 +56,43 @@ public final class DramaDtos {
     /** @param clientRequestId 稳定请求号 @param projectId 项目ID @param revision 修订号 @param stage 要重做的阶段 */
     public record RegenerateStageRequest(@NotBlank @Size(max = 64) String clientRequestId, @NotBlank String projectId,
                                          @Min(1) int revision, @NotBlank @Size(max = 32) String stage) {
+    }
+
+    /**
+     * 手动批量保存分镜表修改（画面、对白、提示词、时长、排序与删除）。
+     *
+     * @param projectId 项目ID
+     * @param revision 修订号
+     * @param versionId 目标分镜版本ID
+     * @param shots 完整分镜列表（按目标顺序排列）
+     */
+    public record UpdateShotsRequest(@NotBlank String projectId, @Min(1) int revision, @NotBlank String versionId,
+                                     @NotEmpty List<@Valid ShotPatch> shots) {
+    }
+
+    /**
+     * 单个分镜镜头的编辑内容。
+     *
+     * @param id 持久化标识，新建镜头可空
+     * @param ref 镜头短序号，如 sh1
+     * @param durationSeconds 镜头时长（秒）
+     * @param title 镜头标题，可空
+     * @param size 景别，可空
+     * @param camera 运镜，可空
+     * @param picture 画面描述
+     * @param dialogue 旁白或对白，可空
+     * @param videoPrompt 视频提示词，可空
+     * @param screenText 屏幕文字，可空
+     * @param rhythm 节奏与导演提示，可空
+     * @param characterRef 关联角色短序号，可空
+     * @param locationRef 关联场景短序号，可空
+     */
+    public record ShotPatch(String id, @NotBlank @Size(max = 16) String ref, @Min(1) @Max(60) int durationSeconds,
+                            @Size(max = 120) String title, @Size(max = 60) String size, @Size(max = 60) String camera,
+                            @NotBlank @Size(max = 4000) String picture, @Size(max = 2000) String dialogue,
+                            @Size(max = 4000) String videoPrompt, @Size(max = 500) String screenText,
+                            @Size(max = 500) String rhythm, @Size(max = 32) String characterRef,
+                            @Size(max = 32) String locationRef) {
     }
 
     /**

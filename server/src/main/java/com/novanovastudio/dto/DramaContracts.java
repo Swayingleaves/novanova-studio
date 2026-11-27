@@ -23,13 +23,12 @@ public final class DramaContracts {
      * @param script 剧本
      * @param cast 角色与场景
      * @param shot 分镜镜头
-     * @param preview 成片说明
      * @param media 要提交的图片或视频，不出图时为空
      * @param choices 需要用户选择的选项列表，非提问场景为空
      * @param multiple 是否允许多选，默认为 false（单选）
      */
     public record DirectorResult(String reply, String intent, String targetStage, PlanBody plan, ScriptBody script,
-                                 CastBody cast, ShotBody shot, PreviewBody preview, MediaPlan media,
+                                 CastBody cast, ShotBody shot, MediaPlan media,
                                  List<ChoiceOption> choices, Boolean multiple) {
     }
 
@@ -105,16 +104,9 @@ public final class DramaContracts {
     public record ShotBody(List<ShotItem> shots) {
     }
 
-    /** @param ref 镜头短序号sh1 @param order 顺序 @param durationSeconds 这一镜的时长（整数秒） @param size 景别 @param camera 运镜 @param picture 画面描述 @param dialogue 对白 @param characterRef 角色短序号 @param locationRef 场景短序号 @param videoPrompt 视频提示词，描述这一镜从首帧到尾帧的动作与情节 */
-    public record ShotItem(String ref, Integer order, Integer durationSeconds, String size, String camera, String picture,
-                           String dialogue, String characterRef, String locationRef, String videoPrompt) {
-    }
-
-    /** @param summary 制作总结 @param checklist 检查项 */
-    public record PreviewBody(String summary, List<CheckItem> checklist) {
-    }
-
-    /** @param item 检查内容 @param passed 是否通过 */
-    public record CheckItem(String item, Boolean passed) {
+    /** @param ref 镜头短序号sh1 @param order 顺序 @param durationSeconds 这一镜的时长（整数秒） @param title 镜头小标题，4到10字概括本镜核心画面或事件，不带编号 @param rhythm 本镜节奏与承接提示，可空 @param size 景别 @param camera 运镜 @param picture 画面描述 @param dialogue 对白 @param characterRef 角色短序号 @param locationRef 场景短序号 @param videoPrompt 视频提示词，描述这一镜从首帧到尾帧的动作与情节 */
+    public record ShotItem(String ref, Integer order, Integer durationSeconds, String title, String rhythm, String size,
+                           String camera, String picture, String dialogue, String characterRef, String locationRef,
+                           String videoPrompt) {
     }
 }

@@ -23,14 +23,13 @@ class DramaStageRulesTest {
      * 确认只指向下一阶段，修改则把后续阶段列为待更新。
      */
     @Test
-    void stageOrderStopsAtPreviewAndListsDownstream() {
+    void stageOrderStopsAtShotAndListsDownstream() {
         assertEquals("script", DramaStageRules.next("plan"));
         assertEquals("shot", DramaStageRules.next("cast"));
-        assertEquals("preview", DramaStageRules.next("shot"));
-        assertNull(DramaStageRules.next("preview"));
-        assertEquals(java.util.List.of("preview"), DramaStageRules.downstream("shot"));
-        assertEquals(java.util.List.of("shot", "preview"), DramaStageRules.downstream("cast"));
-        assertTrue(DramaStageRules.canRevise("preview", "script", true));
+        assertNull(DramaStageRules.next("shot"));
+        assertEquals(java.util.List.of(), DramaStageRules.downstream("shot"));
+        assertEquals(java.util.List.of("shot"), DramaStageRules.downstream("cast"));
+        assertTrue(DramaStageRules.canRevise("shot", "script", true));
         assertFalse(DramaStageRules.canRevise("plan", "script", false));
         assertEquals("720x1280", DramaArtifacts.videoSize("1280x720", "9:16"));
         assertEquals("720x1280", DramaArtifacts.videoSize("720x1280", "9:16"));

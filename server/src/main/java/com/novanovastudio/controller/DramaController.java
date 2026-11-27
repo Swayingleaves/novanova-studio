@@ -98,6 +98,22 @@ public class DramaController {
     }
 
     /**
+     * 手动保存分镜表的行内编辑、时长调整、排序与删除。
+     *
+     * @param request 分镜保存请求
+     * @param httpRequest 当前HTTP请求
+     * @return 更新后的工作台
+     */
+    @PostMapping("/updateShots")
+    public Mono<ApiResponse<DramaDtos.WorkspaceResponse>> updateShots(@Valid @RequestBody DramaDtos.UpdateShotsRequest request, ServerHttpRequest httpRequest) {
+        log.info("保存短剧分镜编辑: url={}, headers={}, projectId={}, versionId={}, count={}",
+                httpRequest.getURI(), headers(httpRequest), request.projectId(), request.versionId(), request.shots().size());
+        return dramaWorkspaceService.updateShots(request).map(ApiResponse::ok)
+                .doOnNext(response -> log.info("保存短剧分镜编辑响应: projectId={}, revision={}",
+                        request.projectId(), response.data() == null ? null : response.data().project().revision()));
+    }
+
+    /**
      * 确认当前阶段版本。确认本身不扣费，下一阶段生成另行计费。
      *
      * @param request 确认请求
@@ -137,20 +153,6 @@ public class DramaController {
         log.debug("生成短剧媒体: url={}, headers={}, body={}", httpRequest.getURI(), headers(httpRequest), request);
         return dramaMediaService.generate(request).then(dramaWorkspaceService.getWorkspace(request.projectId())).map(ApiResponse::ok)
                 .doOnNext(response -> log.debug("生成短剧媒体响应: projectId={}, target={}", request.projectId(), request.targetKey()));
-    }
-
-    /**
-     * 保存已合成的成片，刷新后仍可播放和导出。
-     *
-     * @param request 成片任务
-     * @param httpRequest 当前HTTP请求
-     * @return 带有成片记录的工作台
-     */
-    @PostMapping("/saveCut")
-    public Mono<ApiResponse<DramaDtos.WorkspaceResponse>> saveCut(@Valid @RequestBody DramaDtos.SaveCutRequest request, ServerHttpRequest httpRequest) {
-        log.debug("保存短剧成片: url={}, headers={}, body={}", httpRequest.getURI(), headers(httpRequest), request);
-        return dramaMediaService.saveCut(request.projectId(), request.taskId()).then(dramaWorkspaceService.getWorkspace(request.projectId())).map(ApiResponse::ok)
-                .doOnNext(response -> log.debug("保存短剧成片响应: projectId={}, taskId={}", request.projectId(), request.taskId()));
     }
 
     /**

@@ -53,4 +53,27 @@ class DramaMediaServiceVideoModeTest {
 
         assertEquals(VideoGenerationMode.REFERENCE_TO_VIDEO, mode);
     }
+
+    @Test
+    void usesReferenceToVideoForFirstFrameWithCharacterAndLocation() {
+        List<AiTaskDtos.AiTaskMediaReference> refs = List.of(
+                new AiTaskDtos.AiTaskMediaReference("1", "shot-last:sh1", "image/jpeg", "k1", "https://example.com/last.jpg", "first_frame"),
+                new AiTaskDtos.AiTaskMediaReference("2", "character:c1", "image/png", "k2", "https://example.com/c1.png", "reference_image"),
+                new AiTaskDtos.AiTaskMediaReference("3", "location:l1", "image/png", "k3", "https://example.com/l1.png", "reference_image"));
+
+        String mode = DramaMediaService.resolveVideoMode("shot-video:sh2", "video", refs,
+                List.of(VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO, VideoGenerationMode.REFERENCE_TO_VIDEO));
+
+        assertEquals(VideoGenerationMode.REFERENCE_TO_VIDEO, mode);
+        List<AiTaskDtos.AiTaskMediaReference> adjusted = DramaMediaService.adjustReferenceRolesForVideoMode(refs, mode);
+        assertEquals(List.of("reference_image", "reference_image", "reference_image"),
+                adjusted.stream().map(AiTaskDtos.AiTaskMediaReference::role).toList());
+    }
+
+    @Test
+    void usesTextToVideoWhenFirstShotHasNoReferences() {
+        String mode = DramaMediaService.resolveVideoMode("shot-video:sh1", "video", List.of(),
+                List.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.REFERENCE_TO_VIDEO));
+        assertEquals(VideoGenerationMode.TEXT_TO_VIDEO, mode);
+    }
 }

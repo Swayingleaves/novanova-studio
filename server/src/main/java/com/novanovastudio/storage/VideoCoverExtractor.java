@@ -93,6 +93,69 @@ public final class VideoCoverExtractor {
     }
 
     /**
+     * 截取视频高清尾帧（不缩放），用于衔接下一镜头的首帧参考图。
+     * <p>优先从视频末尾前 0.15 秒截取，若短视频或容器格式不支持 seek 到末尾，则回退截取首帧。</p>
+     *
+     * @param video Path 本地视频文件
+     * @param ffmpegExecutable String FFmpeg 可执行文件
+     * @return byte[] JPEG 尾帧；截取失败时返回 null，不抛出异常
+     */
+    public static byte[] extractLastFrame(Path video, String ffmpegExecutable) {
+        if (video == null || !Files.isRegularFile(video)) {
+            return null;
+        }
+        byte[] frame = runLastFrame(video, ffmpegExecutable, true);
+        if (frame != null && frame.length > 0) {
+            return frame;
+        }
+        return runLastFrame(video, ffmpegExecutable, false);
+    }
+
+    private static byte[] runLastFrame(Path video, String ffmpegExecutable, boolean seekEnd) {
+        Path output = null;
+        try {
+            output = Files.createTempFile("novanova-video-last-frame-", ".jpg");
+            String executable = StringUtils.hasText(ffmpegExecutable) ? ffmpegExecutable.trim() : "ffmpeg";
+            List<String> command = seekEnd
+                    ? List.of(executable, "-y", "-hide_banner", "-nostdin", "-loglevel", "error",
+                            "-sseof", "-0.15", "-i", video.toAbsolutePath().toString(),
+                            "-update", "1", "-frames:v", "1", "-q:v", "2",
+                            output.toAbsolutePath().toString())
+                    : List.of(executable, "-y", "-hide_banner", "-nostdin", "-loglevel", "error",
+                            "-ss", "0", "-i", video.toAbsolutePath().toString(),
+                            "-update", "1", "-frames:v", "1", "-q:v", "2",
+                            output.toAbsolutePath().toString());
+            Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+            Thread outputReader = Thread.ofVirtual().start(() -> discardOutput(process));
+            if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+                outputReader.join(1000);
+                log.error("截取视频尾帧超时: video={}, seekEnd={}", video, seekEnd);
+                return null;
+            }
+            outputReader.join(1000);
+            if (process.exitValue() != 0) {
+                log.warn("截取视频尾帧失败: video={}, seekEnd={}, exit={}", video, seekEnd, process.exitValue());
+                return null;
+            }
+            byte[] bytes = Files.readAllBytes(output);
+            return bytes.length > 0 ? bytes : null;
+        } catch (Exception exception) {
+            log.error("截取视频尾帧异常: video={}, seekEnd={}", video, seekEnd, exception);
+            return null;
+        } finally {
+            if (output != null) {
+                try {
+                    Files.deleteIfExists(output);
+                } catch (IOException exception) {
+                    log.error("清理视频尾帧临时文件失败: file={}", output, exception);
+                }
+            }
+        }
+    }
+
+    /**
      * 组装截取第一帧的 FFmpeg 命令。
      *
      * @param ffmpegExecutable String FFmpeg 可执行文件，空时使用 ffmpeg

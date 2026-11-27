@@ -119,14 +119,18 @@ public class DramaMediaPromptService {
         if (shot != null) {
             input.put("shot", shot);
         }
-        if ("shot-first".equals(kind)) {
+        if ("shot-first".equals(kind) || "shot-video".equals(kind)) {
             JSONObject previous = previousShot(request);
             if (previous != null) {
                 input.put("previousShot", previous);
             }
         }
         if ("shot-video".equals(kind)) {
-            input.put("hasLastFrame", request.availableReferences().contains("shot-last:" + ref));
+            String previous = DramaMediaTargets.previousRef(request.shots(), ref);
+            boolean hasFirst = request.availableReferences().contains("shot-first:" + ref)
+                    || (StringUtils.hasText(previous) && request.availableReferences().contains("shot-last:" + previous));
+            input.put("hasFirstFrame", hasFirst);
+            input.put("hasLastFrame", false);
         }
         if (request.cast() != null) {
             input.put("cast", request.cast());

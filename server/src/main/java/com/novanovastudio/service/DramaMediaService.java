@@ -10,6 +10,7 @@ import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.SystemMessage;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.DramaContracts;
 import com.novanovastudio.dto.DramaDtos;
@@ -17,6 +18,9 @@ import com.novanovastudio.repository.DramaRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.TeamScope;
 import com.novanovastudio.storage.MediaAccessService;
+import com.novanovastudio.storage.VideoCoverExtractor;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -65,11 +69,14 @@ public class DramaMediaService {
     /** 结果地址签名。 */
     private final MediaAccessService mediaAccessService;
 
-    /** 视频合成任务，用于把成片结果落回项目。 */
-    private final VideoCompositionTaskService videoCompositionTaskService;
-
     /** 媒体库和对象存储。 */
     private final PersistenceService persistenceService;
+
+    /** 应用配置，用于获取 FFmpeg 可执行路径。 */
+    private final NovanovaProperties properties;
+
+    /** 正在截取视频尾帧的任务防重表。 */
+    private final ConcurrentHashMap<String, Boolean> extractingLastFrames = new ConcurrentHashMap<>();
 
     /**
      * 批量读取项目封面图，并按需签名可预览地址。
@@ -124,7 +131,7 @@ public class DramaMediaService {
                         return prompt(userId, project, request, spec, shots, cast, plan, media)
                                 // 提示词 Agent 要跑十几秒，参考图可能在这期间才落库，写完再读一次
                                 .flatMap(item -> dramaRepository.listMedia(project.id(), teamId).collectList().flatMap(fresh -> {
-                            List<AiTaskDtos.AiTaskMediaReference> rawReferences = references(request.targetKey(), item.referenceKeys(), spec, fresh);
+                            List<AiTaskDtos.AiTaskMediaReference> rawReferences = references(request.targetKey(), item.referenceKeys(), spec, shots, fresh);
                             Mono<List<String>> capabilitiesMono = "video".equals(spec.mediaType())
                                     ? aiTaskService.resolveModelCapabilities("video", request.model().trim())
                                     : Mono.just(List.of());
@@ -179,36 +186,6 @@ public class DramaMediaService {
             }
         }
         return keys;
-    }
-
-    /**
-     * 把当前用户已成功的合成成片记到项目上，刷新后仍可播放和导出。
-     *
-     * @param projectId 项目ID
-     * @param taskId 合成任务ID
-     * @return 完成信号。同一任务重复保存直接返回
-     */
-    public Mono<Void> saveCut(String projectId, String taskId) {
-        return scope((userId, teamId) -> dramaRepository.findProject(userId, teamId, projectId)
-                .switchIfEmpty(Mono.error(missing()))
-                .then(videoCompositionTaskService.getTask(taskId))
-                .flatMap(task -> {
-                    JSONObject result = task.resultData() == null ? new JSONObject() : task.resultData();
-                    String storageKey = text(result, "storageKey");
-                    if (!"succeeded".equals(task.status()) || !StringUtils.hasText(storageKey)) {
-                        return Mono.error(invalid("成片还没有合成完成"));
-                    }
-                    return dramaRepository.listMedia(projectId, teamId).collectList().flatMap(rows -> {
-                        boolean saved = rows.stream().anyMatch(row -> "cut".equals(row.targetKey()) && taskId.equals(row.taskId()));
-                        if (saved) {
-                            return Mono.empty();
-                        }
-                        DramaRepository.MediaRow row = new DramaRepository.MediaRow(UUID.randomUUID().toString(), projectId, "", "cut", "video",
-                                taskId, "compose", "成片", "success", text(result, "url"), storageKey,
-                                StringUtils.hasText(text(result, "mimeType")) ? text(result, "mimeType") : "video/mp4", "", OffsetDateTime.now());
-                        return dramaRepository.insertMedia(teamId, userId, row).then();
-                    });
-                }));
     }
 
     /**
@@ -305,7 +282,87 @@ public class DramaMediaService {
             status = "failed";
             error = StringUtils.hasText(error) ? error : "生成结果没有媒体地址";
         }
-        return writeMedia(teamId, row, status, url, storageKey, mimeType, "success".equals(status) ? "" : error);
+        String finalStatus = status;
+        return writeMedia(teamId, row, finalStatus, url, storageKey, mimeType, "success".equals(finalStatus) ? "" : error)
+                .then(Mono.defer(() -> "success".equals(finalStatus) && row.targetKey().startsWith("shot-video:")
+                        ? ensureExtractedLastFrame(userId, teamId, row, url, storageKey)
+                        : Mono.empty()));
+    }
+
+    /**
+     * 镜头视频生成成功后，自动截取该视频尾帧并落库为 shot-last:<ref>，供下一镜自动作为首帧参考图。
+     */
+    private Mono<Void> ensureExtractedLastFrame(long userId, long teamId, DramaRepository.MediaRow videoRow,
+                                                String videoUrl, String videoStorageKey) {
+        String ref = DramaMediaTargets.ref(videoRow.targetKey());
+        String lastKey = "shot-last:" + ref;
+        String lockKey = videoRow.projectId() + ":" + lastKey + ":" + videoRow.taskId();
+        if (extractingLastFrames.putIfAbsent(lockKey, Boolean.TRUE) != null) {
+            return Mono.empty();
+        }
+        return dramaRepository.listMedia(videoRow.projectId(), teamId).collectList()
+                .flatMap(existing -> {
+                    boolean alreadyExtracted = existing.stream().anyMatch(item ->
+                            lastKey.equals(item.targetKey())
+                                    && videoRow.taskId().equals(item.taskId())
+                                    && "success".equals(item.status()));
+                    if (alreadyExtracted) {
+                        return Mono.empty();
+                    }
+                    AiTaskDtos.AiTaskMediaReference videoRef = new AiTaskDtos.AiTaskMediaReference(
+                            videoRow.id(), videoRow.targetKey(), "video/mp4", text(videoStorageKey), text(videoUrl), "reference_video");
+                    return mediaSupport.resolveReferenceBinary(userId, videoRef, "video/mp4")
+                            .flatMap(binary -> Mono.fromCallable(() -> extractLastFrameBytes(binary.data()))
+                                    .subscribeOn(Schedulers.boundedElastic()))
+                            .flatMap(frameBytes -> {
+                                if (frameBytes == null || frameBytes.length == 0) {
+                                    return Mono.<Void>empty();
+                                }
+                                return mediaSupport.storeGeneratedMedia(userId, "image", "drama-last-frame-" + ref + ".jpg",
+                                                new GeneratedBinary(frameBytes, "image/jpeg"), null, null, null)
+                                        .flatMap(stored -> {
+                                            DramaRepository.MediaRow lastRow = new DramaRepository.MediaRow(
+                                                    UUID.randomUUID().toString(),
+                                                    videoRow.projectId(),
+                                                    videoRow.versionId(),
+                                                    lastKey,
+                                                    "image",
+                                                    videoRow.taskId(),
+                                                    "extract-last-frame",
+                                                    "自动截取自 " + videoRow.targetKey() + " 尾帧",
+                                                    "success",
+                                                    text(stored.url()),
+                                                    text(stored.storageKey()),
+                                                    "image/jpeg",
+                                                    "",
+                                                    OffsetDateTime.now());
+                                            log.info("短剧视频尾帧自动截取完成: projectId={}, target={}, storageKey={}",
+                                                    videoRow.projectId(), lastKey, stored.storageKey());
+                                            return dramaRepository.insertMedia(teamId, userId, lastRow).then();
+                                        });
+                            });
+                })
+                .then()
+                .onErrorResume(error -> {
+                    log.warn("自动截取短剧视频尾帧失败: projectId={}, videoTarget={}, message={}",
+                            videoRow.projectId(), videoRow.targetKey(), error.getMessage());
+                    return Mono.empty();
+                })
+                .doFinally(signal -> extractingLastFrames.remove(lockKey));
+    }
+
+    private byte[] extractLastFrameBytes(byte[] videoBytes) throws Exception {
+        if (videoBytes == null || videoBytes.length == 0) {
+            return null;
+        }
+        Path tempVideo = Files.createTempFile("novanova-drama-video-", ".mp4");
+        try {
+            Files.write(tempVideo, videoBytes);
+            String ffmpeg = properties.getAi().getVideoComposition().getFfmpegExecutable();
+            return VideoCoverExtractor.extractLastFrame(tempVideo, ffmpeg);
+        } finally {
+            Files.deleteIfExists(tempVideo);
+        }
     }
 
     private Mono<Void> writeMedia(long teamId, DramaRepository.MediaRow row, String status, String url, String storageKey, String mimeType, String error) {
@@ -340,30 +397,49 @@ public class DramaMediaService {
 
     /**
      * 组装参考图。
-     * <p>镜头视频采用首帧（必选）+ 尾帧（可选）；图片目标优先挂必需参考图，再按提示词 Agent 顺序补足角色/场景参考图。</p>
+     * <p>镜头视频：第 1 镜默认不强制首帧（若用户手动生成了自定义首帧则排首位），随后挂载角色与场景图；
+     * 第 2~N 镜优先使用上一镜视频自动截取的尾帧作为首帧，同时挂载本镜的角色与场景图。</p>
      */
     private List<AiTaskDtos.AiTaskMediaReference> references(String targetKey, List<String> keys, DramaMediaTargets.Spec spec,
-                                                             List<DramaRepository.MediaRow> media) {
+                                                             JSONObject shots, List<DramaRepository.MediaRow> media) {
         if (targetKey.startsWith("shot-video:")) {
             String ref = DramaMediaTargets.ref(targetKey);
-            DramaRepository.MediaRow first = usableMedia(media, "shot-first:" + ref);
-            if (first == null) {
-                throw invalid("请先生成这个镜头的首帧图");
-            }
+            String previousRef = DramaMediaTargets.previousRef(shots, ref);
             List<AiTaskDtos.AiTaskMediaReference> videoRefs = new ArrayList<>();
-            videoRefs.add(reference(first, "first_frame"));
-            DramaRepository.MediaRow last = usableMedia(media, "shot-last:" + ref);
-            if (last != null) {
-                videoRefs.add(reference(last, "last_frame"));
+            DramaRepository.MediaRow customFirst = usableMedia(media, "shot-first:" + ref);
+            if (customFirst != null) {
+                videoRefs.add(reference(customFirst, "first_frame"));
+            } else if (StringUtils.hasText(previousRef)) {
+                DramaRepository.MediaRow prevLast = usableMedia(media, "shot-last:" + previousRef);
+                if (prevLast == null) {
+                    throw invalid("请先生成上一镜（" + previousRef + "）的视频，完成后会自动截取尾帧作为本镜首帧");
+                }
+                videoRefs.add(reference(prevLast, "first_frame"));
+            }
+            JSONObject shot = findShot(shots, ref);
+            if (shot != null) {
+                String characterRef = text(shot, "characterRef");
+                if (StringUtils.hasText(characterRef)) {
+                    appendUniqueRef(videoRefs, usableMedia(media, "character:" + characterRef), "reference_image");
+                }
+                String locationRef = text(shot, "locationRef");
+                if (StringUtils.hasText(locationRef)) {
+                    appendUniqueRef(videoRefs, usableMedia(media, "location:" + locationRef), "reference_image");
+                }
+            }
+            for (String key : keys) {
+                if (key.startsWith("character:") || key.startsWith("location:")) {
+                    appendUniqueRef(videoRefs, usableMedia(media, key), "reference_image");
+                }
             }
             return videoRefs;
         }
         String fixedRole = "image".equals(spec.mediaType()) ? "reference_image" : null;
         List<AiTaskDtos.AiTaskMediaReference> references = new ArrayList<>();
-        for (String key : DramaMediaTargets.requiredReferences(targetKey)) {
+        for (String key : DramaMediaTargets.requiredReferences(targetKey, shots)) {
             DramaRepository.MediaRow row = usableMedia(media, key);
             if (row == null) {
-                throw invalid("请先生成这个镜头的首帧图");
+                throw invalid("缺少前置参考图: " + key);
             }
             references.add(reference(row, fixedRole));
         }
@@ -377,6 +453,27 @@ public class DramaMediaService {
             }
         }
         return references;
+    }
+
+    private void appendUniqueRef(List<AiTaskDtos.AiTaskMediaReference> target, DramaRepository.MediaRow row, String role) {
+        if (row == null || target.stream().anyMatch(item -> row.targetKey().equals(item.name()))) {
+            return;
+        }
+        target.add(reference(row, role));
+    }
+
+    private JSONObject findShot(JSONObject shots, String ref) {
+        JSONArray array = shots == null ? null : shots.getJSONArray("shots");
+        if (array == null) {
+            return null;
+        }
+        for (int index = 0; index < array.size(); index++) {
+            JSONObject item = array.getJSONObject(index);
+            if (item != null && ref.equals(item.getString("ref"))) {
+                return item;
+            }
+        }
+        return null;
     }
 
     /**
@@ -420,7 +517,13 @@ public class DramaMediaService {
         boolean supportsReference = capabilities.contains(VideoGenerationMode.REFERENCE_TO_VIDEO);
         boolean supportsImageToVideo = capabilities.contains(VideoGenerationMode.IMAGE_TO_VIDEO);
         if (targetKey.startsWith("shot-video:")) {
-            if (references.size() >= 2) {
+            if (references == null || references.isEmpty()) {
+                return VideoGenerationMode.TEXT_TO_VIDEO;
+            }
+            boolean isPureFirstLastPair = references.size() == 2
+                    && "first_frame".equals(references.get(0).role())
+                    && "last_frame".equals(references.get(1).role());
+            if (isPureFirstLastPair) {
                 if (supportsFirstLast) {
                     return VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO;
                 }
@@ -429,13 +532,29 @@ public class DramaMediaService {
                 }
                 return VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO;
             }
-            if (supportsImageToVideo) {
+            if (references.size() >= 2) {
+                if (supportsReference) {
+                    return VideoGenerationMode.REFERENCE_TO_VIDEO;
+                }
+                if (supportsImageToVideo) {
+                    return VideoGenerationMode.IMAGE_TO_VIDEO;
+                }
+                return VideoGenerationMode.REFERENCE_TO_VIDEO;
+            }
+            boolean onlyFirstFrame = "first_frame".equals(references.get(0).role());
+            if (onlyFirstFrame) {
+                if (supportsImageToVideo) {
+                    return VideoGenerationMode.IMAGE_TO_VIDEO;
+                }
+                if (supportsReference) {
+                    return VideoGenerationMode.REFERENCE_TO_VIDEO;
+                }
                 return VideoGenerationMode.IMAGE_TO_VIDEO;
             }
             if (supportsReference) {
                 return VideoGenerationMode.REFERENCE_TO_VIDEO;
             }
-            return VideoGenerationMode.IMAGE_TO_VIDEO;
+            return supportsImageToVideo ? VideoGenerationMode.IMAGE_TO_VIDEO : VideoGenerationMode.REFERENCE_TO_VIDEO;
         }
         return references.isEmpty() ? VideoGenerationMode.TEXT_TO_VIDEO : VideoGenerationMode.IMAGE_TO_VIDEO;
     }
@@ -449,13 +568,21 @@ public class DramaMediaService {
      */
     static List<AiTaskDtos.AiTaskMediaReference> adjustReferenceRolesForVideoMode(
             List<AiTaskDtos.AiTaskMediaReference> references, String mode) {
-        if (!VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode) || references == null || references.isEmpty()) {
+        if (references == null || references.isEmpty()) {
             return references;
         }
-        return references.stream()
-                .map(ref -> new AiTaskDtos.AiTaskMediaReference(
-                        ref.id(), ref.name(), ref.mimeType(), ref.storageKey(), ref.url(), "reference_image"))
-                .toList();
+        if (VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode)) {
+            return references.stream()
+                    .map(ref -> new AiTaskDtos.AiTaskMediaReference(
+                            ref.id(), ref.name(), ref.mimeType(), ref.storageKey(), ref.url(), "reference_image"))
+                    .toList();
+        }
+        if (VideoGenerationMode.IMAGE_TO_VIDEO.equals(mode) && references.size() > 1) {
+            AiTaskDtos.AiTaskMediaReference first = references.get(0);
+            return List.of(new AiTaskDtos.AiTaskMediaReference(
+                    first.id(), first.name(), first.mimeType(), first.storageKey(), first.url(), "first_frame"));
+        }
+        return references;
     }
 
     private Map<String, Object> parameters(DramaDtos.GenerateMediaRequest request, DramaMediaTargets.Spec spec) {

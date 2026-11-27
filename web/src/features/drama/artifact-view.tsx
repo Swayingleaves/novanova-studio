@@ -1,13 +1,12 @@
 "use client";
 
-import { App, Button, InputNumber } from "antd";
-import { Check, Download, LoaderCircle, Minus, Play, Square } from "lucide-react";
+import { Button, InputNumber } from "antd";
+import { LoaderCircle, Play, Square } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "@/features/locale/use-translation";
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import { downloadMedia } from "@/features/storage/services/media-download";
-import { saveDramaCut, type DramaMedia, type DramaStage, type DramaVersion, type DramaWorkspace } from "@/services/api/drama";
-import { composeVideo, waitVideoCompositionTask, type VideoCompositionTask } from "@/services/api/video-composition";
+import type { DramaMedia, DramaStage, DramaVersion } from "@/services/api/drama";
 import { dramaStageMeta } from "./stage-meta";
 import { DramaAspectPicker } from "./aspect-ratio";
 import { RequeryFailedTaskButton } from "@/features/ai-task/requery-failed-task-button";
@@ -152,7 +151,7 @@ function StageSkeleton({ stage }: { stage: DramaStage }) {
                         </div>
                     </section>
                 </div>
-            ) : stage === "shot" ? (
+            ) : (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                     {[0, 1, 2].map((index) => (
                         <article key={index} className="flex flex-col overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)]">
@@ -185,33 +184,6 @@ function StageSkeleton({ stage }: { stage: DramaStage }) {
                             </div>
                         </article>
                     ))}
-                </div>
-            ) : (
-                <div className="flex flex-col gap-4">
-                    <div className="flex gap-2">
-                        <SkeletonBar className="h-8 w-28 rounded-lg" />
-                        <SkeletonBar className="h-8 w-24 rounded-lg" />
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                        <div className="studio-skeleton aspect-video w-full rounded-xl" aria-hidden="true" />
-                        <div className="studio-skeleton aspect-video w-full rounded-xl" aria-hidden="true" />
-                    </div>
-                    <div className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] px-4 py-3.5">
-                        <SkeletonBar className="h-3 w-16 rounded" />
-                        <SkeletonBar className="mt-2.5 h-3.5 w-full rounded" />
-                        <SkeletonBar className="mt-2 h-3.5 w-4/5 rounded" />
-                    </div>
-                    <section className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] p-4">
-                        <SkeletonBar className="h-4 w-20 rounded" />
-                        <div className="mt-3 flex flex-col gap-2.5">
-                            {[0, 1, 2, 3].map((index) => (
-                                <div key={index} className="flex items-center gap-2.5">
-                                    <SkeletonBar className="size-5 shrink-0 rounded-full!" />
-                                    <SkeletonBar className="h-3.5 w-3/4 rounded" />
-                                </div>
-                            ))}
-                        </div>
-                    </section>
                 </div>
             )}
         </div>
@@ -307,8 +279,6 @@ export function DramaArtifact({
     onStop,
     onRequeried,
     stoppingTaskId = "",
-    projectId,
-    onWorkspace,
 }: {
     stage: DramaStage;
     version: DramaVersion | undefined;
@@ -326,59 +296,11 @@ export function DramaArtifact({
     onStop?: (media: DramaMedia) => void;
     onRequeried?: () => void;
     stoppingTaskId?: string;
-    projectId?: string;
-    onWorkspace?: (workspace: DramaWorkspace) => void;
 }) {
     const translate = useTranslation();
-    const { message } = App.useApp();
     const content = version?.content || {};
     const [seconds, setSeconds] = useState(durationSeconds);
-    const [cut, setCut] = useState<VideoCompositionTask | null>(null);
-    const [composing, setComposing] = useState(false);
-    const [exporting, setExporting] = useState(false);
     useEffect(() => setSeconds(durationSeconds), [durationSeconds]);
-    const shotVideos = shotRefs.map((ref) => mediaByKey[`shot-video:${ref}`]).filter((item): item is DramaMedia => Boolean(item));
-    const readyVideos = shotVideos.filter((item) => item.status === "success" && item.storageKey);
-    const compose = async () => {
-        if (readyVideos.length < shotRefs.length) {
-            message.warning(translate("drama.composeMissing"));
-            return;
-        }
-        if (readyVideos.length < 2 || new Set(readyVideos.map((item) => item.storageKey)).size !== readyVideos.length) {
-            message.warning(translate("drama.composeNeedShots"));
-            return;
-        }
-        setComposing(true);
-        try {
-            const created = await composeVideo(readyVideos.map((item) => item.storageKey));
-            setCut(created);
-            const done = await waitVideoCompositionTask(created.id, { onProgress: setCut });
-            setCut(done);
-            if (done.status !== "succeeded") {
-                message.error(done.errorMessage || translate("drama.composeFailed"));
-                return;
-            }
-            if (projectId) onWorkspace?.(await saveDramaCut({ projectId, taskId: done.id }));
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : translate("drama.composeFailed"));
-        } finally {
-            setComposing(false);
-        }
-    };
-    const savedCut = mediaByKey["cut"]?.status === "success" ? mediaByKey["cut"] : undefined;
-    const cutUrl = cut?.status === "succeeded" ? cut.resultData?.url || "" : savedCut?.url || "";
-    const cutStorageKey = cut?.status === "succeeded" ? cut.resultData?.storageKey || savedCut?.storageKey || "" : savedCut?.storageKey || "";
-    const exportCut = async () => {
-        if (!cutStorageKey && !cutUrl) return;
-        setExporting(true);
-        try {
-            await downloadMedia({ storageKey: cutStorageKey, url: cutUrl }, "drama-cut.mp4");
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : translate("drama.composeFailed"));
-        } finally {
-            setExporting(false);
-        }
-    };
     if (stage === "plan") {
         return (
             <div className="flex flex-col gap-4">
@@ -526,42 +448,5 @@ export function DramaArtifact({
             </div>
         );
     }
-    return (
-        <div className="flex flex-col gap-4">
-            <div className="flex flex-wrap items-center gap-2">
-                <Button type="primary" loading={composing} onClick={() => void compose()}>{translate("drama.composeCut")}</Button>
-                {cutUrl ? <Button icon={<Download className="size-3.5" />} loading={exporting} onClick={() => void exportCut()}>{translate("drama.exportCut")}</Button> : null}
-                {composing ? <span className="text-xs tabular-nums text-[var(--studio-muted)]">{translate("drama.composing", { value0: cut?.progress || 0 })}</span> : null}
-            </div>
-            {cutUrl ? <ZoomableMedia kind="video" url={cutUrl} storageKey={cutStorageKey} className="aspect-video w-full rounded-xl bg-black object-contain" /> : null}
-            {shotRefs.length ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                    {shotRefs.map((ref) => {
-                        const targetKey = `shot-video:${ref}`;
-                        return <MediaFrame key={targetKey} media={mediaByKey[targetKey]} kind="video" targetKey={targetKey} pending={pendingKeys.includes(targetKey)} aspect="aspect-video" onGenerate={onGenerate} onStop={onStop} onRequeried={onRequeried} stoppingTaskId={stoppingTaskId} />;
-                    })}
-                </div>
-            ) : <p className="text-sm leading-6 text-[var(--studio-muted)]">{translate("drama.noVideoYet")}</p>}
-            <Field label={translate("drama.summary")} value={text(content.summary)} />
-            <section className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface)] p-4">
-                <h3 className="text-sm font-semibold text-[var(--studio-ink)]">{translate("drama.checklist")}</h3>
-                <ul className="mt-3 flex flex-col gap-2">
-                    {rows(content.checklist).map((item, index) => {
-                        const passed = item.passed === true;
-                        return (
-                            <li key={index} className="flex items-start gap-2 text-sm leading-6 text-[var(--studio-ink)]">
-                                <span className={`mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full ${passed ? "bg-[color-mix(in_srgb,var(--studio-success)_16%,transparent)] text-[var(--studio-success)]" : "bg-[var(--studio-surface-raised)] text-[var(--studio-muted)]"}`}>
-                                    {passed ? <Check className="size-3" aria-hidden="true" /> : <Minus className="size-3" aria-hidden="true" />}
-                                </span>
-                                <span>
-                                    <span className="mr-2 text-xs font-medium text-[var(--studio-muted)]">{passed ? translate("drama.passed") : translate("drama.notPassed")}</span>
-                                    {text(item.item)}
-                                </span>
-                            </li>
-                        );
-                    })}
-                </ul>
-            </section>
-        </div>
-    );
+    return null;
 }
