@@ -16,7 +16,9 @@ import {
     loadVideoLastUsedSettings,
     saveDramaLastUsedSettings,
 } from "@/features/generation/lib/last-used-generation-settings";
-import { availableVideoResolutions, videoModelSupportsMode } from "@/features/generation/lib/video-billing";
+import { availableVideoResolutions, quoteVideoGeneration, videoModelSupportsMode } from "@/features/generation/lib/video-billing";
+import { requestCreditCost } from "@/features/generation/constants/credit-calculation";
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 import { sizeFromAspectRatio } from "@/features/generation/components/video-settings-panel";
 import type { AiConfig, VideoGenerationMode, VideoResolution } from "@/features/settings/stores/use-config-store";
 import { cancelAiTasksWithRefundPolicy } from "@/features/generation/lib/cancel-provider-generation";
@@ -26,6 +28,7 @@ import {
     confirmDramaStage,
     discardDramaVersion,
     dramaStages,
+    extractDramaLastFrame,
     generateDramaMedia,
     getDramaWorkspace,
     regenerateDramaStage,
@@ -90,6 +93,7 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
     const [settingsHydrated, setSettingsHydrated] = useState(false);
 
     const [pendingKeys, setPendingKeys] = useState<string[]>([]);
+    const [extractingShotRef, setExtractingShotRef] = useState("");
     const [stoppingTaskId, setStoppingTaskId] = useState("");
     const [stopping, setStopping] = useState(false);
     const [filling, setFilling] = useState(false);
@@ -310,6 +314,42 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
         () => availableVideoResolutions({ ...config, videoModel, videoGenerationMode: videoMode }, videoModel, videoMode),
         [config, videoMode, videoModel],
     );
+
+    const imageUnitCredits = useMemo(() => {
+        if (!imageModel) return "";
+        const raw = requestCreditCost({
+            modelCosts: config.modelCosts,
+            model: imageModel,
+            taskType: "image",
+            count: 1,
+            resolution: imageResolution,
+        });
+        return creditAmount(raw).gt(0) ? creditText(raw) : "";
+    }, [config.modelCosts, imageModel, imageResolution]);
+
+    const shotVideoCreditsByRef = useMemo(() => {
+        const map: Record<string, { credits: string; reason?: string }> = {};
+        const ratio = dramaAspectRatio(project?.aspectRatio);
+        for (const shot of timedShots) {
+            if (!videoModel) {
+                map[shot.ref] = { credits: "", reason: translate("drama.mediaModelMissing") };
+                continue;
+            }
+            const quote = quoteVideoGeneration({
+                config,
+                model: videoModel,
+                mode: videoMode,
+                resolution: videoResolution || "720p",
+                seconds: shot.durationSeconds,
+                size: ratio,
+                requireReferences: false,
+            });
+            map[shot.ref] = quote.available
+                ? { credits: String(quote.credits) }
+                : { credits: "", reason: quote.reason };
+        }
+        return map;
+    }, [config, project?.aspectRatio, timedShots, translate, videoMode, videoModel, videoResolution]);
 
     useEffect(() => {
         if (!settingsHydrated || !videoResolutions.length || videoResolutions.includes(videoResolution as VideoResolution)) return;
@@ -601,6 +641,20 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
         }
     };
 
+    const handleExtractLastFrame = async (prevShotRef: string) => {
+        if (!project || !prevShotRef || extractingShotRef) return;
+        setExtractingShotRef(prevShotRef);
+        try {
+            const next = await extractDramaLastFrame({ projectId: project.id, shotRef: prevShotRef });
+            setWorkspace(next);
+            message.success("已重新截取上一镜尾帧作为首帧");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("common.serverRequestFailed_5ed90b"));
+        } finally {
+            setExtractingShotRef("");
+        }
+    };
+
     const stopMedia = async (media: DramaMedia) => {
         if (!media.taskId || stoppingTaskId) return;
         setStoppingTaskId(media.taskId);
@@ -769,6 +823,7 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                         imageResolution={imageResolution}
                         videoResolution={videoResolution}
                         videoResolutions={videoResolutions}
+                        imageUnitCredits={imageUnitCredits}
                         filling={filling}
                         stoppingTaskId={stoppingTaskId}
                         onImageModelChange={handleImageModelChange}
@@ -914,9 +969,13 @@ export function DramaWorkbench({ projectId }: { projectId: string }) {
                                 onMentionShot={mentionShotInChat}
                                 mediaByKey={mediaByKey}
                                 pendingKeys={pendingKeys}
+                                imageUnitCredits={imageUnitCredits}
+                                shotVideoCreditsByRef={shotVideoCreditsByRef}
                                 filling={filling}
                                 stoppingTaskId={stoppingTaskId}
                                 onGenerateMedia={(targetKey, customPrompt) => void generate(targetKey, customPrompt)}
+                                onExtractLastFrame={(prevShotRef) => void handleExtractLastFrame(prevShotRef)}
+                                extractingShotRef={extractingShotRef}
                                 onStopMedia={(media) => void stopMedia(media)}
                                 onRequeried={() => void refresh()}
                                 onGenerateMissingVideos={() => void generateMissing(productionShotRefs.map((ref) => `shot-video:${ref}`))}

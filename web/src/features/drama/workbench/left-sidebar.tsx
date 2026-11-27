@@ -46,6 +46,7 @@ export function DramaLeftSidebar({
     imageResolution,
     videoResolution,
     videoResolutions,
+    imageUnitCredits,
     filling,
     stoppingTaskId,
     onImageModelChange,
@@ -79,6 +80,7 @@ export function DramaLeftSidebar({
     imageResolution: string;
     videoResolution: string;
     videoResolutions: VideoResolution[];
+    imageUnitCredits: string;
     filling: boolean;
     stoppingTaskId: string;
     onImageModelChange: (value: string) => void;
@@ -233,6 +235,7 @@ export function DramaLeftSidebar({
                                                 media={mediaByKey[key]}
                                                 pending={pendingKeys.includes(key)}
                                                 stoppingTaskId={stoppingTaskId}
+                                                creditsText={imageUnitCredits}
                                                 onGenerate={() => onGenerateMedia(key)}
                                                 onStop={onStopMedia}
                                             />
@@ -254,6 +257,7 @@ export function DramaLeftSidebar({
                                                 media={mediaByKey[key]}
                                                 pending={pendingKeys.includes(key)}
                                                 stoppingTaskId={stoppingTaskId}
+                                                creditsText={imageUnitCredits}
                                                 onGenerate={() => onGenerateMedia(key)}
                                                 onStop={onStopMedia}
                                             />
@@ -410,6 +414,7 @@ function CompactAssetRow({
     media,
     pending,
     stoppingTaskId,
+    creditsText,
     onGenerate,
     onStop,
 }: {
@@ -418,6 +423,7 @@ function CompactAssetRow({
     media?: DramaMedia;
     pending: boolean;
     stoppingTaskId: string;
+    creditsText?: string;
     onGenerate: () => void;
     onStop: (media: DramaMedia) => void;
 }) {
@@ -457,7 +463,11 @@ function CompactAssetRow({
                             onClick={onGenerate}
                             className="text-[11px]! font-medium text-[var(--studio-action)]! hover:underline disabled:opacity-50"
                         >
-                            {running ? translate("drama.mediaRunning") : translate("drama.generateImage")}
+                            {running
+                                ? translate("drama.mediaRunning")
+                                : creditsText
+                                    ? `${translate("drama.generateImage")} · ${creditsText} 积分`
+                                    : translate("drama.generateImage")}
                         </button>
                     )}
                 </div>

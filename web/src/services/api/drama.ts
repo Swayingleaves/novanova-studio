@@ -134,6 +134,10 @@ export function updateDramaShots(body: {
     return serverPost<DramaWorkspace>("/drama/updateShots", body);
 }
 
+export function extractDramaLastFrame(body: { projectId: string; shotRef: string }) {
+    return serverPost<DramaWorkspace>("/drama/extractLastFrame", body);
+}
+
 export function generateDramaMedia(body: {
     clientRequestId: string;
     projectId: string;

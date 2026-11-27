@@ -262,12 +262,31 @@ public class DramaMediaService {
     }
 
     private Mono<Void> refresh(long userId, long teamId, List<DramaRepository.MediaRow> rows) {
-        return Flux.fromIterable(rows).filter(row -> open(row.status()) || "failed".equals(row.status())).concatMap(row -> aiTaskService.getTaskForUser(userId, row.taskId())
-                .flatMap(task -> syncMedia(userId, teamId, row, task))
-                .onErrorResume(error -> {
-                    log.warn("同步短剧媒体任务失败: mediaId={}, taskId={}, message={}", row.id(), row.taskId(), error.getMessage());
-                    return Mono.empty();
-                })).then();
+        Mono<Void> syncOpen = Flux.fromIterable(rows)
+                .filter(row -> open(row.status()) || "failed".equals(row.status()))
+                .concatMap(row -> aiTaskService.getTaskForUser(userId, row.taskId())
+                        .flatMap(task -> syncMedia(userId, teamId, row, task))
+                        .onErrorResume(error -> {
+                            log.warn("同步短剧媒体任务失败: mediaId={}, taskId={}, message={}", row.id(), row.taskId(), error.getMessage());
+                            return Mono.empty();
+                        }))
+                .then();
+        // 对已经成功的镜头视频，若尚未截取对应尾帧（例如历史已生成视频），刷新时自动补截。
+        Mono<Void> backfillLastFrames = Flux.fromIterable(rows)
+                .filter(row -> "success".equals(row.status())
+                        && row.targetKey() != null
+                        && row.targetKey().startsWith("shot-video:")
+                        && (StringUtils.hasText(row.storageKey()) || StringUtils.hasText(row.resultUrl())))
+                .filter(row -> {
+                    String lastKey = "shot-last:" + DramaMediaTargets.ref(row.targetKey());
+                    return rows.stream().noneMatch(item ->
+                            lastKey.equals(item.targetKey())
+                                    && text(row.taskId()).equals(text(item.taskId()))
+                                    && "success".equals(item.status()));
+                })
+                .concatMap(row -> ensureExtractedLastFrame(userId, teamId, row, text(row.resultUrl()), text(row.storageKey())))
+                .then();
+        return syncOpen.then(backfillLastFrames);
     }
 
     /** 同步任务结果；转存对象存储失败时 AiMediaSupport 已回退登记原始链接，短剧直接保留原结果链接并标记成功。 */
@@ -290,6 +309,31 @@ public class DramaMediaService {
     }
 
     /**
+     * 强制从指定镜头的已成功视频重新截取高清尾帧并落库，覆盖历史记录供下一镜作为首帧使用。
+     *
+     * @param projectId 项目ID
+     * @param shotRef 镜头短序号，如 sh1
+     * @return 完成信号
+     */
+    public Mono<Void> extractLastFrame(String projectId, String shotRef) {
+        String ref = shotRef == null ? "" : shotRef.trim();
+        if (!StringUtils.hasText(ref)) {
+            return Mono.error(invalid("镜头序号不能为空"));
+        }
+        String videoKey = "shot-video:" + ref;
+        return scope((userId, teamId) -> dramaRepository.findProject(userId, teamId, projectId)
+                .switchIfEmpty(Mono.error(missing()))
+                .then(dramaRepository.listMedia(projectId, teamId).collectList())
+                .flatMap(rows -> {
+                    DramaRepository.MediaRow videoRow = usableMedia(rows, videoKey);
+                    if (videoRow == null) {
+                        return Mono.error(invalid("请先生成 " + ref + " 的视频后再截取尾帧"));
+                    }
+                    return extractAndSaveLastFrame(userId, teamId, videoRow, text(videoRow.resultUrl()), text(videoRow.storageKey()));
+                }));
+    }
+
+    /**
      * 镜头视频生成成功后，自动截取该视频尾帧并落库为 shot-last:<ref>，供下一镜自动作为首帧参考图。
      */
     private Mono<Void> ensureExtractedLastFrame(long userId, long teamId, DramaRepository.MediaRow videoRow,
@@ -307,48 +351,55 @@ public class DramaMediaService {
                                     && videoRow.taskId().equals(item.taskId())
                                     && "success".equals(item.status()));
                     if (alreadyExtracted) {
-                        return Mono.empty();
+                        return Mono.<Void>empty();
                     }
-                    AiTaskDtos.AiTaskMediaReference videoRef = new AiTaskDtos.AiTaskMediaReference(
-                            videoRow.id(), videoRow.targetKey(), "video/mp4", text(videoStorageKey), text(videoUrl), "reference_video");
-                    return mediaSupport.resolveReferenceBinary(userId, videoRef, "video/mp4")
-                            .flatMap(binary -> Mono.fromCallable(() -> extractLastFrameBytes(binary.data()))
-                                    .subscribeOn(Schedulers.boundedElastic()))
-                            .flatMap(frameBytes -> {
-                                if (frameBytes == null || frameBytes.length == 0) {
-                                    return Mono.<Void>empty();
-                                }
-                                return mediaSupport.storeGeneratedMedia(userId, "image", "drama-last-frame-" + ref + ".jpg",
-                                                new GeneratedBinary(frameBytes, "image/jpeg"), null, null, null)
-                                        .flatMap(stored -> {
-                                            DramaRepository.MediaRow lastRow = new DramaRepository.MediaRow(
-                                                    UUID.randomUUID().toString(),
-                                                    videoRow.projectId(),
-                                                    videoRow.versionId(),
-                                                    lastKey,
-                                                    "image",
-                                                    videoRow.taskId(),
-                                                    "extract-last-frame",
-                                                    "自动截取自 " + videoRow.targetKey() + " 尾帧",
-                                                    "success",
-                                                    text(stored.url()),
-                                                    text(stored.storageKey()),
-                                                    "image/jpeg",
-                                                    "",
-                                                    OffsetDateTime.now());
-                                            log.info("短剧视频尾帧自动截取完成: projectId={}, target={}, storageKey={}",
-                                                    videoRow.projectId(), lastKey, stored.storageKey());
-                                            return dramaRepository.insertMedia(teamId, userId, lastRow).then();
-                                        });
-                            });
+                    return extractAndSaveLastFrame(userId, teamId, videoRow, videoUrl, videoStorageKey);
                 })
-                .then()
                 .onErrorResume(error -> {
                     log.warn("自动截取短剧视频尾帧失败: projectId={}, videoTarget={}, message={}",
                             videoRow.projectId(), videoRow.targetKey(), error.getMessage());
                     return Mono.empty();
                 })
                 .doFinally(signal -> extractingLastFrames.remove(lockKey));
+    }
+
+    private Mono<Void> extractAndSaveLastFrame(long userId, long teamId, DramaRepository.MediaRow videoRow,
+                                               String videoUrl, String videoStorageKey) {
+        String ref = DramaMediaTargets.ref(videoRow.targetKey());
+        String lastKey = "shot-last:" + ref;
+        AiTaskDtos.AiTaskMediaReference videoRef = new AiTaskDtos.AiTaskMediaReference(
+                videoRow.id(), videoRow.targetKey(), "video/mp4", text(videoStorageKey), text(videoUrl), "reference_video");
+        return mediaSupport.resolveReferenceBinary(userId, videoRef, "video/mp4")
+                .flatMap(binary -> Mono.fromCallable(() -> extractLastFrameBytes(binary.data()))
+                        .subscribeOn(Schedulers.boundedElastic()))
+                .flatMap(frameBytes -> {
+                    if (frameBytes == null || frameBytes.length == 0) {
+                        return Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "截取视频尾帧失败，请稍后重试"));
+                    }
+                    return mediaSupport.storeGeneratedMedia(userId, "image", "drama-last-frame-" + ref + ".jpg",
+                                    new GeneratedBinary(frameBytes, "image/jpeg"), null, null, null)
+                            .flatMap(stored -> {
+                                DramaRepository.MediaRow lastRow = new DramaRepository.MediaRow(
+                                        UUID.randomUUID().toString(),
+                                        videoRow.projectId(),
+                                        videoRow.versionId(),
+                                        lastKey,
+                                        "image",
+                                        videoRow.taskId(),
+                                        "extract-last-frame",
+                                        "自动截取自 " + videoRow.targetKey() + " 尾帧",
+                                        "success",
+                                        text(stored.url()),
+                                        text(stored.storageKey()),
+                                        "image/jpeg",
+                                        "",
+                                        OffsetDateTime.now());
+                                log.info("短剧视频尾帧截取完成: projectId={}, target={}, storageKey={}",
+                                        videoRow.projectId(), lastKey, stored.storageKey());
+                                return dramaRepository.insertMedia(teamId, userId, lastRow).then();
+                            });
+                })
+                .then();
     }
 
     private byte[] extractLastFrameBytes(byte[] videoBytes) throws Exception {

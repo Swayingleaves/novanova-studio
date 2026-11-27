@@ -156,6 +156,23 @@ public class DramaController {
     }
 
     /**
+     * 手动从指定镜头的已成功视频重新截取尾帧，作为下一镜的首帧参考图。
+     *
+     * @param request 截帧请求
+     * @param httpRequest 当前HTTP请求
+     * @return 更新后的工作台
+     */
+    @PostMapping("/extractLastFrame")
+    public Mono<ApiResponse<DramaDtos.WorkspaceResponse>> extractLastFrame(@Valid @RequestBody DramaDtos.ExtractLastFrameRequest request, ServerHttpRequest httpRequest) {
+        log.debug("重新截取短剧镜头尾帧: url={}, headers={}, projectId={}, shotRef={}",
+                httpRequest.getURI(), headers(httpRequest), request.projectId(), request.shotRef());
+        return dramaMediaService.extractLastFrame(request.projectId(), request.shotRef())
+                .then(dramaWorkspaceService.getWorkspace(request.projectId()))
+                .map(ApiResponse::ok)
+                .doOnNext(response -> log.debug("重新截取短剧镜头尾帧响应: projectId={}, shotRef={}", request.projectId(), request.shotRef()));
+    }
+
+    /**
      * 重做指定阶段的产物，直接按生成请求入队，不走对话意图判断。
      *
      * @param request 重做请求
@@ -164,9 +181,9 @@ public class DramaController {
      */
     @PostMapping("/regenerateStage")
     public Mono<ApiResponse<DramaDtos.WorkspaceResponse>> regenerateStage(@Valid @RequestBody DramaDtos.RegenerateStageRequest request, ServerHttpRequest httpRequest) {
-        log.info("重做短剧阶段: url={}, headers={}, body={}", httpRequest.getURI(), headers(httpRequest), request);
+        log.debug("重做短剧阶段: url={}, headers={}, body={}", httpRequest.getURI(), headers(httpRequest), request);
         return dramaWorkspaceService.regenerateStage(request).map(ApiResponse::ok)
-                .doOnNext(response -> log.info("重做短剧阶段响应: projectId={}, stage={}", request.projectId(), request.stage()));
+                .doOnNext(response -> log.debug("重做短剧阶段响应: projectId={}, stage={}", request.projectId(), request.stage()));
     }
 
     /**
@@ -178,9 +195,9 @@ public class DramaController {
      */
     @PostMapping("/discardVersion")
     public Mono<ApiResponse<DramaDtos.WorkspaceResponse>> discardVersion(@Valid @RequestBody DramaDtos.DiscardVersionRequest request, ServerHttpRequest httpRequest) {
-        log.info("撤销短剧版本: url={}, headers={}, body={}", httpRequest.getURI(), headers(httpRequest), request);
+        log.debug("撤销短剧版本: url={}, headers={}, body={}", httpRequest.getURI(), headers(httpRequest), request);
         return dramaWorkspaceService.discardVersion(request).map(ApiResponse::ok)
-                .doOnNext(response -> log.info("撤销短剧版本响应: projectId={}, versionId={}", request.projectId(), request.versionId()));
+                .doOnNext(response -> log.debug("撤销短剧版本响应: projectId={}, versionId={}", request.projectId(), request.versionId()));
     }
 
     /**

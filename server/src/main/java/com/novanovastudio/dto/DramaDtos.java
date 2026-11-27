@@ -95,6 +95,10 @@ public final class DramaDtos {
                             @Size(max = 32) String locationRef) {
     }
 
+    /** @param projectId 项目ID @param shotRef 要截取尾帧的镜头短序号，如 sh1 */
+    public record ExtractLastFrameRequest(@NotBlank String projectId, @NotBlank @Size(max = 32) String shotRef) {
+    }
+
     /**
      * 为当前阶段里的一个角色、场景或镜头提交真实的图片或视频任务。
      *

@@ -7,6 +7,7 @@ import {
     Check,
     ChevronDown,
     ChevronUp,
+    Coins,
     Copy,
     GripVertical,
     HelpCircle,
@@ -21,6 +22,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/features/locale/use-translation";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { RequeryFailedTaskButton } from "@/features/ai-task/requery-failed-task-button";
@@ -55,9 +57,13 @@ export function DramaStoryboardTable({
     onMentionShot,
     mediaByKey,
     pendingKeys,
+    imageUnitCredits,
+    shotVideoCreditsByRef,
     filling,
     stoppingTaskId,
     onGenerateMedia,
+    onExtractLastFrame,
+    extractingShotRef,
     onStopMedia,
     onRequeried,
     onGenerateMissingVideos,
@@ -81,9 +87,13 @@ export function DramaStoryboardTable({
     onMentionShot: (shot: TimedDramaShot) => void;
     mediaByKey: Record<string, DramaMedia | undefined>;
     pendingKeys: string[];
+    imageUnitCredits: string;
+    shotVideoCreditsByRef: Record<string, { credits: string; reason?: string }>;
     filling: boolean;
     stoppingTaskId: string;
     onGenerateMedia: (targetKey: string, customPrompt?: string) => void;
+    onExtractLastFrame: (prevShotRef: string) => void;
+    extractingShotRef: string;
     onStopMedia: (media: DramaMedia) => void;
     onRequeried: () => void;
     onGenerateMissingVideos: () => void;
@@ -100,7 +110,7 @@ export function DramaStoryboardTable({
         label: string;
         placeholder: string;
     } | null>(null);
-    const [customFirstFrame, setCustomFirstFrame] = useState<{ shotRef: string; prompt: string } | null>(null);
+    const [customFirstFrame, setCustomFirstFrame] = useState<{ shotRef: string; shotLabel: string; prompt: string } | null>(null);
     const [detail, setDetail] = useState<ResultDetail | null>(null);
     const cardRefs = useRef<Record<string, HTMLElement | null>>({});
 
@@ -110,10 +120,19 @@ export function DramaStoryboardTable({
     useEffect(() => {
         if (!selectedShotRef) return;
         const target = cardRefs.current[selectedShotRef];
-        if (target) target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
     }, [selectedShotRef]);
 
     const totalDialogueChars = countDialogueChars(shots);
+    const missingVideosTotalCredits = shots.reduce((sum, shot) => {
+        const videoMedia = mediaByKey[`shot-video:${shot.ref}`];
+        if (videoMedia?.status === "success" || videoMedia?.status === "pending" || videoMedia?.status === "running") {
+            return sum;
+        }
+        const quote = shotVideoCreditsByRef[shot.ref]?.credits;
+        return quote ? sum.plus(creditAmount(quote)) : sum;
+    }, creditAmount(0));
+    const missingVideosCreditsText = missingVideosTotalCredits.gt(0) ? creditText(missingVideosTotalCredits) : "";
 
     const requestDelete = (shot: TimedDramaShot) => {
         if (shots.length <= 1) {
@@ -161,7 +180,9 @@ export function DramaStoryboardTable({
                         disabled={pendingKeys.length > 0 || filling || shots.length === 0}
                         onClick={onGenerateMissingVideos}
                     >
-                        {translate("drama.generateMissingVideos")}
+                        {missingVideosCreditsText
+                            ? `${translate("drama.generateMissingVideos")} · ${missingVideosCreditsText} 积分`
+                            : translate("drama.generateMissingVideos")}
                     </Button>
                     {canConfirm ? (
                         <Button
@@ -183,15 +204,29 @@ export function DramaStoryboardTable({
                         const active = selectedShotRef === shot.ref;
                         const overflow = estimateSpeechOverflow(shot.dialogue, shot.durationSeconds);
                         const firstMedia = mediaByKey[`shot-first:${shot.ref}`];
-                        const lastMedia = mediaByKey[`shot-last:${shot.ref}`];
+                        const prevShot = shot.index > 0 ? shots[shot.index - 1] : undefined;
+                        const prevVideoMedia = prevShot ? mediaByKey[`shot-video:${prevShot.ref}`] : undefined;
+                        const inheritedFirstMedia = prevShot ? mediaByKey[`shot-last:${prevShot.ref}`] : undefined;
                         const videoMedia = mediaByKey[`shot-video:${shot.ref}`];
                         const hasAnyMedia = Boolean(
-                            firstMedia?.url || lastMedia?.url || videoMedia?.url
+                            firstMedia?.url || inheritedFirstMedia?.url || videoMedia?.url
                             || firstMedia?.status === "pending" || firstMedia?.status === "running"
-                            || lastMedia?.status === "pending" || lastMedia?.status === "running"
-                            || videoMedia?.status === "pending" || videoMedia?.status === "running",
+                            || videoMedia?.status === "pending" || videoMedia?.status === "running"
+                            || prevVideoMedia?.status === "success",
                         );
                         const mediaOpen = expandedMedia[shot.ref] ?? hasAnyMedia;
+                        const videoQuote = shotVideoCreditsByRef[shot.ref];
+                        const videoCredits = videoQuote?.credits || "";
+                        const shotCreditTooltip = [
+                            videoCredits
+                                ? `视频：${videoCredits} 积分（${shot.durationSeconds} 秒）`
+                                : videoQuote?.reason
+                                    ? `视频：${videoQuote.reason}`
+                                    : "视频：未定价",
+                            shot.index === 0
+                                ? (imageUnitCredits ? `自定义首帧：${imageUnitCredits} 积分/张` : "自定义首帧：未定价")
+                                : null,
+                        ].filter(Boolean).join("；");
                         const directorNotes = [shot.rhythm, shot.size, shot.camera, shot.characterRef, shot.locationRef].filter(Boolean).join(" · ");
 
                         return (
@@ -218,22 +253,40 @@ export function DramaStoryboardTable({
                                     setOverIndex(null);
                                 }}
                                 onClick={() => onSelectShot(shot.ref)}
-                                className={`rounded-lg border transition-colors ${
+                                style={
+                                    active
+                                        ? {
+                                            borderColor: "var(--studio-action)",
+                                            boxShadow: "0 0 0 1px var(--studio-action)",
+                                        }
+                                        : undefined
+                                }
+                                className={`overflow-hidden rounded-lg border transition-all ${
                                     overIndex === shot.index && dragIndex !== null && dragIndex !== shot.index
                                         ? "border-[var(--studio-action)] bg-[var(--studio-surface-raised)]"
                                         : active
-                                            ? "border-[var(--studio-line-strong)] bg-[var(--studio-surface)]"
+                                            ? "bg-[var(--studio-surface)]"
                                             : "border-[var(--studio-line)] bg-[var(--studio-surface)] hover:border-[var(--studio-line-strong)]"
                                 }`}
                             >
-                                <div className="flex flex-wrap items-center gap-2 border-b border-[var(--studio-line)] px-3.5 py-2.5">
+                                <div
+                                    style={
+                                        active
+                                            ? { background: "color-mix(in srgb, var(--studio-action) 10%, var(--studio-surface))" }
+                                            : undefined
+                                    }
+                                    className="flex flex-wrap items-center gap-2 border-b border-[var(--studio-line)] px-3.5 py-2.5 transition-colors"
+                                >
                                     <span
                                         className={`inline-flex items-center text-[var(--studio-faint)] ${editable ? "cursor-grab active:cursor-grabbing" : "opacity-40"}`}
                                         aria-hidden="true"
                                     >
                                         <GripVertical className="size-3.5" />
                                     </span>
-                                    <span className="text-xs font-semibold tabular-nums text-[var(--studio-muted)]">
+                                    <span
+                                        style={active ? { color: "var(--studio-action)" } : undefined}
+                                        className={`text-xs font-semibold tabular-nums ${active ? "" : "text-[var(--studio-muted)]"}`}
+                                    >
                                         {formatShotNumber(shot.index)}
                                     </span>
                                     <input
@@ -248,6 +301,16 @@ export function DramaStoryboardTable({
                                     <span className="rounded bg-[var(--studio-surface-raised)] px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-[var(--studio-muted)]">
                                         {shot.ref}
                                     </span>
+                                    <Tooltip title={shotCreditTooltip}>
+                                        <span className="inline-flex items-center gap-1 rounded bg-[var(--studio-surface-raised)] px-2 py-0.5 text-[11px] font-medium tabular-nums text-[var(--studio-action)]">
+                                            <Coins className="size-3 shrink-0" aria-hidden="true" />
+                                            {videoCredits
+                                                ? (shot.index === 0 && imageUnitCredits
+                                                    ? `视频 ${videoCredits} / 首帧 ${imageUnitCredits} 积分`
+                                                    : `${videoCredits} 积分`)
+                                                : (shot.index === 0 && imageUnitCredits ? `首帧 ${imageUnitCredits} 积分` : "未定价")}
+                                        </span>
+                                    </Tooltip>
                                     <span className="text-xs tabular-nums text-[var(--studio-faint)]">
                                         {formatTimecode(shot.startSec)}–{formatTimecode(shot.endSec)}
                                     </span>
@@ -453,6 +516,8 @@ export function DramaStoryboardTable({
                                                 media={videoMedia}
                                                 pending={pendingKeys.includes(`shot-video:${shot.ref}`)}
                                                 stoppingTaskId={stoppingTaskId}
+                                                creditsText={videoCredits}
+                                                creditsReason={videoQuote?.reason}
                                                 helperText={
                                                     shot.index > 0 && mediaByKey[`shot-last:${shots[shot.index - 1]?.ref}`]?.status !== "success"
                                                         ? `等待上一镜（${shots[shot.index - 1]?.ref}）视频完成后自动截取尾帧`
@@ -476,32 +541,89 @@ export function DramaStoryboardTable({
                                                     media={firstMedia}
                                                     pending={pendingKeys.includes(`shot-first:${shot.ref}`)}
                                                     stoppingTaskId={stoppingTaskId}
+                                                    creditsText={imageUnitCredits}
                                                     helperText="默认不需要，按需输入提示词生成"
-                                                    onGenerate={() => setCustomFirstFrame({ shotRef: shot.ref, prompt: shot.picture })}
+                                                    onGenerate={() => setCustomFirstFrame({
+                                                        shotRef: shot.ref,
+                                                        shotLabel: `${formatShotNumber(shot.index)} 镜`,
+                                                        prompt: shot.picture,
+                                                    })}
                                                     onStop={onStopMedia}
                                                     onRequeried={onRequeried}
                                                     onPreview={(item) => setDetail(item)}
                                                 />
                                             </div>
-                                        ) : null}
-
-                                        {lastMedia?.status === "success" && lastMedia.url ? (
-                                            <div className="min-w-[180px] flex-1">
-                                                <InlineMediaSlot
-                                                    label="自动尾帧（下镜首帧）"
-                                                    kind="image"
-                                                    targetKey={`shot-last:${shot.ref}`}
-                                                    media={lastMedia}
-                                                    pending={false}
-                                                    stoppingTaskId={stoppingTaskId}
-                                                    readOnly
-                                                    helperText="已从视频自动截取"
-                                                    onGenerate={onGenerateMedia}
-                                                    onStop={onStopMedia}
-                                                    onRequeried={onRequeried}
-                                                    onPreview={(item) => setDetail(item)}
-                                                />
-                                            </div>
+                                        ) : prevShot ? (
+                                            (() => {
+                                                const hasCustomFirst = firstMedia?.status === "success" || firstMedia?.status === "pending" || firstMedia?.status === "running";
+                                                const displayedFirst = hasCustomFirst ? firstMedia : inheritedFirstMedia;
+                                                const extracting = extractingShotRef === prevShot.ref;
+                                                const customPending = pendingKeys.includes(`shot-first:${shot.ref}`);
+                                                const prevVideoReady = prevVideoMedia?.status === "success";
+                                                return (
+                                                    <div className="min-w-[220px] flex-1">
+                                                        <InlineMediaSlot
+                                                            label={hasCustomFirst ? "首帧（自定义生成）" : `首帧（承接自 ${formatShotNumber(prevShot.index)} 镜尾帧）`}
+                                                            kind="image"
+                                                            targetKey={hasCustomFirst ? `shot-first:${shot.ref}` : `shot-last:${prevShot.ref}`}
+                                                            media={displayedFirst}
+                                                            pending={extracting || customPending}
+                                                            stoppingTaskId={stoppingTaskId}
+                                                            creditsText={imageUnitCredits}
+                                                            helperText={
+                                                                extracting
+                                                                    ? `正在从 ${formatShotNumber(prevShot.index)} 镜视频重新截取尾帧…`
+                                                                    : hasCustomFirst
+                                                                        ? "已使用自定义首帧，生成本镜视频时优先传入"
+                                                                        : inheritedFirstMedia?.status === "success"
+                                                                            ? `已从 ${formatShotNumber(prevShot.index)} 镜视频截取，生成本镜视频时自动传入`
+                                                                            : prevVideoReady
+                                                                                ? `可点「重新截取」从 ${formatShotNumber(prevShot.index)} 镜视频截尾帧，或自定义生成`
+                                                                                : `生成 ${formatShotNumber(prevShot.index)} 镜视频后可自动截取，也可直接自定义生成`
+                                                            }
+                                                            extraActions={
+                                                                <>
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={!prevVideoReady || extracting}
+                                                                        onClick={(event) => {
+                                                                            event.stopPropagation();
+                                                                            onExtractLastFrame(prevShot.ref);
+                                                                        }}
+                                                                        className="text-[11px]! font-medium text-[var(--studio-action)]! hover:underline disabled:cursor-not-allowed disabled:opacity-45"
+                                                                    >
+                                                                        {extracting ? "截取中…" : "重新截取"}
+                                                                    </button>
+                                                                    <span className="text-[10px] text-[var(--studio-line-strong)]" aria-hidden="true">|</span>
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={customPending}
+                                                                        onClick={(event) => {
+                                                                            event.stopPropagation();
+                                                                            setCustomFirstFrame({
+                                                                                shotRef: shot.ref,
+                                                                                shotLabel: `${formatShotNumber(shot.index)} 镜`,
+                                                                                prompt: shot.picture,
+                                                                            });
+                                                                        }}
+                                                                        className="text-[11px]! font-medium text-[var(--studio-text)]! hover:text-[var(--studio-ink)]! hover:underline disabled:opacity-45"
+                                                                    >
+                                                                        自定义生成
+                                                                    </button>
+                                                                </>
+                                                            }
+                                                            onGenerate={() => setCustomFirstFrame({
+                                                                shotRef: shot.ref,
+                                                                shotLabel: `${formatShotNumber(shot.index)} 镜`,
+                                                                prompt: shot.picture,
+                                                            })}
+                                                            onStop={onStopMedia}
+                                                            onRequeried={onRequeried}
+                                                            onPreview={(item) => setDetail(item)}
+                                                        />
+                                                    </div>
+                                                );
+                                            })()
                                         ) : null}
                                     </div>
                                 ) : null}
@@ -552,10 +674,10 @@ export function DramaStoryboardTable({
             </Modal>
             <Modal
                 open={Boolean(customFirstFrame)}
-                title="自定义第一镜首帧提示词"
+                title={customFirstFrame ? `自定义 ${customFirstFrame.shotLabel} 首帧提示词` : "自定义首帧提示词"}
                 width={560}
                 mask={{ closable: true }}
-                okText="生成首帧图"
+                okText={imageUnitCredits ? `生成首帧图（${imageUnitCredits} 积分）` : "生成首帧图"}
                 cancelText={translate("drama.cancel")}
                 okButtonProps={{ disabled: !customFirstFrame?.prompt.trim() }}
                 onCancel={() => setCustomFirstFrame(null)}
@@ -594,7 +716,10 @@ function InlineMediaSlot({
     pending,
     stoppingTaskId,
     readOnly = false,
+    creditsText,
+    creditsReason,
     helperText,
+    extraActions,
     onGenerate,
     onStop,
     onRequeried,
@@ -607,7 +732,10 @@ function InlineMediaSlot({
     pending: boolean;
     stoppingTaskId: string;
     readOnly?: boolean;
+    creditsText?: string;
+    creditsReason?: string;
     helperText?: string;
+    extraActions?: React.ReactNode;
     onGenerate: (targetKey: string) => void;
     onStop: (media: DramaMedia) => void;
     onRequeried: () => void;
@@ -661,7 +789,23 @@ function InlineMediaSlot({
                 ) : null}
             </div>
             <div className="min-w-0 flex-1">
-                <p className="truncate text-[11px] font-medium text-[var(--studio-ink)]">{label}</p>
+                <div className="flex items-center justify-between gap-2">
+                    <p className="truncate text-[11px] font-medium text-[var(--studio-ink)]">{label}</p>
+                    {!readOnly ? (
+                        creditsText ? (
+                            <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-[var(--studio-surface-raised)] px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-[var(--studio-action)]">
+                                <Coins className="size-2.5" aria-hidden="true" />
+                                {creditsText} 积分
+                            </span>
+                        ) : creditsReason ? (
+                            <Tooltip title={creditsReason}>
+                                <span className="shrink-0 rounded bg-[var(--studio-surface-raised)] px-1.5 py-0.5 text-[10px] text-[var(--studio-warning)]">
+                                    不可报价
+                                </span>
+                            </Tooltip>
+                        ) : null
+                    ) : null}
+                </div>
                 {failed ? (
                     <p className="mt-0.5 truncate text-[10px] text-[var(--studio-danger)]">{media?.errorMessage || translate("drama.statusFailed")}</p>
                 ) : helperText ? (
@@ -682,6 +826,8 @@ function InlineMediaSlot({
                                 {stopping ? <LoaderCircle className="size-3 animate-spin" /> : <Square className="size-2.5 fill-current" />}
                                 {translate("drama.stop")}
                             </button>
+                        ) : extraActions ? (
+                            extraActions
                         ) : (
                             <button
                                 type="button"
@@ -695,7 +841,7 @@ function InlineMediaSlot({
                                 {running ? translate("drama.mediaRunning") : ready ? translate("drama.regenerate") : label}
                             </button>
                         )}
-                        {media?.status === "failed" && media.taskId ? (
+                        {media?.status === "failed" && media.taskId && !extraActions ? (
                             <RequeryFailedTaskButton taskId={media.taskId} onRestarted={onRequeried} />
                         ) : null}
                     </div>
