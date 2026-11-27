@@ -1498,10 +1498,21 @@ public class CreationPlanExecutor {
             return;
         }
         if (StringUtils.hasText(settings.videoModel())) arguments.put("model", settings.videoModel());
-        if (StringUtils.hasText(settings.size())) arguments.put("size", settings.size());
-        if (StringUtils.hasText(settings.seconds())) arguments.put("seconds", settings.seconds());
+        if (!hasTextArgument(arguments, "size") && StringUtils.hasText(settings.size())) {
+            arguments.put("size", settings.size());
+        }
+        if (!hasTextArgument(arguments, "seconds") && StringUtils.hasText(settings.seconds())) {
+            arguments.put("seconds", settings.seconds());
+        }
         if (StringUtils.hasText(settings.resolution())) arguments.put("vquality", settings.resolution());
         arguments.put("videoGenerationMode", VideoGenerationMode.defaultIfBlank(settings.videoGenerationMode()));
+    }
+
+    /** 判断工具参数中指定字符串字段是否已有非空值。 */
+    private static boolean hasTextArgument(Map<String, Object> arguments, String key) {
+        if (arguments == null) return false;
+        Object value = arguments.get(key);
+        return value != null && StringUtils.hasText(String.valueOf(value));
     }
 
     /**

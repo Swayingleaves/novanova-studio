@@ -10,6 +10,7 @@ import com.novanovastudio.ai.*;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
+import com.novanovastudio.dto.AiTaskDtos;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -146,33 +147,42 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
             log.info("OpenAI视频任务恢复轮询: taskId={}, providerTaskId={}", context.task().getId(), existingProviderTaskId);
             return finishVideoTask(context, existingProviderTaskId);
         }
-        // OpenAI兼容视频接口只支持提示词和图片参考。
-        if (!AiTaskParameterReader.safeReferences(context.request().videoReferences()).isEmpty()) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.openAICompatibleVideoDoesNotSupportVideoReferences")));
-        }
-        return Flux.fromIterable(AiTaskParameterReader.safeReferences(context.request().references()).stream().limit(7).toList())
-                .concatMap(reference -> mediaSupport.resolveReferenceUrl(context.task().getUserId(), reference))
-                .collectList()
-                .flatMap(referenceUrls -> {
-                    String boundary = "----NovanovaVideoBoundary" + UUID.randomUUID();
-                    List<MultipartPart> parts = new ArrayList<>();
-                    parts.add(aiHttpClient.formPart("model", context.model()));
-                    parts.add(aiHttpClient.formPart("prompt", context.request().prompt()));
-                    parts.add(aiHttpClient.formPart("seconds", AiTaskParameterReader.parameterText(context.request().parameters(), "seconds", "6")));
+        // OpenAI兼容视频接口以 JSON 方式提交，按非空列表附加 images / videos / audios 参考链接。
+        Mono<List<String>> imageUrlsMono = resolveReferenceUrls(context.task().getUserId(),
+                AiTaskParameterReader.safeReferences(context.request().references()));
+        Mono<List<String>> videoUrlsMono = resolveReferenceUrls(context.task().getUserId(),
+                AiTaskParameterReader.safeReferences(context.request().videoReferences()));
+        Mono<List<String>> audioUrlsMono = resolveReferenceUrls(context.task().getUserId(),
+                AiTaskParameterReader.safeReferences(context.request().audioReferences()));
+        return Mono.zip(imageUrlsMono, videoUrlsMono, audioUrlsMono)
+                .flatMap(tuple -> {
+                    List<String> imageUrls = tuple.getT1();
+                    List<String> videoUrls = tuple.getT2();
+                    List<String> audioUrls = tuple.getT3();
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put("model", context.model());
+                    payload.put("prompt", context.request().prompt());
+                    payload.put("seconds", AiTaskParameterReader.parameterText(context.request().parameters(), "seconds", "6"));
                     String size = AiTaskParameterReader.parameterText(context.request().parameters(), "size", "");
                     if (StringUtils.hasText(size) && !"auto".equals(size)) {
-                        parts.add(aiHttpClient.formPart("size", normalizeVideoSize(size)));
+                        payload.put("size", normalizeVideoSize(size));
                     }
                     String resolution = AiTaskParameterReader.parameterText(context.request().parameters(), "resolution", "720p");
                     if (StringUtils.hasText(resolution)) {
-                        parts.add(aiHttpClient.formPart("resolution_name", normalizeVideoResolution(resolution)));
+                        payload.put("resolution_name", normalizeVideoResolution(resolution));
                     }
-                    parts.add(aiHttpClient.formPart("preset", "normal"));
-                    for (String referenceUrl : referenceUrls) {
-                        parts.add(aiHttpClient.formPart("input_reference[]", referenceUrl));
+                    payload.put("preset", "normal");
+                    if (!imageUrls.isEmpty()) {
+                        payload.put("images", imageUrls);
                     }
-                    logRequest(context, "视频请求", "/videos", formSummary(parts));
-                    return aiHttpClient.sendMultipartRequest(context.channel(), "/videos", boundary, parts);
+                    if (!videoUrls.isEmpty()) {
+                        payload.put("videos", videoUrls);
+                    }
+                    if (!audioUrls.isEmpty()) {
+                        payload.put("audios", audioUrls);
+                    }
+                    logRequest(context, "视频请求", "/videos", payload);
+                    return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/videos", payload);
                 }).flatMap(created -> {
                     JSONObject createdPayload = AiJsonUtils.responsePayload(created);
                     String providerTaskId = AiTaskParameterReader.firstNonEmpty(createdPayload.getString("id"), createdPayload.getString("task_id"));
@@ -183,6 +193,23 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
                             .then(context.updateRunningProgress(20))
                             .then(finishVideoTask(context, providerTaskId));
                 });
+    }
+
+    /**
+     * 解析并过滤非空参考素材公网访问链接。
+     *
+     * @param userId Long 用户ID
+     * @param references List<AiTaskMediaReference> 参考素材列表
+     * @return Mono<List<String>> 公网链接列表
+     */
+    private Mono<List<String>> resolveReferenceUrls(Long userId, List<AiTaskDtos.AiTaskMediaReference> references) {
+        if (references == null || references.isEmpty()) {
+            return Mono.just(List.of());
+        }
+        return Flux.fromIterable(references)
+                .concatMap(reference -> mediaSupport.resolveReferenceUrl(userId, reference))
+                .filter(StringUtils::hasText)
+                .collectList();
     }
 
     private Mono<JSONObject> finishVideoTask(AiTaskExecutionContext context, String providerTaskId) {

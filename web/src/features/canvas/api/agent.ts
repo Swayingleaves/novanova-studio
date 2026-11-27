@@ -67,6 +67,14 @@ export interface AgentChatParams {
     message: string;
     /** 对话模式：agent 由主 Agent 规划优化，chat 跳过规划直接生成。 */
     mode?: "agent" | "chat";
+    /** 审批模式：auto 自动执行，manual 高成本操作前等待用户确认。 */
+    approvalMode?: "auto" | "manual";
+    /** 当前选中视频模型的实际能力区间（最小时长、最大时长、支持画幅）。 */
+    videoModelCapabilities?: {
+        minDurationSeconds?: number;
+        maxDurationSeconds?: number;
+        supportedAspectRatios?: string[];
+    };
     canvasSnapshot?: Record<string, unknown>;
     references?: { title: string; text: string }[];
     attachments?: AgentAttachment[];

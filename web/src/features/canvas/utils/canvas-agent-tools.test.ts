@@ -295,3 +295,27 @@ test("通用 Agent 不允许直接创建分镜节点", () => {
     assert.deepEqual(execution.ops, []);
     assert.match(execution.result.message, /分镜脚本请通过剧本文本节点创建/);
 });
+
+test("图片生成工具携带 referenceNodeIds 时先连线参考节点再触发生成", () => {
+    const execution = resolveCanvasAgentTool(
+        "canvas_generate_image",
+        {
+            prompt: "基于品牌 Logo 生成宣传图",
+            size: "16:9",
+            referenceNodeIds: ["image-logo-1", "image-logo-1", "image-fixed-ref"],
+        },
+        () => "fixed-ref",
+    );
+
+    assert.ok(execution);
+    assert.deepEqual(
+        execution.ops.map((op) => op.type),
+        ["add_node", "connect_nodes", "run_generation"],
+    );
+    assert.deepEqual(execution.ops[1], {
+        type: "connect_nodes",
+        sourceNodeId: "image-logo-1",
+        targetNodeId: "image-fixed-ref",
+    });
+    assert.equal(execution.ops[2]?.nodeId, "image-fixed-ref");
+});

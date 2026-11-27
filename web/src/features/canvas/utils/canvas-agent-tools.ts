@@ -151,9 +151,16 @@ function createGenerationExecution(mode: "text" | "image" | "video", args: Recor
         y: readNumber(args.y),
         attributes: generationAttributes(mode, args, prompt),
     };
-    const ops = autoRun
+    const referenceNodeIds = Array.from(new Set(readStringArray(args.referenceNodeIds))).filter((id) => id !== nodeId);
+    const referenceConnectionOps: CanvasAgentOp[] = referenceNodeIds.map((sourceNodeId) => ({
+        type: "connect_nodes",
+        sourceNodeId,
+        targetNodeId: nodeId,
+    }));
+    const ops: CanvasAgentOp[] = autoRun
         ? [
               addNode,
+              ...referenceConnectionOps,
               {
                   type: "run_generation",
                   nodeId,
@@ -162,7 +169,7 @@ function createGenerationExecution(mode: "text" | "image" | "video", args: Recor
                   ...(generationStyleSnapshots.length ? { generationStyleSnapshots } : {}),
               } satisfies CanvasAgentOp,
           ]
-        : [addNode];
+        : [addNode, ...referenceConnectionOps];
     return {
         ops,
         result: {
@@ -211,12 +218,19 @@ function createRecoveryGenerationExecution(name: string, args: Record<string, un
         ...(prompt ? (textGeneration ? { content: prompt } : { prompt }) : {}),
         ...(readString(args.size) ? { size: readString(args.size) } : {}),
         ...(readString(args.quality) ? { quality: readString(args.quality) } : {}),
-        ...(readString(args.imageResolution) ? { imageResolution: readString(args.imageResolution) } : {}),
+        ...(readImageResolution(args.imageResolution) ? { imageResolution: readImageResolution(args.imageResolution) } : {}),
         ...(videoGeneration ? videoGenerationAttributes(args) : {}),
         ...(readStyleSnapshots(args.generationStyleSnapshots).length ? { generationStyleSnapshots: readStyleSnapshots(args.generationStyleSnapshots) } : {}),
     };
+    const referenceNodeIds = Array.from(new Set(readStringArray(args.referenceNodeIds)));
     return {
-        ops: nodeIds.flatMap((nodeId) => [{ type: "update_node", id: nodeId, attributes } satisfies CanvasAgentOp, { type: "run_generation", nodeId, prompt, recovery: true } satisfies CanvasAgentOp]),
+        ops: nodeIds.flatMap((nodeId) => [
+            { type: "update_node", id: nodeId, attributes } satisfies CanvasAgentOp,
+            ...referenceNodeIds
+                .filter((sourceNodeId) => sourceNodeId !== nodeId)
+                .map((sourceNodeId) => ({ type: "connect_nodes", sourceNodeId, targetNodeId: nodeId }) satisfies CanvasAgentOp),
+            { type: "run_generation", nodeId, prompt, recovery: true } satisfies CanvasAgentOp,
+        ]),
         result: { ok: true, message: translate("canvas.regeneratingFailedNodes"), data: { nodeIds, status: "running" } },
     };
 }
@@ -261,7 +275,7 @@ function generationAttributes(mode: "text" | "image" | "video", args: Record<str
         status: "idle",
         ...(readString(args.size) ? { size: readString(args.size) } : {}),
         ...(readString(args.quality) ? { quality: readString(args.quality) } : {}),
-        ...(readString(args.imageResolution) ? { imageResolution: readString(args.imageResolution) } : {}),
+        ...(readImageResolution(args.imageResolution) ? { imageResolution: readImageResolution(args.imageResolution) } : {}),
         ...(count === undefined ? {} : { count }),
         ...(readStyleSnapshots(args.generationStyleSnapshots).length ? { generationStyleSnapshots: readStyleSnapshots(args.generationStyleSnapshots) } : {}),
     };
@@ -291,6 +305,13 @@ function readStyleSnapshots(value: unknown): import("@/services/api/server").Gen
             typeof (item as { generationType?: unknown }).generationType === "string" &&
             typeof (item as { stylePrompt?: unknown }).stylePrompt === "string",
     );
+}
+
+/** 仅接受合法图片清晰度（1K / 2K / 4K），避免模型误填视频分辨率（如 480p / 720p）导致生图失败。 */
+function readImageResolution(value: unknown): "1K" | "2K" | "4K" | undefined {
+    const text = readString(value)?.toUpperCase();
+    if (text === "1K" || text === "2K" || text === "4K") return text;
+    return undefined;
 }
 
 function createTextNodeOps(args: Record<string, unknown>): CanvasAgentOp[] {

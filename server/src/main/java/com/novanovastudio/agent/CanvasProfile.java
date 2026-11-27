@@ -141,6 +141,6 @@ public class CanvasProfile implements AgentLoopProfile {
      *
      * @return int 最大循环步数
      */
-    @Override public int maxSteps() { return 4; }
+    @Override public int maxSteps() { return 12; }
 
 }

@@ -2,12 +2,12 @@
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { App, Tooltip } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { App, Button, Dropdown, Tooltip } from "antd";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
-import { AudioLines, Box, Boxes, Clapperboard, Copy, FileText, Image as ImageIcon, PanelRightClose, Plus, Square, Video } from "lucide-react";
+import { AudioLines, Box, Boxes, Check, CheckCircle2, ChevronDown, CircleAlert, Clapperboard, Copy, FileText, Image as ImageIcon, MessageSquarePlus, PanelRightClose, Video, X, XCircle } from "lucide-react";
 import type { ThinkingBlockState } from "@/features/chat/types";
 import { StreamingReplyBubble } from "@/features/generation/components/streaming-reply-bubble";
 import { ModelPicker } from "@/features/settings/components/model-picker";
@@ -17,14 +17,26 @@ import { ASK_USER_MODEL_CONFIG, CONTINUE_AFTER_MODEL_CONFIG, MODEL_CONFIG_CONFIR
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
-import type { CanvasAssistantChoice, CanvasAssistantMessage, CanvasAssistantReference, CanvasNode } from "../types";
+import type {
+    CanvasAgentBatchItem,
+    CanvasAgentPendingApproval,
+    CanvasAgentQueuedPrompt,
+    CanvasAssistantChoice,
+    CanvasAssistantMessage,
+    CanvasAssistantReference,
+    CanvasAssistantSession,
+    CanvasAssistantTraceStep,
+    CanvasNode,
+} from "../types";
 import type { GenerationStyleOption } from "@/services/api/server";
 import { formatGroupedGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { GenerationStyleChips, useGenerationStyles } from "@/features/generation/components/generation-style-picker";
 import { isImageNode, isTextNode, isVideoNode } from "../domain/canvas-node";
 import { buildCanvasAgentMentionMessage, formatCanvasAgentMentionDisplayText, readCanvasAgentMentionNodeIds } from "../utils/canvas-agent-mentions";
-import { AgentChatComposer } from "./canvas-agent-chat-ui";
+import { AgentChatComposer, type CanvasAgentSkillOption } from "./canvas-agent-composer";
+import { CanvasAgentPlanTimeline } from "./canvas-agent-plan-timeline";
+import { CanvasAgentThinkingRow } from "./canvas-agent-thinking-row";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
 const DEFAULT_PANEL_WIDTH = 380;
@@ -36,10 +48,28 @@ const KEYBOARD_RESIZE_STEP = 24;
 type CanvasChatPanelProps = {
     onCollapse: () => void;
     nodes: CanvasNode[];
+    selectedNodeIds?: Set<string>;
     onNodeDropRef?: React.MutableRefObject<((nodeId: string) => void) | null>;
     messages: CanvasAssistantMessage[];
+    sessions?: CanvasAssistantSession[];
+    onSelectSession?: (sessionId: string) => void;
     completedThinkings?: ThinkingBlockState[];
     activeThinking?: ThinkingBlockState | null;
+    activeSteps?: CanvasAssistantTraceStep[];
+    onFocusNode?: (nodeId: string) => void;
+    onRetryBatchItem?: (item: CanvasAgentBatchItem) => void;
+    queuedPrompts?: CanvasAgentQueuedPrompt[];
+    onRemoveQueuedPrompt?: (id: string) => void;
+    pendingApproval?: CanvasAgentPendingApproval | null;
+    onResolveApproval?: (approved: boolean) => void;
+    approvalMode?: "auto" | "manual";
+    onApprovalModeChange?: (mode: "auto" | "manual") => void;
+    agentMode?: "agent" | "chat";
+    onAgentModeChange?: (mode: "agent" | "chat") => void;
+    skillOptions?: CanvasAgentSkillOption[];
+    selectedSkill?: CanvasAgentSkillOption | null;
+    onSkillSelect?: (skill: CanvasAgentSkillOption | null) => void;
+    contextUsagePercent?: number;
     onSend: (text: string, references?: CanvasAssistantReference[], generationStyleIds?: number[], generationStyles?: GenerationStyleOption[], agentText?: string) => void;
     onNewSession: () => void;
     onStop: () => void;
@@ -58,16 +88,34 @@ type CanvasChatPanelProps = {
 };
 
 /**
- * 基于 assistant-ui 的画布 AI 对话面板
- * 承载画布内的对话、节点引用和模型选择交互
+ * 画布 AI 协作侧边栏面板
+ * 承载多会话切换、折叠式思考/步骤轨迹、消息内的任务执行时间线、审批拦截、节点上下文联动和运行中排队。
  */
 export function CanvasChatPanel({
     onCollapse,
     nodes,
+    selectedNodeIds,
     onNodeDropRef,
     messages,
+    sessions = [],
+    onSelectSession,
     completedThinkings = [],
     activeThinking = null,
+    activeSteps = [],
+    onFocusNode,
+    onRetryBatchItem,
+    queuedPrompts = [],
+    onRemoveQueuedPrompt,
+    pendingApproval = null,
+    onResolveApproval,
+    approvalMode = "auto",
+    onApprovalModeChange,
+    agentMode = "agent",
+    onAgentModeChange,
+    skillOptions = [],
+    selectedSkill = null,
+    onSkillSelect,
+    contextUsagePercent,
     onSend,
     onNewSession,
     onStop,
@@ -103,6 +151,24 @@ export function CanvasChatPanel({
     const [modelConfigContinueMessageId, setModelConfigContinueMessageId] = useState<string | null>(null);
     const actionableMessageId = latestUnansweredAssistantId(messages);
     const droppedNodes = nodes.filter((node) => droppedNodeIds.has(node.id));
+    const selectedNodes = useMemo(
+        () => (selectedNodeIds && selectedNodeIds.size > 0 ? nodes.filter((node) => selectedNodeIds.has(node.id)) : []),
+        [nodes, selectedNodeIds],
+    );
+    const activeSession = useMemo(() => sessions.find((item) => item.id === sessionId) || null, [sessions, sessionId]);
+    const liveThinkings = useMemo(
+        () => [
+            ...completedThinkings.map((item) => ({ id: item.id, text: item.text, durationMs: item.durationMs })),
+            ...(activeThinking ? [{ id: activeThinking.id, text: activeThinking.text, durationMs: activeThinking.durationMs }] : []),
+        ],
+        [activeThinking, completedThinkings],
+    );
+    const computedContextUsage = useMemo(() => {
+        if (typeof contextUsagePercent === "number") return contextUsagePercent;
+        const charCount = messages.reduce((sum, item) => sum + item.text.length, 0) + selectedNodes.length * 180;
+        if (charCount === 0) return 0;
+        return Math.min(99, Math.max(1, Math.round((charCount / 2 / 32000) * 100)));
+    }, [contextUsagePercent, messages, selectedNodes.length]);
 
     useEffect(() => {
         if (initialPromptAppliedRef.current || !initialPrompt) return;
@@ -258,27 +324,96 @@ export function CanvasChatPanel({
                 />
             </button>
             {/* 标题栏 */}
-            <div className="flex items-center justify-between px-4 py-3 text-sm font-medium shrink-0" style={{ borderBottom: `1px solid ${theme.toolbar.border}` }}>
-                <span>{translate("canvas.canvasAgent")}</span>
-                <div className="flex items-center gap-1">
+            <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 text-sm font-medium shrink-0" style={{ borderBottom: `1px solid ${theme.toolbar.border}` }}>
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                    {sessions.length > 0 && onSelectSession ? (
+                        <Dropdown
+                            trigger={["click"]}
+                            menu={{
+                                items: sessions
+                                    .slice()
+                                    .reverse()
+                                    .map((session) => ({
+                                        key: session.id,
+                                        label: (
+                                            <div className="flex max-w-[240px] items-center justify-between gap-2">
+                                                <span className="truncate">{session.title || translate("canvas.newConversation")}</span>
+                                                {session.id === sessionId ? <Check className="size-3.5 shrink-0" /> : null}
+                                            </div>
+                                        ),
+                                        onClick: () => {
+                                            if (!requestActive) onSelectSession(session.id);
+                                        },
+                                    })),
+                            }}
+                        >
+                            <button
+                                type="button"
+                                className="flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1 text-left transition hover:opacity-90"
+                                style={{ color: theme.node.text }}
+                                title={activeSession?.title || translate("canvas.canvasAgent")}
+                            >
+                                <span
+                                    className="grid size-6 shrink-0 place-items-center rounded-md"
+                                    style={{
+                                        background: selectedSkill || activeSession?.skillName
+                                            ? "color-mix(in srgb, #f59e0b 18%, transparent)"
+                                            : `color-mix(in srgb, ${theme.node.text} 8%, transparent)`,
+                                        color: selectedSkill || activeSession?.skillName ? "#f59e0b" : theme.node.muted,
+                                    }}
+                                >
+                                    <Clapperboard className="size-3.5" />
+                                </span>
+                                {selectedSkill?.name || activeSession?.skillName ? (
+                                    <span className="shrink-0 text-xs font-semibold" style={{ color: "#f59e0b" }}>
+                                        技能包
+                                    </span>
+                                ) : null}
+                                <span className="truncate text-[13px] font-medium">
+                                    {activeSession?.title || translate("canvas.canvasAgent")}
+                                </span>
+                                <ChevronDown className="size-3.5 shrink-0 opacity-60" />
+                            </button>
+                        </Dropdown>
+                    ) : (
+                        <span className="truncate">{translate("canvas.canvasAgent")}</span>
+                    )}
+                </div>
+
+                <div className="flex shrink-0 items-center gap-1.5">
                     {requestActive ? (
-                        <button type="button" className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100" onClick={onStop} title={isQueued ? translate("canvas.leaveQueue") : translate("canvas.stopGeneration")} aria-label={isQueued ? translate("canvas.leaveQueue") : translate("canvas.stopGeneration")}>
-                            <Square className="size-3.5" />
-                        </button>
+                        <span
+                            className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-normal"
+                            style={{ color: isStreaming ? "#22c55e" : "#f59e0b" }}
+                        >
+                            <span
+                                className="size-1.5 rounded-full animate-pulse"
+                                style={{ background: isStreaming ? "#22c55e" : "#f59e0b" }}
+                            />
+                            <span>{isStreaming ? "运行中" : "排队中"}</span>
+                        </span>
                     ) : null}
-                    <button
-                        type="button"
-                        className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-25"
-                        onClick={handleNewSession}
-                        disabled={requestActive}
-                        title={translate("canvas.newConversation")}
-                        aria-label={translate("canvas.newConversation")}
-                    >
-                        <Plus className="size-4" />
-                    </button>
-                    <button type="button" className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100" onClick={onCollapse} title={translate("canvas.collapseCanvasAgent")} aria-label={translate("canvas.collapseCanvasAgent")}>
-                        <PanelRightClose className="size-4" />
-                    </button>
+                    <Tooltip title={translate("canvas.newConversation")}>
+                        <button
+                            type="button"
+                            className="grid size-7 place-items-center rounded-lg opacity-60 transition hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-25"
+                            onClick={handleNewSession}
+                            disabled={requestActive}
+                            aria-label={translate("canvas.newConversation")}
+                        >
+                            <MessageSquarePlus className="size-4" />
+                        </button>
+                    </Tooltip>
+                    <Tooltip title={translate("canvas.collapseCanvasAgent")}>
+                        <button
+                            type="button"
+                            className="grid size-7 place-items-center rounded-lg opacity-60 transition hover:opacity-100"
+                            onClick={onCollapse}
+                            aria-label={translate("canvas.collapseCanvasAgent")}
+                        >
+                            <PanelRightClose className="size-4" />
+                        </button>
+                    </Tooltip>
                 </div>
             </div>
 
@@ -297,6 +432,9 @@ export function CanvasChatPanel({
                             const choices = msg.id === actionableMessageId ? messageActionChoices(msg, modelConfigContinueMessageId) : [];
                             return (
                                 <div key={msg.id} className="space-y-1.5">
+                                    {msg.role === "assistant" && msg.trace && (msg.trace.thinkings.length > 0 || msg.trace.steps.length > 0) ? (
+                                        <CanvasAgentThinkingRow thinkings={msg.trace.thinkings} steps={msg.trace.steps} />
+                                    ) : null}
                                     {visibleText ? (
                                         <ChatBubble
                                             role={msg.role === "user" ? "user" : "assistant"}
@@ -307,6 +445,11 @@ export function CanvasChatPanel({
                                             assistantBubbleBg={assistantBubbleBg}
                                             onCopy={() => copyText(formatGroupedGenerationStyleMessage(visibleText, msg.generationStyles), translate("canvas.messageCopied"))}
                                         />
+                                    ) : null}
+                                    {msg.plan ? (
+                                        <div className="mr-8">
+                                            <CanvasAgentPlanTimeline plan={msg.plan} onFocusNode={onFocusNode} onRetryItem={onRetryBatchItem} />
+                                        </div>
                                     ) : null}
                                     {choices.length ? (
                                         <ChoiceGroup
@@ -329,29 +472,94 @@ export function CanvasChatPanel({
                     )}
                     {requestActive ? (
                         <div key={`live-${latestUserMessageId}`} className="space-y-1.5">
-                            <StreamingReplyBubble
-                                animated
-                                text={liveReplyText}
-                                thinking={!liveReplyText}
-                                thinkingLabel={translate("chat.thinking")}
-                                bubbleBackground={assistantBubbleBg}
-                                bubbleTextColor={theme.node.text}
-                                onHeightChange={scrollToBottom}
-                            />
+                            <CanvasAgentThinkingRow active thinkings={liveThinkings} steps={activeSteps} />
+                            {liveReplyText ? (
+                                <StreamingReplyBubble
+                                    animated
+                                    text={liveReplyText}
+                                    thinking={false}
+                                    thinkingLabel={translate("chat.thinking")}
+                                    bubbleBackground={assistantBubbleBg}
+                                    bubbleTextColor={theme.node.text}
+                                    onHeightChange={scrollToBottom}
+                                />
+                            ) : null}
+                            {liveReplyMessage?.plan ? (
+                                <div className="mr-8">
+                                    <CanvasAgentPlanTimeline plan={liveReplyMessage.plan} onFocusNode={onFocusNode} onRetryItem={onRetryBatchItem} />
+                                </div>
+                            ) : null}
                         </div>
+                    ) : null}
+                    {pendingApproval && onResolveApproval ? (
+                        <section
+                            className="rounded-xl border p-3.5 text-xs"
+                            style={{
+                                borderColor: "color-mix(in srgb, #f59e0b 45%, transparent)",
+                                background: `color-mix(in srgb, #f59e0b 8%, ${theme.toolbar.panel})`,
+                                color: theme.node.text,
+                            }}
+                        >
+                            <div className="flex items-center gap-2 font-medium text-amber-500">
+                                <CircleAlert className="size-4 shrink-0" />
+                                <span>待审批操作 · {pendingApproval.name}</span>
+                            </div>
+                            <p className="mt-1.5 leading-5 opacity-90">{pendingApproval.summary}</p>
+                            <div className="mt-3 flex justify-end gap-2">
+                                <Button size="small" icon={<XCircle className="size-3.5" />} onClick={() => onResolveApproval(false)}>
+                                    拒绝
+                                </Button>
+                                <Button size="small" type="primary" icon={<CheckCircle2 className="size-3.5" />} onClick={() => onResolveApproval(true)}>
+                                    批准执行
+                                </Button>
+                            </div>
+                        </section>
                     ) : null}
                 </div>
             </div>
+
+            {/* 已排队消息条 */}
+            {queuedPrompts.length > 0 ? (
+                <div className="px-2 pt-2">
+                    <div
+                        className="space-y-1 rounded-xl border px-3 py-2 text-xs"
+                        style={{
+                            borderColor: theme.toolbar.border,
+                            background: `color-mix(in srgb, ${theme.node.text} 4%, ${theme.toolbar.panel})`,
+                            color: theme.node.muted,
+                        }}
+                    >
+                        <div className="text-[11px] font-medium opacity-80">已排队 {queuedPrompts.length} 条，当前任务完成后自动发送</div>
+                        {queuedPrompts.map((item) => (
+                            <div key={item.id} className="flex items-center justify-between gap-2">
+                                <span className="truncate" style={{ color: theme.node.text }}>{item.text}</span>
+                                {onRemoveQueuedPrompt ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => onRemoveQueuedPrompt(item.id)}
+                                        className="shrink-0 opacity-60 hover:opacity-100"
+                                        aria-label="取消排队"
+                                    >
+                                        <X className="size-3.5" />
+                                    </button>
+                                ) : null}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ) : null}
 
             {/* 输入框 */}
             <div className="shrink-0" style={{ borderTop: `1px solid ${theme.toolbar.border}` }}>
                 <AgentChatComposer
                     prompt={prompt}
                     sending={requestActive}
-                    placeholder={translate("canvas.typeAMessageEnterToSend")}
+                    placeholder="说说你的创作想法，@ 引用节点，/ 或 、 引用技能"
                     theme={theme}
                     onPromptChange={setPrompt}
                     onSubmit={() => handleSend(prompt)}
+                    onStop={onStop}
+                    onQueueSubmit={() => handleSend(prompt)}
                     styleOptions={styleCatalog.styles}
                     selectedStyles={selectedStyles}
                     styleLoading={styleCatalog.loading}
@@ -360,6 +568,7 @@ export function CanvasChatPanel({
                     onStyleRemove={(id) => setSelectedStyles((current) => current.filter((style) => style.id !== id))}
                     onStyleLimit={() => message.warning(translate("canvas.selectUpToStyles", { value0: MAX_GENERATION_STYLE_SELECTION_COUNT }))}
                     droppedNodes={droppedNodes}
+                    selectedNodes={selectedNodes}
                     nodes={nodes}
                     onDroppedNodeRemove={(nodeId) => {
                         setDroppedNodeIds((prev) => {
@@ -368,7 +577,15 @@ export function CanvasChatPanel({
                             return next;
                         });
                     }}
-                    left={<ModelPicker config={config} value={model} onChange={onModelChange} capability="text" className="h-8 max-w-full" placeholder={translate("canvas.selectTextModel")} onMissingConfig={onMissingConfig} />}
+                    approvalMode={approvalMode}
+                    onApprovalModeChange={onApprovalModeChange}
+                    agentMode={agentMode}
+                    onAgentModeChange={onAgentModeChange}
+                    skillOptions={skillOptions}
+                    selectedSkill={selectedSkill}
+                    onSkillSelect={onSkillSelect}
+                    contextUsagePercent={computedContextUsage}
+                    left={<ModelPicker config={config} value={model} onChange={onModelChange} capability="text" showChannel={false} className="h-7 max-w-[140px]" placeholder={translate("canvas.selectTextModel")} onMissingConfig={onMissingConfig} />}
                 />
             </div>
             <CreationSettingsModal open={modelSettingsOpen} title={translate("canvas.modelSettings")} onClose={() => {

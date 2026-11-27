@@ -14,7 +14,7 @@ import { isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/features/genera
 import { readVideoAudioOutput, videoAudioOn } from "@/features/generation/lib/video-audio";
 import { readVideoDurationRange } from "@/features/generation/lib/video-duration";
 import { readCustomVideoConstraints, readVideoGenerationConstraintIssue, readVideoModelConfiguration } from "@/features/generation/lib/video-generation-constraints";
-import { createVideoGenerationModeOptions, VIDEO_RESOLUTION_OPTIONS, availableVideoResolutions, resolveBillingMaximumDurationSeconds } from "@/features/generation/lib/video-billing";
+import { createVideoGenerationModeOptions, VIDEO_RESOLUTION_OPTIONS, availableVideoResolutions, reconcileVideoSettingsForModel, resolveBillingMaximumDurationSeconds } from "@/features/generation/lib/video-billing";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import { resolveModelRequestConfig, type AiConfig, type VideoGenerationMode, type VideoResolution } from "@/features/settings/stores/use-config-store";
 
@@ -125,21 +125,22 @@ export function VideoSettingsPanel({
 
     useEffect(() => setDurationDraft(seconds), [seconds]);
 
-    // 切换视频模型或生成模式后，当前分辨率可能不在新模型/模式的计费档位内，
-    // 此时自动回退到首个可用分辨率，避免残留旧分辨率触发“当前模式未配置所选分辨率价格”。
-    const previousModelMode = useRef<{ model: string; mode: VideoGenerationMode } | null>(null);
+    // 切换视频模型/生成模式或打开包含历史残留配置的设置面板时，
+    // 自动校准分辨率、比例、模式与时长，避免旧模型不支持的配置导致“当前模式未配置所选分辨率价格”或按钮不可点。
     useEffect(() => {
         const currentModel = config.videoModel || config.model;
-        const currentMode = config.videoGenerationMode;
-        const previous = previousModelMode.current;
-        previousModelMode.current = { model: currentModel, mode: currentMode };
-        if (!previous || customVideo) return;
-        if (previous.model === currentModel && previous.mode === currentMode) return;
-        if (pricedResolutions.length === 0) return;
-        if (!pricedResolutions.includes(resolution as VideoResolution)) {
-            onConfigChange("vquality", pricedResolutions[0]);
+        if (!currentModel) return;
+        const patch = reconcileVideoSettingsForModel(config, currentModel, config.videoGenerationMode, resolutionOptions);
+        if (patch.vquality && patch.vquality !== config.vquality) {
+            onConfigChange("vquality", patch.vquality);
         }
-    }, [config.videoModel, config.videoGenerationMode, config.model, pricedResolutions, resolution, onConfigChange, customVideo]);
+        if (patch.size && patch.size !== config.size) {
+            onConfigChange("size", patch.size);
+        }
+        if (patch.videoSeconds && patch.videoSeconds !== config.videoSeconds) {
+            onConfigChange("videoSeconds", patch.videoSeconds);
+        }
+    }, [config, onConfigChange, resolutionOptions]);
 
     const commitDuration = (value: number) => {
         const normalized = String(customVideo ? value : normalizeDurationDraft(String(value), durationRange));

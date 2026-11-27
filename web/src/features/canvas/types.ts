@@ -58,6 +58,66 @@ export type CanvasAssistantAction = {
     options?: CanvasAssistantChoice[];
 };
 
+export type CanvasAssistantTraceThinking = {
+    id: string;
+    text: string;
+    durationMs: number;
+};
+
+export type CanvasAssistantTraceStep = {
+    callId: string;
+    name: string;
+    label: string;
+    status: "running" | "done" | "error";
+};
+
+export type CanvasAssistantMessageTrace = {
+    thinkings: CanvasAssistantTraceThinking[];
+    steps: CanvasAssistantTraceStep[];
+};
+
+export type CanvasAgentBatchItemStatus = "pending" | "running" | "done" | "failed" | "canceled";
+
+export type CanvasAgentBatchItem = {
+    index: number;
+    taskId?: string;
+    callId?: string;
+    nodeId?: string;
+    label: string;
+    status: CanvasAgentBatchItemStatus;
+    progress?: number;
+};
+
+export type CanvasAgentBatchState = {
+    batchId: string;
+    title: string;
+    status: "running" | "completed" | "failed" | "canceled";
+    /** 计划开始时间戳，用于收起后展示用时。 */
+    startedAt?: number;
+    /** 计划终态时间戳。 */
+    finishedAt?: number;
+    items: CanvasAgentBatchItem[];
+};
+
+export type CanvasAgentQueuedPrompt = {
+    id: string;
+    text: string;
+    agentText: string;
+    references: CanvasAssistantReference[];
+    generationStyleIds: number[];
+    generationStyles: Array<{ id: number; name: string; generationType: "image" | "video" }>;
+    skillId?: string;
+};
+
+export type CanvasAgentPendingApproval = {
+    callId: string;
+    sessionId: string;
+    requestId: string;
+    name: string;
+    summary: string;
+    arguments: Record<string, unknown>;
+};
+
 export interface CanvasAssistantMessage {
     /** 系统计划执行状态，避免依赖已翻译的显示文案判断终态。 */
     executionStatus?: string;
@@ -71,6 +131,10 @@ export interface CanvasAssistantMessage {
     generationStyles?: Array<{ id: number; name: string; generationType: "image" | "video" }>;
     /** 当前回复触发的用户动作，例如打开模型设置或确认。 */
     action?: CanvasAssistantAction;
+    /** 本轮助手消息关联的思考与工具执行轨迹。 */
+    trace?: CanvasAssistantMessageTrace;
+    /** 本轮任务的执行计划，随消息一起持久化，刷新后仍能回看。 */
+    plan?: CanvasAgentBatchState;
 }
 
 export interface CanvasAssistantSession {
@@ -79,6 +143,8 @@ export interface CanvasAssistantSession {
     messages: CanvasAssistantMessage[];
     createdAt: string;
     updatedAt: string;
+    skillId?: string;
+    skillName?: string;
 }
 
 export interface ConnectionHandle {
@@ -583,9 +649,17 @@ export interface CanvasConversation {
     activeSessionId: string | null;
 }
 
+export interface CanvasDefaultModels {
+    textModel?: string;
+    imageModel?: string;
+    videoModel?: string;
+}
+
 export interface CanvasPreferences {
     background: CanvasBackgroundMode;
     showImageInformation: boolean;
+    /** 当前画布的默认文本、图片、视频生成模型，留空时回退全局默认配置。 */
+    defaultModels?: CanvasDefaultModels;
 }
 
 export interface CanvasDocument {

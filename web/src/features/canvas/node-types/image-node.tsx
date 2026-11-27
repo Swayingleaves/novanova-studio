@@ -7,7 +7,7 @@ import { NodeResizer, useUpdateNodeInternals, type NodeProps, type Node } from "
 import { AlertTriangle, ChevronRight, Image as ImageIcon, Images, Sparkles } from "lucide-react";
 import type { CanvasImageNode } from "../types";
 import { type BatchImagePreview, useNodeActions } from "./node-action-context";
-import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface, NodeMediaLoading, NodeMediaUnavailable } from "./shared";
+import { CanvasConnectionHandles, CanvasNodeGenerationMeta, CanvasNodeTitle, NodeHoverSurface, NodeMediaLoading, NodeMediaUnavailable } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
 import { WatermarkBadge } from "@/features/watermark/components/watermark-badge";
@@ -125,6 +125,12 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                 >
                     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[inherit] p-4">
                         <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.image_37e4e4")} onTitleChange={actions.onTitleChange} />
+                    <CanvasNodeGenerationMeta
+                        selected={selected}
+                        model={data.generation.model}
+                        resolution={readValidImageResolution(data.generation.resolution)}
+                        size={data.generation.size}
+                    />
                         <div className="flex items-center justify-between gap-3">
                             <div className="flex min-w-0 items-center gap-2.5">
                                 <span className="grid size-8 shrink-0 place-items-center rounded-lg" style={{ background: theme.node.fill, color: theme.node.activeStroke }}>
@@ -221,6 +227,12 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                     }}
                 >
                     <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.image_37e4e4")} onTitleChange={actions.onTitleChange} />
+                    <CanvasNodeGenerationMeta
+                        selected={selected}
+                        model={data.generation.model}
+                        resolution={readValidImageResolution(data.generation.resolution)}
+                        size={data.generation.size}
+                    />
                     <div className="flex h-full w-full overflow-hidden rounded-[inherit]">
                         {isLoading ? (
                             <NodeMediaLoading progress={data.execution.progress} />
@@ -297,4 +309,10 @@ function CollapsedBatchImagePreview({ preview }: { preview: BatchImagePreview })
 
     if (failed) return <NodeMediaUnavailable kind="image" compact />;
     return <img src={preview.source} alt="" className="h-full w-full object-contain" draggable={false} onError={() => setFailed(true)} />;
+}
+
+/** 仅展示合法的图片清晰度（1K / 2K / 4K），避免历史脏值（如 480p）误显。 */
+function readValidImageResolution(value?: string): string {
+    const normalized = (value || "").trim().toUpperCase();
+    return normalized === "1K" || normalized === "2K" || normalized === "4K" ? normalized : "";
 }

@@ -9,7 +9,7 @@ import { formatAudioTime } from "@/features/storage/utils/audio-waveform";
 import { activateCanvasAudio, releaseCanvasAudio } from "../services/canvas-audio-playback";
 import type { CanvasVideoNode } from "../types";
 import { useNodeActions } from "./node-action-context";
-import { CanvasConnectionHandles, CanvasNodeTitle, NodeError, NodeHoverSurface, NodeMediaLoading, NodeMediaUnavailable } from "./shared";
+import { CanvasConnectionHandles, CanvasNodeGenerationMeta, CanvasNodeTitle, NodeError, NodeHoverSurface, NodeMediaLoading, NodeMediaUnavailable } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { useMediaUrl } from "@/shared/hooks/use-media-url";
 
@@ -54,6 +54,12 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
                 }}
             >
                 <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.video")} onTitleChange={actions.onTitleChange} />
+                <CanvasNodeGenerationMeta
+                    selected={selected}
+                    model={data.generation.model}
+                    resolution={data.generation.quality}
+                    size={data.generation.size}
+                />
                 {isLoading ? (
                     <NodeMediaLoading progress={data.execution.progress} />
                 ) : isError ? (

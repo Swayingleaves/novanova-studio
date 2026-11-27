@@ -9,7 +9,15 @@ export type VideoConstraintIssue = { field: VideoConstraintField; message: strin
 
 /** 读取选中模型的公开运行配置，不通过渠道格式推断自定义模型。 */
 export function readVideoModelConfiguration(config: AiConfig, model = config.videoModel || config.model) {
-    return config.videoModelBillingConfigurations.find((item) => item.model === model);
+    if (!model) return undefined;
+    const trimmed = model.trim();
+    const direct = config.videoModelBillingConfigurations.find((item) => item.model === trimmed);
+    if (direct) return direct;
+    const bareName = trimmed.includes("::") ? trimmed.slice(trimmed.indexOf("::") + 2) : trimmed;
+    return config.videoModelBillingConfigurations.find((item) => {
+        const itemBare = item.model.includes("::") ? item.model.slice(item.model.indexOf("::") + 2) : item.model;
+        return itemBare === bareName;
+    });
 }
 
 /** 返回约束配置字段的当前语言名称。 */

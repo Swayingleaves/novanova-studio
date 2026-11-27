@@ -24,12 +24,12 @@ import { requestEdit, requestGeneration, requestImageQuestion } from "@/features
 import { requestVideoGeneration, storeGeneratedVideo } from "@/features/generation/api/video";
 import { composeStoryboardPrompts, createStoryboardAssetImageTask, generateStoryboard, readStoryboardAssetImage } from "@/services/api/storyboard";
 import { cancelAiTasksWithRefundPolicy, isSubmittedMediaTask, runCancelWithProviderRequestPolicy } from "@/features/generation/lib/cancel-provider-generation";
-import { cancelAiTask, createAiTask, getAiTaskInfo, markGenerationCancelForfeit, readAiTaskError, subscribeAiTaskDeltas, waitAiTask, type AiTaskErrorDetails, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
+import { cancelAiTask, createAiTask, getAiTaskInfo, listSkills, markGenerationCancelForfeit, readAiTaskError, subscribeAiTaskDeltas, waitAiTask, type AiTaskErrorDetails, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
 import { cancelCompositionTask, composeVideo, waitVideoCompositionTask, type VideoCompositionTask } from "@/services/api/video-composition";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { normalizeImageGenerationCount } from "@/features/generation/components/image-settings-panel";
 import { normalizeVideoGenerationCount } from "@/features/generation/components/video-settings-panel";
-import { quoteVideoGeneration } from "@/features/generation/lib/video-billing";
+import { quoteVideoGeneration, reconcileVideoSettingsForModel, resolveBillingMaximumDurationSeconds } from "@/features/generation/lib/video-billing";
 import { defaultConfig, normalizeModelOptionValue, type AiConfig, useConfigStore, useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { getImageBlob, resolveImageUrl, reuseOrUploadImage, uploadImage, type UploadedImage } from "@/features/storage/services/image-storage";
 import { stopCanvasAudio } from "../services/canvas-audio-playback";
@@ -98,6 +98,18 @@ import { canvasNodeContainsPoint, planBatchNodesToVideoConnections, readCanvasNo
 import { createFirstLastFrameVideoTemplate } from "../domain/canvas-first-last-frame-template";
 import { ActiveConnectionPath, ConnectionPath } from "../components/canvas-connections";
 import { CanvasChatPanel } from "../components/canvas-chat-panel";
+import type { CanvasAgentSkillOption } from "../components/canvas-agent-composer";
+import { CreationSettingsModal } from "@/features/generation/components/creation-settings-modal";
+import { ModelPicker } from "@/features/settings/components/model-picker";
+import type {
+    CanvasAgentBatchItem,
+    CanvasAgentBatchState,
+    CanvasAgentPendingApproval,
+    CanvasAgentQueuedPrompt,
+    CanvasAssistantReference,
+    CanvasAssistantTraceStep,
+    CanvasDefaultModels,
+} from "../types";
 import type { CanvasImageCropRect } from "../components/canvas-node-crop-dialog";
 import { CanvasThemeProvider, useCanvasTheme } from "../components/canvas-theme-provider";
 import type { CanvasImageSplitParams } from "../components/canvas-node-split-dialog";
@@ -296,7 +308,7 @@ function CanvasWorkspacePage() {
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const mediaUploadScopeRef = useRef<CanvasMediaUploadScope | null>(null);
-    const uploadTargetRef = useRef<{ nodeId?: string; position: CanvasPoint; scope: CanvasMediaUploadScope } | null>(null);
+    const uploadTargetRef = useRef<{ nodeId?: string; position: CanvasPoint; scope: CanvasMediaUploadScope; agentUploadKind?: "image" | "video" } | null>(null);
     useLayoutEffect(() => {
         const scope: CanvasMediaUploadScope = { controller: new AbortController(), messageKeys: new Set(), replacingNodeIds: new Set() };
         mediaUploadScopeRef.current = scope;
@@ -464,6 +476,21 @@ function CanvasWorkspacePage() {
         });
     }, []);
     const [showImageInfo, setShowImageInfo] = useState(false);
+    const [canvasDefaultModels, setCanvasDefaultModels] = useState<CanvasDefaultModels>({});
+    const [canvasModelSettingsOpen, setCanvasModelSettingsOpen] = useState(false);
+    const resolvedCanvasTextModel = canvasDefaultModels.textModel || effectiveConfig.textModel;
+    const resolvedCanvasImageModel = canvasDefaultModels.imageModel || effectiveConfig.imageModel;
+    const resolvedCanvasVideoModel = canvasDefaultModels.videoModel || effectiveConfig.videoModel;
+    const canvasEffectiveConfig = useMemo<AiConfig>(
+        () => ({
+            ...effectiveConfig,
+            textModel: resolvedCanvasTextModel,
+            imageModel: resolvedCanvasImageModel,
+            videoModel: resolvedCanvasVideoModel,
+            agentModel: canvasDefaultModels.textModel || effectiveConfig.agentModel || resolvedCanvasTextModel,
+        }),
+        [canvasDefaultModels.textModel, effectiveConfig, resolvedCanvasImageModel, resolvedCanvasTextModel, resolvedCanvasVideoModel],
+    );
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [canvasAssetPickerOpen, setCanvasAssetPickerOpen] = useState(false);
@@ -493,6 +520,48 @@ function CanvasWorkspacePage() {
     const [agentQueued, setAgentQueued] = useState(false);
     const agentResumeAttemptedRef = useRef(false);
     const { completedThinkings, activeThinking, onThoughtDelta, onThoughtComplete, resetThinkings } = useAgentThinking();
+    const [approvalMode, setApprovalMode] = useState<"auto" | "manual">("manual");
+    const [agentSkillOptions, setAgentSkillOptions] = useState<CanvasAgentSkillOption[]>([]);
+    const [selectedAgentSkill, setSelectedAgentSkill] = useState<CanvasAgentSkillOption | null>(null);
+    const [activeAgentSteps, setActiveAgentSteps] = useState<CanvasAssistantTraceStep[]>([]);
+    const activeAgentStepsRef = useRef<CanvasAssistantTraceStep[]>([]);
+    const latestThinkingsRef = useRef<Array<{ id: string; text: string; durationMs: number }>>([]);
+    /** 当前轮次的计划消息 ID；有值时生成步骤由消息里的时间线呈现，不再重复追加工具对话行。 */
+    const activePlanMessageIdRef = useRef<string | null>(null);
+    const [queuedAgentPrompts, setQueuedAgentPrompts] = useState<CanvasAgentQueuedPrompt[]>([]);
+    const [pendingAgentApproval, setPendingAgentApproval] = useState<CanvasAgentPendingApproval | null>(null);
+
+    latestThinkingsRef.current = [
+        ...completedThinkings.map((item) => ({ id: item.id, text: item.text, durationMs: item.durationMs })),
+        ...(activeThinking ? [{ id: activeThinking.id, text: activeThinking.text, durationMs: activeThinking.durationMs }] : []),
+    ];
+
+    useEffect(() => {
+        if (!assistantMounted || agentSkillOptions.length > 0) return;
+        let cancelled = false;
+        void Promise.all([
+            listSkills("video").catch(() => ({ skills: [] as SkillOption[] })),
+            listSkills("image").catch(() => ({ skills: [] as SkillOption[] })),
+        ]).then(([videoRes, imageRes]) => {
+            if (cancelled) return;
+            const merged = new Map<string, CanvasAgentSkillOption>();
+            for (const item of [...(videoRes.skills || []), ...(imageRes.skills || [])]) {
+                const key = String(item.id);
+                if (!merged.has(key)) {
+                    merged.set(key, {
+                        id: key,
+                        name: item.name,
+                        description: item.description,
+                        targetType: item.targetType,
+                    });
+                }
+            }
+            setAgentSkillOptions(Array.from(merged.values()));
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [agentSkillOptions.length, assistantMounted]);
     const [titleEditing, setTitleEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState("");
     const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
@@ -751,6 +820,7 @@ function CanvasWorkspacePage() {
             setActiveChatId(document.conversation.activeSessionId);
             setBackgroundMode(document.preferences.background);
             setShowImageInfo(document.preferences.showImageInformation);
+            setCanvasDefaultModels(document.preferences.defaultModels || {});
             setViewport({
                 x: document.scene.viewport.offsetX,
                 y: document.scene.viewport.offsetY,
@@ -918,8 +988,9 @@ function CanvasWorkspacePage() {
         updatePreferences(projectId, {
             background: backgroundMode,
             showImageInformation: showImageInfo,
+            defaultModels: canvasDefaultModels,
         });
-    }, [backgroundMode, projectId, projectLoaded, showImageInfo, updatePreferences]);
+    }, [backgroundMode, canvasDefaultModels, projectId, projectLoaded, showImageInfo, updatePreferences]);
 
     useEffect(() => {
         if (!dialogNodeId) setNodeImageSettingsOpen(false);
@@ -1037,7 +1108,7 @@ function CanvasWorkspacePage() {
     const readVideoReferenceAdditionIssue = useCallback((nextNodes: CanvasDomainNode[], nextConnections: CanvasConnection[]) => {
         for (const node of nextNodes) {
             if (!isVideoNode(node)) continue;
-            const config = buildGenerationConfig(effectiveConfig, node, "video");
+            const config = buildGenerationConfig(canvasEffectiveConfig, node, "video");
             if (!readVideoModelConfiguration(config)?.isCustomModel) continue;
             const previous = buildNodeGenerationContext(node.id, nodesRef.current, connectionsRef.current, "");
             const next = buildNodeGenerationContext(node.id, nextNodes, nextConnections, "");
@@ -1439,7 +1510,7 @@ function CanvasWorkspacePage() {
                 if (!target) throw new Error(translate("canvas.generationNodeNotFound", { value0: operation.nodeId }));
                 const mode = readCanvasGenerationMode(operation.mode ?? target.kind);
                 if (!mode) throw new Error(translate("canvas.useTheStoryboardGenerationActionInsteadOfGenericGeneration"));
-                const generationConfig = buildGenerationConfig(effectiveConfig, target, mode);
+                const generationConfig = buildGenerationConfig(canvasEffectiveConfig, target, mode);
                 if (isAiConfigReady(generationConfig, generationConfig.model)) continue;
                 showMissingAiConfig(mode);
                 throw new Error(translate("settings.contactAdministratorForModel"));
@@ -1491,7 +1562,19 @@ function CanvasWorkspacePage() {
             const targetPosition = position || getCanvasCenter();
             // 工具栏创建时随机错开节点，指定位置创建时仍优先保持落点并自动避开重叠。
             const offset = position ? { x: 0, y: 0 } : { x: (Math.random() - 0.5) * 200, y: (Math.random() - 0.5) * 200 };
-            const newNode = createCanvasNode(type, { x: targetPosition.x + offset.x, y: targetPosition.y + offset.y });
+            const defaultModel =
+                type === "text"
+                    ? resolvedCanvasTextModel
+                    : type === "image"
+                      ? resolvedCanvasImageModel
+                      : type === "video"
+                        ? resolvedCanvasVideoModel
+                        : "";
+            const newNode = createCanvasNode(
+                type,
+                { x: targetPosition.x + offset.x, y: targetPosition.y + offset.y },
+                defaultModel ? { model: normalizeModelOptionValue(defaultModel, effectiveConfig.channels) } : undefined,
+            );
             const safePosition = findNonOverlappingCanvasNodePosition(nodesRef.current, newNode.frame.position, newNode.frame.width, newNode.frame.height);
             const positionedNode = updateCanvasNodeFrame(newNode, { position: safePosition });
 
@@ -1501,7 +1584,7 @@ function CanvasWorkspacePage() {
             setSelectedConnectionId(null);
             setDialogNodeId(type === "background" ? null : positionedNode.id);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter, requestFocusNodes],
+        [effectiveConfig.canvasImageCount, effectiveConfig.channels, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter, requestFocusNodes, resolvedCanvasImageModel, resolvedCanvasTextModel, resolvedCanvasVideoModel],
     );
 
     const createFirstLastFrameVideoTemplateNodes = useCallback((position: CanvasPoint) => {
@@ -2275,16 +2358,16 @@ function CanvasWorkspacePage() {
     );
 
     /** 整批完成后一次性插入节点，进度与取消作用域均不进入画布文档。 */
-    const uploadCanvasMediaFiles = useCallback(async (files: File[], position: CanvasPoint) => {
+    const uploadCanvasMediaFiles = useCallback(async (files: File[], position: CanvasPoint, options?: { openNodeDialog?: boolean }) => {
         const scope = mediaUploadScopeRef.current;
-        if (!files.length || !scope || scope.controller.signal.aborted) return;
+        if (!files.length || !scope || scope.controller.signal.aborted) return [] as CanvasDomainNode[];
         const { signal } = scope.controller;
         const messageKey = `canvas-media-upload-${nanoid()}`;
         scope.messageKeys.add(messageKey);
         const showProgress = (completed: number) => message.open({ key: messageKey, type: "loading", duration: 0, content: translate("canvas.mediaUploadProgress", { value0: completed, value1: files.length }) });
         showProgress(0);
         const results = await uploadCanvasFiles(files, uploadCanvasMediaNode, signal, showProgress);
-        if (signal.aborted) return;
+        if (signal.aborted) return [] as CanvasDomainNode[];
         const uploadedNodes: CanvasDomainNode[] = [];
         const failures: Array<{ name: string; reason: string }> = [];
         results.forEach((result, index) => {
@@ -2297,7 +2380,7 @@ function CanvasWorkspacePage() {
             setSelectedNodeIds(new Set(nodeIds));
             setSelectedConnectionId(null);
             setSelectionBox(null);
-            setDialogNodeId(files.length === 1 && !isAudioNode(uploadedNodes[0]) ? nodeIds[0] : null);
+            setDialogNodeId(options?.openNodeDialog === false ? null : files.length === 1 && !isAudioNode(uploadedNodes[0]) ? nodeIds[0] : null);
             requestFocusNodes(nodeIds);
         }
         message.open({
@@ -2313,6 +2396,7 @@ function CanvasWorkspacePage() {
                 {failures.length ? <ul className="mt-2 max-h-40 overflow-y-auto break-words text-xs">{failures.map((failure, index) => <li key={index}>{failure.name}：{failure.reason}</li>)}</ul> : null}
             </div>,
         });
+        return uploadedNodes;
     }, [message, requestFocusNodes, translate]);
 
     /** 将音频裁剪为新节点，并保留原节点的完整媒体与波形。 */
@@ -3427,12 +3511,12 @@ function CanvasWorkspacePage() {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyCanvasNodeAttributes(node, { fontSize }) : node)));
     }, []);
 
-    const handleUploadRequest = useCallback((nodeId?: string, position?: CanvasPoint, accept?: string) => {
+    const handleUploadRequest = useCallback((nodeId?: string, position?: CanvasPoint, accept?: string, agentUploadKind?: "image" | "video") => {
         if (nodeId && useCanvasUiStore.getState().uploadingNodeIds.has(nodeId)) return;
         const input = imageInputRef.current;
         const scope = mediaUploadScopeRef.current;
         if (!input || !scope || scope.controller.signal.aborted) return;
-        uploadTargetRef.current = { nodeId, position: position || getCanvasCenter(), scope };
+        uploadTargetRef.current = { nodeId, position: position || getCanvasCenter(), scope, agentUploadKind };
         input.multiple = !nodeId;
         input.accept = accept || (nodeId && nodesRef.current.some((node) => node.id === nodeId && isAudioNode(node)) ? ".mp3,.wav,audio/mpeg,audio/wav" : "image/*,video/*,.mp3,.wav,audio/mpeg,audio/wav");
         input.click();
@@ -3447,7 +3531,23 @@ function CanvasWorkspacePage() {
             event.target.value = "";
             if (!files.length || !target || target.scope.controller.signal.aborted) return;
             if (!target.nodeId) {
-                void uploadCanvasMediaFiles(files, target.position);
+                const uploaded = await uploadCanvasMediaFiles(files, target.position, { openNodeDialog: !target.agentUploadKind });
+                // 由画布 Agent 对话中的「上传图片 / 上传视频」按钮触发时，上传完毕后自动回复 Agent 继续流程。
+                if (target.agentUploadKind && uploaded.length > 0) {
+                    const refs: CanvasAssistantReference[] = uploaded.map((node) => ({
+                        id: node.id,
+                        type: node.kind,
+                        title: node.title.trim() || (node.kind === "video" ? "视频" : "图片"),
+                        dataUrl: isImageNode(node) || isVideoNode(node) ? node.content.source || undefined : undefined,
+                        storageKey: isImageNode(node) || isVideoNode(node) ? node.content.storageKey : undefined,
+                        objectStorage: isImageNode(node) || isVideoNode(node) ? node.content.objectStorage : undefined,
+                    }));
+                    const displayText = target.agentUploadKind === "video" ? "已上传参考视频" : "已上传产品图片";
+                    const agentText = `${displayText}：${uploaded.map((node) => `${node.title || node.id}（节点ID: ${node.id}）`).join("、")}`;
+                    window.setTimeout(() => {
+                        void dispatchCanvasAgentPromptRef.current(displayText, refs, [], [], agentText);
+                    }, 60);
+                }
                 return;
             }
             const file = files[0];
@@ -3643,6 +3743,91 @@ function CanvasWorkspacePage() {
         [updateAssistantSession],
     );
 
+    /** 就地更新最后一条满足条件的消息上的执行计划，计划随消息持久化。 */
+    const updateMessagePlan = useCallback(
+        (sessionId: string, match: (plan: CanvasAgentBatchState) => boolean, updater: (plan: CanvasAgentBatchState) => CanvasAgentBatchState) => {
+            updateAssistantSession(sessionId, (session) => {
+                const index = session.messages.findLastIndex((item) => Boolean(item.plan) && match(item.plan as CanvasAgentBatchState));
+                if (index < 0) return session;
+                const current = session.messages[index].plan as CanvasAgentBatchState;
+                const next = updater(current);
+                if (next === current) return session;
+                return {
+                    ...session,
+                    messages: session.messages.map((item, idx) => (idx === index ? { ...item, plan: next } : item)),
+                    updatedAt: new Date().toISOString(),
+                };
+            });
+        },
+        [updateAssistantSession],
+    );
+
+    /** 把新计划挂到指定消息上，消息不存在时忽略。 */
+    const attachMessagePlan = useCallback(
+        (sessionId: string, messageId: string, plan: CanvasAgentBatchState) => {
+            updateAssistantSession(sessionId, (session) => {
+                const index = session.messages.findIndex((item) => item.id === messageId);
+                if (index < 0) return session;
+                return {
+                    ...session,
+                    messages: session.messages.map((item, idx) => (idx === index ? { ...item, plan } : item)),
+                    updatedAt: new Date().toISOString(),
+                };
+            });
+        },
+        [updateAssistantSession],
+    );
+
+    /** 生成类工具调用并入计划时间线，没有计划时在消息上补一个。 */
+    const mergeGenerationCallIntoPlan = useCallback(
+        (sessionId: string, messageId: string, call: { callId: string; taskId?: string; label: string }) => {
+            updateAssistantSession(sessionId, (session) => {
+                // 优先落在当前消息的计划上，其次才复用仍在执行的计划，避免并到上一轮残留的计划里。
+                let index = session.messages.findIndex((item) => item.id === messageId && Boolean(item.plan));
+                if (index < 0) index = session.messages.findLastIndex((item) => item.plan?.status === "running");
+                if (index < 0) index = session.messages.findIndex((item) => item.id === messageId);
+                if (index < 0) return session;
+                const current = session.messages[index].plan;
+                const items = current ? [...current.items] : [];
+                let targetIndex = items.findIndex(
+                    (item) => item.callId === call.callId || (call.taskId && item.taskId === call.taskId) || item.taskId === call.callId,
+                );
+                if (targetIndex < 0) targetIndex = items.findIndex((item) => !item.callId && /^任务\s+\d+$/.test(item.label));
+                if (targetIndex >= 0) {
+                    items[targetIndex] = {
+                        ...items[targetIndex],
+                        taskId: items[targetIndex].taskId || call.taskId || call.callId,
+                        callId: call.callId,
+                        label: call.label,
+                        status: "running",
+                    };
+                } else {
+                    items.push({ index: items.length + 1, taskId: call.taskId || call.callId, callId: call.callId, label: call.label, status: "running" });
+                }
+                const plan: CanvasAgentBatchState = current
+                    ? { ...current, status: "running", items }
+                    : { batchId: `batch-${Date.now()}`, title: "批量生成", status: "running", startedAt: Date.now(), items };
+                return {
+                    ...session,
+                    messages: session.messages.map((item, idx) => (idx === index ? { ...item, plan } : item)),
+                    updatedAt: new Date().toISOString(),
+                };
+            });
+        },
+        [updateAssistantSession],
+    );
+
+    /** 轮次结束时把仍在运行的步骤收敛为成功；取消或报错时收敛为对应终态。 */
+    const terminateActivePlan = useCallback(
+        (sessionId: string, status: "done" | "failed" | "canceled") => {
+            updateMessagePlan(sessionId, (plan) => plan.status === "running", (plan) => settlePlan({
+                ...plan,
+                items: plan.items.map((item) => (item.status === "running" || item.status === "pending" ? { ...item, status } : item)),
+            }));
+        },
+        [updateMessagePlan],
+    );
+
     const {
         sendMessage: sendAgentMessage,
         cancelMessage: cancelAgentMessage,
@@ -3651,9 +3836,14 @@ function CanvasWorkspacePage() {
         detachRequest: detachAgentRequest,
         readActiveToolCallIds,
         readAttachedRequestId,
+        resolveApproval: resolveAgentApproval,
     } = useAgentSSE({
         snapshot: agentSnapshot,
+        approvalMode,
         onApplyOps: applyAgentOps,
+        onApprovalRequired: (approval) => {
+            setPendingAgentApproval(approval);
+        },
         onToolExecute: (call) => {
             // 工具开始执行时保留当前流式规划对话，并追加与图片/视频页一致的工具调用对话行。
             resetTextStream(true);
@@ -3667,9 +3857,56 @@ function CanvasWorkspacePage() {
                 progress: 0,
             });
             const lines = buildActivityDialogueLines([activity]);
-            if (lines[0]) {
+            const stepLabel = lines[0] || call.name;
+            const nextSteps: CanvasAssistantTraceStep[] = [
+                ...activeAgentStepsRef.current.filter((step) => step.callId !== call.callId),
+                { callId: call.callId, name: call.name, label: stepLabel, status: "running" },
+            ];
+            activeAgentStepsRef.current = nextSteps;
+            setActiveAgentSteps(nextSteps);
+            const isGenerationCall = call.name === "canvas_generate_image" || call.name === "canvas_generate_video" || call.name === "canvas_run_generation";
+            // 计划模式下生成步骤已经由时间线逐条呈现，不再往正文重复追加一行工具调用。
+            if (lines[0] && !(isGenerationCall && activePlanMessageIdRef.current)) {
                 appendCanvasDialogueLine(sessionId, lines[0]);
             }
+            if (!isGenerationCall) return;
+            const taskName = typeof call.arguments.title === "string" && call.arguments.title.trim()
+                ? call.arguments.title.trim()
+                : generationTaskName(call.name);
+            const title = activity.description ? `${taskName}（${activity.description}）` : taskName;
+            const planMessageId = activePlanMessageIdRef.current || activeAgentAssistantMessageIdRef.current;
+            if (!planMessageId) return;
+            mergeGenerationCallIntoPlan(sessionId, planMessageId, {
+                callId: call.callId,
+                taskId: extractPlanTaskIdFromCallId(call.callId),
+                label: title,
+            });
+        },
+        onToolResult: (callId, ok, _resultMessage, data) => {
+            setPendingAgentApproval((current) => (current?.callId === callId ? null : current));
+            const nextSteps: CanvasAssistantTraceStep[] = activeAgentStepsRef.current.map((step) =>
+                step.callId === callId ? { ...step, status: ok ? "done" : "error" } : step,
+            );
+            activeAgentStepsRef.current = nextSteps;
+            setActiveAgentSteps(nextSteps);
+            const sessionId = activeAgentSessionIdRef.current;
+            if (!sessionId) return;
+            const createdNodeId = typeof data?.nodeId === "string" ? data.nodeId : undefined;
+            const extractedTaskId = extractPlanTaskIdFromCallId(callId);
+            updateMessagePlan(
+                sessionId,
+                (plan) => plan.items.some(
+                    (item) => item.callId === callId || item.taskId === callId || (extractedTaskId && item.taskId === extractedTaskId),
+                ),
+                (plan) => settlePlan({
+                    ...plan,
+                    items: plan.items.map((item) =>
+                        item.callId === callId || item.taskId === callId || (extractedTaskId && item.taskId === extractedTaskId)
+                            ? { ...item, status: ok ? "done" : "failed", ...(createdNodeId ? { nodeId: createdNodeId } : {}) }
+                            : item,
+                    ),
+                }),
+            );
         },
         onTextDelta: (_messageId, delta) => {
             const sessionId = activeAgentSessionIdRef.current;
@@ -3681,9 +3918,26 @@ function CanvasWorkspacePage() {
         onThoughtDelta,
         onThoughtComplete,
         onTaskComplete: (_messageId, text, action) => {
+            const capturedTrace =
+                latestThinkingsRef.current.length > 0 || activeAgentStepsRef.current.length > 0
+                    ? {
+                          thinkings: latestThinkingsRef.current.map((item) => ({ ...item })),
+                          steps: activeAgentStepsRef.current.map((step) => ({
+                              ...step,
+                              status: step.status === "running" ? ("done" as const) : step.status,
+                          })),
+                      }
+                    : undefined;
             resetThinkings();
-            finalizeAgentTaskNodesLayout();
+            activeAgentStepsRef.current = [];
+            setActiveAgentSteps([]);
+            setPendingAgentApproval(null);
             const sessionId = activeAgentSessionIdRef.current;
+            if (sessionId) {
+                terminateActivePlan(sessionId, "done");
+                activePlanMessageIdRef.current = null;
+            }
+            finalizeAgentTaskNodesLayout();
             if (!sessionId) return;
             const displayMessageId = activeAgentAssistantMessageIdRef.current || nanoid();
             activeAgentAssistantMessageIdRef.current = displayMessageId;
@@ -3695,35 +3949,61 @@ function CanvasWorkspacePage() {
             if (isGenericPlanSummary) {
                 // 保留已展示的多行规划与执行对话，并将“正在… ”收敛为“已…。”，避免被机械汇总覆写。
                 resetTextStream(true);
-                updateAssistantSession(sessionId, (session) => ({
-                    ...session,
-                    messages: session.messages.map((item) => {
-                        if (item.id !== displayMessageId) return item;
-                        const settledText = item.text
-                            .split("\n")
-                            .map((line) => (/^正在.+…$/.test(line) ? `已${line.slice(2, -1)}。` : line))
-                            .join("\n");
-                        return {
-                            ...item,
-                            text: settledText,
-                            ...(action?.type === "choice" && action.options?.length
-                                ? { action: { type: action.type, options: action.options } }
-                                : {}),
-                        };
-                    }),
-                    updatedAt: new Date().toISOString(),
-                }));
+                updateAssistantSession(sessionId, (session) => {
+                    const hasDisplayMsg = session.messages.some((item) => item.id === displayMessageId);
+                    const targetId = hasDisplayMsg
+                        ? displayMessageId
+                        : [...session.messages].reverse().find((item) => item.role === "assistant")?.id;
+                    return {
+                        ...session,
+                        messages: session.messages.map((item) => {
+                            if (item.id !== targetId) return item;
+                            const settledText = item.text
+                                .split("\n")
+                                .map((line) => (/^正在.+…$/.test(line) ? `已${line.slice(2, -1)}。` : line))
+                                .join("\n");
+                            return {
+                                ...item,
+                                text: settledText,
+                                ...(capturedTrace ? { trace: capturedTrace } : {}),
+                                ...(action?.type === "choice" && action.options?.length
+                                    ? { action: { type: action.type, options: action.options } }
+                                    : {}),
+                            };
+                        }),
+                        updatedAt: new Date().toISOString(),
+                    };
+                });
                 activeAgentAssistantMessageIdRef.current = null;
                 setAgentRunning(false);
                 setAgentQueued(false);
                 return;
             }
             completeTextMessage(sessionId, displayMessageId, text);
+            if (capturedTrace) {
+                updateAssistantSession(sessionId, (session) => {
+                    const hasDisplayMsg = session.messages.some((item) => item.id === displayMessageId);
+                    const targetId = hasDisplayMsg
+                        ? displayMessageId
+                        : [...session.messages].reverse().find((item) => item.role === "assistant")?.id;
+                    return {
+                        ...session,
+                        messages: session.messages.map((item) => (item.id === targetId ? { ...item, trace: capturedTrace } : item)),
+                        updatedAt: new Date().toISOString(),
+                    };
+                });
+            }
         },
         onCanceled: () => {
             resetThinkings();
+            activeAgentStepsRef.current = [];
+            setActiveAgentSteps([]);
+            setPendingAgentApproval(null);
             resetTextStream(false);
             agentTaskCreatedNodeIdsRef.current = [];
+            const sessionId = activeAgentSessionIdRef.current;
+            if (sessionId) terminateActivePlan(sessionId, "canceled");
+            activePlanMessageIdRef.current = null;
             activeAgentAssistantMessageIdRef.current = null;
             setAgentRunning(false);
             setAgentQueued(false);
@@ -3740,23 +4020,67 @@ function CanvasWorkspacePage() {
             const sessionId = activeAgentSessionIdRef.current;
             if (!sessionId) return;
             const cleanSummary = summary.trim().replace(/([。！？])，\s*共/g, "$1 共");
+            const alreadyHasTaskCount = /共\s*\d+\s*个任务/.test(cleanSummary);
             const planLine = cleanSummary
-                ? /[。！？]$/.test(cleanSummary)
-                    ? `${cleanSummary} 共 ${taskCount} 个任务`
-                    : `${cleanSummary}，共 ${taskCount} 个任务`
+                ? alreadyHasTaskCount
+                    ? cleanSummary
+                    : /[。！？]$/.test(cleanSummary)
+                      ? `${cleanSummary} 共 ${taskCount} 个任务`
+                      : `${cleanSummary}，共 ${taskCount} 个任务`
                 : translate("canvas.tasks", { value0: taskCount });
-            appendCanvasDialogueLine(sessionId, planLine, `plan-${planId}`);
+            // 规划句会并进当前正在流式输出的那条消息，计划也挂在同一条消息上，避免时间线与对话分家。
+            const planMessageId = activeAgentAssistantMessageIdRef.current || `plan-${planId}`;
+            activeAgentAssistantMessageIdRef.current = planMessageId;
+            activePlanMessageIdRef.current = planMessageId;
+            appendCanvasDialogueLine(sessionId, planLine, planMessageId);
+            if (taskCount <= 0) return;
+            attachMessagePlan(sessionId, planMessageId, {
+                batchId: planId || planMessageId,
+                title: cleanSummary || "批量生成",
+                status: "running",
+                startedAt: Date.now(),
+                items: Array.from({ length: taskCount }, (_, index) => ({
+                    index: index + 1,
+                    label: `任务 ${index + 1}`,
+                    status: "pending" as const,
+                })),
+            });
         },
-        onPlanTaskStatus: (planId, _taskId, status, statusMessage) => {
+        onPlanTaskStatus: (planId, taskId, taskStatus, statusMessage) => {
             const sessionId = activeAgentSessionIdRef.current;
             if (!sessionId) return;
+            const mappedStatus: CanvasAgentBatchItem["status"] =
+                taskStatus === "succeeded" || taskStatus === "completed" || taskStatus === "done"
+                    ? "done"
+                    : taskStatus === "canceled"
+                      ? "canceled"
+                      : taskStatus === "failed"
+                        ? "failed"
+                        : "running";
+            updateMessagePlan(
+                sessionId,
+                (plan) => (planId ? plan.batchId === planId : plan.status === "running"),
+                (plan) => {
+                    // 计划已经收尾后，诊断/重试之类的中间状态乱序到达时不要把它重新拉回执行中。
+                    if (plan.status !== "running" && mappedStatus === "running") return plan;
+                    const items = [...plan.items];
+                    let idx = items.findIndex((item) => item.taskId === taskId);
+                    if (idx < 0) idx = items.findIndex((item) => !item.taskId);
+                    if (idx >= 0) {
+                        items[idx] = { ...items[idx], taskId, status: mappedStatus };
+                    } else {
+                        items.push({ index: items.length + 1, taskId, label: `任务 ${items.length + 1}`, status: mappedStatus });
+                    }
+                    return settlePlan({ ...plan, status: "running", items });
+                },
+            );
             const trimmed = (statusMessage || "").trim();
             if (!trimmed || /^子\s*agent\s*正在准备任务$/i.test(trimmed) || /^agent\s+is\s+preparing\s+the\s+task$/i.test(trimmed)) {
                 return;
             }
-            if (status === "failed" || status === "canceled" || status === "retrying" || status === "diagnosing") {
-                const line = status === "failed" ? translate("canvas.failed_ae7e3c", { value0: trimmed }) : trimmed;
-                appendCanvasDialogueLine(sessionId, line, `plan-${planId}`, status);
+            if (taskStatus === "failed" || taskStatus === "canceled" || taskStatus === "retrying" || taskStatus === "diagnosing") {
+                const line = taskStatus === "failed" ? translate("canvas.failed_ae7e3c", { value0: trimmed }) : trimmed;
+                appendCanvasDialogueLine(sessionId, line, `plan-${planId}`, taskStatus);
             }
         },
         onPromptPrepared: (planId, _taskId, strategy) => {
@@ -3772,8 +4096,11 @@ function CanvasWorkspacePage() {
             const sessionId = activeAgentSessionIdRef.current;
             const messageId = activeAgentAssistantMessageIdRef.current;
             resetTextStream(false);
-            if (sessionId && messageId) removeAssistantMessage(sessionId, messageId);
+            if (sessionId) terminateActivePlan(sessionId, "failed");
+            // 计划消息上有时间线，保留它并把失败项标出来；普通流式消息仍然清掉避免留下半句话。
+            if (sessionId && messageId && !activePlanMessageIdRef.current) removeAssistantMessage(sessionId, messageId);
             activeAgentAssistantMessageIdRef.current = null;
+            activePlanMessageIdRef.current = null;
             if (sessionId) {
                 appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: translate("canvas.operationFailed"), text: translate("canvas.error", { value0: errorMessage }) });
             }
@@ -3831,6 +4158,11 @@ function CanvasWorkspacePage() {
     const handleCreateAgentSession = useCallback(() => {
         if (agentRunning || agentQueued) return;
         resetThinkings();
+        activeAgentStepsRef.current = [];
+        setActiveAgentSteps([]);
+        setPendingAgentApproval(null);
+        activePlanMessageIdRef.current = null;
+        setQueuedAgentPrompts([]);
         const activeSession = chatSessions.find((session) => session.id === activeChatId);
         if (activeSession && activeSession.messages.length === 0) {
             resetAgentSession();
@@ -3853,7 +4185,191 @@ function CanvasWorkspacePage() {
         handleAssistantSessionsChange([...chatSessions, newSession], sessionId);
     }, [activeChatId, agentQueued, agentRunning, chatSessions, handleAssistantSessionsChange, resetAgentSession, resetThinkings]);
 
+    const handleSelectAgentSession = useCallback(
+        (nextSessionId: string) => {
+            if (agentRunning || agentQueued || nextSessionId === activeChatId) return;
+            resetThinkings();
+            activeAgentStepsRef.current = [];
+            setActiveAgentSteps([]);
+            setPendingAgentApproval(null);
+            activePlanMessageIdRef.current = null;
+            setQueuedAgentPrompts([]);
+            activeAgentSessionIdRef.current = nextSessionId;
+            activeAgentAssistantMessageIdRef.current = null;
+            resetAgentSession();
+            handleAssistantSessionsChange(chatSessions, nextSessionId);
+        },
+        [activeChatId, agentQueued, agentRunning, chatSessions, handleAssistantSessionsChange, resetAgentSession, resetThinkings],
+    );
+
     const activeSessionMessages = useMemo(() => chatSessions.find((s) => s.id === activeChatId)?.messages || [], [chatSessions, activeChatId, translate.locale]);
+
+    const dispatchCanvasAgentPrompt = useCallback(
+        async (
+            text: string,
+            references: CanvasAssistantReference[] = [],
+            _generationStyleIds: number[] = [],
+            generationStyles: Array<{ id: number; name: string; generationType: "image" | "video" }> = [],
+            agentText = text,
+            skillIdOverride?: string,
+        ) => {
+            if (agentRunning || agentQueued) {
+                setQueuedAgentPrompts((current) => [
+                    ...current,
+                    {
+                        id: nanoid(),
+                        text,
+                        agentText,
+                        references,
+                        generationStyleIds: _generationStyleIds,
+                        generationStyles,
+                        skillId: skillIdOverride ?? selectedAgentSkill?.id,
+                    },
+                ]);
+                return;
+            }
+            const now = new Date().toISOString();
+            const sessionId = activeChatId || nanoid();
+            const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references, generationStyles };
+            const history = buildAgentChatHistory(activeSessionMessages);
+            activeAgentSessionIdRef.current = sessionId;
+            activeAgentAssistantMessageIdRef.current = null;
+            activePlanMessageIdRef.current = null;
+            activeAgentStepsRef.current = [];
+            setActiveAgentSteps([]);
+            setPendingAgentApproval(null);
+            resetTextStream(false);
+            resetThinkings();
+            setAgentRunning(false);
+            setAgentQueued(true);
+
+            if (!activeChatId) {
+                const newSession: CanvasAssistantSession = {
+                    id: sessionId,
+                    title: text.slice(0, 30) || translate("canvas.newConversation"),
+                    messages: [userMessage],
+                    createdAt: now,
+                    updatedAt: now,
+                    skillId: skillIdOverride ?? selectedAgentSkill?.id,
+                    skillName: selectedAgentSkill?.name,
+                };
+                handleAssistantSessionsChange([...chatSessions, newSession], sessionId);
+            } else {
+                appendAssistantMessage(sessionId, userMessage);
+            }
+
+            try {
+                agentTaskCreatedNodeIdsRef.current = [];
+                const reconciledVideo = reconcileVideoSettingsForModel(canvasEffectiveConfig, resolvedCanvasVideoModel);
+                const effectiveVideoMode = reconciledVideo.videoGenerationMode || config.videoGenerationMode;
+                const effectiveVideoResolution = reconciledVideo.vquality || config.vquality || "720p";
+                const effectiveVideoSeconds = reconciledVideo.videoSeconds || config.videoSeconds || "5";
+                const selectedVideoModelConfig = readVideoModelConfiguration(canvasEffectiveConfig, resolvedCanvasVideoModel);
+                const selectedVideoConstraints = selectedVideoModelConfig?.videoGenerationConstraints?.[effectiveVideoMode];
+                const minDurationSeconds =
+                    selectedVideoConstraints?.minimumDurationSeconds ?? selectedVideoModelConfig?.videoBillingConfiguration?.minimumDurationSeconds;
+                const maxDurationSeconds =
+                    selectedVideoConstraints?.maximumDurationSeconds ??
+                    resolveBillingMaximumDurationSeconds(selectedVideoModelConfig?.videoBillingConfiguration) ??
+                    undefined;
+                const supportedRatios = selectedVideoConstraints?.supportedAspectRatios;
+                const resolvedAgentSize =
+                    reconciledVideo.size ||
+                    (supportedRatios?.length && config.size && !supportedRatios.includes(config.size)
+                        ? supportedRatios[0]
+                        : config.size || "16:9");
+                const videoModelCapabilities =
+                    minDurationSeconds || maxDurationSeconds || supportedRatios?.length
+                        ? {
+                              ...(minDurationSeconds ? { minDurationSeconds } : {}),
+                              ...(maxDurationSeconds ? { maxDurationSeconds } : {}),
+                              ...(supportedRatios?.length ? { supportedAspectRatios: supportedRatios } : {}),
+                          }
+                        : undefined;
+                const submitted = await sendAgentMessage(
+                    agentText,
+                    references.map((reference) => ({ title: reference.title, text: reference.text || "" })),
+                    canvasEffectiveConfig.agentModel || undefined,
+                    history,
+                    {
+                        image: generationStyles.filter((style) => style.generationType === "image").map((style) => style.id),
+                        video: generationStyles.filter((style) => style.generationType === "video").map((style) => style.id),
+                    },
+                    {
+                        size: resolvedAgentSize,
+                        resolution: effectiveVideoResolution,
+                        quality: String(effectiveVideoResolution).includes("1080") || String(effectiveVideoResolution).includes("1088") || String(effectiveVideoResolution).includes("1440")
+                            ? "high"
+                            : String(effectiveVideoResolution).includes("480")
+                              ? "low"
+                              : "medium",
+                        count: normalizeVideoGenerationCount(config.canvasVideoCount),
+                        seconds: effectiveVideoSeconds,
+                        watermark: String(config.videoWatermark).toLowerCase() === "true",
+                        videoGenerationMode: effectiveVideoMode,
+                        imageModel: resolvedCanvasImageModel || undefined,
+                        imageResolution: config.imageResolution || "2K",
+                        imageQuality: config.quality || "medium",
+                        videoModel: resolvedCanvasVideoModel || undefined,
+                    },
+                    skillIdOverride ?? selectedAgentSkill?.id,
+                    "agent",
+                    videoModelCapabilities,
+                );
+                if (!submitted) {
+                    setAgentRunning(false);
+                    setAgentQueued(false);
+                    appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: translate("canvas.operationFailed"), text: translate("canvas.previousCanvasAgentTaskIsStillRunningWaitFor") });
+                }
+            } catch (error) {
+                resetThinkings();
+                appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: translate("canvas.operationFailed"), text: error instanceof Error ? error.message : translate("canvas.operationFailed") });
+                setAgentRunning(false);
+                setAgentQueued(false);
+            }
+        },
+        [
+            activeChatId,
+            activeSessionMessages,
+            agentQueued,
+            agentRunning,
+            appendAssistantMessage,
+            chatSessions,
+            canvasEffectiveConfig,
+            config.canvasVideoCount,
+            config.size,
+            config.videoGenerationMode,
+            config.videoSeconds,
+            config.videoWatermark,
+            config.vquality,
+            handleAssistantSessionsChange,
+            resetTextStream,
+            resetThinkings,
+            resolvedCanvasImageModel,
+            resolvedCanvasVideoModel,
+            selectedAgentSkill?.id,
+            selectedAgentSkill?.name,
+            sendAgentMessage,
+        ],
+    );
+
+    const dispatchCanvasAgentPromptRef = useRef(dispatchCanvasAgentPrompt);
+    dispatchCanvasAgentPromptRef.current = dispatchCanvasAgentPrompt;
+
+    // 当前 Agent 任务结束后自动弹出并执行队列中的下一条用户指令。
+    useEffect(() => {
+        if (agentRunning || agentQueued || queuedAgentPrompts.length === 0) return;
+        const [nextPrompt, ...rest] = queuedAgentPrompts;
+        setQueuedAgentPrompts(rest);
+        void dispatchCanvasAgentPromptRef.current(
+            nextPrompt.text,
+            nextPrompt.references,
+            nextPrompt.generationStyleIds,
+            nextPrompt.generationStyles,
+            nextPrompt.agentText,
+            nextPrompt.skillId,
+        );
+    }, [agentQueued, agentRunning, queuedAgentPrompts]);
 
     const handleSettingGraphGenerate = useCallback(
         async (nodeId: string, prompt: string, skill: CanvasSettingGraphSkillSnapshot) => {
@@ -3869,6 +4385,7 @@ function CanvasWorkspacePage() {
             const sessionId = activeChatId || nanoid();
             activeAgentSessionIdRef.current = sessionId;
             activeAgentAssistantMessageIdRef.current = null;
+            activePlanMessageIdRef.current = null;
             resetThinkings();
             resetTextStream(false);
             setAgentQueued(true);
@@ -3965,7 +4482,7 @@ function CanvasWorkspacePage() {
             if (sourceNode?.execution.phase === "running" && sourceNode.execution.taskId) {
                 return failedCanvasGenerationResult(nodeId, canvasError("configuration", translate("canvas.nodeIsGeneratingWaitForCompletion")));
             }
-            let generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
+            let generationConfig = buildGenerationConfig(canvasEffectiveConfig, sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 showMissingAiConfig(mode);
                 return failedCanvasGenerationResult(nodeId, canvasError("configuration", translate("canvas.incompleteModelConfiguration")));
@@ -4535,7 +5052,7 @@ function CanvasWorkspacePage() {
                           imageResolution: savedImageGeneration.resolution || effectiveConfig.imageResolution,
                           count: "1",
                       }
-                    : { ...buildGenerationConfig(effectiveConfig, sourceNode, retryMode), ...(settingGraphRatio ? { size: settingGraphRatio } : {}), count: "1" };
+                    : { ...buildGenerationConfig(canvasEffectiveConfig, sourceNode, retryMode), ...(settingGraphRatio ? { size: settingGraphRatio } : {}), count: "1" };
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 showMissingAiConfig(retryMode);
                 return failedCanvasGenerationResult(node.id, canvasError("configuration", translate("canvas.incompleteModelConfiguration")));
@@ -5699,6 +6216,7 @@ function CanvasWorkspacePage() {
                     }}
                     edgeFlowEnabled={edgeFlowEnabled}
                     onToggleEdgeFlow={toggleEdgeFlow}
+                    onOpenSettings={() => setCanvasModelSettingsOpen(true)}
                     selectedBackground={
                         selectedNodeIds.size === 1
                             ? (() => {
@@ -5806,89 +6324,143 @@ function CanvasWorkspacePage() {
             {assistantMounted ? (
                 <CanvasChatPanel
                     onCollapse={closeAgent}
-                    onUploadImage={() => handleUploadRequest(undefined, undefined, "image/*")}
-                    onUploadVideo={() => handleUploadRequest(undefined, undefined, "video/mp4,video/quicktime,video/*")}
+                    onUploadImage={() => handleUploadRequest(undefined, undefined, "image/*", "image")}
+                    onUploadVideo={() => handleUploadRequest(undefined, undefined, "video/mp4,video/quicktime,video/*", "video")}
                     nodes={nodes}
+                    selectedNodeIds={selectedNodeIds}
                     onNodeDropRef={onNodeDropRef}
                     messages={activeSessionMessages}
+                    sessions={chatSessions}
+                    onSelectSession={handleSelectAgentSession}
                     completedThinkings={completedThinkings}
                     activeThinking={activeThinking}
+                    activeSteps={activeAgentSteps}
+                    onFocusNode={(nodeId) => {
+                        setSelectedNodeIds(new Set([nodeId]));
+                        requestFocusNodes([nodeId]);
+                    }}
+                    onRetryBatchItem={(item) => {
+                        const targetDesc = item.nodeId ? `节点 ${item.label}（${item.nodeId}）` : item.label;
+                        void dispatchCanvasAgentPrompt(`请只重跑 ${targetDesc}，保持规格不变。`);
+                    }}
+                    queuedPrompts={queuedAgentPrompts}
+                    onRemoveQueuedPrompt={(id) => setQueuedAgentPrompts((current) => current.filter((item) => item.id !== id))}
+                    pendingApproval={pendingAgentApproval}
+                    onResolveApproval={(approved) => {
+                        if (!pendingAgentApproval) return;
+                        resolveAgentApproval(pendingAgentApproval.callId, approved);
+                        setPendingAgentApproval(null);
+                    }}
+                    approvalMode={approvalMode}
+                    onApprovalModeChange={setApprovalMode}
+                    skillOptions={agentSkillOptions}
+                    selectedSkill={selectedAgentSkill}
+                    onSkillSelect={setSelectedAgentSkill}
                     onNewSession={handleCreateAgentSession}
                     onStop={() => void runCancelWithProviderRequestPolicy(modal, (forfeit) => cancelAgentMessage(forfeit)).catch((error) => message.error(error instanceof Error ? error.message : translate("canvas.failedToStop")))}
                     initialPrompt={initialPrompt}
                     sessionId={activeChatId}
-                    onSend={async (text, references = [], generationStyleIds = [], generationStyles = [], agentText = text) => {
-                        if (agentRunning || agentQueued) return;
-                        const now = new Date().toISOString();
-                        const sessionId = activeChatId || nanoid();
-                        const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references, generationStyles };
-                        const history = buildAgentChatHistory(activeSessionMessages);
-                        activeAgentSessionIdRef.current = sessionId;
-                        activeAgentAssistantMessageIdRef.current = null;
-                        resetTextStream(false);
-                        resetThinkings();
-                        setAgentRunning(false);
-                        setAgentQueued(true);
-
-                        if (!activeChatId) {
-                            const newSession: CanvasAssistantSession = {
-                                id: sessionId,
-                                title: text.slice(0, 30) || translate("canvas.newConversation"),
-                                messages: [userMessage],
-                                createdAt: now,
-                                updatedAt: now,
-                            };
-                            handleAssistantSessionsChange([...chatSessions, newSession], sessionId);
-                        } else {
-                            appendAssistantMessage(sessionId, userMessage);
-                        }
-
-                        try {
-                            agentTaskCreatedNodeIdsRef.current = [];
-                            const submitted = await sendAgentMessage(
-                                agentText,
-                                references.map((reference) => ({ title: reference.title, text: reference.text || "" })),
-                                config.agentModel || undefined,
-                                history,
-                                {
-                                    image: generationStyles.filter((style) => style.generationType === "image").map((style) => style.id),
-                                    video: generationStyles.filter((style) => style.generationType === "video").map((style) => style.id),
-                                },
-                                {
-                                    size: config.size || "16:9",
-                                    resolution: config.vquality || "720p",
-                                    quality: String(config.vquality || "720p").includes("1080") ? "high" : String(config.vquality || "720p").includes("480") ? "low" : "medium",
-                                    count: normalizeVideoGenerationCount(config.canvasVideoCount),
-                                    seconds: config.videoSeconds || "5",
-                                    watermark: String(config.videoWatermark).toLowerCase() === "true",
-                                    videoGenerationMode: config.videoGenerationMode,
-                                    videoModel: config.videoModel || undefined,
-                                },
-                            );
-                            if (!submitted) {
-                                setAgentRunning(false);
-                                setAgentQueued(false);
-                                appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: translate("canvas.operationFailed"), text: translate("canvas.previousCanvasAgentTaskIsStillRunningWaitFor") });
-                            }
-                        } catch (error) {
-                            resetThinkings();
-                            appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: translate("canvas.operationFailed"), text: error instanceof Error ? error.message : translate("canvas.operationFailed") });
-                            setAgentRunning(false);
-                            setAgentQueued(false);
-                        }
+                    onSend={(text, references = [], generationStyleIds = [], generationStyles = [], agentText = text) => {
+                        void dispatchCanvasAgentPrompt(text, references, generationStyleIds, generationStyles, agentText);
                     }}
                     isStreaming={agentRunning}
                     isQueued={agentQueued}
-                    config={config}
-                    model={config.agentModel}
-                    onModelChange={(model) => updateConfig("agentModel", model)}
-                    onImageModelChange={(model) => updateConfig("imageModel", model)}
-                    onVideoModelChange={(model) => updateConfig("videoModel", model)}
+                    config={canvasEffectiveConfig}
+                    model={canvasEffectiveConfig.agentModel}
+                    onModelChange={(model) => setCanvasDefaultModels((prev) => ({ ...prev, textModel: model }))}
+                    onImageModelChange={(model) => setCanvasDefaultModels((prev) => ({ ...prev, imageModel: model }))}
+                    onVideoModelChange={(model) => setCanvasDefaultModels((prev) => ({ ...prev, videoModel: model }))}
                     onMissingConfig={() => showMissingAiConfig("text")}
                 />
             ) : null}
+            <CreationSettingsModal
+                open={canvasModelSettingsOpen}
+                title="画布默认模型设置"
+                onClose={() => setCanvasModelSettingsOpen(false)}
+            >
+                <div className="space-y-4">
+                    <p className="text-xs leading-5 opacity-70">
+                        仅对当前画布生效：新建节点与画布 Agent 将优先使用这里的默认模型，你仍可随时单独修改单个节点的模型。
+                    </p>
+                    <div>
+                        <label className="mb-1.5 block text-sm font-semibold">默认文本模型</label>
+                        <ModelPicker
+                            config={canvasEffectiveConfig}
+                            value={resolvedCanvasTextModel}
+                            onChange={(model) => setCanvasDefaultModels((prev) => ({ ...prev, textModel: model }))}
+                            capability="text"
+                            fullWidth
+                            placeholder={translate("canvas.selectTextModel")}
+                            onMissingConfig={() => showMissingAiConfig("text")}
+                        />
+                    </div>
+                    <div>
+                        <label className="mb-1.5 block text-sm font-semibold">默认图片模型</label>
+                        <ModelPicker
+                            config={canvasEffectiveConfig}
+                            value={resolvedCanvasImageModel}
+                            onChange={(model) => setCanvasDefaultModels((prev) => ({ ...prev, imageModel: model }))}
+                            capability="image"
+                            fullWidth
+                            onMissingConfig={() => showMissingAiConfig("image")}
+                        />
+                    </div>
+                    <div>
+                        <label className="mb-1.5 block text-sm font-semibold">默认视频模型</label>
+                        <ModelPicker
+                            config={canvasEffectiveConfig}
+                            value={resolvedCanvasVideoModel}
+                            onChange={(model) => setCanvasDefaultModels((prev) => ({ ...prev, videoModel: model }))}
+                            capability="video"
+                            fullWidth
+                            onMissingConfig={() => showMissingAiConfig("video")}
+                        />
+                    </div>
+                    {(canvasDefaultModels.textModel || canvasDefaultModels.imageModel || canvasDefaultModels.videoModel) ? (
+                        <div className="flex justify-end pt-1">
+                            <button
+                                type="button"
+                                className="rounded-lg border px-3 py-1.5 text-xs! opacity-80 transition hover:opacity-100"
+                                onClick={() => setCanvasDefaultModels({})}
+                            >
+                                恢复全局默认
+                            </button>
+                        </div>
+                    ) : null}
+                </div>
+            </CreationSettingsModal>
         </main>
     );
+}
+
+/** 从后端生成的 callId（格式 planId:taskId 或 planId:taskId:recovery:N）中提取任务 ID。 */
+function extractPlanTaskIdFromCallId(callId: string): string | undefined {
+    const parts = callId.split(":");
+    if (parts.length >= 2 && parts[1]) return parts[1];
+    return undefined;
+}
+
+/** 时间线里用任务化的短名，避免直接展示“调用某某工具”。 */
+function generationTaskName(toolName: string): string {
+    if (toolName === "canvas_generate_image") return "生成图片";
+    if (toolName === "canvas_generate_video") return "生成视频";
+    if (toolName === "canvas_generate_text") return "生成文本";
+    return "执行画布生成";
+}
+
+/** 所有步骤进入终态时收敛计划状态并记录完成时间，否则保持执行中。 */
+function settlePlan(plan: CanvasAgentBatchState): CanvasAgentBatchState {
+    if (!plan.items.length) return plan;
+    const settled = plan.items.every((item) => item.status === "done" || item.status === "failed" || item.status === "canceled");
+    if (!settled) {
+        return plan.status === "running" ? plan : { ...plan, status: "running", finishedAt: undefined };
+    }
+    const status = plan.items.some((item) => item.status === "failed")
+        ? "failed"
+        : plan.items.some((item) => item.status === "canceled")
+          ? "canceled"
+          : "completed";
+    return { ...plan, status, finishedAt: plan.finishedAt ?? Date.now() };
 }
 
 function applyVideoCompositionTaskToNodes(nodes: CanvasDomainNode[], compositionNodeId: string, fallbackResultVideoNodeId: string | undefined, task: VideoCompositionTask): CanvasDomainNode[] {
@@ -6335,12 +6907,15 @@ function buildGenerationConfig(config: AiConfig, node: CanvasDomainNode | undefi
     const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : config.textModel;
     const generation = node && (isImageNode(node) || isVideoNode(node)) ? node.generation : null;
     const model = normalizeModelOptionValue(generation?.model || defaultModel || config.model || defaultConfig.model, config.channels);
+    const rawImageResolution = node && isImageNode(node) ? (node.generation.resolution || "").trim().toUpperCase() : "";
+    const validNodeImageResolution =
+        rawImageResolution === "1K" || rawImageResolution === "2K" || rawImageResolution === "4K" ? rawImageResolution : "";
     return {
         ...config,
         model,
         videoModel: mode === "video" ? model : config.videoModel,
         quality: node && isImageNode(node) ? node.generation.quality || config.quality || defaultConfig.quality : config.quality || defaultConfig.quality,
-        imageResolution: node && isImageNode(node) ? node.generation.resolution || config.imageResolution || defaultConfig.imageResolution : config.imageResolution || defaultConfig.imageResolution,
+        imageResolution: validNodeImageResolution || config.imageResolution || defaultConfig.imageResolution,
         size: generation?.size || config.size || defaultConfig.size,
         videoSeconds: node && isVideoNode(node) ? node.generation.seconds || config.videoSeconds || defaultConfig.videoSeconds : config.videoSeconds || defaultConfig.videoSeconds,
         vquality: node && isVideoNode(node) ? node.generation.quality || config.vquality || defaultConfig.vquality : config.vquality || defaultConfig.vquality,

@@ -19,10 +19,17 @@ type CanvasAgentApplyResult = {
   result?: CanvasAgentToolResult;
 };
 
+const APPROVAL_REQUIRED_TOOLS = new Set([
+  "canvas_delete_nodes",
+]);
+
 interface UseAgentSSEProps {
   snapshot: CanvasAgentSnapshot;
+  approvalMode?: "auto" | "manual";
   onApplyOps: (ops: CanvasAgentOp[] | undefined, signal: AbortSignal) => Promise<CanvasAgentApplyResult>;
   onToolExecute?: (call: { callId: string; name: string; arguments: Record<string, unknown> }) => void;
+  onToolResult?: (callId: string, ok: boolean, message: string, data?: Record<string, unknown>) => void;
+  onApprovalRequired?: (approval: { callId: string; sessionId: string; requestId: string; name: string; summary: string; arguments: Record<string, unknown> }) => void;
   onTextDelta: (messageId: string, delta: string) => void;
   onThoughtDelta?: (thoughtId: string, delta: string) => void;
   onThoughtComplete?: (thoughtId: string, durationMs: number) => void;
@@ -40,7 +47,7 @@ interface UseAgentSSEProps {
  * Agent SSE 通信 Hook。建立 SSE 长连接，处理文本增量、工具执行、任务完成和错误事件。
  * 画布写操作工具通过 onApplyOps 应用到画布，并将执行结果回传后端继续 Agent Loop。
  */
-export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, onThoughtDelta, onThoughtComplete, onTaskComplete, onCanceled, onPlanCreated, onPlanTaskStatus, onPromptPrepared, onQueueStatus, onRequestFinished, onError }: UseAgentSSEProps) {
+export function useAgentSSE({ snapshot, approvalMode = "auto", onApplyOps, onToolExecute, onToolResult, onApprovalRequired, onTextDelta, onThoughtDelta, onThoughtComplete, onTaskComplete, onCanceled, onPlanCreated, onPlanTaskStatus, onPromptPrepared, onQueueStatus, onRequestFinished, onError }: UseAgentSSEProps) {
     const translate = useTranslation();
   const locale = useLocale();
   const subscribedLocale = useRef(locale);
@@ -58,9 +65,13 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
   const queueStatusRef = useRef<AgentQueueStatus | null>(null);
   const terminalRequestIdsRef = useRef(new Set<string>());
   const activeToolControllersRef = useRef(new Map<string, AbortController>());
+  const pendingApprovalResolversRef = useRef(new Map<string, (approved: boolean) => void>());
+  const approvalModeRef = useRef(approvalMode);
   const snapshotRef = useRef(snapshot);
   const onApplyOpsRef = useRef(onApplyOps);
   const onToolExecuteRef = useRef(onToolExecute);
+  const onToolResultRef = useRef(onToolResult);
+  const onApprovalRequiredRef = useRef(onApprovalRequired);
   const onTextDeltaRef = useRef(onTextDelta);
   const onThoughtDeltaRef = useRef(onThoughtDelta);
   const onThoughtCompleteRef = useRef(onThoughtComplete);
@@ -72,9 +83,12 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
   const onQueueStatusRef = useRef(onQueueStatus);
   const onRequestFinishedRef = useRef(onRequestFinished);
   const onErrorRef = useRef(onError);
+  approvalModeRef.current = approvalMode;
   snapshotRef.current = snapshot;
   onApplyOpsRef.current = onApplyOps;
   onToolExecuteRef.current = onToolExecute;
+  onToolResultRef.current = onToolResult;
+  onApprovalRequiredRef.current = onApprovalRequired;
   onTextDeltaRef.current = onTextDelta;
   onThoughtDeltaRef.current = onThoughtDelta;
   onThoughtCompleteRef.current = onThoughtComplete;
@@ -106,6 +120,8 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
     queueStatusRef.current = null;
     activeToolControllersRef.current.forEach((controller) => controller.abort());
     activeToolControllersRef.current.clear();
+    pendingApprovalResolversRef.current.forEach((resolve) => resolve(false));
+    pendingApprovalResolversRef.current.clear();
     onCanceledRef.current?.(message);
   }, [markRequestTerminal]);
 
@@ -193,11 +209,35 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
         const controller = new AbortController();
         activeToolControllersRef.current.set(data.callId!, controller);
         try {
+          const toolArgs = (data.arguments as Record<string, unknown> | undefined) || {};
           onToolExecuteRef.current?.({
             callId: data.callId!,
             name: data.name!,
-            arguments: (data.arguments as Record<string, unknown> | undefined) || {},
+            arguments: toolArgs,
           });
+          if (approvalModeRef.current === "manual" && APPROVAL_REQUIRED_TOOLS.has(data.name!) && onApprovalRequiredRef.current) {
+            const approved = await new Promise<boolean>((resolve) => {
+              pendingApprovalResolversRef.current.set(data.callId!, resolve);
+              onApprovalRequiredRef.current?.({
+                callId: data.callId!,
+                sessionId,
+                requestId: data.requestId || "",
+                name: data.name!,
+                summary: buildToolApprovalSummary(data.name!, toolArgs),
+                arguments: toolArgs,
+              });
+            });
+            pendingApprovalResolversRef.current.delete(data.callId!);
+            if (controller.signal.aborted) return;
+            if (!approved) {
+              const deniedResult = { ok: false, message: "用户拒绝执行该操作，请根据用户意见调整方案。" };
+              onToolResultRef.current?.(data.callId!, false, deniedResult.message);
+              if (data.requestId) {
+                await agentSubmitToolResult({ sessionId, requestId: data.requestId, callId: data.callId!, result: deniedResult });
+              }
+              return;
+            }
+          }
           const execution = resolveCanvasAgentTool(data.name!, data.arguments);
           if (!execution) throw new Error(translate("canvas.unsupportedCanvasTool", { value0: data.name! }));
           let result = execution.result;
@@ -207,12 +247,15 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
             result = application.result || result;
           }
           if (controller.signal.aborted) return;
+          onToolResultRef.current?.(data.callId!, result.ok, result.message, result.data);
           const requestId = data.requestId;
           if (!requestId) return;
           await agentSubmitToolResult({ sessionId, requestId, callId: data.callId!, result });
         } catch (err) {
           const canceled = controller.signal.aborted;
           if (canceled) return;
+          const errorMsg = err instanceof Error ? err.message : translate("canvas.toolExecutionFailed");
+          onToolResultRef.current?.(data.callId!, false, errorMsg);
           const requestId = data.requestId;
           if (requestId) {
             await agentSubmitToolResult({
@@ -221,12 +264,13 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
               callId: data.callId!,
               result: {
                 ok: false,
-                message: err instanceof Error ? err.message : translate("canvas.toolExecutionFailed"),
+                message: errorMsg,
                 data: { error: readAiTaskError(err) },
               },
             }).catch(() => undefined);
           }
         } finally {
+          pendingApprovalResolversRef.current.delete(data.callId!);
           activeToolControllersRef.current.delete(data.callId!);
         }
       })();
@@ -333,6 +377,12 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
       generationStyleIdsByType?: { image?: number[]; video?: number[] },
       generationSettings?: Omit<CreationSettings, "model" | "generationStyleIdsByType">,
       skillId?: string,
+      mode?: "agent" | "chat",
+      videoModelCapabilities?: {
+        minDurationSeconds?: number;
+        maxDurationSeconds?: number;
+        supportedAspectRatios?: string[];
+      },
     ) => {
       if (sendingRef.current || activeRequestRef.current) return false;
       sendingRef.current = true;
@@ -359,6 +409,9 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
             ? { model, generationStyleIdsByType, ...creationGenerationSettings }
             : undefined,
           skillId,
+          mode,
+          approvalMode: approvalModeRef.current,
+          videoModelCapabilities,
           settingGraphNodeId,
           settingGraphSkillSnapshot,
         });
@@ -531,7 +584,35 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
     }, { once: true });
   }, [locale, finishCanceledRequest, markRequestTerminal]);
 
-  return { sendMessage, cancelMessage, resetSession, attachRequest, detachRequest, readActiveToolCallIds, readAttachedRequestId };
+  const resolveApproval = useCallback((callId: string, approved: boolean) => {
+    const resolver = pendingApprovalResolversRef.current.get(callId);
+    if (resolver) {
+      pendingApprovalResolversRef.current.delete(callId);
+      resolver(approved);
+    }
+  }, []);
+
+  return { sendMessage, cancelMessage, resetSession, attachRequest, detachRequest, readActiveToolCallIds, readAttachedRequestId, resolveApproval };
+}
+
+function buildToolApprovalSummary(name: string, args: Record<string, unknown>): string {
+  const prompt = typeof args.prompt === "string" && args.prompt.trim() ? `「${args.prompt.trim().slice(0, 80)}」` : "";
+  switch (name) {
+    case "canvas_generate_image":
+      return `准备在画布生成图片${prompt}`;
+    case "canvas_generate_video":
+      return `准备在画布生成视频${prompt}`;
+    case "canvas_run_generation":
+      return `准备触发节点 ${String(args.nodeId || "")} 生成${prompt}`;
+    case "canvas_delete_nodes": {
+      const ids = Array.isArray(args.ids) ? args.ids : [];
+      return `准备删除画布上的 ${ids.length} 个节点及相关连线`;
+    }
+    case "canvas_create_generation_flow":
+      return `准备创建生成流程节点${prompt}`;
+    default:
+      return `准备执行画布工具 ${name}`;
+  }
 }
 
 /** 设定图生成只向 Agent 发送目标节点及其直接引用节点，避免把整张大型画布历史注入模型导致请求超时。 */

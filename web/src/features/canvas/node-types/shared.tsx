@@ -11,6 +11,7 @@ import { useNodeActions } from "./node-action-context";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
 import { RequeryFailedTaskButton } from "@/features/ai-task/requery-failed-task-button";
+import { modelOptionName, useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 
 /** 共享加载状态组件 */
 export function NodeLoading() {
@@ -238,6 +239,38 @@ export function CanvasNodeTitle({ nodeId, title, defaultTitle, onTitleChange }: 
                     A+
                 </button>
             </span>
+        </div>
+    );
+}
+
+type CanvasNodeGenerationMetaProps = {
+    selected?: boolean;
+    model?: string;
+    resolution?: string;
+    size?: string;
+};
+
+/** 选中图片或视频节点时，在节点右上角展示生成该内容时使用的模型、分辨率与比例。 */
+export function CanvasNodeGenerationMeta({ selected, model, resolution, size }: CanvasNodeGenerationMetaProps) {
+    const theme = useCanvasTheme();
+    const config = useEffectiveConfig();
+    if (!selected) return null;
+    const trimmedModel = model?.trim() || "";
+    const modelName = trimmedModel ? config.modelDisplayNames?.[trimmedModel] || modelOptionName(trimmedModel) : "";
+    const parts = [modelName, resolution?.trim() || "", size?.trim() || ""].filter(Boolean);
+    if (!parts.length) return null;
+
+    return (
+        <div
+            className="pointer-events-none absolute right-2.5 top-2.5 z-[30] flex max-w-[calc(100%-1.25rem)] items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium backdrop-blur-md"
+            style={{
+                background: `${theme.node.panel}d9`,
+                borderColor: theme.node.stroke,
+                color: theme.node.text,
+            }}
+            title={parts.join(" · ")}
+        >
+            <span className="truncate">{parts.join(" · ")}</span>
         </div>
     );
 }

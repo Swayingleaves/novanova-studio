@@ -416,10 +416,26 @@ public class CreationPlanValidator {
             throw invalid(SystemMessage.of("business.agentCannotRepeatReadOnlyCanvasTools"));
         }
         Map<String, Object> arguments = task.toolArguments() == null ? Map.of() : task.toolArguments();
+        // 专用生成工具（canvas_generate_text/image/video）隐含固定模式，模型偶尔会按 canvas_run_generation 的习惯多带同值 mode 字段；
+        // 仅在 mode 与该工具固定类型完全一致时剥离，避免合法计划因冗余字段被整批拒绝。
+        String impliedMode = impliedGenerationMode(task.toolName());
+        if (impliedMode != null && impliedMode.equals(arguments.get("mode"))) {
+            try {
+                arguments.remove("mode");
+            } catch (UnsupportedOperationException ignored) {
+                arguments = new java.util.LinkedHashMap<>(arguments);
+                arguments.remove("mode");
+            }
+        }
         if ("canvas_apply_ops".equals(task.toolName()) && containsGenerationOperation(arguments.get("ops"))) {
             throw invalid(SystemMessage.of("business.canvasApplyOpsCannotGenerateUseADedicatedGenerationTool"));
         }
         List<String> missing = new ArrayList<>(missingRequiredArguments(tool.parameters(), arguments));
+        // 画布生成任务的 prompt 由服务端按 sourcePromptId 回填并覆盖，只要任务已提供 sourcePromptId 或 prompt 就不再判缺参。
+        if ((impliedMode != null || "canvas_create_generation_flow".equals(task.toolName()))
+                && (StringUtils.hasText(task.sourcePromptId()) || StringUtils.hasText(task.prompt()))) {
+            missing.remove("prompt");
+        }
         if ("canvas_create_generation_flow".equals(task.toolName())
                 && "image".equals(arguments.get("mode"))
                 && Boolean.TRUE.equals(arguments.get("autoRun"))
@@ -445,6 +461,16 @@ public class CreationPlanValidator {
             throw invalid(SystemMessage.of("business.canvasToolsRequireCanvasTaskTypeAndToolAction"));
         }
         return List.of();
+    }
+
+    /** 返回专用画布生成工具隐含的固定模式；非专用生成工具返回 null。 */
+    private static String impliedGenerationMode(String toolName) {
+        return switch (toolName == null ? "" : toolName) {
+            case "canvas_generate_text" -> "text";
+            case "canvas_generate_image" -> "image";
+            case "canvas_generate_video" -> "video";
+            default -> null;
+        };
     }
 
     /**
@@ -473,7 +499,7 @@ public class CreationPlanValidator {
         return switch (toolName) {
             case "canvas_generate_image" -> "image";
             case "canvas_generate_video" -> "video";
-            case "canvas_create_generation_flow" -> {
+            case "canvas_create_generation_flow", "canvas_run_generation" -> {
                 Object mode = arguments == null ? null : arguments.get("mode");
                 yield "image".equals(mode) || "video".equals(mode) ? String.valueOf(mode) : "";
             }

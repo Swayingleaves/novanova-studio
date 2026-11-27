@@ -19,7 +19,7 @@ import { normalizeImageGenerationCount } from "@/features/generation/components/
 import { normalizeVideoGenerationCount } from "@/features/generation/components/video-settings-panel";
 import { modelCreditBalance } from "@/features/team/credit-balance";
 import { CreditCostDisplay, requestCreditCost } from "@/features/generation/constants/credits";
-import { availableVideoModelsForMode, quoteVideoGeneration } from "@/features/generation/lib/video-billing";
+import { availableVideoModelsForMode, quoteVideoGeneration, reconcileVideoSettingsForModel } from "@/features/generation/lib/video-billing";
 import { readVideoGenerationConstraintIssue, readVideoModelConfiguration } from "@/features/generation/lib/video-generation-constraints";
 import { uploadImage } from "@/features/storage/services/image-storage";
 import { isAudioFile, uploadAudioFile } from "@/features/storage/services/audio-storage";
@@ -646,11 +646,11 @@ export function CanvasNodePromptPanel({
                     ) : null}
                     {mode === "image" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" className="!h-10 !min-w-0 !max-w-[180px] flex-1" onMissingConfig={() => onMissingConfig("image")} />
+                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" showChannel={false} className="!h-10 !min-w-0 !max-w-[180px] flex-1" onMissingConfig={() => onMissingConfig("image")} />
                             <CanvasImageSettingsPopover
                                 config={config}
                                 placement="topLeft"
-                                buttonClassName="!h-10 !w-[140px] !justify-start !rounded-full !px-3"
+                                buttonClassName="h-10! w-auto! max-w-[260px]! justify-start! rounded-full! px-3!"
                                 onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: normalizeImageGenerationCount(value) } : { [key]: value })}
                                 onOpenChange={onImageSettingsOpenChange}
                             />
@@ -661,15 +661,42 @@ export function CanvasNodePromptPanel({
                                 config={config}
                                 value={config.model}
                                 modelOptions={availableVideoModelsForMode(config, config.videoGenerationMode)}
-                                onChange={(model) => onConfigChange(node.id, { model })}
+                                onChange={(model) => {
+                                    const reconciled = reconcileVideoSettingsForModel(config, model);
+                                    onConfigChange(node.id, {
+                                        model,
+                                        ...(reconciled.videoGenerationMode ? { videoGenerationMode: reconciled.videoGenerationMode } : {}),
+                                        ...(reconciled.vquality ? { vquality: reconciled.vquality } : {}),
+                                        ...(reconciled.size ? { size: reconciled.size } : {}),
+                                        ...(reconciled.videoSeconds ? { seconds: reconciled.videoSeconds } : {}),
+                                    });
+                                }}
                                 capability="video"
+                                showChannel={false}
                                 className="!h-10 !min-w-0 !max-w-[180px] flex-1"
                                 onMissingConfig={() => onMissingConfig("video")}
                             />
-                            <CanvasVideoSettingsPopover config={config} buttonClassName="!h-10 !w-[140px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                            <CanvasVideoSettingsPopover
+                                config={config}
+                                buttonClassName="h-10! w-auto! max-w-[260px]! justify-start! rounded-full! px-3!"
+                                onConfigChange={(key, value) => {
+                                    const basePatch = videoConfigPatch(key, value);
+                                    if (key === "videoGenerationMode") {
+                                        const reconciled = reconcileVideoSettingsForModel(config, config.model, value as AiConfig["videoGenerationMode"]);
+                                        onConfigChange(node.id, {
+                                            ...basePatch,
+                                            ...(reconciled.vquality ? { vquality: reconciled.vquality } : {}),
+                                            ...(reconciled.size ? { size: reconciled.size } : {}),
+                                            ...(reconciled.videoSeconds ? { seconds: reconciled.videoSeconds } : {}),
+                                        });
+                                        return;
+                                    }
+                                    onConfigChange(node.id, basePatch);
+                                }}
+                            />
                         </>
                     ) : (
-                        <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" className="!h-10 !min-w-0 !max-w-[180px] flex-1" onMissingConfig={() => onMissingConfig("text")} />
+                        <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" showChannel={false} className="!h-10 !min-w-0 !max-w-[180px] flex-1" onMissingConfig={() => onMissingConfig("text")} />
                     )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -812,12 +839,14 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNode, mode: CanvasN
     const defaultModel = mode === "image" ? globalConfig.imageModel : mode === "video" ? globalConfig.videoModel : globalConfig.textModel;
     const generation = isImageNode(node) || isVideoNode(node) ? node.generation : null;
     const model = normalizeModelOptionValue(generation?.model || defaultModel || globalConfig.model || defaultConfig.model, globalConfig.channels);
+    const rawImageResolution = isImageNode(node) ? (node.generation.resolution || "").trim().toUpperCase() : "";
+    const validImageResolution = rawImageResolution === "1K" || rawImageResolution === "2K" || rawImageResolution === "4K" ? rawImageResolution : "";
     return {
         ...globalConfig,
         model,
         videoModel: mode === "video" ? model : globalConfig.videoModel,
         quality: isImageNode(node) ? node.generation.quality || globalConfig.quality || defaultConfig.quality : globalConfig.quality || defaultConfig.quality,
-        imageResolution: isImageNode(node) ? node.generation.resolution || globalConfig.imageResolution || defaultConfig.imageResolution : globalConfig.imageResolution || defaultConfig.imageResolution,
+        imageResolution: validImageResolution || globalConfig.imageResolution || defaultConfig.imageResolution,
         size: generation?.size || globalConfig.size || defaultConfig.size,
         videoSeconds: isVideoNode(node) ? node.generation.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds : globalConfig.videoSeconds || defaultConfig.videoSeconds,
         vquality: isVideoNode(node) ? node.generation.quality || globalConfig.vquality || defaultConfig.vquality : globalConfig.vquality || defaultConfig.vquality,

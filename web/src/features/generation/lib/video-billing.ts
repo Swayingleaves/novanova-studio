@@ -164,6 +164,86 @@ export function quoteVideoGeneration(input: VideoGenerationQuoteInput): VideoGen
     return { available: true, credits: total, billingUnit: configuration.billingUnit, unitPrice, durationSeconds: seconds, taskCount };
 }
 
+/**
+ * 切换视频模型或生成模式后，自动校准分辨率、画幅比例、生成模式和时长，
+ * 避免残留上一个模型不支持的配置导致计费不可用或按钮置灰。
+ */
+export function reconcileVideoSettingsForModel(
+    config: AiConfig,
+    nextModel: string,
+    nextMode?: VideoGenerationMode,
+    resolutionOptionsOverride?: VideoResolution[],
+): {
+    videoGenerationMode?: VideoGenerationMode;
+    vquality?: VideoResolution;
+    size?: string;
+    videoSeconds?: string;
+} {
+    const trimmedModel = (nextModel || "").trim();
+    if (!trimmedModel) return {};
+
+    const patch: {
+        videoGenerationMode?: VideoGenerationMode;
+        vquality?: VideoResolution;
+        size?: string;
+        videoSeconds?: string;
+    } = {};
+
+    // 1. 生成模式：新模型不支持当前模式时，回退到该模型支持的首个模式
+    const currentMode = nextMode || config.videoGenerationMode;
+    let effectiveMode = currentMode;
+    const allModes: VideoGenerationMode[] = ["text-to-video", "image-to-video", "reference-to-video", "first-last-frame-to-video"];
+    if (!videoModelSupportsMode(config, trimmedModel, currentMode)) {
+        const fallbackMode = allModes.find((mode) => videoModelSupportsMode(config, trimmedModel, mode));
+        if (fallbackMode && fallbackMode !== currentMode) {
+            effectiveMode = fallbackMode;
+            patch.videoGenerationMode = fallbackMode;
+        }
+    }
+
+    // 2. 分辨率：当前分辨率不在新模型/模式的计费档位内时，回退到首个可用分辨率
+    const pricedResolutions = resolutionOptionsOverride || availableVideoResolutions(config, trimmedModel, effectiveMode);
+    const currentRes = (config.vquality || "").trim().toLowerCase();
+    if (pricedResolutions.length > 0 && !pricedResolutions.includes(currentRes as VideoResolution)) {
+        patch.vquality = pricedResolutions[0];
+    }
+
+    // 3. 画幅比例：若新模型配置了支持比例清单且当前比例不在其中，回退到首个支持比例
+    const billingEntry = readVideoModelBillingConfiguration(config, trimmedModel);
+    const constraints = billingEntry?.videoGenerationConstraints?.[effectiveMode];
+    const supportedRatios = constraints?.supportedAspectRatios;
+    if (supportedRatios?.length) {
+        const rawSize = (config.size || "").trim();
+        const normalizedSize = rawSize === "adaptive" ? "auto" : rawSize;
+        if (!supportedRatios.includes(normalizedSize)) {
+            patch.size = supportedRatios[0];
+        }
+    }
+
+    // 4. 时长：将当前时长钳制到新模型（含计费与模式约束）的有效区间内
+    const billingMin = billingEntry?.videoBillingConfiguration?.minimumDurationSeconds || 1;
+    const billingMax = resolveBillingMaximumDurationSeconds(billingEntry?.videoBillingConfiguration);
+    const customMin = constraints?.minimumDurationSeconds;
+    const customMax = constraints?.maximumDurationSeconds;
+    const effectiveMin = typeof customMin === "number" && Number.isSafeInteger(customMin) && customMin > 0
+        ? Math.max(customMin, billingMin)
+        : billingMin;
+    const effectiveMax = typeof customMax === "number" && Number.isSafeInteger(customMax) && customMax > 0
+        ? (billingMax !== null ? Math.min(customMax, billingMax) : customMax)
+        : billingMax;
+    const parsedSeconds = parsePositiveInteger(config.videoSeconds);
+    if (parsedSeconds !== null && (effectiveMax === null || effectiveMin <= effectiveMax)) {
+        const clamped = effectiveMax !== null
+            ? Math.min(effectiveMax, Math.max(effectiveMin, parsedSeconds))
+            : Math.max(effectiveMin, parsedSeconds);
+        if (clamped !== parsedSeconds) {
+            patch.videoSeconds = String(clamped);
+        }
+    }
+
+    return patch;
+}
+
 export function createVideoBillingConfiguration(): VideoBillingConfiguration {
     return {
         billingUnit: "generation",

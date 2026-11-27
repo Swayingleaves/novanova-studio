@@ -24,6 +24,8 @@ import java.util.Map;
  * @param settingGraphNodeId String 画布设定图目标节点ID
  * @param settingGraphSkillSnapshot Map 画布设定图技能快照
  * @param mode String 对话模式：agent（默认，主Agent规划）| chat（跳过规划直接生成）
+ * @param approvalMode String 审批模式：auto（默认，自动执行）| manual（高成本操作前人工确认）
+ * @param videoModelCapabilities Map 当前选中视频模型的能力区间（最小时长、最大时长、支持画幅等）
  */
 public record AgentChatRequest(
     String sessionId,
@@ -37,14 +39,34 @@ public record AgentChatRequest(
     String skillId,
     String settingGraphNodeId,
     Map<String, Object> settingGraphSkillSnapshot,
-    String mode
+    String mode,
+    String approvalMode,
+    Map<String, Object> videoModelCapabilities
 ) {
+
+    /** 保留既有十三参数构造方式。 */
+    public AgentChatRequest(String sessionId, String entrySource, String message, Map<String, Object> canvasSnapshot,
+                            List<Reference> references, List<Attachment> attachments, List<HistoryMessage> history,
+                            CreationSettings creationSettings, String skillId, String settingGraphNodeId,
+                            Map<String, Object> settingGraphSkillSnapshot, String mode, String approvalMode) {
+        this(sessionId, entrySource, message, canvasSnapshot, references, attachments, history, creationSettings,
+                skillId, settingGraphNodeId, settingGraphSkillSnapshot, mode, approvalMode, null);
+    }
+
+    /** 保留既有十二参数构造方式。 */
+    public AgentChatRequest(String sessionId, String entrySource, String message, Map<String, Object> canvasSnapshot,
+                            List<Reference> references, List<Attachment> attachments, List<HistoryMessage> history,
+                            CreationSettings creationSettings, String skillId, String settingGraphNodeId,
+                            Map<String, Object> settingGraphSkillSnapshot, String mode) {
+        this(sessionId, entrySource, message, canvasSnapshot, references, attachments, history, creationSettings,
+                skillId, settingGraphNodeId, settingGraphSkillSnapshot, mode, null, null);
+    }
 
     /** 保留既有九参数构造方式。 */
     public AgentChatRequest(String sessionId, String entrySource, String message, Map<String, Object> canvasSnapshot,
                             List<Reference> references, List<Attachment> attachments, List<HistoryMessage> history,
                             CreationSettings creationSettings, String skillId) {
-        this(sessionId, entrySource, message, canvasSnapshot, references, attachments, history, creationSettings, skillId, null, null, null);
+        this(sessionId, entrySource, message, canvasSnapshot, references, attachments, history, creationSettings, skillId, null, null, null, null, null);
     }
 
     /** 判断是否 Chat 模式：跳过主Agent规划与提示词优化，直接执行生成工具。 */

@@ -702,8 +702,10 @@ public class CreationAgentOrchestrator {
                             if (Boolean.TRUE.equals(canceledAfterPlanning)) {
                                 return Mono.empty();
                             }
+                            List<Map<String, String>> recentHistory = historyForAgent(request, session);
                             CreationPlan validated = CanvasDeleteConfirmationSupport.enforce(
-                                    rawValidated, request, historyForAgent(request, session));
+                                    rawValidated, request, recentHistory);
+                            validated = enforceCanvasApprovalMode(validated, request, recentHistory);
                             if (StringUtils.hasText(validated.clarificationQuestion())) {
                                 AgentAction action;
                                 if (validated.choices() != null && !validated.choices().isEmpty()) {
@@ -717,7 +719,8 @@ public class CreationAgentOrchestrator {
                                 return saveClarificationRound(userId, session, request, clarification, validated.choices())
                                         .then(completeWithMessage(userId, session.id(), clarification, action));
                             }
-                            CreationPlan plan = composeFollowUpPrompts(withServerPlanId(validated, session, request.message()),
+                            CreationPlan plan = composeFollowUpPrompts(
+                                    withServerPlanId(validated, session, request.message(), request.canvasSnapshot()),
                                     session, request.message());
                             active.planId().set(plan.planId());
                             return planRepository.create(userId, session.id(), plan)
@@ -735,9 +738,114 @@ public class CreationAgentOrchestrator {
                                                                 active.setCompletion(summary.status(), summary.systemMessage());
                                                                 return isWorkflowImageStagePlan(plan)
                                                                         ? completeImageStageWithConfirmation(userId, session, request, plan, summary)
-                                                                        : completeWithMessage(userId, session.id(), summary.systemMessage(), null);
+                                                                        : completeWithMessage(userId, session.id(), summary.systemMessage(),
+                                                                                resolvePlanCompletionAction(request, summary));
                                                             }));
                         }))));
+    }
+
+    /**
+     * 当画布计划因模型、渠道、画幅、时长或能力不匹配而未成功完成时，附带「设置模型」动作按钮，方便用户直接调整当前画布模型配置。
+     *
+     * @param request AgentChatRequest 当前请求
+     * @param summary CreationPlanExecutor.PlanExecutionSummary 计划执行汇总
+     * @return AgentAction 需要展示的前端交互动作，无需时返回 null
+     */
+    private AgentAction resolvePlanCompletionAction(AgentChatRequest request,
+                                                    CreationPlanExecutor.PlanExecutionSummary summary) {
+        if (request == null || summary == null
+                || !CreationEntrySource.CANVAS.equals(request.entrySource())
+                || "succeeded".equals(summary.status())) {
+            return null;
+        }
+        String text = summary.systemMessage() == null ? "" : summary.systemMessage().diagnostic();
+        if (!StringUtils.hasText(text)) {
+            text = summary.message() == null ? "" : summary.message();
+        }
+        String lower = text.toLowerCase(java.util.Locale.ROOT);
+        boolean configMismatch = lower.contains("模型") || lower.contains("渠道") || lower.contains("比例")
+                || lower.contains("画幅") || lower.contains("时长") || lower.contains("不支持")
+                || lower.contains("model") || lower.contains("size") || lower.contains("duration")
+                || lower.contains("channel");
+        if (!configMismatch) {
+            return null;
+        }
+        return AgentAction.choice(List.of(
+                new AgentChoice("设置模型", "设置模型", false, SkillPromptActions.ASK_USER_MODEL_CONFIG)));
+    }
+
+    /**
+     * 画布开启审批模式（approvalMode=manual）时，在执行图片或视频生成任务前强制先向用户确认方案。
+     *
+     * @param plan CreationPlan 已通过基础校验的计划
+     * @param request AgentChatRequest 当前用户请求
+     * @param history List<Map<String, String>> 最近对话历史
+     * @return CreationPlan 原计划或转为带确认按钮的澄清计划
+     */
+    private CreationPlan enforceCanvasApprovalMode(CreationPlan plan, AgentChatRequest request,
+                                                   List<Map<String, String>> history) {
+        if (plan == null || request == null
+                || !CreationEntrySource.CANVAS.equals(request.entrySource())
+                || !"manual".equals(request.approvalMode())
+                || StringUtils.hasText(plan.clarificationQuestion())
+                || plan.tasks() == null || plan.tasks().isEmpty()) {
+            return plan;
+        }
+        boolean hasGenerationTask = plan.tasks().stream().anyMatch(task ->
+                task != null && ("image".equals(task.taskType()) || "video".equals(task.taskType())
+                        || "canvas_generate_image".equals(task.toolName())
+                        || "canvas_generate_video".equals(task.toolName())
+                        || "canvas_run_generation".equals(task.toolName())));
+        if (!hasGenerationTask || isCanvasApprovalConfirmReply(request.message(), history)) {
+            return plan;
+        }
+        String summaryText = StringUtils.hasText(plan.summary())
+                ? plan.summary().trim()
+                : "准备在画布执行 " + plan.tasks().size() + " 个生成任务";
+        String question = summaryText + "。\n请确认是否开始生成，或先调整模型设置 / 上传参考图后再继续。";
+        List<AgentChoice> choices = List.of(
+                new AgentChoice("确认生成", "确认生成", false, SkillPromptActions.ASK_USER_CONFIRM),
+                new AgentChoice("上传图片", "上传图片", false, SkillPromptActions.ASK_USER_UPLOAD_IMAGE),
+                new AgentChoice("设置模型", "设置模型", false, SkillPromptActions.ASK_USER_MODEL_CONFIG));
+        return new CreationPlan(plan.planId(), plan.intent(), plan.entrySource(), plan.summary(),
+                question, false, plan.creationSettings(), List.of(), choices, plan.workflowType(), plan.workflowId());
+    }
+
+    /**
+     * 判断当前用户输入是否是对上一轮画布生成审批的明确确认。
+     *
+     * @param message String 用户输入
+     * @param history List<Map<String, String>> 最近对话历史
+     * @return boolean 是否已确认生成
+     */
+    private boolean isCanvasApprovalConfirmReply(String message, List<Map<String, String>> history) {
+        if (!StringUtils.hasText(message) || history == null || history.isEmpty()) {
+            return false;
+        }
+        String trimmed = message.trim();
+        String normalized = trimmed.toLowerCase(java.util.Locale.ROOT);
+        boolean confirmWord = normalized.equals("确认") || normalized.equals("确认生成")
+                || normalized.equals("开始生成") || normalized.equals("继续")
+                || normalized.equals("好的") || normalized.equals("同意")
+                || normalized.equals("无需参考图，直接生成") || normalized.equals("直接生成")
+                || normalized.equals("confirm") || normalized.equals("yes")
+                || normalized.contains("确认生成") || normalized.contains("我已确认模型");
+        String lastAssistant = "";
+        for (int i = history.size() - 1; i >= 0; i--) {
+            Map<String, String> turn = history.get(i);
+            if ("assistant".equals(turn.get("role"))) {
+                lastAssistant = turn.get("text") == null ? "" : turn.get("text");
+                break;
+            }
+        }
+        if (!StringUtils.hasText(lastAssistant)) {
+            return false;
+        }
+        if (confirmWord) {
+            return true;
+        }
+        // 用户点击“确认生成”按钮发送上一轮助手展示的完整优化提示词时，视为已确认
+        return trimmed.length() >= 12 && lastAssistant.contains(trimmed);
     }
 
     /**
@@ -1553,7 +1661,9 @@ public class CreationAgentOrchestrator {
                 .map(historicalSettings -> new AgentChatRequest(
                         request.sessionId(), request.entrySource(), request.message(), request.canvasSnapshot(),
                         request.references(), request.attachments(), request.history(),
-                        mergeRetrySettings(request.creationSettings(), historicalSettings), request.skillId()))
+                        mergeRetrySettings(request.creationSettings(), historicalSettings), request.skillId(),
+                        request.settingGraphNodeId(), request.settingGraphSkillSnapshot(), request.mode(),
+                        request.approvalMode(), request.videoModelCapabilities()))
                 .defaultIfEmpty(request);
     }
 
@@ -1616,6 +1726,10 @@ public class CreationAgentOrchestrator {
                 input.put("retryPrompt", latestRetryPrompt(session));
             }
             input.put("attachmentCount", request.attachments() == null ? 0 : request.attachments().size());
+            input.put("approvalMode", "manual".equals(request.approvalMode()) ? "manual" : "auto");
+            if (request.videoModelCapabilities() != null && !request.videoModelCapabilities().isEmpty()) {
+                input.put("videoModelCapabilities", request.videoModelCapabilities());
+            }
             if (CreationEntrySource.CANVAS.equals(request.entrySource())) {
                 Map<String, Object> compactedSnapshot = canvasSnapshotCompactor.compact(request.canvasSnapshot());
                 Object originalNodes = request.canvasSnapshot() == null ? null : request.canvasSnapshot().get("nodes");
@@ -1643,7 +1757,7 @@ public class CreationAgentOrchestrator {
                     return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidSkillID")));
                 }
                 return skillService.findUsableSkill(skillId, userId)
-                        .filter(skill -> ("canvas".equals(request.entrySource()) && "canvasSettingGraph".equals(skill.getTargetType()))
+                        .filter(skill -> CreationEntrySource.CANVAS.equals(request.entrySource())
                                 || (("imagePage".equals(request.entrySource()) || "videoPage".equals(request.entrySource()))
                                 && !"canvasSettingGraph".equals(skill.getTargetType())))
                         .onErrorResume(exception -> Mono.empty())
@@ -1901,7 +2015,7 @@ public class CreationAgentOrchestrator {
      */
     CreationPlan composeFollowUpPrompts(CreationPlan plan, AgentSession session, String currentMessage) {
         if (plan == null || plan.tasks() == null || plan.tasks().isEmpty()
-                || !StringUtils.hasText(currentMessage) || isRetryMessage(currentMessage)) {
+                || !StringUtils.hasText(currentMessage) || isNonPromptControlMessage(currentMessage)) {
             return plan;
         }
         Set<String> historyPrompts = new LinkedHashSet<>();
@@ -1949,6 +2063,21 @@ public class CreationAgentOrchestrator {
      * @throws BusinessException 任务提示词不是用户逐字输入时抛出
      */
     CreationPlan withServerPlanId(CreationPlan plan, AgentSession session, String currentMessage) {
+        return withServerPlanId(plan, session, currentMessage, null);
+    }
+
+    /**
+     * 使用服务端生成的计划编号替换模型输出编号，并在画布重试/确认场景下从会话历史或画布节点恢复真实提示词。
+     *
+     * @param plan CreationPlan 已校验计划
+     * @param session AgentSession 当前会话
+     * @param currentMessage String 当前用户消息
+     * @param canvasSnapshot Map<String, Object> 当前画布快照（可为空）
+     * @return CreationPlan 带可信计划编号的计划
+     * @throws BusinessException 任务提示词不是用户逐字输入时抛出
+     */
+    CreationPlan withServerPlanId(CreationPlan plan, AgentSession session, String currentMessage,
+                                  Map<String, Object> canvasSnapshot) {
         if (StringUtils.hasText(plan.workflowType())) {
             return new CreationPlan(UUID.randomUUID().toString(), plan.intent(), plan.entrySource(), plan.summary(), "",
                     false, plan.creationSettings(), plan.tasks(), List.of(), plan.workflowType());
@@ -1961,21 +2090,109 @@ public class CreationAgentOrchestrator {
                 .forEach(userPrompts::add);
         java.util.List<com.novanovastudio.agent.dto.CreationTask> tasks = plan.tasks().stream()
                 .map(task -> {
-                    String taskPrompt = isRetryMessage(currentMessage) && isRetryMessage(task.prompt())
-                            ? latestRetryPrompt(session) : task.prompt();
-                    if (!userPrompts.contains(taskPrompt)) {
+                    String taskPrompt = task.prompt();
+                    boolean trustedCanvasFallback = false;
+                    if (isNonPromptControlMessage(taskPrompt)) {
+                        String confirmedOptimized = !isRetryMessage(currentMessage)
+                                ? extractOptimizedPromptFromAssistant(session) : "";
+                        if (StringUtils.hasText(confirmedOptimized)) {
+                            taskPrompt = confirmedOptimized;
+                            trustedCanvasFallback = true;
+                        } else {
+                            String historyPrompt = latestRetryPrompt(session);
+                            if (StringUtils.hasText(historyPrompt)) {
+                                taskPrompt = historyPrompt;
+                            } else {
+                                String canvasPrompt = resolveCanvasFallbackPrompt(plan, task, canvasSnapshot);
+                                if (StringUtils.hasText(canvasPrompt)) {
+                                    taskPrompt = canvasPrompt;
+                                    trustedCanvasFallback = true;
+                                }
+                            }
+                        }
+                    }
+                    if (!trustedCanvasFallback && !userPrompts.contains(taskPrompt)) {
                         taskPrompt = resolveCanvasHistoricalPrompt(plan, task, taskPrompt, userPrompts);
                     }
-                    if (!StringUtils.hasText(taskPrompt) || !userPrompts.contains(taskPrompt)) {
+                    if (!StringUtils.hasText(taskPrompt)
+                            || (!trustedCanvasFallback && !userPrompts.contains(taskPrompt))) {
                         throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.agentTaskPromptMustMatchTheUserMessageVerbatim"));
                     }
+                    String finalPrompt = stripOptimizedPromptHeading(taskPrompt);
                     return new com.novanovastudio.agent.dto.CreationTask(
-                            task.taskId(), task.taskType(), task.action(), taskPrompt, task.sourcePromptId(), task.dependsOn(),
+                            task.taskId(), task.taskType(), task.action(), finalPrompt, task.sourcePromptId(), task.dependsOn(),
                             task.toolName(), task.toolArguments(), task.taskRole());
                 })
                 .toList();
         return new CreationPlan(UUID.randomUUID().toString(), plan.intent(), plan.entrySource(), plan.summary(), "",
                 false, plan.creationSettings(), tasks, List.of(), plan.workflowType());
+    }
+
+    /**
+     * 当会话历史里全为“重试/确认”等控制指令时，从画布目标节点或工具参数中恢复真实的生成提示词。
+     *
+     * @param plan CreationPlan 当前计划
+     * @param task CreationTask 当前任务
+     * @param canvasSnapshot Map<String, Object> 画布快照
+     * @return String 恢复出的提示词；不存在时返回空字符串
+     */
+    private String resolveCanvasFallbackPrompt(CreationPlan plan,
+                                               com.novanovastudio.agent.dto.CreationTask task,
+                                               Map<String, Object> canvasSnapshot) {
+        if (!CreationEntrySource.CANVAS.equals(plan.entrySource()) || task == null) {
+            return "";
+        }
+        Map<String, Object> args = task.toolArguments();
+        if (canvasSnapshot != null) {
+            List<String> candidateNodeIds = new ArrayList<>();
+            if (args != null) {
+                Object nodeId = args.get("nodeId");
+                if (nodeId instanceof String text && StringUtils.hasText(text)) {
+                    candidateNodeIds.add(text.trim());
+                }
+                Object recoveryNodeIds = args.get("recoveryNodeIds");
+                if (recoveryNodeIds instanceof List<?> ids) {
+                    for (Object item : ids) {
+                        if (item instanceof String text && StringUtils.hasText(text)) {
+                            candidateNodeIds.add(text.trim());
+                        }
+                    }
+                }
+            }
+            Object selectedNodeIds = canvasSnapshot.get("selectedNodeIds");
+            if (selectedNodeIds instanceof List<?> ids) {
+                for (Object item : ids) {
+                    if (item instanceof String text && StringUtils.hasText(text)) {
+                        candidateNodeIds.add(text.trim());
+                    }
+                }
+            }
+            Object nodesObj = canvasSnapshot.get("nodes");
+            if (!candidateNodeIds.isEmpty() && nodesObj instanceof List<?> nodes) {
+                Map<String, String> promptByNodeId = new LinkedHashMap<>();
+                for (Object nodeObj : nodes) {
+                    if (!(nodeObj instanceof Map<?, ?> nodeMap)) continue;
+                    Object idObj = nodeMap.get("id");
+                    Object genObj = nodeMap.get("generation");
+                    if (!(idObj instanceof String id) || !(genObj instanceof Map<?, ?> genMap)) continue;
+                    Object promptObj = genMap.get("prompt");
+                    if (promptObj instanceof String text && StringUtils.hasText(text) && !isNonPromptControlMessage(text)) {
+                        promptByNodeId.put(id.trim(), text.trim());
+                    }
+                }
+                for (String candidateId : candidateNodeIds) {
+                    String found = promptByNodeId.get(candidateId);
+                    if (StringUtils.hasText(found)) {
+                        return found;
+                    }
+                }
+            }
+        }
+        if (args != null && args.get("prompt") instanceof String toolPrompt
+                && StringUtils.hasText(toolPrompt) && !isNonPromptControlMessage(toolPrompt)) {
+            return toolPrompt.trim();
+        }
+        return "";
     }
 
     /**
@@ -2028,7 +2245,93 @@ public class CreationAgentOrchestrator {
     }
 
     /**
-     * 获取重试时最近一条非重试用户创作消息。
+     * 判断用户消息是否为控制指令（重试、确认、上传完成通知等），不应作为图像或视频生成提示词。
+     *
+     * @param message String 用户消息
+     * @return boolean 是否为非创作提示词的控制消息
+     */
+    private boolean isNonPromptControlMessage(String message) {
+        if (!StringUtils.hasText(message)) {
+            return true;
+        }
+        if (isRetryMessage(message)) {
+            return true;
+        }
+        String normalized = message.trim().replaceAll("[。！!？?，,、\\s]+$", "").toLowerCase(java.util.Locale.ROOT);
+        if (Set.of("确认", "确认生成", "开始生成", "继续", "好的", "同意", "确定",
+                "直接生成", "无需参考图，直接生成", "不需要", "跳过", "取消",
+                "已上传产品图片", "已上传参考视频", "confirm", "yes", "ok").contains(normalized)) {
+            return true;
+        }
+        return normalized.contains("确认生成") || normalized.contains("我已确认模型");
+    }
+
+    /** 剥离确认按钮值中可能携带的“【优化后的提示词】”标题前缀，避免进入生图/生视频模型。 */
+    private static String stripOptimizedPromptHeading(String prompt) {
+        if (!StringUtils.hasText(prompt)) {
+            return prompt;
+        }
+        String trimmed = prompt.trim();
+        String marker = "【优化后的提示词】";
+        if (trimmed.startsWith(marker)) {
+            String stripped = trimmed.substring(marker.length()).trim();
+            if (StringUtils.hasText(stripped)) {
+                return stripped;
+            }
+        }
+        return prompt;
+    }
+
+    /**
+     * 从最近一条助手消息中提取“【优化后的提示词】”正文，供用户在未点按钮而直接回复“确认”时使用。
+     *
+     * @param session AgentSession 当前会话
+     * @return String 优化后的提示词；不存在时返回空字符串
+     */
+    private String extractOptimizedPromptFromAssistant(AgentSession session) {
+        if (session == null || session.messages() == null || session.messages().isEmpty()) {
+            return "";
+        }
+        String lastAssistant = "";
+        for (int index = session.messages().size() - 1; index >= 0; index--) {
+            com.novanovastudio.agent.dto.AgentMessage message = session.messages().get(index);
+            if ("assistant".equals(message.role()) && StringUtils.hasText(message.text())) {
+                lastAssistant = message.text();
+                break;
+            }
+        }
+        if (!StringUtils.hasText(lastAssistant)) {
+            return "";
+        }
+        String marker = "【优化后的提示词】";
+        int markerIndex = lastAssistant.indexOf(marker);
+        if (markerIndex < 0) {
+            return "";
+        }
+        String body = lastAssistant.substring(markerIndex + marker.length()).trim();
+        if (!StringUtils.hasText(body)) {
+            return "";
+        }
+        int splitIndex = body.indexOf("\n\n");
+        if (splitIndex > 0) {
+            body = body.substring(0, splitIndex).trim();
+        }
+        String[] lines = body.split("\\r?\\n");
+        StringBuilder cleaned = new StringBuilder();
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (!StringUtils.hasText(trimmed)) continue;
+            if (trimmed.startsWith("请确认") || trimmed.startsWith("确认后") || trimmed.startsWith("如需修改") || trimmed.startsWith("如需调整")) {
+                break;
+            }
+            if (!cleaned.isEmpty()) cleaned.append('\n');
+            cleaned.append(trimmed);
+        }
+        return cleaned.toString().trim();
+    }
+
+    /**
+     * 获取重试时最近一条非控制指令的用户创作消息。
      *
      * @param session AgentSession 当前会话
      * @return String 最近一次创作提示词；不存在时返回空字符串
@@ -2036,7 +2339,7 @@ public class CreationAgentOrchestrator {
     private String latestRetryPrompt(AgentSession session) {
         for (int index = session.messages().size() - 1; index >= 0; index--) {
             com.novanovastudio.agent.dto.AgentMessage message = session.messages().get(index);
-            if ("user".equals(message.role()) && StringUtils.hasText(message.text()) && !isRetryMessage(message.text())) {
+            if ("user".equals(message.role()) && StringUtils.hasText(message.text()) && !isNonPromptControlMessage(message.text())) {
                 return message.text();
             }
         }
@@ -2427,7 +2730,8 @@ public class CreationAgentOrchestrator {
     private AgentChatRequest requestWithSessionId(AgentChatRequest request, String sessionId) {
         return new AgentChatRequest(sessionId, request.entrySource(), request.message(), request.canvasSnapshot(),
                 request.references(), request.attachments(), request.history(), request.creationSettings(),
-                request.skillId(), request.settingGraphNodeId(), request.settingGraphSkillSnapshot(), request.mode());
+                request.skillId(), request.settingGraphNodeId(), request.settingGraphSkillSnapshot(), request.mode(),
+                request.approvalMode(), request.videoModelCapabilities());
     }
 
     /**

@@ -4,7 +4,7 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 import type { ReactNode } from "react";
 import { Button, Tooltip } from "antd";
-import { Box, Eraser, FolderOpen, Frame, Hand, Image as ImageIcon, Redo2, Trash2, Type, Undo2, Upload, AudioLines, Video, Waves } from "lucide-react";
+import { Box, Eraser, FolderOpen, Frame, Hand, Image as ImageIcon, Redo2, Settings, Trash2, Type, Undo2, Upload, AudioLines, Video, Waves } from "lucide-react";
 
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import type { CanvasBackgroundNode } from "../types";
@@ -35,6 +35,7 @@ type CanvasToolbarProps = {
     onOpenMyAssets: () => void;
     edgeFlowEnabled: boolean;
     onToggleEdgeFlow: () => void;
+    onOpenSettings?: () => void;
     selectedBackground?: CanvasBackgroundNode | null;
     onBackgroundTitleChange?: (nodeId: string, title: string) => void;
     onBackgroundColorChange?: (nodeId: string, color: string) => void;
@@ -110,6 +111,17 @@ function buildToolbarActions(props: CanvasToolbarProps): ToolbarAction[] {
             active: props.edgeFlowEnabled,
             onClick: props.onToggleEdgeFlow,
         },
+        ...(props.onOpenSettings
+            ? [
+                  {
+                      key: "canvas-settings",
+                      label: "画布模型设置",
+                      icon: <Settings className="size-4" />,
+                      dividerBefore: true,
+                      onClick: props.onOpenSettings,
+                  },
+              ]
+            : []),
     ];
 
     if (props.selectedCount) {

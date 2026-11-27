@@ -169,7 +169,11 @@ function reduceConnectNodes(snapshot: CanvasAgentSnapshot, op: CanvasAgentOp): C
     if (!nodeIds.has(op.sourceNodeId) || !nodeIds.has(op.targetNodeId)) return snapshot;
     if (snapshot.connections.some((connection) => connection.source.nodeId === op.sourceNodeId && connection.target.nodeId === op.targetNodeId)) return snapshot;
     if (readVideoCompositionConnectionError(op.sourceNodeId, op.targetNodeId, snapshot.nodes, snapshot.connections)) return snapshot;
-    const nextConnection: CanvasConnection = { id: op.id || nanoid(), source: { nodeId: op.sourceNodeId }, target: { nodeId: op.targetNodeId } };
+    const nextConnection: CanvasConnection = {
+        id: op.id || nanoid(),
+        source: { nodeId: op.sourceNodeId, portId: "right" },
+        target: { nodeId: op.targetNodeId, portId: "left" },
+    };
     return { ...snapshot, connections: [...snapshot.connections, nextConnection] };
 }
 

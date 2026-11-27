@@ -92,7 +92,7 @@ import type { RecentReferenceAsset } from "@/features/generation/lib/recent-refe
 import { reconcileImageMentions, type PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
-import { availableVideoModelsForMode, quoteVideoGeneration, videoGenerationReferenceIssue } from "@/features/generation/lib/video-billing";
+import { availableVideoModelsForMode, quoteVideoGeneration, reconcileVideoSettingsForModel, videoGenerationReferenceIssue } from "@/features/generation/lib/video-billing";
 import { requestCreditCost } from "@/features/generation/constants/credits";
 import { cancelAiTasksWithRefundPolicy, runCancelWithProviderRequestPolicy } from "@/features/generation/lib/cancel-provider-generation";
 import {
@@ -2049,6 +2049,11 @@ export default function VideoPage() {
                             setVideoDraftSettingsModified(true);
                         }
                         updateConfig("videoModel", value);
+                        const reconciled = reconcileVideoSettingsForModel(effectiveConfig, value);
+                        if (reconciled.videoGenerationMode) updateConfig("videoGenerationMode", reconciled.videoGenerationMode);
+                        if (reconciled.vquality) updateConfig("vquality", reconciled.vquality);
+                        if (reconciled.size) updateConfig("size", reconciled.size);
+                        if (reconciled.videoSeconds) updateConfig("videoSeconds", reconciled.videoSeconds);
                     }}
                     capability="video"
                     modelOptions={availableVideoModelsForMode(effectiveConfig, config.videoGenerationMode)}

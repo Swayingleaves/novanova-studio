@@ -261,6 +261,69 @@ class CreationAgentOrchestratorTest {
     }
 
     /**
+     * 历史消息包含“已上传产品图片”“确认”“重试”等控制指令时，恢复提示词必须跳过这些控制消息并命中真实创作描述。
+     */
+    @Test
+    void shouldSkipControlMessagesWhenRestoringPromptOnRetryOrConfirm() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+        AgentSession session = session(List.of(
+                new AgentMessage("user-1", "user", "为 novanovastudio.cn 制作一张社交媒体推广用的宣传图", null),
+                new AgentMessage("user-2", "user", "已上传产品图片", null),
+                new AgentMessage("user-3", "user", "确认", null),
+                new AgentMessage("assistant-1", "assistant", "生成失败", null),
+                new AgentMessage("user-4", "user", "重试", null)));
+
+        CreationPlan retryResult = orchestrator.withServerPlanId(plan("重试"), session, "重试");
+        CreationPlan confirmResult = orchestrator.withServerPlanId(plan("重试"), session, "确认");
+
+        Assertions.assertEquals("为 novanovastudio.cn 制作一张社交媒体推广用的宣传图", retryResult.tasks().getFirst().prompt());
+        Assertions.assertEquals("为 novanovastudio.cn 制作一张社交媒体推广用的宣传图", confirmResult.tasks().getFirst().prompt());
+    }
+
+    /**
+     * 当画布会话历史里全为“重试”“确认”等控制消息时，必须从选中画布节点的原始提示词恢复，不得把“确认”送去生图。
+     */
+    @Test
+    void shouldRestoreCanvasNodePromptWhenSessionHistoryOnlyHasControlMessages() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+        AgentSession session = session(List.of(
+                new AgentMessage("user-1", "user", "重试", null),
+                new AgentMessage("assistant-1", "assistant", "请确认是否开始重试", null),
+                new AgentMessage("user-2", "user", "确认", null)));
+        Map<String, Object> canvasSnapshot = Map.of(
+                "selectedNodeIds", List.of("image-KMzGeIgM5ESmHozUHAMG4"),
+                "nodes", List.of(Map.of(
+                        "id", "image-KMzGeIgM5ESmHozUHAMG4",
+                        "kind", "image",
+                        "generation", Map.of("prompt", "为 novanovastudio.cn 制作一张社交媒体推广用的平台宣传图"))));
+
+        CreationPlan result = orchestrator.withServerPlanId(canvasPlan("确认"), session, "确认", canvasSnapshot);
+
+        Assertions.assertEquals("为 novanovastudio.cn 制作一张社交媒体推广用的平台宣传图", result.tasks().getFirst().prompt());
+    }
+
+    /**
+     * 简单提示词经助手返回优化版本后，用户直接回复“确认”时必须使用助手展示的优化提示词而非原始简单词。
+     */
+    @Test
+    void shouldUseConfirmedOptimizedPromptWhenUserRepliesConfirmText() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+        String optimized = "一只橘色短毛小猫蜷缩在午后阳光洒满的木质窗台上，柔和暖光勾勒出绒毛质感，浅景深，电影级写实摄影风格。";
+        AgentSession session = session(List.of(
+                new AgentMessage("user-1", "user", "一只小猫", null),
+                new AgentMessage("assistant-1", "assistant",
+                        "【优化后的提示词】\n" + optimized + "\n\n请确认是否按此提示词开始生成？如需修改，请直接回复你的调整意见。", null),
+                new AgentMessage("user-2", "user", "确认", null)));
+
+        CreationPlan result = orchestrator.withServerPlanId(plan("确认"), session, "确认");
+
+        Assertions.assertEquals(optimized, result.tasks().getFirst().prompt());
+    }
+
+    /**
      * 用户切换模型后发送重试时，恢复历史风格但保留本次模型和页面设置。
      */
     @Test

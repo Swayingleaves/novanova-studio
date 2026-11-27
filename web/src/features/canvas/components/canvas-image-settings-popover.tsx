@@ -54,5 +54,5 @@ function buildImageSettingsSummary(config: AiConfig) {
     const resolution = config.imageResolution || "2K";
     const size = config.size || "auto";
     const count = normalizeImageGenerationCount(config.count);
-    return translate("canvas.images", { value0: imageQualityLabel(quality), value1: imageResolutionLabel(resolution), value2: imageSizeLabel(size), value3: count });
+    return `${imageResolutionLabel(resolution)} · ${imageSizeLabel(size)} · ${imageQualityLabel(quality)} · ${count}张`;
 }

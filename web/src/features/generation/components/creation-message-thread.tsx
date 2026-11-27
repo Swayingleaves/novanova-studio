@@ -7,7 +7,7 @@ import { WhitemodelPreviewCard } from "@/features/whitemodel/whitemodel-preview-
 
 
 import { Button, Input, Modal, Tooltip } from "antd";
-import { ArrowRight, Copy, PenLine } from "lucide-react";
+import { ArrowRight, Check, ChevronRight, Copy, PenLine } from "lucide-react";
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "@/shared/lib/team-navigation";
 
@@ -300,7 +300,54 @@ export function ChoiceGroup({
         </Modal>
     );
 
+    const isVerticalList = options.length > 1;
+
     if (!multiple) {
+        if (isVerticalList) {
+            return (
+                <div className="flex flex-col gap-1.5 pt-2">
+                    {options.map((option, index) => {
+                        const disabledReason = disabledReasons?.[option.value];
+                        const row = (
+                            <button
+                                key={option.value}
+                                type="button"
+                                disabled={Boolean(disabledReason)}
+                                onClick={() => handleOptionClick(option)}
+                                className="group flex w-full items-center gap-2.5 rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface-raised)] px-3 py-2.5 text-left text-sm! leading-5 text-[var(--studio-ink)]! transition-colors hover:border-[var(--studio-action)] hover:bg-[var(--studio-primary-soft)] disabled:cursor-not-allowed disabled:opacity-45"
+                            >
+                                <span className="grid size-5 shrink-0 place-items-center rounded-md bg-[var(--studio-primary-soft)] text-xs! font-semibold text-[var(--studio-action)]!">
+                                    {index + 1}
+                                </span>
+                                <span className="min-w-0 flex-1 break-words">{actionLabel(option)}</span>
+                                <ChevronRight className="size-4 shrink-0 text-[var(--studio-muted)]! opacity-60 transition-transform group-hover:translate-x-0.5 group-hover:opacity-100" />
+                            </button>
+                        );
+                        return disabledReason ? (
+                            <Tooltip key={option.value} title={disabledReason}>
+                                {row}
+                            </Tooltip>
+                        ) : (
+                            row
+                        );
+                    })}
+                    {durationAdjustment ? null : (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setCustomValue("");
+                                setCustomOpen(true);
+                            }}
+                            className="flex w-full items-center gap-2.5 rounded-xl border border-dashed border-[var(--studio-line)] bg-transparent px-3 py-2 text-left text-xs! leading-5 text-[var(--studio-muted)]! transition-colors hover:border-[var(--studio-action)] hover:bg-[var(--studio-primary-soft)] hover:text-[var(--studio-ink)]!"
+                        >
+                            <PenLine className="size-3.5 shrink-0" />
+                            <span>{translate("generation.custom")}</span>
+                        </button>
+                    )}
+                    {durationAdjustment ? null : customModal}
+                </div>
+            );
+        }
         return (
             <div className="flex flex-wrap items-center gap-2.5 pt-2">
                 {options.map((option) => {
@@ -326,13 +373,37 @@ export function ChoiceGroup({
 
     return (
         <div className="space-y-2.5 pt-2">
-            <div className="flex flex-wrap items-center gap-2.5">
-                {options.map((option) => {
+            <div className={isVerticalList ? "flex flex-col gap-1.5" : "flex flex-wrap items-center gap-2.5"}>
+                {options.map((option, index) => {
                     const disabledReason = disabledReasons?.[option.value];
-                    const button = (
+                    const checked = selected.includes(option.value);
+                    const control = isVerticalList ? (
+                        <button
+                            key={option.value}
+                            type="button"
+                            disabled={Boolean(disabledReason)}
+                            onClick={() => handleOptionClick(option)}
+                            className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left text-sm! leading-5 transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                                checked
+                                    ? "border-[var(--studio-action)] bg-[var(--studio-primary-soft)] font-medium text-[var(--studio-ink)]!"
+                                    : "border-[var(--studio-line)] bg-[var(--studio-surface-raised)] text-[var(--studio-ink)]! hover:border-[var(--studio-action)] hover:bg-[var(--studio-primary-soft)]"
+                            }`}
+                        >
+                            <span
+                                className={`grid size-5 shrink-0 place-items-center rounded-md border text-xs! ${
+                                    checked
+                                        ? "border-[var(--studio-action)] bg-[var(--studio-action)] text-[var(--studio-action-foreground)]!"
+                                        : "border-[var(--studio-line)] text-[var(--studio-muted)]!"
+                                }`}
+                            >
+                                {checked ? <Check className="size-3.5" /> : index + 1}
+                            </span>
+                            <span className="min-w-0 flex-1 break-words">{actionLabel(option)}</span>
+                        </button>
+                    ) : (
                         <Button
                             key={option.value}
-                            className={selected.includes(option.value) ? "creation-choice-button creation-choice-multi creation-choice-selected" : "creation-choice-button creation-choice-multi"}
+                            className={checked ? "creation-choice-button creation-choice-multi creation-choice-selected" : "creation-choice-button creation-choice-multi"}
                             disabled={Boolean(disabledReason)}
                             onClick={() => handleOptionClick(option)}
                         >
@@ -341,10 +412,10 @@ export function ChoiceGroup({
                     );
                     return disabledReason ? (
                         <Tooltip key={option.value} title={disabledReason}>
-                            {button}
+                            {control}
                         </Tooltip>
                     ) : (
-                        button
+                        control
                     );
                 })}
             </div>
@@ -362,6 +433,32 @@ export function ChoiceGroup({
 /** 历史记录中的选项条：普通选项只读；时长不一致的确认项在提供回调时仍可点击。 */
 export function ChoiceHistoryBar({ choices, onSelect }: { choices: { label: string; value: string; multiple?: boolean; action?: string }[]; onSelect?: (choice: { label: string; value: string; multiple?: boolean; action?: string }) => void }) {
     const actionLabel = useActionLabel();
+    const isVerticalList = choices.length > 1;
+    if (isVerticalList) {
+        return (
+            <div className="flex flex-col gap-1.5 pt-2">
+                {choices.map((choice, index) => {
+                    const interactive = Boolean(onSelect) && choice.action === "adjust_video_duration";
+                    return (
+                        <button
+                            key={`${choice.action || "choice"}-${choice.value}`}
+                            type="button"
+                            disabled={!interactive}
+                            onClick={interactive ? () => onSelect?.(choice) : undefined}
+                            className={`flex w-full items-center gap-2.5 rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface-raised)] px-3 py-2 text-left text-xs! leading-5 text-[var(--studio-muted)]! ${
+                                interactive ? "cursor-pointer hover:border-[var(--studio-action)] hover:text-[var(--studio-ink)]!" : "cursor-default opacity-75"
+                            }`}
+                        >
+                            <span className="grid size-4 shrink-0 place-items-center rounded bg-[var(--studio-primary-soft)] text-[11px]! font-medium">
+                                {index + 1}
+                            </span>
+                            <span className="min-w-0 flex-1 break-words">{actionLabel(choice)}</span>
+                        </button>
+                    );
+                })}
+            </div>
+        );
+    }
     return (
         <div className="flex flex-wrap items-center gap-2.5 pt-2">
             {choices.map((choice) => {
